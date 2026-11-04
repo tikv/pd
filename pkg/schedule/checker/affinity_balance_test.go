@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/cache"
@@ -36,12 +37,10 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
-	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -411,7 +410,7 @@ func TestAffinityBalanceKeepsUnmodelledGroups(t *testing.T) {
 }
 
 func TestAffinityBalanceRetries(t *testing.T) {
-	for _, reason := range []string{"pending", "gap", "schedule denied", "converging", "busy", "store limit"} {
+	for _, reason := range []string{"pending", "schedule denied", "converging", "busy", "store limit"} {
 		t.Run(reason, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 4)
@@ -422,8 +421,6 @@ func TestAffinityBalanceRetries(t *testing.T) {
 			switch reason {
 			case "pending":
 				f.PutRegion(region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(2)})))
-			case "gap":
-				f.PutRegion(region.Clone(core.WithStartKey(append(region.GetStartKey(), 'x'))))
 			case "schedule denied":
 				re.NoError(f.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{ID: "deny", Index: 100,
 					Labels: []labeler.RegionLabel{{Key: "schedule", Value: "deny"}}, RuleType: "key-range",
@@ -578,68 +575,34 @@ func TestAffinityOperatorTargetStores(t *testing.T) {
 	}
 }
 
-type affinityBalanceScanCluster struct {
-	sche.CheckerCluster
-	beforeFinal func()
-}
-
-func (c *affinityBalanceScanCluster) BatchScanRegions(ranges *keyutil.KeyRanges, opts ...core.BatchScanRegionsOptionFunc) ([]*core.RegionInfo, error) {
-	c.beforeFinal()
-	return c.CheckerCluster.BatchScanRegions(ranges, opts...)
+func beforeAffinityBalanceCommit(t *testing.T, fn func()) {
+	t.Helper()
+	const fp = "github.com/tikv/pd/pkg/schedule/checker/beforeAffinityBalanceCommit"
+	require.NoError(t, failpoint.EnableCall(fp, fn))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(fp)) })
 }
 
 func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
-	for _, change := range []string{"rule", "conf version", "split", "merge", "add learner", "remove learner", "later group",
-		"limit", "pause", "halt", "placement disabled", "policy", "cancel"} {
+	for _, change := range []string{"rule", "limit", "pause", "halt", "placement disabled", "policy", "cancel"} {
 		t.Run(change, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 3)
-			leaders := []uint64{1, 1}
-			if change == "later group" {
-				leaders = append(leaders, 1)
-			}
-			ids := f.seed("100", 1, leaders...)
-			if change != "later group" {
-				f.policy(affinity.BalancePolicyFixed, ids[1])
-			}
-			learner := &metapb.Peer{Id: 100, StoreId: 4, Role: metapb.PeerRole_Learner}
-			if strings.HasSuffix(change, "learner") {
-				f.AddRegionStore(4, 10)
-			}
-			if change == "remove learner" {
-				re.NoError(f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: "learner", Role: placement.Learner, Count: 1}))
-				f.PutRegion(f.GetRegion(1).Clone(core.WithAddPeer(learner), core.WithIncConfVer()))
-			}
+			ids := f.seed("100", 1, 1, 1)
+			f.policy(affinity.BalancePolicyFixed, ids[1])
 			snapshot := f.snapshot()
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			res, err := f.planBalanceTargets(ctx, snapshot)
 			re.NoError(err)
-			re.Len(res.targets, len(leaders)-1)
+			re.Len(res.targets, 1)
 			called := false
-			f.cluster = &affinityBalanceScanCluster{CheckerCluster: f.Cluster, beforeFinal: func() {
+			beforeAffinityBalanceCommit(t, func() {
 				re.False(called)
 				called = true
-				region := f.GetRegion(1)
 				switch change {
 				case "rule":
 					rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 					re.NoError(f.ruleManager.SetRule(rule))
-				case "conf version":
-					f.PutRegion(region.Clone(core.WithIncConfVer()))
-				case "split":
-					mid := append(slices.Clone(region.GetStartKey()), 'm')
-					f.PutRegion(region.Clone(core.WithEndKey(mid), core.WithIncVersion()))
-					f.PutRegion(region.Clone(core.WithNewRegionID(3), core.WithStartKey(mid), core.WithIncVersion()))
-				case "merge":
-					f.PutRegion(region.Clone(core.WithEndKey(f.GetRegion(2).GetEndKey()), core.WithIncVersion()))
-				case "add learner":
-					f.PutRegion(region.Clone(core.WithAddPeer(learner), core.WithIncConfVer()))
-				case "remove learner":
-					f.PutRegion(region.Clone(core.WithRemoveStorePeer(4), core.WithIncConfVer()))
-				case "later group":
-					later := f.GetRegion(uint64(slices.Index(ids, res.targets[1].ID) + 1))
-					f.PutRegion(later.Clone(core.WithIncConfVer()))
 				case "limit":
 					f.SetAffinityScheduleLimit(0)
 				case "pause":
@@ -653,7 +616,7 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 				case "cancel":
 					cancel()
 				}
-			}}
+			})
 			result := affinityBalanceRejected
 			if change == "cancel" {
 				result = affinityBalanceError
@@ -694,8 +657,10 @@ func TestAffinityBalanceCommitAllowsOtherGroupChanges(t *testing.T) {
 	re.NotEqual(uint64(1), res.targets[0].LeaderStoreID)
 	called := false
 	var changedVersion uint64
-	f.cluster = &affinityBalanceScanCluster{CheckerCluster: f.Cluster, beforeFinal: func() {
-		re.False(called)
+	beforeAffinityBalanceCommit(t, func() {
+		if called {
+			return
+		}
 		called = true
 		_, err := f.affinityManager.UpdateAffinityGroupPeers(ids[1], res.targets[0].LeaderStoreID, []uint64{1, 2, 3})
 		re.NoError(err)
@@ -703,7 +668,7 @@ func TestAffinityBalanceCommitAllowsOtherGroupChanges(t *testing.T) {
 		changedVersion, ok = f.affinityManager.GetBalanceVersion(balanceTestTable())
 		re.True(ok)
 		re.Greater(changedVersion, snapshot.Version)
-	}}
+	})
 	written, reason, err := f.commitBalancePlan(t.Context(), snapshot, res, revision)
 	re.NoError(err)
 	re.True(called)
@@ -719,7 +684,6 @@ func TestAffinityBalanceCommitAllowsOtherGroupChanges(t *testing.T) {
 
 	// Once Regions reach their targets, the next round can improve the table
 	// without moving the fixed group that changed during the previous commit.
-	f.cluster = f.Cluster
 	f.settle()
 	fixed := f.affinityManager.GetAffinityGroupState(ids[1]).Group
 	snapshot = f.snapshot()

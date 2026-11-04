@@ -22,6 +22,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/schedule/operator"
 )
 
 type heartbeatTargetWriter struct {
@@ -61,27 +62,25 @@ func newMissingHeartbeatBalanceTest(t *testing.T) (*affinityBalanceTest, *core.R
 	return f, missing, writer
 }
 
-func TestAffinityBalanceWaitsForMissingRegionHeartbeat(t *testing.T) {
+func TestAffinityBalanceWithRegionGaps(t *testing.T) {
 	re := require.New(t)
 	f, missing, writer := newMissingHeartbeatBalanceTest(t)
+	f.SetMaxAffinityMergeRegionSize(0)
 	re.Nil(f.GetRegion(missing.GetID()))
-	before := f.snapshot()
-	group := before.Group(balanceTestGroupID("_tidb_pt_100_p1"))
-	target := group.Group
-	target.LeaderStoreID = 3
-	status, _ := f.validateBalancePlanTarget(t.Context(), before, group, &target, make(map[uint64]balanceCheckedRegion))
-	re.Equal(balanceUnready, status)
-	for range 3 {
-		re.False(f.step())
-		re.Empty(writer.targets)
-		re.Equal(before.Groups, f.snapshot().Groups)
-	}
-	f.PutRegion(missing)
-	f.affinityManager.GetAndCacheRegionAffinityGroupState(missing)
 	re.True(f.step())
 	re.Len(writer.targets, 1)
-	re.Equal(group.ID, writer.targets[0].Expected.ID)
 	re.Equal(uint64(3), writer.targets[0].LeaderStoreID)
+	// Deliver the persisted target before the missing Region's first heartbeat.
+	written, err := f.affinityManager.UpdateAffinityGroupTargets(writer.targets)
+	re.NoError(err)
+	re.Equal([]string{writer.targets[0].Expected.ID}, written)
+	f.PutRegion(missing)
+	ops := f.Check(missing)
+	re.Len(ops, 1)
+	operator.ApplyOperator(f.Cluster, ops[0])
+	moved := f.GetRegion(missing.GetID())
+	re.Equal(uint64(3), moved.GetLeader().GetStoreId())
+	re.True(f.ruleManager.FitRegionWithoutCache(f.Cluster, moved).IsSatisfied())
 }
 
 func TestAffinityBalanceWaitsForStorageRegionHeartbeat(t *testing.T) {

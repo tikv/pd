@@ -15,7 +15,6 @@
 package checker
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"slices"
@@ -24,13 +23,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/affinity/balanceplan"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 const (
@@ -55,12 +53,11 @@ const (
 type balanceCommitReason string
 
 const (
-	balanceCommitRegionsChanged balanceCommitReason = "regions-changed"
-	balanceCommitDisallowed     balanceCommitReason = "balance-disallowed"
-	balanceCommitRulesChanged   balanceCommitReason = "rules-changed"
-	balanceCommitCanceled       balanceCommitReason = "canceled"
-	balanceCommitAllConflicted  balanceCommitReason = "all-conflicted"
-	balanceCommitError          balanceCommitReason = "error"
+	balanceCommitDisallowed    balanceCommitReason = "balance-disallowed"
+	balanceCommitRulesChanged  balanceCommitReason = "rules-changed"
+	balanceCommitCanceled      balanceCommitReason = "canceled"
+	balanceCommitAllConflicted balanceCommitReason = "all-conflicted"
+	balanceCommitError         balanceCommitReason = "error"
 )
 
 // balancePlan is the planner input of a table and the mapping back to it.
@@ -78,8 +75,6 @@ type balancePlan struct {
 // balancePlanResult is a validated plan.
 type balancePlanResult struct {
 	targets []*affinity.Group
-	// checked holds the Regions that the targets were validated against.
-	checked map[uint64]balanceCheckedRegion
 	// retry reports that the table may improve soon without a metadata change.
 	retry bool
 	// planner and groupCounts describe the last round; work, visits and durations
@@ -93,14 +88,8 @@ type balancePlanResult struct {
 	validateDuration time.Duration
 }
 
-// balanceCheckedRegion is a Region that a target was validated against.
-type balanceCheckedRegion struct {
-	group  *affinity.GroupState
-	region *core.RegionInfo
-}
-
-// planBalanceTargets plans a table and validates every changed group on all
-// its Regions. A group whose target fails is planned again without the stores
+// planBalanceTargets plans a table and validates every changed group on its
+// known Regions. A group whose target fails is planned again without the stores
 // that hold learners of its Regions, or kept unchanged if no learner is to
 // blame. It returns a validated plan that improves the table, or no targets.
 func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affinity.BalanceSnapshot) (balancePlanResult, error) {
@@ -128,12 +117,11 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 			return res, nil
 		}
 		targets := plan.changedTargets(&result)
-		checked := make(map[uint64]balanceCheckedRegion)
 		failed := false
 		start = time.Now()
 		for _, target := range targets {
 			group := snapshot.Group(target.ID)
-			status, learners := c.validateBalancePlanTarget(ctx, snapshot, group, target, checked)
+			status, learners := c.validateBalancePlanTarget(ctx, snapshot, group, target)
 			if err := ctx.Err(); err != nil {
 				res.validateDuration += time.Since(start)
 				return res, err
@@ -165,7 +153,7 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 		}
 		res.validateDuration += time.Since(start)
 		if !failed {
-			res.targets, res.checked = targets, checked
+			res.targets = targets
 			return res, nil
 		}
 	}
@@ -173,23 +161,17 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 	return res, nil
 }
 
-// commitBalancePlan writes a validated plan if the Regions of the changed
-// groups are still as they were validated, balancing is still allowed and the
-// placement rules have not changed since planning. It returns
+// commitBalancePlan writes a validated plan if balancing is still allowed and
+// the placement rules have not changed since planning. It returns
 // the IDs of the written groups and the reason if no target was written or the
 // commit failed. The checks run right before the write, but not atomically with
 // it. Changes to other groups of the table, such as an admin update of a fixed
 // group, can leave this round without improvement; the next round replans from
 // the latest state.
 func (c *AffinityChecker) commitBalancePlan(ctx context.Context, snapshot *affinity.BalanceSnapshot, res balancePlanResult, revision uint64) ([]string, balanceCommitReason, error) {
-	// The scan may take a while, so the gates are checked after it, right
-	// before the write.
-	regionsUnchanged := c.verifyBalanceRegions(snapshot, res.targets, res.checked)
+	failpoint.InjectCall("beforeAffinityBalanceCommit")
 	if err := ctx.Err(); err != nil {
 		return nil, balanceCommitCanceled, err
-	}
-	if !regionsUnchanged {
-		return nil, balanceCommitRegionsChanged, nil
 	}
 	if !c.balanceAllowed() {
 		return nil, balanceCommitDisallowed, nil
@@ -211,21 +193,18 @@ func (c *AffinityChecker) commitBalancePlan(ctx context.Context, snapshot *affin
 }
 
 // validateBalancePlanTarget checks the store actions of a changed group and,
-// on every Region of its ranges, the current Region and the Region moved to
+// on every known Region of its ranges, the current Region and the Region moved to
 // the target. On a rejection it also returns the target voters that hold a
 // learner of the Region.
 func (c *AffinityChecker) validateBalancePlanTarget(ctx context.Context, snapshot *affinity.BalanceSnapshot, group *affinity.GroupState,
-	target *affinity.Group, checked map[uint64]balanceCheckedRegion) (balanceStatus, []uint64) {
+	target *affinity.Group) (balanceStatus, []uint64) {
 	if status := c.balanceTargetExecutionStatus(&group.Group, target); status != balanceAllowed {
 		return status, nil
 	}
 	scan := newBalanceRegionScan(snapshot.Ranges[group.ID])
 	for ctx.Err() == nil {
-		region, covered, done := scan.next(c.cluster)
-		if !covered {
-			return balanceUnready, nil
-		}
-		if done {
+		region := scan.next(c.cluster)
+		if region == nil {
 			return balanceAllowed, nil
 		}
 		fit, status := c.validateBalanceCurrentRegion(group, region)
@@ -241,39 +220,8 @@ func (c *AffinityChecker) validateBalancePlanTarget(ctx context.Context, snapsho
 			}
 			return status, learners
 		}
-		checked[region.GetID()] = balanceCheckedRegion{group, region}
 	}
 	return balanceUnready, nil
-}
-
-// verifyBalanceRegions scans the ranges of the changed groups again. It
-// requires the same Regions, unchanged and still ready, so that a split, a
-// merge or a peer change after the validation is not missed.
-func (c *AffinityChecker) verifyBalanceRegions(snapshot *affinity.BalanceSnapshot, targets []*affinity.Group,
-	checked map[uint64]balanceCheckedRegion) bool {
-	var ranges []keyutil.KeyRange
-	for _, target := range targets {
-		ranges = append(ranges, snapshot.Ranges[target.ID].KeyRanges...)
-	}
-	slices.SortFunc(ranges, func(a, b keyutil.KeyRange) int { return bytes.Compare(a.StartKey, b.StartKey) })
-	regions, err := c.cluster.BatchScanRegions(keyutil.NewKeyRanges(ranges), core.WithOutputMustContainAllKeyRange())
-	if err != nil || len(regions) != len(checked) {
-		return false
-	}
-	for _, region := range regions {
-		old, ok := checked[region.GetID()]
-		if !ok || !sameBalanceRegion(old.region, region) || !c.balanceRegionReady(old.group, region) {
-			return false
-		}
-	}
-	return true
-}
-
-func sameBalanceRegion(a, b *core.RegionInfo) bool {
-	return a.GetRegionEpoch().GetVersion() == b.GetRegionEpoch().GetVersion() &&
-		a.GetRegionEpoch().GetConfVer() == b.GetRegionEpoch().GetConfVer() &&
-		bytes.Equal(a.GetStartKey(), b.GetStartKey()) && bytes.Equal(a.GetEndKey(), b.GetEndKey()) &&
-		a.GetLeader().GetStoreId() == b.GetLeader().GetStoreId() && core.SortedPeersEqual(a.GetPeers(), b.GetPeers())
 }
 
 // balanceCreatingTable reports whether a table has an auto group that was
@@ -445,8 +393,8 @@ func (c *AffinityChecker) balanceRuleOf(group *affinity.GroupState, ranges affin
 		return ruleOf, true
 	}
 	scan := newBalanceRegionScan(ranges)
-	region, covered, done := scan.next(c.cluster)
-	if !covered || done {
+	region := scan.next(c.cluster)
+	if region == nil {
 		return nil, false
 	}
 	fit := c.ruleManager.FitRegion(c.cluster, region)

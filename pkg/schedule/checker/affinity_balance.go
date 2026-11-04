@@ -51,19 +51,20 @@ func newBalanceRegionScan(ranges affinity.GroupKeyRanges) balanceRegionScan {
 	return balanceRegionScan{ranges: merged.Ranges()}
 }
 
-// next returns the next Region. covered is false if no Region covers the next
-// key, and done is true after the last Region.
-func (p *balanceRegionScan) next(cluster sche.CheckerCluster) (region *core.RegionInfo, covered, done bool) {
+// next returns the next known Region, skipping gaps, or nil after the last one.
+func (p *balanceRegionScan) next(cluster sche.CheckerCluster) *core.RegionInfo {
 	for p.rangeIndex < len(p.ranges) {
 		keyRange := p.ranges[p.rangeIndex]
 		if !p.started {
 			p.nextKey, p.started = slices.Clone(keyRange.StartKey), true
 		}
 		regions := cluster.ScanRegions(p.nextKey, keyRange.EndKey, 1)
-		if len(regions) == 0 || !balanceRegionCoversKey(regions[0], p.nextKey) {
-			return nil, false, false
+		if len(regions) == 0 {
+			p.rangeIndex++
+			p.started = false
+			continue
 		}
-		region = regions[0]
+		region := regions[0]
 		p.nextKey = slices.Clone(region.GetEndKey())
 		if len(p.nextKey) == 0 || len(keyRange.EndKey) > 0 && bytes.Compare(p.nextKey, keyRange.EndKey) >= 0 {
 			p.rangeIndex++
@@ -74,14 +75,9 @@ func (p *balanceRegionScan) next(cluster sche.CheckerCluster) (region *core.Regi
 			continue
 		}
 		p.lastRegion = region.GetID()
-		return region, true, false
+		return region
 	}
-	return nil, true, true
-}
-
-func balanceRegionCoversKey(region *core.RegionInfo, key []byte) bool {
-	return bytes.Compare(region.GetStartKey(), key) <= 0 &&
-		(len(region.GetEndKey()) == 0 || bytes.Compare(key, region.GetEndKey()) < 0)
+	return nil
 }
 
 // balanceRegionReady reports whether a Region of the group is healthy,
