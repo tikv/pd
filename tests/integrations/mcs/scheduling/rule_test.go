@@ -21,13 +21,17 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -48,6 +52,86 @@ type ruleTestSuite struct {
 
 func TestRule(t *testing.T) {
 	suite.Run(t, &ruleTestSuite{})
+}
+
+func TestAffinityOverlapStartup(t *testing.T) {
+	for _, withinGroup := range []bool{false, true} {
+		t.Run(fmt.Sprintf("within-group=%t", withinGroup), func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			pdCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+			re.NoError(err)
+			defer pdCluster.Destroy()
+			re.NoError(pdCluster.RunInitialServers())
+			leaderName := pdCluster.WaitLeader()
+			re.NotEmpty(leaderName)
+			leader := pdCluster.GetServer(leaderName)
+			re.NoError(leader.BootstrapCluster())
+			raftCluster := leader.GetRaftCluster()
+			store := raftCluster.GetStorage()
+			ranges := []affinity.GroupKeyRanges{
+				{GroupID: "a", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("d")}}},
+				{GroupID: "b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
+			}
+			if withinGroup {
+				ranges[0].KeyRanges = append(ranges[0].KeyRanges, ranges[1].KeyRanges...)
+				ranges = ranges[:1]
+			}
+			// Model data already persisted by an older PD or a partially applied request.
+			for _, groupRanges := range ranges {
+				re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+					if err := store.SaveAffinityGroup(txn, groupRanges.GroupID, &affinity.Group{
+						ID: groupRanges.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1},
+					}); err != nil {
+						return err
+					}
+					return store.SaveRegionRule(txn, affinity.GetLabelRuleID(groupRanges.GroupID), affinity.MakeLabelRule(groupRanges))
+				}))
+			}
+			raftCluster.Stop()
+			raftCluster.Wait()
+			re.NoError(raftCluster.Start(leader.GetServer(), false))
+			re.True(raftCluster.IsRunning())
+			pdManager := raftCluster.GetAffinityManager()
+			for _, groupRanges := range ranges {
+				pdManager.RestoreAffinityGroup(groupRanges.GroupID)
+				re.False(pdManager.GetAffinityGroupState(groupRanges.GroupID).AffinitySchedulingAllowed)
+			}
+
+			schedulingCluster, err := tests.NewTestSchedulingCluster(ctx, 1, pdCluster)
+			re.NoError(err)
+			defer schedulingCluster.Destroy()
+			primary := schedulingCluster.WaitForPrimaryServing(re)
+			manager := primary.GetCluster().GetAffinityManager()
+			region := core.NewRegionInfo(&metapb.Region{Id: 10, StartKey: []byte("b"), EndKey: []byte("c")}, nil)
+			for _, groupRanges := range ranges {
+				manager.RestoreAffinityGroup(groupRanges.GroupID)
+				state := manager.GetAffinityGroupState(groupRanges.GroupID)
+				re.NotNil(state)
+				re.Equal(affinity.PhasePending, state.Phase)
+				re.False(state.AffinitySchedulingAllowed)
+				re.True(state.RegularSchedulingAllowed)
+				re.Equal(len(groupRanges.KeyRanges), state.RangeCount)
+			}
+			group, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(group)
+			re.False(isAffinity)
+
+			remaining := "b"
+			if withinGroup {
+				remaining = "a"
+				re.NoError(pdManager.UpdateAffinityGroupKeyRanges(nil, []affinity.GroupKeyRanges{{
+					GroupID: "a", KeyRanges: ranges[0].KeyRanges[1:],
+				}}))
+			} else {
+				re.NoError(pdManager.DeleteAffinityGroups([]string{"a"}, true))
+			}
+			testutil.Eventually(re, func() bool {
+				group, _ := manager.GetRegionAffinityGroupState(region)
+				return group != nil && group.ID == remaining && group.AffinitySchedulingAllowed
+			})
+		})
+	}
 }
 
 func (suite *ruleTestSuite) SetupSuite() {
