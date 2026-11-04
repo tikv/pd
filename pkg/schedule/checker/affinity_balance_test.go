@@ -17,6 +17,7 @@ package checker
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -272,6 +273,107 @@ func TestAffinityBalanceLearnerInLaterRegion(t *testing.T) {
 	re.NotNil(op)
 	operator.ApplyOperator(f.Cluster, op)
 	re.Equal(learner, f.GetRegion(later.GetID()).GetStoreLearner(4))
+}
+
+func TestAffinityBalanceTiFlashRecordRules(t *testing.T) {
+	for _, differentVoterRules := range []bool{false, true} {
+		t.Run(fmt.Sprintf("different-voter-rules=%t", differentVoterRules), func(t *testing.T) {
+			re := require.New(t)
+			f := newAffinityBalanceTest(t, 5)
+			f.SetEnableUseJointConsensus(false)
+			f.SetStoreLabel(5, map[string]string{"engine": "tiflash"})
+			encode := func(key []byte) []byte {
+				if kerneltype.IsNextGen() {
+					key = append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 42), key...)
+				}
+				return codec.EncodeBytes(key)
+			}
+			for i := range 3 {
+				partition := int64(101 + i)
+				start := encode(codec.GenerateTableKey(partition))
+				record := encode(codec.GenerateRecordKeyPrefix(partition))
+				end := encode(codec.GenerateTableKey(partition + 1))
+				// TiDB's TiFlash rule starts at the record prefix, inside the
+				// affinity range, leaving the index Region without a learner.
+				re.NoError(f.ruleManager.SetRule(&placement.Rule{
+					GroupID: "tiflash", ID: fmt.Sprintf("table-%d-r", partition), Role: placement.Learner, Count: 1,
+					StartKeyHex: hex.EncodeToString(record), EndKeyHex: hex.EncodeToString(end),
+					LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}},
+				}))
+				if differentVoterRules {
+					rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+					rule.ID, rule.Index, rule.Override = fmt.Sprintf("record-%d", partition), 1, true
+					rule.StartKeyHex, rule.EndKeyHex = hex.EncodeToString(record), hex.EncodeToString(end)
+					rule.LabelConstraints = []placement.LabelConstraint{{Key: "engine", Op: placement.NotIn, Values: []string{"tiflash"}}}
+					re.NoError(f.ruleManager.SetRule(rule))
+				}
+				id := balanceTestGroupID(fmt.Sprintf("_tidb_pt_100_p%d", partition))
+				re.NoError(createAffinityGroupForTest(f.affinityManager,
+					&affinity.Group{ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}, start, end))
+				keys := [][]byte{start, record, end}
+				for j := range 2 {
+					regionID := uint64(2*i + j + 1)
+					f.AddLeaderRegionWithRange(regionID, string(keys[j]), string(keys[j+1]), 1, 2, 3)
+					region := f.GetRegion(regionID).Clone(core.SetApproximateSize(1))
+					if j == 1 {
+						region = region.Clone(core.WithAddPeer(&metapb.Peer{Id: 100 + regionID, StoreId: 5, Role: metapb.PeerRole_Learner}))
+					}
+					f.PutRegion(region)
+					_, aligned := f.affinityManager.GetAndCacheRegionAffinityGroupState(region)
+					re.True(aligned)
+					re.True(f.ruleManager.FitRegionWithoutCache(f.Cluster, region).IsSatisfied())
+				}
+			}
+			snapshot := f.snapshot()
+			revision := f.ruleManager.GetRevision()
+			res, err := f.planBalanceTargets(t.Context(), snapshot)
+			re.NoError(err)
+			t.Logf("targets=%d mutable=%d unsupported=%d", len(res.targets),
+				res.groupCounts[balanceGroupMutable], res.groupCounts[balanceGroupUnsupported])
+			if differentVoterRules {
+				re.Empty(res.targets)
+				re.Equal(3, res.groupCounts[balanceGroupUnsupported])
+				re.False(f.step())
+				re.Equal(snapshot.Groups, f.snapshot().Groups)
+				return
+			}
+			re.Equal(3, res.groupCounts[balanceGroupMutable])
+			re.Zero(res.groupCounts[balanceGroupUnsupported])
+			re.NotEmpty(res.targets)
+			written, reason, err := f.commitBalancePlan(t.Context(), snapshot, res, revision)
+			re.NoError(err)
+			re.Empty(reason)
+			re.Len(written, len(res.targets))
+			for _, target := range res.targets {
+				re.Contains(written, target.ID)
+				re.NotContains(target.VoterStoreIDs, uint64(5))
+				raw, err := f.GetStorage().LoadAffinityGroup(target.ID)
+				re.NoError(err)
+				var stored affinity.Group
+				re.NoError(json.Unmarshal([]byte(raw), &stored))
+				re.Equal(*target, stored)
+				re.Equal(stored, f.affinityManager.GetAffinityGroupState(target.ID).Group)
+			}
+			score := balanceTableScore(f.affinityManager, balanceTestTable())
+			re.Less(score[0], 27)
+			re.Less(score[1], 9)
+			for _, region := range f.GetRegions() {
+				group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
+				learners := region.GetLearners()
+				if op := f.createAffinityOperator(region, group); op != nil {
+					operator.ApplyOperator(f.Cluster, op)
+				}
+				moved := f.GetRegion(region.GetID())
+				re.Equal(learners, moved.GetLearners())
+				re.Equal(group.LeaderStoreID, moved.GetLeader().GetStoreId())
+				re.Len(moved.GetVoters(), len(group.VoterStoreIDs))
+				for _, id := range group.VoterStoreIDs {
+					re.NotNil(moved.GetStoreVoter(id))
+				}
+				re.True(f.ruleManager.FitRegionWithoutCache(f.Cluster, moved).IsSatisfied())
+			}
+		})
+	}
 }
 
 func TestAffinityBalanceKeepsUnmodelledGroups(t *testing.T) {

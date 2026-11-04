@@ -409,25 +409,29 @@ func (c *AffinityChecker) balancePlanGroup(group *affinity.GroupState, ranges af
 }
 
 // balanceGroupRules returns the voter rules of a group. The planner models
-// one set of rules per group, so every range of the group must lie in one
-// rule segment and all ranges must have the same rules.
+// one set of voter rules per group. Learner rules may differ across segments,
+// but the same voter rules must apply to every segment of every range.
 func (c *AffinityChecker) balanceGroupRules(ranges affinity.GroupKeyRanges) ([]*placement.Rule, bool) {
 	var voters []*placement.Rule
-	for i, keyRange := range ranges.KeyRanges {
-		// It returns no rules for a range that crosses a rule boundary.
-		var rules []*placement.Rule
-		for _, r := range c.ruleManager.GetRulesForApplyRange(keyRange.StartKey, keyRange.EndKey) {
-			if r.Role != placement.Learner {
-				rules = append(rules, r)
+	for _, keyRange := range ranges.KeyRanges {
+		start := keyRange.StartKey
+		ends := append(c.ruleManager.GetSplitKeys(start, keyRange.EndKey), keyRange.EndKey)
+		for _, end := range ends {
+			var rules []*placement.Rule
+			for _, r := range c.ruleManager.GetRulesForApplyRange(start, end) {
+				if r.Role != placement.Learner {
+					rules = append(rules, r)
+				}
 			}
-		}
-		if len(rules) == 0 {
-			return nil, false
-		}
-		if i == 0 {
-			voters = rules
-		} else if !slices.EqualFunc(voters, rules, func(a, b *placement.Rule) bool { return a.Key() == b.Key() }) {
-			return nil, false
+			if len(rules) == 0 {
+				return nil, false
+			}
+			if len(voters) == 0 {
+				voters = rules
+			} else if !slices.EqualFunc(voters, rules, func(a, b *placement.Rule) bool { return a.Key() == b.Key() }) {
+				return nil, false
+			}
+			start = end
 		}
 	}
 	return voters, len(voters) > 0
