@@ -93,10 +93,11 @@ type Options struct {
 	Sweeps      int
 	Kick        int
 	MaxAttempts int
-	// WorkBudget limits the candidate entries scanned by the whole plan.
+	// WorkBudget limits candidate and reversion load entries processed by the
+	// whole plan, including entries restored after a rejected reversion.
 	WorkBudget int64
 	Seed       uint64
-	// Cancel is checked before every group visit.
+	// Cancel is checked before every group visit and reversion trial.
 	Cancel func() bool
 }
 
@@ -222,6 +223,9 @@ func Plan(in *Input, opt Options) Result {
 		bestV, bestL, res.Stop, res.Attempts = p.perturb(fast, bestV, bestL, res.Bound)
 	}
 	res.Score = p.revert(origV, origL, bestV, bestL)
+	if p.stop != "" {
+		res.Stop = p.stop
+	}
 	res.Voters, res.Leaders = p.expand(bestV, bestL)
 	res.Visits, res.Work = p.visits, p.work
 	for i := range bestV {
@@ -698,18 +702,29 @@ func (p *planner) kick(g *groupState, rng *rand.Rand) {
 // neutral changes behind; re-planning a mostly balanced 128-group table
 // rewrites 39 groups with this pass and 75 without it. It repeats until a pass
 // reverts nothing; every other pass reverts at least one group, so it ends.
-// The result is never worse.
+// Trials share the search's cancellation and work budget. A cutoff keeps the
+// last accepted layout, whose score is never worse than the saved best layout.
 func (p *planner) revert(origV [][]int, origL []int, voters [][]int, leaders []int) Score {
 	p.setLayout(voters, leaders, nil)
 	cur := p.score()
+	if p.stopped() {
+		return cur
+	}
 	for reverted := true; reverted; {
 		reverted = false
 		for i := range p.gs {
+			if p.stopped() {
+				return cur
+			}
 			g := &p.gs[i]
 			if g.lead == origL[i] && sameSet(g.cur, origV[i]) {
 				continue
 			}
 			oldV, oldL := g.cur, g.lead
+			// move processes both voter targets and the two leader entries.
+			work := int64(len(oldV) + len(origV[i]) + 2)
+			p.work += work
+			p.visits++
 			d := p.move(g, slices.Clone(origV[i]), origL[i])
 			if value := (Score{cur.Voter + d.Voter, cur.Leader + d.Leader}); !cur.Less(value) {
 				cur, reverted = value, true
@@ -717,6 +732,7 @@ func (p *planner) revert(origV [][]int, origL []int, voters [][]int, leaders []i
 				continue
 			}
 			p.move(g, oldV, oldL)
+			p.work += work
 		}
 	}
 	return cur
