@@ -35,6 +35,7 @@ import (
 	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -180,6 +181,38 @@ func TestMetricStorageValidationAtQueryTime(t *testing.T) {
 type configTestSuite struct {
 	suite.Suite
 	env *tests.SchedulingTestEnvironment
+}
+
+func TestRedactInfoLogWithPersistedConfig(t *testing.T) {
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	// The persisted configuration stores redact-info-log as false, as earlier versions
+	// do, because it is not part of the persisted settings.
+	svr := cluster.GetLeaderServer().GetServer()
+	re.NoError(svr.GetPersistOptions().Persist(svr.GetStorage()))
+	var persisted struct {
+		Security struct {
+			RedactInfoLog logutil.RedactInfoLogType `json:"redact-info-log"`
+		} `json:"security"`
+	}
+	exist, err := svr.GetStorage().LoadConfig(&persisted)
+	re.NoError(err)
+	re.True(exist)
+	re.Equal(logutil.RedactInfoLogOFF, persisted.Security.RedactInfoLog)
+
+	// After a restart, the default still applies because the configuration file does not set it.
+	re.NoError(cluster.StopAll())
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	re.Equal("?", logutil.RedactString("key"))
+	cfg := &config.Config{}
+	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, cluster.GetLeaderServer().GetAddr()+"/pd/api/v1/config", cfg))
+	re.Equal(logutil.RedactInfoLogON, cfg.Security.RedactInfoLog)
 }
 
 func TestConfigTestSuite(t *testing.T) {
