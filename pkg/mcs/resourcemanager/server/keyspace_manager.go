@@ -286,6 +286,9 @@ func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.Resour
 	if !krgm.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
+	if err := validateResourceGroupProto(group); err != nil {
+		return err
+	}
 	err := curGroup.PatchSettings(group)
 	if err != nil {
 		return err

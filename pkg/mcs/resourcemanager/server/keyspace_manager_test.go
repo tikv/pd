@@ -195,10 +195,7 @@ func TestResourceGroupRejectsUnsupportedModes(t *testing.T) {
 				group.Mode = mode
 				group.Priority = 9
 				err = operation.apply(krgm, group)
-				re.Error(err)
-				if operation.name != "modify" {
-					re.ErrorIs(err, errs.ErrInvalidGroup)
-				}
+				re.ErrorIs(err, errs.ErrInvalidGroup)
 				if original != nil {
 					re.Equal(original, krgm.groups[group.Name].Clone(true))
 				} else {
