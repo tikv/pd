@@ -121,6 +121,9 @@ func validateResourceGroupProto(grouppb *rmpb.ResourceGroup) error {
 	if grouppb.GetPriority() > maxPriority {
 		return errs.ErrInvalidGroup.FastGenByArgs("the group priority")
 	}
+	if grouppb.GetMode() != rmpb.GroupMode_RUMode {
+		return errs.ErrInvalidGroup.FastGenByArgs("the group mode: only RU mode is supported")
+	}
 	return nil
 }
 

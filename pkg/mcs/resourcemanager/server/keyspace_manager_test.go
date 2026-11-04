@@ -151,6 +151,70 @@ func TestAddResourceGroup(t *testing.T) {
 	re.Equal(group.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), addedGroup.RUSettings.RU.getBurstLimitSetting())
 }
 
+func TestResourceGroupRejectsUnsupportedModes(t *testing.T) {
+	for _, mode := range []rmpb.GroupMode{
+		rmpb.GroupMode_Unknown,
+		rmpb.GroupMode_RawMode,
+		rmpb.GroupMode(-1),
+		rmpb.GroupMode(3),
+	} {
+		for _, operation := range []struct {
+			name     string
+			existing bool
+			apply    func(*keyspaceResourceGroupManager, *rmpb.ResourceGroup) error
+		}{
+			{name: "add", apply: (*keyspaceResourceGroupManager).addResourceGroup},
+			{name: "load", apply: func(krgm *keyspaceResourceGroupManager, group *rmpb.ResourceGroup) error {
+				return krgm.addResourceGroupFromRaw(group.Name, mustMarshalResourceGroup(t, group))
+			}},
+			{name: "watch_insert", apply: func(krgm *keyspaceResourceGroupManager, group *rmpb.ResourceGroup) error {
+				return krgm.upsertResourceGroupFromRaw(group.Name, mustMarshalResourceGroup(t, group))
+			}},
+			{name: "watch_update", existing: true, apply: func(krgm *keyspaceResourceGroupManager, group *rmpb.ResourceGroup) error {
+				return krgm.upsertResourceGroupFromRaw(group.Name, mustMarshalResourceGroup(t, group))
+			}},
+			{name: "modify", existing: true, apply: (*keyspaceResourceGroupManager).modifyResourceGroup},
+		} {
+			t.Run(fmt.Sprintf("mode_%d/%s", mode, operation.name), func(t *testing.T) {
+				re := require.New(t)
+				store := storage.NewStorageWithMemoryBackend()
+				krgm := newKeyspaceResourceGroupManager(1, store)
+				group := newTestResourceGroup("test_group", 5, 100, 200)
+				var original *ResourceGroup
+				if operation.existing {
+					re.NoError(krgm.addResourceGroup(group))
+					original = krgm.groups[group.Name].Clone(true)
+				}
+				settingsPath := keypath.KeyspaceResourceGroupSettingPath(1, group.Name)
+				originalSettings, err := store.Load(settingsPath)
+				re.NoError(err)
+				statesPath := keypath.KeyspaceResourceGroupStatePath(1, group.Name)
+				originalStates, err := store.Load(statesPath)
+				re.NoError(err)
+
+				group.Mode = mode
+				group.Priority = 9
+				err = operation.apply(krgm, group)
+				re.Error(err)
+				if operation.name != "modify" {
+					re.ErrorIs(err, errs.ErrInvalidGroup)
+				}
+				if original != nil {
+					re.Equal(original, krgm.groups[group.Name].Clone(true))
+				} else {
+					re.Empty(krgm.groups)
+				}
+				settings, err := store.Load(settingsPath)
+				re.NoError(err)
+				re.Equal(originalSettings, settings)
+				states, err := store.Load(statesPath)
+				re.NoError(err)
+				re.Equal(originalStates, states)
+			})
+		}
+	}
+}
+
 func TestModifyResourceGroup(t *testing.T) {
 	re := require.New(t)
 
