@@ -68,6 +68,8 @@ type Manager struct {
 	// targetWriter writes the targets this Manager decides when it does not own the storage,
 	// as in the scheduling service. When it is nil, the Manager writes its own storage.
 	targetWriter TargetWriter
+	// targetSender sends first-win targets to targetWriter in the background.
+	targetSender *targetSender
 
 	// The following members are protected by RWMutex.
 	affinityRegionCount int

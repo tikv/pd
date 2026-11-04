@@ -62,9 +62,13 @@ type TargetWriter interface {
 }
 
 // SetTargetWriter makes the Manager send the targets it decides to w instead of
-// writing its own storage. It must be called before the Manager is used.
+// writing its own storage. First-win targets are sent in the background until
+// the context of the Manager is done. It must be called once, before the
+// Manager is used.
 func (m *Manager) SetTargetWriter(w TargetWriter) {
 	m.targetWriter = w
+	m.targetSender = newTargetSender(w)
+	go m.targetSender.run(m.ctx)
 }
 
 // UpdateAffinityGroupTargets writes the targets whose stored groups still equal

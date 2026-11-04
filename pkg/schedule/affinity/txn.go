@@ -350,8 +350,9 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 // updateObservedGroupPeers sets a target observed from a healthy Region. The
 // target is written only if the stored group still equals the group it was
 // observed for. Without a target writer the Manager writes its own storage.
-// Otherwise it sends the target to the writer, which stores it in PD for the
-// scheduling service. The watcher syncs the stored target back into memory.
+// Otherwise it queues the target for the writer, which stores it in PD for the
+// scheduling service, and returns without waiting for PD; see targetSender.
+// The watcher syncs the stored target back into memory.
 // A Region with the layout of the current target, for example after the group
 // was loaded, confirms the target without writing it again.
 func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
@@ -379,9 +380,9 @@ func (m *Manager) updateObservedGroupPeers(groupID string, affinityVer uint64, l
 	}
 	m.metaMutex.Unlock()
 
-	if _, err := m.sendGroupTargets(m.ctx, []GroupTarget{*target}); err != nil {
-		return nil, err
-	}
+	// Send the target in the background, so that a slow or unreachable PD blocks
+	// neither the checker nor the watcher.
+	m.targetSender.send(*target)
 	return m.GetAffinityGroupState(groupID), nil
 }
 
