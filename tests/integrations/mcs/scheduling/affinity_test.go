@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -102,6 +103,12 @@ func TestAffinityFirstWinTargetWriteUnavailable(t *testing.T) {
 	cluster.SetPrepared()
 	for id := uint64(1); id <= 3; id++ {
 		tests.MustPutStore(re, pd, &metapb.Store{Id: id, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
+		// MustPutStore's default statistics are low-space. Keep first-win
+		// independent of when the availability check first inspects the group.
+		tests.MustHandleStoreHeartbeat(re, pd, &pdpb.StoreHeartbeatRequest{
+			Header: testutil.NewRequestHeader(leader.GetClusterID()),
+			Stats:  &pdpb.StoreStats{StoreId: id, Capacity: 10 * units.GiB, Available: 9 * units.GiB, UsedSize: units.GiB},
+		})
 	}
 	pdManager, err := leader.GetServer().GetAffinityManager()
 	re.NoError(err)
@@ -209,6 +216,12 @@ func TestAffinityFirstWinAfterPDLeaderStops(t *testing.T) {
 	cluster.SetPrepared()
 	for id := uint64(1); id <= 3; id++ {
 		tests.MustPutStore(re, pd, &metapb.Store{Id: id, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
+		// MustPutStore's default statistics are low-space. Keep first-win
+		// independent of when the availability check first inspects the group.
+		tests.MustHandleStoreHeartbeat(re, pd, &pdpb.StoreHeartbeatRequest{
+			Header: testutil.NewRequestHeader(leader.GetClusterID()),
+			Stats:  &pdpb.StoreStats{StoreId: id, Capacity: 10 * units.GiB, Available: 9 * units.GiB, UsedSize: units.GiB},
+		})
 	}
 	manager := cluster.GetAffinityManager()
 	// Establish membership before the experiment, independently of a failed
