@@ -16,7 +16,6 @@ package placement
 
 import (
 	"math"
-	"math/bits"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -276,45 +275,55 @@ func (w *fitWorker) fitRule(index int) bool {
 // Pick the most suitable peer combination for the rule with candidates.
 // Returns true if it replaces `bestFit` with a better alternative.
 func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, count int) bool {
-	// map the candidates to binary numbers with len(candidates) bits,
-	// each bit can be 1 or 0, 1 means a picked candidate
-	// the binary numbers with `count` 1 means a choose for the current rule.
+	// There is only one combination when every candidate is needed.
+	if count == len(candidates) {
+		for _, p := range candidates {
+			p.selected = true
+		}
+		better := w.compareBest(candidates, index)
+		unSelectPeers(candidates)
+		return better
+	}
+
+	// Visit combinations in increasing bitmask order without depending on the
+	// machine word size or scanning subsets with a different number of peers.
+	indexes := make([]int, count)
+	selected := make([]*fitPeer, count)
+	for i := range indexes {
+		indexes[i] = i
+	}
 
 	var better bool
-	limit := uint(1<<len(candidates) - 1)
-	binaryInt := uint(1<<count - 1)
-	for ; binaryInt <= limit; binaryInt++ {
-		// there should be exactly `count` number in current binary number `binaryInt`
-		if bits.OnesCount(binaryInt) != count {
-			continue
+	for {
+		for i, candidateIndex := range indexes {
+			selected[i] = candidates[candidateIndex]
+			selected[i].selected = true
 		}
-		selected := pickPeersFromBinaryInt(candidates, binaryInt)
 		better = w.compareBest(selected, index) || better
-		// reset the selected items to false.
 		unSelectPeers(selected)
 		if w.exit {
-			break
+			return better
 		}
-	}
-	return better
-}
 
-// pickPeersFromBinaryInt picks the candidates with the related index at the position of binary for the `binaryNumber` is `1`.
-// binaryNumber = 5, which means the related binary is 101, it will returns {candidates[0],candidates[2]}
-// binaryNumber = 6, which means the related binary is 110, it will returns {candidates[1],candidates[2]}
-func pickPeersFromBinaryInt(candidates []*fitPeer, binaryNumber uint) []*fitPeer {
-	selected := make([]*fitPeer, 0)
-	for _, p := range candidates {
-		if binaryNumber&1 == 1 {
-			p.selected = true
-			selected = append(selected, p)
+		// Advance the lowest index that has room, then reset lower indexes.
+		i := 0
+		for ; i < count; i++ {
+			limit := len(candidates)
+			if i+1 < count {
+				limit = indexes[i+1]
+			}
+			if indexes[i]+1 < limit {
+				break
+			}
 		}
-		binaryNumber >>= 1
-		if binaryNumber == 0 {
-			break
+		if i == count {
+			return better
+		}
+		indexes[i]++
+		for j := range i {
+			indexes[j] = j
 		}
 	}
-	return selected
 }
 
 func unSelectPeers(selected []*fitPeer) {
