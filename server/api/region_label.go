@@ -48,18 +48,18 @@ func isAffinityLabelRule(rule *labeler.LabelRule) bool {
 	return false
 }
 
-func validateRegionLabelPatch(patch labeler.LabelRulePatch) error {
+func isAffinityLabelRulePatch(patch labeler.LabelRulePatch) bool {
 	if slices.ContainsFunc(patch.SetRules, isAffinityLabelRule) {
-		return errs.ErrAffinityLabelProtected.FastGenByArgs()
+		return true
 	}
 	// Only prefixed IDs belong to the affinity manager. Custom IDs with a
 	// legacy affinity label remain removable through the region-label API.
 	for _, id := range patch.DeleteRules {
 		if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
-			return errs.ErrAffinityLabelProtected.FastGenByArgs()
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 type regionLabelHandler struct {
@@ -89,7 +89,7 @@ func (h *regionLabelHandler) GetAllRegionLabelRules(w http.ResponseWriter, r *ht
 
 // PatchRegionLabelRules updates region label rules in batch.
 //
-//	@Tags			region_label
+//	@Tags			swagger, region_label
 //	@Summary		Update region label rules in batch.
 //	@Description	Affinity rules must be managed through the affinity API.
 //	@Accept			json
@@ -106,8 +106,8 @@ func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *htt
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &patch); err != nil {
 		return
 	}
-	if err := validateRegionLabelPatch(patch); err != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+	if isAffinityLabelRulePatch(patch) {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	if err := cluster.GetRegionLabeler().Patch(patch); err != nil {
@@ -171,7 +171,7 @@ func (h *regionLabelHandler) GetRegionLabelRuleByID(w http.ResponseWriter, r *ht
 
 // DeleteRegionLabelRule deletes label rule of cluster by id.
 //
-//	@Tags			region_label
+//	@Tags			swagger, region_label
 //	@Summary		Delete label rule of cluster by id.
 //	@Description	Affinity rules must be managed through the affinity API.
 //	@Param			id	path	string	true	"Rule Id"
@@ -207,7 +207,7 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 
 // SetRegionLabelRule updates region label rule of cluster.
 //
-//	@Tags			region_label
+//	@Tags			swagger, region_label
 //	@Summary		Update region label rule of cluster.
 //	@Description	Affinity rules must be managed through the affinity API.
 //	@Accept			json
