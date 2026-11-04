@@ -30,6 +30,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -117,34 +118,10 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		if exist {
-			// A previous create may have registered the scheduler but failed to
-			// persist the scheduler list. Persist it again so that a success
-			// response always means the scheduler is persisted.
-			if err := h.PersistScheduleConfig(); err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			handler, err := h.GetSchedulerConfigHandler()
-			if err == nil && handler != nil {
-				r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
-				r.Method = http.MethodPut
-				data, err := json.Marshal(input)
-				if err != nil {
-					h.r.JSON(w, http.StatusInternalServerError, err.Error())
-					return
-				}
-
-				r.Body = io.NopCloser(bytes.NewBuffer(data))
-				handler.ServeHTTP(w, r)
-				return
-			}
-			if err != nil {
-				h.r.JSON(w, http.StatusNotAcceptable, err.Error())
-				return
-			}
-			h.r.JSON(w, http.StatusNotAcceptable, "scheduler config handler is unavailable")
+			h.addBalanceRangeJob(w, r, input)
 			return
 		}
+		failpoint.InjectCall("beforeCreateBalanceRangeScheduler")
 		if err := apiutil.CollectStringOption("rule", input, collector); err != nil {
 			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
@@ -313,6 +290,12 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := h.AddScheduler(tp, args...); err != nil {
+		if tp == types.BalanceRangeScheduler && errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+			// Another request may have created the scheduler after the absence
+			// check. Reuse the job handler's idempotency check in that case too.
+			h.addBalanceRangeJob(w, r, input)
+			return
+		}
 		h.r.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -322,6 +305,34 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
+}
+
+func (h *schedulerHandler) addBalanceRangeJob(w http.ResponseWriter, r *http.Request, input map[string]any) {
+	// A previous create may have registered the scheduler but failed to
+	// persist the scheduler list. Persist it again so that a success
+	// response always means the scheduler is persisted.
+	if err := h.PersistScheduleConfig(); err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	handler, err := h.GetSchedulerConfigHandler()
+	if err != nil {
+		h.r.JSON(w, http.StatusNotAcceptable, err.Error())
+		return
+	}
+	if handler == nil {
+		h.r.JSON(w, http.StatusNotAcceptable, "scheduler config handler is unavailable")
+		return
+	}
+	data, err := json.Marshal(input)
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
+	r.Method = http.MethodPut
+	r.Body = io.NopCloser(bytes.NewBuffer(data))
+	handler.ServeHTTP(w, r)
 }
 
 // collectEvictLeaderStoreIDs reads the target store IDs for evict-leader-scheduler

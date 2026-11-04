@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -969,6 +970,92 @@ func isSchedulerPaused(re *require.Assertions, urlPrefix, name string) bool {
 		}
 	}
 	return false
+}
+
+func (suite *scheduleTestSuite) TestConcurrentBalanceRangeCreation() {
+	suite.te.RunTest(suite.checkConcurrentBalanceRangeCreation)
+}
+
+func (suite *scheduleTestSuite) checkConcurrentBalanceRangeCreation(cluster *tests.TestCluster) {
+	re := suite.Require()
+	urlPrefix := cluster.GetLeaderServer().GetAddr() + "/pd/api/v1"
+	input := map[string]any{
+		"name":      types.BalanceRangeScheduler.String(),
+		"alias":     "db.t+1",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+	}
+	data, err := json.Marshal(input)
+	re.NoError(err)
+
+	// Hold both requests after the absence check, so both take the create path.
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	const fp = "github.com/tikv/pd/server/api/beforeCreateBalanceRangeScheduler"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		entered <- struct{}{}
+		<-release
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	type result struct {
+		status int
+		body   string
+		err    error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			var res result
+			res.err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data,
+				func(body []byte, status int, _ http.Header) {
+					res.status = status
+					res.body = string(body)
+				})
+			results <- res
+		}()
+	}
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(10 * time.Second):
+			re.FailNow("both requests must observe the scheduler as absent")
+		}
+	}
+	releaseOnce.Do(func() { close(release) })
+	for range 2 {
+		select {
+		case res := <-results:
+			re.NoError(res.err)
+			re.Equal(http.StatusOK, res.status, res.body)
+			re.JSONEq(`"0"`, res.body)
+		case <-time.After(10 * time.Second):
+			re.FailNow("concurrent scheduler creation did not finish")
+		}
+	}
+
+	// Check the scheduling service as well in microservice mode.
+	testutil.Eventually(re, func() bool {
+		resp, err := apiutil.GetJSON(tests.TestDialClient,
+			urlPrefix+"/scheduler-config/balance-range-scheduler/list", nil)
+		re.NoError(err)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		var jobs []map[string]any
+		re.NoError(json.NewDecoder(resp.Body).Decode(&jobs))
+		re.Len(jobs, 1)
+		re.Equal(float64(0), jobs[0]["job-id"])
+		re.Equal(input["alias"], jobs[0]["alias"])
+		return true
+	})
+	re.NoError(testutil.CheckDelete(tests.TestDialClient,
+		urlPrefix+"/schedulers/balance-range-scheduler", testutil.StatusOK(re)))
 }
 
 func (suite *scheduleTestSuite) TestBalanceRangeAPI() {
