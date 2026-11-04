@@ -32,16 +32,18 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-// GetEtcdClient returns the shared client for a meta-service group, including disabled groups.
+// getEtcdClient returns the shared client for a meta-service group, including disabled groups.
 // The manager owns the client; callers must not close it or change its endpoints.
 // Configuration changes may close a borrowed client; callers must handle the resulting errors.
-func (m *MetaServiceGroupManager) GetEtcdClient(groupID string) (*clientv3.Client, error) {
+func (m *MetaServiceGroupManager) getEtcdClient(groupID string) (*clientv3.Client, error) {
 	m.Lock()
 	defer m.Unlock()
 	return m.getEtcdClientLocked(groupID)
 }
 
 // GetEtcdClientWithConfigRevision returns a client whose endpoints match a persisted config snapshot.
+// The manager owns the client; callers must not close it or change its endpoints.
+// Configuration changes may close a borrowed client; callers must handle the resulting errors.
 // The returned revision must be checked when committing writes based on reads from the client.
 // Revision zero uses the initial file config and requires the config key to remain absent.
 // A stale local config fails closed until it is reloaded. Borrowed clients are never retargeted.
