@@ -28,9 +28,10 @@ type AffinityStorage interface {
 	// LoadAllAffinityGroups loads all affinity groups, passing raw key/value strings to the callback.
 	LoadAllAffinityGroups(f func(k, v string)) error
 
-	// LoadAffinityGroupInTxn loads a single affinity group as a raw JSON string within a transaction.
-	// In an etcd transaction, the commit fails if the value changes after it is loaded.
-	LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, error)
+	// LoadAffinityGroupsInTxn loads affinity groups as raw JSON strings within a transaction,
+	// in their order and with an empty string for a missing group. An etcd transaction loads
+	// them in one request, and its commit fails if any of the values changes after it is loaded.
+	LoadAffinityGroupsInTxn(txn kv.Txn, groupIDs []string) ([]string, error)
 	// SaveAffinityGroup saves an affinity group within a transaction.
 	SaveAffinityGroup(txn kv.Txn, groupID string, group any) error
 	// DeleteAffinityGroup deletes an affinity group within a transaction.
@@ -42,9 +43,25 @@ type AffinityStorage interface {
 
 var _ AffinityStorage = (*StorageEndpoint)(nil)
 
-// LoadAffinityGroupInTxn loads an affinity group configuration as a raw string within a transaction.
-func (*StorageEndpoint) LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, error) {
-	return txn.Load(keypath.AffinityGroupPath(groupID))
+// LoadAffinityGroupsInTxn loads affinity group configurations as raw strings within a transaction.
+// A transaction that cannot load several keys at once loads them one by one.
+func (*StorageEndpoint) LoadAffinityGroupsInTxn(txn kv.Txn, groupIDs []string) ([]string, error) {
+	keys := make([]string, 0, len(groupIDs))
+	for _, groupID := range groupIDs {
+		keys = append(keys, keypath.AffinityGroupPath(groupID))
+	}
+	if batchTxn, ok := txn.(kv.BatchLoadTxn); ok {
+		return batchTxn.BatchLoad(keys)
+	}
+	values := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value, err := txn.Load(key)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, nil
 }
 
 // SaveAffinityGroup stores an affinity group configuration to storage.

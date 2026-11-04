@@ -15,6 +15,7 @@
 package affinity
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -39,6 +43,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -440,12 +445,79 @@ func TestStoredGroupFields(t *testing.T) {
 	}
 }
 
+// groupEtcdRequests records the etcd requests of a client on affinity groups.
+type groupEtcdRequests struct {
+	mu sync.Mutex
+	// gets counts the requests that read one group, reads holds the number of
+	// groups read by each transaction that only reads, and commits counts the
+	// other transactions.
+	gets    int
+	reads   []int
+	commits int
+}
+
+func (r *groupEtcdRequests) intercept(ctx context.Context, method string, req, reply any,
+	cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	r.record(req)
+	return invoker(ctx, method, req, reply, cc, opts...)
+}
+
+func (r *groupEtcdRequests) record(req any) {
+	isGroupKey := func(key []byte) bool { return bytes.HasPrefix(key, []byte(keypath.AffinityGroupsPrefix())) }
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch req := req.(type) {
+	case *etcdserverpb.RangeRequest:
+		if isGroupKey(req.Key) {
+			r.gets++
+		}
+	case *etcdserverpb.TxnRequest:
+		reads, touched, onlyReads := 0, false, len(req.Compare) == 0
+		for _, cmp := range req.Compare {
+			touched = touched || isGroupKey(cmp.Key)
+		}
+		for _, op := range req.Success {
+			switch {
+			case op.GetRequestRange() != nil:
+				reads++
+				touched = touched || isGroupKey(op.GetRequestRange().Key)
+			case op.GetRequestPut() != nil:
+				onlyReads = false
+				touched = touched || isGroupKey(op.GetRequestPut().Key)
+			default:
+				onlyReads = false
+			}
+		}
+		switch {
+		case !touched:
+		case onlyReads:
+			r.reads = append(r.reads, reads)
+		default:
+			r.commits++
+		}
+	}
+}
+
+func (r *groupEtcdRequests) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.gets, r.reads, r.commits = 0, nil, 0
+}
+
 // TestUpdateAffinityGroupTargetsWithEtcd checks that a write of more targets than
 // one etcd transaction can hold succeeds on etcd, which limits the operations of
-// a transaction.
+// a transaction, and that each transaction loads the stored groups of its
+// targets in one request. The write holds metaMutex until each transaction
+// commits, so a request for each target would make every other metadata change
+// wait for all of them.
 func TestUpdateAffinityGroupTargetsWithEtcd(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	requests := &groupEtcdRequests{}
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
+		ClientCfgModifier: func(cfg *clientv3.Config) {
+			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(requests.intercept))
+		},
+	})
 	defer clean()
 	store := storage.NewStorageWithEtcdBackend(client)
 	manager := newTargetTestManagerWithStorage(t, store)
@@ -460,14 +532,26 @@ func TestUpdateAffinityGroupTargetsWithEtcd(t *testing.T) {
 		}
 		re.NoError(manager.CreateAffinityGroups(groups))
 	}
-	targets := make([]GroupTarget, 0, len(ids))
-	for _, id := range ids {
+	// A target decided from a changed group and a target for a missing group are not written.
+	stale := targetFor(manager, ids[0], 1, 1, 2, 3)
+	stale.Expected.CreateTimestamp++
+	targets := []GroupTarget{stale, {Expected: Group{ID: "missing"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}}
+	for _, id := range ids[1:] {
 		targets = append(targets, targetFor(manager, id, 1, 1, 2, 3))
 	}
+	requests.reset()
 	written, err := manager.UpdateAffinityGroupTargets(targets)
 	re.NoError(err)
-	re.Equal(ids, written)
-	for _, id := range ids {
+	re.Equal(ids[1:], written)
+	requests.mu.Lock()
+	gets, reads, commits := requests.gets, slices.Clone(requests.reads), requests.commits
+	requests.mu.Unlock()
+	t.Logf("%d targets: %d single reads, transactions that only read %v groups, %d commits", len(targets), gets, reads, commits)
+	re.Zero(gets, "the groups of a transaction are loaded in one request, not one request for each")
+	re.Equal([]int{etcdutil.MaxEtcdTxnOps, len(targets) - etcdutil.MaxEtcdTxnOps}, reads)
+	re.Equal(2, commits)
+	re.Zero(loadStoredGroup(re, store, ids[0]).LeaderStoreID)
+	for _, id := range ids[1:] {
 		re.Equal(uint64(1), loadStoredGroup(re, store, id).LeaderStoreID)
 	}
 }

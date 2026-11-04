@@ -146,18 +146,25 @@ func (m *Manager) updateGroupTargets(ctx context.Context, targets []GroupTarget)
 
 // updateGroupTargetsLocked writes adjusted targets in one transaction. The
 // transaction loads every stored group, so it fails if any of them changes
-// before the commit. metaMutex must be held.
+// before the commit. It loads them in one request, so that the caller holds
+// metaMutex for two etcd requests, the load and the commit, instead of one for
+// each target and the commit. metaMutex must be held.
 func (m *Manager) updateGroupTargetsLocked(ctx context.Context, targets []GroupTarget) ([]string, error) {
 	// stored is the group loaded for each target, and saved the group that holds
 	// its target after the commit, if it is written.
 	stored := make([]*Group, len(targets))
 	saved := make([]*Group, len(targets))
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, target.Expected.ID)
+	}
 	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		values, err := m.storage.LoadAffinityGroupsInTxn(txn, ids)
+		if err != nil {
+			return err
+		}
 		for i, target := range targets {
-			value, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
-			if err != nil {
-				return err
-			}
+			value := values[i]
 			if value == "" {
 				continue
 			}
