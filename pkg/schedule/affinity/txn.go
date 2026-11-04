@@ -185,11 +185,16 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	}
 
 	// Step 4: Create the change plan for the Group
-	saveOps := plan.CommitOps()
-	labelOpCount := len(saveOps)
+	labelOps := plan.CommitOps()
+	groupOps := make([][]func(kv.Txn) error, 0, len(filteredGroups))
 	for i, group := range filteredGroups {
 		source := filteredChanges[i].InheritPolicyFrom
-		saveOps = append(saveOps, func(txn kv.Txn) error {
+		ops := make([]func(kv.Txn) error, 0, 2)
+		if labelRules[i] != nil {
+			ops = append(ops, labelOps[0])
+			labelOps = labelOps[1:]
+		}
+		ops = append(ops, func(txn kv.Txn) error {
 			if source != "" {
 				value, err := m.storage.LoadAffinityGroupInTxn(txn, source)
 				if err != nil {
@@ -205,33 +210,15 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 			}
 			return m.storage.SaveAffinityGroup(txn, group.ID, group)
 		})
+		groupOps = append(groupOps, ops)
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	for start := 0; start < len(saveOps); start += etcdutil.MaxEtcdTxnOps {
-		end := min(start+etcdutil.MaxEtcdTxnOps, len(saveOps))
-		if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-			var sourceKeys []string
-			for _, change := range filteredChanges[max(start-labelOpCount, 0):max(end-labelOpCount, 0)] {
-				if change.InheritPolicyFrom != "" {
-					sourceKeys = append(sourceKeys, keypath.AffinityGroupPath(change.InheritPolicyFrom))
-				}
-			}
-			slices.Sort(sourceKeys)
-			sourceKeys = slices.Compact(sourceKeys)
-			if err := kv.Prefetch(txn, sourceKeys); err != nil {
-				return err
-			}
-			for _, op := range saveOps[start:end] {
-				if err := op(txn); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			log.Error("failed to add affinity groups", zap.Int("total-groups", len(filteredChanges)), zap.Error(err))
-			return err
-		}
+	if err := m.runGroupOpsInTxn(groupOps); err != nil {
+		log.Error("failed to add affinity groups",
+			zap.Int("total-groups", len(filteredChanges)),
+			zap.Error(err))
+		return err
 	}
 
 	// Step 6: Save the Group and Label information in memory.
@@ -255,7 +242,7 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	return nil
 }
 
-// DeleteAffinityGroups deletes multiple affinity groups in a single transaction.
+// DeleteAffinityGroups deletes multiple affinity groups and their label rules.
 // If force is false:
 //   - Returns error if any group does not exist
 //   - Returns error if any group has key ranges
@@ -316,16 +303,20 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 	}
 
 	// Step 4: Create the change plan for the Group
-	saveOps := plan.CommitOps()
-	for _, id := range toDelete {
+	labelOps := plan.CommitOps()
+	groupOps := make([][]func(kv.Txn) error, 0, len(toDelete))
+	for i, id := range toDelete {
 		groupID := id
-		saveOps = append(saveOps, func(txn kv.Txn) error {
-			return m.storage.DeleteAffinityGroup(txn, groupID)
+		groupOps = append(groupOps, []func(kv.Txn) error{
+			labelOps[i],
+			func(txn kv.Txn) error {
+				return m.storage.DeleteAffinityGroup(txn, groupID)
+			},
 		})
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, saveOps); err != nil {
+	if err := m.runGroupOpsInTxn(groupOps); err != nil {
 		log.Error("failed to delete affinity groups",
 			zap.Int("total-groups", len(toDelete)),
 			zap.Error(err))
@@ -342,6 +333,23 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 
 	m.deleteGroups(toDelete)
 	return nil
+}
+
+// runGroupOpsInTxn keeps each group's one or two writes in the same transaction.
+// Count the individual operations so a group without a label rule cannot make
+// the next group's pair straddle the transaction limit.
+func (m *Manager) runGroupOpsInTxn(groupOps [][]func(kv.Txn) error) error {
+	batch := make([]func(kv.Txn) error, 0, etcdutil.MaxEtcdTxnOps)
+	for _, ops := range groupOps {
+		if len(batch)+len(ops) > etcdutil.MaxEtcdTxnOps {
+			if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+		batch = append(batch, ops...)
+	}
+	return endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 }
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
