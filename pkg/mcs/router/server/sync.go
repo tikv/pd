@@ -67,6 +67,7 @@ type RegionSyncer struct {
 	cancelFunc context.CancelFunc
 
 	// stopSync cancels and joins the current stream before syncLoop replaces it.
+	// It is owned exclusively by syncLoop.
 	stopSync func()
 
 	// notify the syncer to reconnect to leader
@@ -186,9 +187,9 @@ func (s *RegionSyncer) syncLoop() {
 			if !force && s.streamingRunning.Load() {
 				continue
 			}
-			if s.stopSync != nil {
-				s.stopSync()
+			if stopSync := s.stopSync; stopSync != nil {
 				s.stopSync = nil
+				stopSync()
 			}
 		}
 		s.startSyncWithLeader()
