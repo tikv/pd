@@ -43,17 +43,17 @@ func (p BalancePolicy) IsFixed() bool {
 	return p != "" && p != BalancePolicyAuto
 }
 
-// TableID identifies the table of TiDB partition groups.
+// TableID identifies the table of TiDB partition affinity groups.
 type TableID string
 
-// partitionGroupIDRegexp matches the IDs of TiDB partition groups:
+// partitionAffinityGroupIDRegexp matches the IDs of TiDB partition affinity groups:
 // _tidb_pt_{table}_p{partition}, or _tidb_ks{keyspace}_pt_{table}_p{partition} in NextGen.
-var partitionGroupIDRegexp = regexp.MustCompile(`^_tidb_(ks[0-9]+_)?pt_[0-9]+_p[0-9]+$`)
+var partitionAffinityGroupIDRegexp = regexp.MustCompile(`^_tidb_(ks[0-9]+_)?pt_[0-9]+_p[0-9]+$`)
 
-// TableIDForGroup returns the table of a TiDB partition group. Other groups
+// TableIDForGroup returns the table of a TiDB partition affinity group. Other groups
 // belong to no table and are not balanced.
 func TableIDForGroup(groupID string) (TableID, bool) {
-	if !partitionGroupIDRegexp.MatchString(groupID) {
+	if !partitionAffinityGroupIDRegexp.MatchString(groupID) {
 		return "", false
 	}
 	return TableID(groupID[:strings.LastIndex(groupID, "_p")]), true
