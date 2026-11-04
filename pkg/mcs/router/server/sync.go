@@ -105,6 +105,7 @@ const (
 	msgSize              = 8 * units.MiB
 	retryInterval        = time.Second
 	memberUpdateInterval = time.Minute
+	requestTimeout       = 3 * time.Second
 )
 
 func (s *RegionSyncer) getClient() *clientv3.Client {
@@ -131,7 +132,10 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 					log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
 					continue
 				}
-				status, err := s.getClient().Status(s.serverCtx, ep.ClientURLs[0])
+				// A stopped member must not block discovering the next PD leader.
+				statusCtx, statusCancel := context.WithTimeout(s.serverCtx, requestTimeout)
+				status, err := s.getClient().Status(statusCtx, ep.ClientURLs[0])
+				statusCancel()
 				if err != nil {
 					log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
 					continue
