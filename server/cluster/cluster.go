@@ -1398,7 +1398,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.hotStat.UpdateRegion(ctx, region); err != nil {
+		if overlaps, err = c.CheckAndPutRootTree(ctx, region); err != nil {
 			tracer.OnSaveCacheFinished()
 			return err
 		}

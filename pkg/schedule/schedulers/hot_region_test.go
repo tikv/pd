@@ -87,6 +87,62 @@ func newTestRegion(id uint64) *core.RegionInfo {
 	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
 }
 
+func TestHotReadMovePeerUsesCurrentLeader(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetEnablePlacementRules(false)
+	for storeID := uint64(1); storeID <= 4; storeID++ {
+		tc.AddRegionStore(storeID, 1)
+		readBytes := uint64(0)
+		if storeID <= 3 {
+			readBytes = 20 * units.MiB * utils.StoreHeartBeatReportInterval
+		}
+		tc.UpdateStorageReadBytes(storeID, readBytes)
+	}
+	tc.AddRegionWithReadInfo(1, 1, units.MiB*utils.StoreHeartBeatReportInterval, 0, 0,
+		utils.StoreHeartBeatReportInterval, []uint64{2, 3})
+	hot := newHotReadScheduler(oc, initHotRegionScheduleConfig())
+	hot.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+	hot.conf.setHistorySampleDuration(0)
+	hot.prepareForBalance(readPeer, tc)
+	solver := newBalanceSolver(hot, tc, utils.Read, movePeer)
+
+	// Retain the previous summary while a region heartbeat reports a new leader.
+	region := tc.GetRegion(1)
+	tc.PutRegion(region.Clone(core.WithLeader(region.GetStorePeer(2))))
+	solver.regionCache = make(map[uint64]hotRegionSnapshot)
+	for _, testCase := range []struct {
+		name          string
+		storeID       uint64
+		sampledLeader bool
+		canMove       bool
+	}{
+		{"new leader", 2, false, false},
+		{"previous leader", 1, true, false},
+		{"unchanged follower", 3, false, true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			source := solver.stLoadDetail[testCase.storeID]
+			re.Len(source.HotPeers, 1)
+			peer := source.HotPeers[0]
+			re.Equal(testCase.sampledLeader, peer.IsLeader())
+			current, fit := solver.getRegion(peer, testCase.storeID)
+			if !testCase.canMove {
+				re.Nil(current, "changed roles must wait for refreshed statistics")
+				re.Nil(fit)
+				return
+			}
+			re.NotNil(current)
+			re.Equal(uint64(2), current.GetLeader().GetStoreId())
+			solver.cur = &solution{srcStore: source, mainPeerStat: peer, region: current}
+			solver.curFit = fit
+			destinations := solver.filterDstStores()
+			re.Contains(destinations, uint64(4))
+		})
+	}
+}
+
 func TestHotScheduleIntervalBackoff(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()

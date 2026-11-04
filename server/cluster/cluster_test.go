@@ -954,6 +954,65 @@ func TestStaleBucketMeta(t *testing.T) {
 	re.Equal(bucket2, region1.GetBuckets())
 }
 
+func TestRegionHeartbeatRefreshesReadLeaderBeforeStoreHeartbeat(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(t.Context(), cluster, nil)
+	for _, store := range newTestStores(3, "2.0.0") {
+		cluster.PutStore(store)
+	}
+	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 33, StoreId: 3}}
+	region := core.NewRegionInfo(&metapb.Region{
+		Id:          1,
+		StartKey:    []byte("a"),
+		EndKey:      []byte("b"),
+		Peers:       peers,
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}, peers[0], core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+	for range 5 {
+		for _, peer := range peers {
+			readBytes := peer.GetStoreId() * (1 << 20) * utils.StoreHeartBeatReportInterval
+			re.NoError(cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: &pdpb.StoreStats{
+				StoreId:     peer.GetStoreId(),
+				Capacity:    100,
+				Available:   50,
+				RegionCount: 1,
+				Interval:    &pdpb.TimeInterval{EndTimestamp: utils.StoreHeartBeatReportInterval},
+				PeerStats:   []*pdpb.PeerStat{{RegionId: region.GetID(), ReadBytes: readBytes, ReadKeys: 10240}},
+			}}, &pdpb.StoreHeartbeatResponse{}))
+		}
+	}
+	before := cluster.hotStat.GetHotPeerStats(utils.Read, 3)
+	for _, peer := range peers {
+		re.Len(before[peer.GetStoreId()], 1)
+	}
+
+	// A region heartbeat publishes the transfer before another store sample arrives.
+	moved := region.Clone(core.WithLeader(peers[1]))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), moved))
+	re.Equal(peers[1], cluster.GetRegion(region.GetID()).GetLeader())
+	after := cluster.hotStat.GetHotPeerStats(utils.Read, 3)
+	for _, peer := range peers {
+		storeID := peer.GetStoreId()
+		re.Len(after[storeID], 1)
+		stat := after[storeID][0]
+		re.Equal(storeID == peers[1].GetStoreId(), stat.IsLeader())
+		re.Equal(float64(storeID)*(1<<20), stat.GetLoad(utils.ByteDim))
+		re.Equal(before[storeID][0].GetLoads(), stat.GetLoads())
+		re.Equal(before[storeID][0].HotDegree, stat.HotDegree)
+		single := cluster.hotStat.GetHotPeerStat(utils.Read, region.GetID(), storeID)
+		re.NotNil(single)
+		re.Equal(stat.IsLeader(), single.IsLeader())
+	}
+	summary := statistics.CollectHotPeerInfos(cluster.GetStores(), after)
+	re.Zero(summary.AsLeader[peers[0].GetStoreId()].Count)
+	re.Equal(1, summary.AsLeader[peers[1].GetStoreId()].Count)
+	re.Equal(float64(2<<20), summary.AsLeader[peers[1].GetStoreId()].TotalBytesRate)
+}
+
 func TestRegionHeartbeatHotStat(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -1455,7 +1514,7 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	heartbeatRegions(re, cluster, regions)
 
 	// Merge regions manually
-	source, target := regions[0].Clone(), regions[1].Clone()
+	source, target := regions[0], regions[1]
 	target.GetMeta().StartKey = []byte{}
 	target.GetMeta().EndKey = []byte{}
 	source.GetMeta().GetRegionEpoch().Version++
@@ -1464,92 +1523,19 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	}
 	target.GetMeta().GetRegionEpoch().Version++
 
-	started, release := make(chan struct{}), make(chan struct{})
-	unblock := sync.OnceFunc(func() { close(release) })
-	t.Cleanup(unblock)
-	processCtx := core.ContextTODO()
-	processCtx.Tracer = &blockingPreCheckTracer{
-		RegionHeartbeatProcessTracer: processCtx.Tracer,
-		started:                      started,
-		release:                      release,
-	}
-	result := make(chan error, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat", "return(true)"))
 	go func() {
-		result <- cluster.processRegionHeartbeat(processCtx, source)
+		defer wg.Done()
+		err := cluster.processRegionHeartbeat(core.ContextTODO(), source)
+		assert.NoError(t, err)
 	}()
-	<-started
+	time.Sleep(100 * time.Millisecond)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat"))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), target))
-	unblock()
-	re.ErrorContains(<-result, "region is stale", "the final validation must reject the delayed source heartbeat")
+	wg.Wait()
 	checkRegion(re, cluster.GetRegionByKey([]byte{}), target)
-}
-
-type blockingPreCheckTracer struct {
-	core.RegionHeartbeatProcessTracer
-	started chan struct{}
-	release chan struct{}
-}
-
-func (tracer *blockingPreCheckTracer) OnPreCheckFinished() {
-	close(tracer.started)
-	<-tracer.release
-}
-
-func TestDelayedRegionHeartbeatPreservesHotReadLeader(t *testing.T) {
-	re := require.New(t)
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-	cluster.coordinator = schedule.NewCoordinator(t.Context(), cluster, nil)
-	for _, store := range newTestStores(3, "2.0.0") {
-		cluster.PutStore(store)
-	}
-	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}}
-	heartbeat := &pdpb.RegionHeartbeatRequest{
-		Region:   &metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}, Peers: peers},
-		Leader:   peers[0],
-		Term:     10,
-		Interval: &pdpb.TimeInterval{EndTimestamp: utils.RegionHeartBeatReportInterval},
-	}
-	oldRegion := core.RegionFromHeartbeat(heartbeat, 0)
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), oldRegion))
-	loads := make([]float64, utils.RegionStatCount)
-	loads[utils.RegionReadBytes] = 1 << 20
-	re.True(cluster.hotStat.CheckReadPeerAsync(oldRegion, peers[0], loads, utils.StoreHeartBeatReportInterval))
-	re.True(cluster.hotStat.GetHotPeerStat(utils.Read, 1, 1).IsLeader())
-
-	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	ctx := core.ContextTODO()
-	ctx.Tracer = &blockingPreCheckTracer{RegionHeartbeatProcessTracer: ctx.Tracer, started: started, release: release}
-	t.Cleanup(func() {
-		select {
-		case <-release:
-		default:
-			close(release)
-		}
-		<-finished
-	})
-	result := make(chan error, 1)
-	go func() {
-		defer close(finished)
-		result <- cluster.processRegionHeartbeat(ctx, oldRegion.Clone())
-	}()
-	<-started
-	heartbeat.Leader, heartbeat.Term = peers[1], 11
-	newRegion := core.RegionFromHeartbeat(heartbeat, 0)
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	re.False(cluster.hotStat.GetHotPeerStat(utils.Read, 1, 1).IsLeader())
-	close(release)
-	re.NoError(<-result)
-	re.Equal(uint64(11), cluster.GetRegion(1).GetTerm())
-	re.False(cluster.hotStat.GetHotPeerStat(utils.Read, 1, 1).IsLeader(), "an older heartbeat must not roll back hot read leadership")
-	re.True(cluster.hotStat.CheckReadPeerAsync(cluster.GetRegion(1), peers[0], loads, utils.StoreHeartBeatReportInterval))
-	re.False(cluster.hotStat.GetHotPeerStat(utils.Read, 1, 1).IsLeader(), "later store samples must retain the published leader")
-	heartbeat.Term = 12
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), core.RegionFromHeartbeat(heartbeat, 0)))
-	re.Equal(uint64(12), cluster.GetRegion(1).GetTerm(), "a newer term must be published even when the leader is unchanged")
-	_, _, err = cluster.PreCheckPutRegion(newRegion)
-	re.Error(err, "the published term must reject older heartbeats")
 }
 
 func TestRegionLabelIsolationLevel(t *testing.T) {

@@ -1438,6 +1438,192 @@ func TestScanRegionLimit(t *testing.T) {
 	}
 }
 
+func TestRegionChangeListenerPublications(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}}
+	region := NewRegionInfo(&metapb.Region{
+		Id: 1, StartKey: []byte("a"), EndKey: []byte("b"), Peers: peers,
+		RegionEpoch: &metapb.RegionEpoch{Version: 2, ConfVer: 2},
+	}, peers[0])
+	var notifications []uint64
+	var expected *RegionInfo
+	unregister := regions.AddRegionChangeListener(func(id uint64, accepted *RegionInfo) {
+		notifications = append(notifications, id)
+		re.Same(expected, accepted)
+		// The listener already holds the root lock, so inspect the root directly.
+		re.Same(expected, regions.getRegionLocked(id))
+	})
+	defer unregister()
+
+	expected = region
+	regions.SetRegion(region)
+	re.Equal([]uint64{1}, notifications)
+	notifications = nil
+
+	// Statistics, terms, epochs, and peer roles do not change peer identity.
+	region = region.Clone(SetReadBytes(1000), SetWrittenBytes(2000), WithIncVersion(), WithIncConfVer())
+	region.term++
+	expected = region
+	regions.PutRegion(region)
+	region = region.Clone(WithLearners([]*metapb.Peer{peers[1]}))
+	expected = region
+	regions.CheckAndPutRegion(region)
+	region = region.Clone(func(region *RegionInfo) {
+		region.meta.Peers[1].Role = metapb.PeerRole_Voter
+	})
+	expected = region
+	regions.CheckAndPutRegion(region)
+	region = NewRegionInfo(region.GetMeta(), region.GetLeader(), SetReadBytes(3000))
+	expected = region
+	_, err := regions.CheckAndPutRootTree(ContextTODO(), region)
+	re.NoError(err)
+	re.Empty(notifications)
+
+	// A leader change must notify even when the metadata pointer is shared.
+	region = NewRegionInfo(region.GetMeta(), peers[1])
+	expected = region
+	_, err = regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+	re.NoError(err)
+	re.Equal([]uint64{1}, notifications)
+	notifications = nil
+	region = region.Clone(WithLeader(nil))
+	expected = region
+	_, err = regions.CheckAndPutRootTree(ContextTODO(), region)
+	re.NoError(err)
+	re.Equal([]uint64{1}, notifications)
+	notifications = nil
+
+	// Replacing a peer on the same store is a membership change even if the
+	// number of peers and region epoch stay the same.
+	region = region.Clone(WithRemoveStorePeer(2), WithAddPeer(&metapb.Peer{Id: 22, StoreId: 2}))
+	expected = region
+	regions.PutRegion(region)
+	re.Equal([]uint64{1}, notifications)
+	notifications = nil
+	region = region.Clone(WithRemoveStorePeer(2), WithAddPeer(&metapb.Peer{Id: 22, StoreId: 3}))
+	expected = region
+	regions.CheckAndPutRegion(region)
+	re.Equal([]uint64{1}, notifications)
+	notifications = nil
+
+	// All checked publication APIs reject stale metadata without notifying.
+	stale := region.Clone(SetRegionVersion(1), WithLeader(peers[0]))
+	re.Equal([]*RegionInfo{stale}, regions.CheckAndPutRegion(stale))
+	_, err = regions.AtomicCheckAndPutRegion(ContextTODO(), stale)
+	re.Error(err)
+	_, err = regions.CheckAndPutRootTree(ContextTODO(), stale)
+	re.Error(err)
+	re.Empty(notifications)
+	re.Same(region, regions.GetRegion(1))
+}
+
+func TestRegionChangeListenerRemovals(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	left := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	right := NewTestRegionInfo(2, 1, []byte("b"), []byte("c"))
+	regions.PutRegion(left)
+	regions.PutRegion(right)
+	merged := left.Clone(WithNewRegionID(3), WithEndKey([]byte("c")), WithIncVersion())
+	var notifications []uint64
+	checkRoot := func(uint64) {}
+	unregister := regions.AddRegionChangeListener(func(id uint64, accepted *RegionInfo) {
+		notifications = append(notifications, id)
+		re.Same(regions.getRegionLocked(id), accepted)
+		checkRoot(id)
+	})
+	defer unregister()
+	checkRoot = func(uint64) {
+		re.Nil(regions.getRegionLocked(1))
+		re.Nil(regions.getRegionLocked(2))
+		re.Same(merged, regions.getRegionLocked(3))
+	}
+	_, err := regions.CheckAndPutRootTree(ContextTODO(), merged)
+	re.NoError(err)
+	re.ElementsMatch([]uint64{1, 2, 3}, notifications)
+	notifications = nil
+
+	checkRoot = func(id uint64) { re.Nil(regions.getRegionLocked(id)) }
+	regions.RemoveRegion(merged)
+	re.Equal([]uint64{3}, notifications)
+	notifications = nil
+	regions.RemoveRegion(merged)
+	re.Empty(notifications)
+
+	checkRoot = func(id uint64) { re.Same(left, regions.getRegionLocked(id)) }
+	regions.PutRegion(left)
+	notifications = nil
+	checkRoot = func(id uint64) {
+		re.Zero(id)
+		re.Empty(regions.regions)
+		re.Zero(regions.tree.length())
+	}
+	regions.ResetRegionCache()
+	re.Equal([]uint64{0}, notifications)
+	notifications = nil
+	checkRoot = func(id uint64) { re.Same(left, regions.getRegionLocked(id)) }
+	regions.SetRegion(left)
+	re.Equal([]uint64{1}, notifications)
+}
+
+func TestRegionChangeListenerSubscriptions(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	var first, second, third []uint64
+	removeFirst := regions.AddRegionChangeListener(func(id uint64, _ *RegionInfo) { first = append(first, id) })
+	removeSecond := regions.AddRegionChangeListener(func(id uint64, _ *RegionInfo) { second = append(second, id) })
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	regions.SetRegion(region)
+	re.Equal([]uint64{1}, first)
+	re.Equal(first, second)
+
+	removeFirst()
+	removeThird := regions.AddRegionChangeListener(func(id uint64, _ *RegionInfo) { third = append(third, id) })
+	defer removeThird()
+	removeFirst()
+	regions.RemoveRegion(region)
+	re.Equal([]uint64{1}, first)
+	re.Equal([]uint64{1, 1}, second)
+	re.Equal([]uint64{1}, third)
+
+	removeSecond()
+	removeSecond()
+	regions.ResetRegionCache()
+	re.Equal([]uint64{1, 1}, second)
+	re.Equal([]uint64{1, 0}, third)
+}
+
+func TestGetRegionsByIDs(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	byID := map[uint64]*RegionInfo{
+		1: NewTestRegionInfo(1, 1, []byte("a"), []byte("b")),
+		2: NewTestRegionInfo(2, 1, []byte("b"), []byte("c")),
+		3: NewTestRegionInfo(3, 1, []byte("c"), []byte("d")),
+	}
+	for _, region := range byID {
+		regions.CheckAndPutRegion(region)
+	}
+	re.Empty(regions.GetRegionsByIDs(nil))
+
+	// Preserve input positions, including duplicate and missing IDs, across batches.
+	pattern := []uint64{3, 99, 1, 3, 2}
+	ids := make([]uint64, batchSearchSize+len(pattern))
+	for i := range ids {
+		ids[i] = pattern[i%len(pattern)]
+	}
+	got := regions.GetRegionsByIDs(ids)
+	re.Len(got, len(ids))
+	for i, id := range ids {
+		if expected := byID[id]; expected != nil {
+			re.Same(expected, got[i], "input position %d", i)
+		} else {
+			re.Nil(got[i], "input position %d", i)
+		}
+	}
+}
+
 func TestQueryRegions(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()

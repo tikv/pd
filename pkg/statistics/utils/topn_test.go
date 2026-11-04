@@ -18,7 +18,6 @@ import (
 	"math/rand/v2"
 	"sort"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -86,6 +85,46 @@ func (it *item) ID() uint64 {
 
 func (it *item) Less(k int, than TopNItem) bool {
 	return it.values[k] < than.(*item).values[k]
+}
+
+func TestReplace(t *testing.T) {
+	re := require.New(t)
+	tn := NewTopN(2, 1, time.Hour)
+	first := &item{id: 1, values: []float64{1, 5}}
+	second := &item{id: 2, values: []float64{2, 4}}
+	tn.Put(first)
+	tn.Put(second)
+	expiration := tn.ttlLst.index[1].Value.(ttlItem)
+	position := tn.ttlLst.index[1]
+
+	metadata := &item{id: 1, values: []float64{1, 5}}
+	re.True(tn.Replace(metadata, false))
+	re.Same(metadata, tn.Get(1))
+	re.Same(second, tn.GetTopNMin(0))
+	re.Same(metadata, tn.GetTopNMin(1))
+	re.Contains(tn.GetAll(), metadata)
+	re.False(tn.Replace(&item{id: 3, values: []float64{10, 10}}, false))
+
+	replacement := &item{id: 1, values: []float64{3, 3}}
+	re.True(tn.Replace(replacement, true))
+	re.Same(replacement, tn.Get(1))
+	re.Same(replacement, tn.GetTopNMin(0))
+	re.Same(second, tn.GetTopNMin(1))
+	re.Same(position, tn.ttlLst.index[1])
+	re.Equal(expiration, tn.ttlLst.index[1].Value)
+	re.False(tn.Replace(&item{id: 3, values: []float64{10, 10}}, true))
+	re.Nil(tn.Get(3))
+	re.Equal(2, tn.Len())
+
+	// Make the original deadline expire without sleeping. A metadata replacement
+	// must neither move the TTL entry nor give an expired sample another lifetime.
+	expiration.expire = time.Now().Add(-time.Second)
+	position.Value = expiration
+	re.True(tn.Replace(first, true))
+	re.Contains(tn.RemoveExpired(), uint64(1))
+	re.Nil(tn.Get(1))
+	re.Same(second, tn.Get(2))
+	re.False(tn.Replace(replacement, true))
 }
 
 func TestPut(t *testing.T) {
@@ -156,33 +195,6 @@ func TestPut(t *testing.T) {
 		re.Equal(i, it.id)
 		re.Equal(-float64(i), it.values[0])
 	}
-}
-
-func TestUpdatePreservesTTL(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		tn := NewTopN(2, 1, 30*time.Second)
-		first := &item{id: 1, values: []float64{1, 3}}
-		second := &item{id: 2, values: []float64{2, 2}}
-		tn.Put(first)
-		tn.Put(second)
-		time.Sleep(20 * time.Second)
-		updated := &item{id: 1, values: []float64{3, 1}}
-		require.True(t, tn.Update(updated))
-		require.Same(t, updated, tn.Get(1))
-		require.Same(t, updated, tn.GetTopNMin(0))
-		require.Same(t, second, tn.GetTopNMin(1))
-		require.Equal(t, []float64{1, 3}, first.values)
-		require.False(t, tn.Update(&item{id: 3, values: []float64{4, 4}}))
-		require.Nil(t, tn.Get(3))
-		require.Equal(t, 2, tn.Len())
-		time.Sleep(11 * time.Second)
-		require.NotEmpty(t, tn.RemoveExpired())
-		require.Zero(t, tn.Len())
-		require.Empty(t, tn.GetAll())
-		for dim := range 2 {
-			require.Empty(t, tn.GetAllTopN(dim))
-		}
-	})
 }
 
 func putPerm(re *require.Assertions, tn *TopN, total int, f func(x int) float64, isUpdate bool) {

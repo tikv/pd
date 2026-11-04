@@ -558,7 +558,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	writtenBytes, writtenKeys, writtenQuery uint64,
 	reportInterval uint64,
 	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
-	r := mc.newMockRegionInfoWithOrigin(regionID, leaderStoreID, mc.GetRegion(regionID), otherPeerStoreIDs...)
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(0, reportInterval))
@@ -845,7 +845,7 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	return mc.buildMockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, epoch, nil)
 }
 
-func (mc *Cluster) buildMockRegionInfo(regionID uint64, leaderStoreID uint64,
+func (mc *Cluster) buildMockRegionInfo(regionID, leaderStoreID uint64,
 	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch, origin *core.RegionInfo) *core.RegionInfo {
 	newPeer := func(storeID uint64) *metapb.Peer {
 		if origin != nil {
