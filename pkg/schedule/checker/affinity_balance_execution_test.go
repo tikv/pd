@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 type balanceExecutionTargetWriter struct {
@@ -117,20 +118,35 @@ func TestAffinityBalanceExecutionAfterRegionChanges(t *testing.T) {
 					re.True(fit.IsSatisfied())
 					re.Equal(bestLocationRejected, f.regionPlacementBestLocation(virtual, fit))
 				}
-				firstWins := 0
+				type firstWin struct {
+					expired *affinity.GroupState
+					targets []affinity.GroupTarget
+					err     error
+				}
+				firstWins := make(chan firstWin, 1)
 				f.affinityManager.SetTargetWriter(balanceExecutionTargetWriter{write: func(targets []affinity.GroupTarget) ([]string, error) {
-					firstWins++
 					expired := f.affinityManager.GetAffinityGroupState(id)
-					re.True(expired.RegularSchedulingAllowed)
-					re.False(expired.AffinitySchedulingAllowed)
-					re.Len(targets, 1)
-					re.Equal(targets[0].Expected, *target)
-					re.Equal(uint64(1), targets[0].LeaderStoreID)
-					re.Equal([]uint64{1, 2, 3}, targets[0].VoterStoreIDs)
-					return f.affinityManager.UpdateAffinityGroupTargets(targets)
+					ids, err := f.affinityManager.UpdateAffinityGroupTargets(targets)
+					firstWins <- firstWin{expired: expired, targets: targets, err: err}
+					return ids, err
 				}})
 				re.Empty(f.Check(region))
-				re.Equal(1, firstWins)
+				var observed firstWin
+				testutil.Eventually(re, func() bool {
+					select {
+					case observed = <-firstWins:
+						return true
+					default:
+						return false
+					}
+				})
+				re.NoError(observed.err)
+				re.True(observed.expired.RegularSchedulingAllowed)
+				re.False(observed.expired.AffinitySchedulingAllowed)
+				re.Len(observed.targets, 1)
+				re.Equal(observed.targets[0].Expected, *target)
+				re.Equal(uint64(1), observed.targets[0].LeaderStoreID)
+				re.Equal([]uint64{1, 2, 3}, observed.targets[0].VoterStoreIDs)
 				learned := f.affinityManager.GetAffinityGroupState(id)
 				re.True(learned.AffinitySchedulingAllowed)
 				re.False(learned.RegularSchedulingAllowed)
