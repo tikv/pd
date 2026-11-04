@@ -35,7 +35,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Pooled deadlock timers cannot cross synctest bubble boundaries.
+	// Keep deadlock detection enabled without reusing timers across synctest bubbles.
 	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
