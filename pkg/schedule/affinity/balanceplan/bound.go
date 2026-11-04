@@ -42,11 +42,9 @@ func fill(loads, selected []int, stores []int, units int) bool {
 // the same domains, the per-domain totals gives a valid lower bound for each
 // score part separately.
 //
-// It is used only to stop the search early, and it is worth its size: with
-// no bound every plan runs all perturbation attempts, so a 64-group table
-// takes about 80 ms instead of 5 ms; keeping only the simple fill over all
-// stores misses the leader-occupancy step, and a table whose leaders may use
-// 3 of 12 stores runs to the budget (140 ms instead of 3 ms).
+// A layout already at the bound can return before any greedy scans. The
+// leader-occupancy constraint matters when, for example, leaders may use only
+// 3 of 12 stores; filling all stores would miss that optimum.
 func (p *planner) lowerBound() Score {
 	n := p.n
 	loads := slices.Clone(p.baseV)

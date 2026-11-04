@@ -203,10 +203,14 @@ func TestUnsupportedGroupsStayFixed(t *testing.T) {
 // General isolation must count candidate scans and respect the work budget.
 func TestGeneralShapesAreBounded(t *testing.T) {
 	re := require.New(t)
-	for _, c := range []struct{ replicas, zones int }{{3, 2}, {5, 3}} {
+	for _, c := range []struct {
+		replicas, zones int
+		stop            StopReason
+	}{{3, 2, StopGreedy}, {5, 3, StopBound}} {
 		r := Plan(general(100, 300, c.replicas, c.zones), Options{})
-		re.Equal(StopBound, r.Stop, "%+v", c)
+		re.Equal(c.stop, r.Stop, "%+v", c)
 		re.LessOrEqual(r.Work, int64(DefaultWorkBudget), "%+v", c)
+		re.False(r.Baseline.Less(r.Score), "%+v", c)
 	}
 	opt := Options{WorkBudget: 50_000}
 	r := Plan(general(100, 300, 3, 2), opt)
@@ -316,6 +320,9 @@ func TestUnforcedSearchRespectsStop(t *testing.T) {
 			t.Logf("visits=%d work=%d checks=%d stop=%s", r.Visits, r.Work, checks, r.Stop)
 			re.Equal(stop, r.Stop)
 			re.Equal(1, r.Visits)
+			// Stopping inside the greedy keeps a complete, consistent layout.
+			re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score)
+			re.False(r.Baseline.Less(r.Score))
 			// Allow one complete root, its isolation calculation, and the
 			// leader-only fallback when the interrupted search finds no target.
 			re.LessOrEqual(r.Work, int64(2*rules*stores+rules))
@@ -329,7 +336,7 @@ func initialize(in *Input) {
 	for i := range in.Groups {
 		one := *placed
 		one.Groups = []Group{in.Groups[i]}
-		r := Plan(&one, Options{Sweeps: 1, MaxAttempts: -1})
+		r := Plan(&one, Options{Sweeps: 1})
 		in.Groups[i].Voters, in.Groups[i].Leader = r.Voters[0], r.Leaders[0]
 		for _, s := range r.Voters[0] {
 			placed.BaseVoters[s]++

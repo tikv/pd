@@ -90,9 +90,7 @@ type Input struct {
 
 // Options bounds the search. Zero values select the defaults.
 type Options struct {
-	Sweeps      int
-	Kick        int
-	MaxAttempts int
+	Sweeps int
 	// WorkBudget limits candidate and reversion load entries processed by the
 	// whole plan, including entries restored after a rejected reversion.
 	WorkBudget int64
@@ -101,19 +99,11 @@ type Options struct {
 	Cancel func() bool
 }
 
-// Default search parameters. Sweeps, kick and attempts were chosen by the
-// parameter sweep and confirmed on held-out samples (see the design
-// evidence): kick 6 beats kick 3 on the sparse sets at equal or lower cost,
-// and 400 attempts let hard small tables finish in one plan. The work budget
-// bounds large tables: at 1000 groups and 300 stores it lets every rule shape
-// whose lower bound is tight reach it (at most about 0.4 s), and a table whose
-// bound is loose stops after about 0.6 s; 2M entries stopped some shapes
-// before the first greedy finished.
+// Default search limits. The work budget is shared by greedy candidate scans
+// and reversion cleanup.
 const (
-	DefaultSweeps      = 4
-	DefaultKick        = 6
-	DefaultMaxAttempts = 400
-	DefaultWorkBudget  = 10_000_000
+	DefaultSweeps     = 4
+	DefaultWorkBudget = 10_000_000
 )
 
 // Score is (sum of squared voter counts, sum of squared leader counts),
@@ -135,7 +125,7 @@ type StopReason string
 const (
 	StopNoGroups StopReason = "no_groups"
 	StopBound    StopReason = "lower_bound"
-	StopAttempts StopReason = "attempts"
+	StopGreedy   StopReason = "greedy"
 	StopBudget   StopReason = "budget"
 	StopCanceled StopReason = "canceled"
 )
@@ -147,7 +137,7 @@ type Result struct {
 	Leaders                      []int
 	Baseline, Fast, Score, Bound Score
 	Stop                         StopReason
-	Attempts, Visits             int
+	Visits                       int
 	Work                         int64
 	Changed                      int
 }
@@ -176,7 +166,6 @@ type planner struct {
 	work    int64
 	visits  int
 	stop    StopReason
-	exclude []bool
 	pk      picker
 	parts   [maxDepth]partScratch
 	results [maxDepth + 1][2][]choice
@@ -188,14 +177,6 @@ type planner struct {
 func Plan(in *Input, opt Options) Result {
 	if opt.Sweeps <= 0 {
 		opt.Sweeps = DefaultSweeps
-	}
-	if opt.Kick <= 0 {
-		opt.Kick = DefaultKick
-	}
-	if opt.MaxAttempts < 0 {
-		opt.MaxAttempts = 0
-	} else if opt.MaxAttempts == 0 {
-		opt.MaxAttempts = DefaultMaxAttempts
 	}
 	if opt.WorkBudget <= 0 {
 		opt.WorkBudget = DefaultWorkBudget
@@ -217,19 +198,18 @@ func Plan(in *Input, opt Options) Result {
 	}
 	fastV, fastL, fast := p.greedy(opt.Seed)
 	res.Fast = fast
-	bestV, bestL := fastV, fastL
-	res.Stop = StopBound
-	if fast != res.Bound {
-		bestV, bestL, res.Stop, res.Attempts = p.perturb(fast, bestV, bestL, res.Bound)
+	res.Stop = StopGreedy
+	if fast == res.Bound {
+		res.Stop = StopBound
 	}
-	res.Score = p.revert(origV, origL, bestV, bestL)
+	res.Score = p.revert(origV, origL, fastV, fastL)
 	if p.stop != "" {
 		res.Stop = p.stop
 	}
-	res.Voters, res.Leaders = p.expand(bestV, bestL)
+	res.Voters, res.Leaders = p.expand(fastV, fastL)
 	res.Visits, res.Work = p.visits, p.work
-	for i := range bestV {
-		if bestL[i] != origL[i] || !sameSet(bestV[i], origV[i]) {
+	for i := range fastV {
+		if fastL[i] != origL[i] || !sameSet(fastV[i], origV[i]) {
 			res.Changed++
 		}
 	}
@@ -491,6 +471,8 @@ func (p *planner) stopped() bool {
 // greedy runs the source-ordered complete-target sweeps from the working
 // layout. It returns the best layout among the start and every sweep end and
 // leaves that layout installed.
+// Groups with different candidate stores may stop at a local optimum;
+// see #11502.
 func (p *planner) greedy(seed uint64) ([][]int, []int, Score) {
 	rng := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
 	for i := range p.gs {
@@ -596,7 +578,7 @@ func (p *planner) visit(g *groupState) bool {
 		p.v[s]--
 	}
 	p.l[g.lead]--
-	t, r, leader, ok := p.choose(g, nil)
+	t, r, leader, ok := p.choose(g)
 	changed := false
 	if ok {
 		changed = leader != g.lead || !sameSet(t, g.cur)
@@ -647,53 +629,6 @@ func (p *planner) visitLeader(g *groupState) bool {
 	g.lead = best
 	p.l[best]++
 	return best != old
-}
-
-// perturb is a bounded iterated greedy: kick a few random groups to other
-// cheap legal targets, rerun the greedy from there and keep the best layout.
-// The greedy alone stops at local optima that need several groups to move
-// together. Even when every group shares one rule, without it 1000 groups
-// with 3 replicas over 2 zones of 300 stores end at a voter score of 30030
-// instead of the optimal 30000, and small tables reach the exhaustive optimum
-// in 1931 of 2000 cases instead of all of them.
-func (p *planner) perturb(best Score, bestV [][]int, bestL []int, bound Score) (voters [][]int, leaders []int, stop StopReason, attempts int) {
-	rng := rand.New(rand.NewPCG(p.opt.Seed^0x5851f42d4c957f2d, p.opt.Seed))
-	kick := min(p.opt.Kick, len(p.gs))
-	for {
-		switch {
-		case best == bound:
-			return bestV, bestL, StopBound, attempts
-		case attempts >= p.opt.MaxAttempts:
-			return bestV, bestL, StopAttempts, attempts
-		case p.stopped():
-			return bestV, bestL, p.stop, attempts
-		}
-		for _, i := range rng.Perm(len(p.gs))[:kick] {
-			p.kick(&p.gs[i], rng)
-		}
-		attempts++
-		v, l, value := p.greedy(p.opt.Seed + uint64(attempts))
-		if value.Less(best) {
-			best, bestV, bestL = value, v, l
-		}
-	}
-}
-
-// kick moves one group to a random cheap alternative target.
-func (p *planner) kick(g *groupState, rng *rand.Rand) {
-	p.visits++
-	for _, s := range g.cur {
-		p.v[s]--
-	}
-	p.l[g.lead]--
-	if options := p.alternatives(g); len(options) > 0 {
-		o := options[rng.IntN(len(options))]
-		g.cur, g.curRule, g.lead = o.voters, o.rules, o.leader
-	}
-	for _, s := range g.cur {
-		p.v[s]++
-	}
-	p.l[g.lead]++
 }
 
 // revert restores the original target of every changed group whose change is
