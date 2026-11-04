@@ -186,6 +186,31 @@ func TestAffinitySplitBeforeMoveFallbackEpoch(t *testing.T) {
 	re.Equal(before+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
 }
 
+func TestAffinitySplitBeforeMoveFallbackReportsOnce(t *testing.T) {
+	re := require.New(t)
+	cluster, checker := newAffinitySplitTest(t)
+	before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
+	// fallBack times out a new split attempt and evaluates the Region twice. The
+	// move is not added here, so the second evaluation is what the next patrol
+	// does. Both evaluations allow the move, and the attempt is counted once.
+	fallBack := func(region *core.RegionInfo, reported float64) {
+		requireAffinitySplit(t, checker.Check(region))
+		ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+		for range 2 {
+			ops := checker.Check(region)
+			re.Len(ops, 1)
+			re.Equal("affinity-move-region", ops[0].Desc())
+			re.Equal(before+reported, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+		}
+	}
+	region := cluster.GetRegion(1)
+	fallBack(region, 1)
+	// A new epoch version starts a new attempt, which is reported again.
+	region = region.Clone(core.WithIncVersion())
+	cluster.PutRegion(region)
+	fallBack(region, 2)
+}
+
 func TestAffinitySplitBeforeMoveFallbackKeepsGates(t *testing.T) {
 	for _, reason := range []string{"recent merge", "startup"} {
 		t.Run(reason, func(t *testing.T) {
