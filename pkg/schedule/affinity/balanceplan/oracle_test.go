@@ -247,6 +247,7 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 	rng := rand.New(rand.NewPCG(20261027, 7))
 	for _, sh := range shapes {
 		cases, optimal, boundStops, chooserChecks := 0, 0, 0, 0
+		gaps := make(map[Score]int)
 		for cases < *oracleCases {
 			in, ok := randomCase(rng, sh)
 			if !ok {
@@ -295,6 +296,8 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 			}
 			if r.Score == opt {
 				optimal++
+			} else {
+				gaps[Score{r.Score.Voter - opt.Voter, r.Score.Leader - opt.Leader}]++
 			}
 			// The single-group choice must minimize (sum V', L' of leader).
 			p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
@@ -311,7 +314,7 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 						best = c
 					}
 				}
-				voters, rules, leader, ok := p.choose(g, nil)
+				voters, rules, leader, ok := p.choose(g)
 				re.True(ok, "%s case %d group %d: chooser found nothing", sh.name, cases, gi)
 				re.Len(rules, len(voters))
 				re.True(matchesTarget(legal[gi], voters, rules, leader), "%s case %d group %d: illegal choice", sh.name, cases, gi)
@@ -324,5 +327,6 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 			}
 		}
 		t.Logf("%-18s cases=%d plan optimal=%d stopped at bound=%d single-group checks=%d", sh.name, cases, optimal, boundStops, chooserChecks)
+		t.Logf("%s non-optimal score gaps (voter, leader): %v", sh.name, gaps)
 	}
 }

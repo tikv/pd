@@ -127,8 +127,7 @@ func (rs *ruleSearch) done() bool {
 }
 
 // choose selects the complete target with the lowest cost. The counts must
-// already exclude the group's working target. exclude, when set, removes
-// stores from the selection but not from the isolation every rule must reach.
+// already exclude the group's working target.
 //
 // It first picks every rule independently. A store claimed by several rules
 // is then given to each claimant in turn and forbidden to the others. A
@@ -138,7 +137,7 @@ func (rs *ruleSearch) done() bool {
 // returns the best target found; it is never worse than the current target,
 // because the current leader's rule is searched first and its search starts
 // with the current assignment.
-func (p *planner) choose(g *groupState, exclude []bool) (voters, rules []int, leader int, ok bool) {
+func (p *planner) choose(g *groupState) (voters, rules []int, leader int, ok bool) {
 	var forced []int
 	for _, s := range g.Voters {
 		if g.isForced(s) {
@@ -150,7 +149,7 @@ func (p *planner) choose(g *groupState, exclude []bool) (voters, rules []int, le
 		if len(p.leaderHosts(g)) == 0 {
 			return nil, nil, 0, false
 		}
-		c, ok := p.pickRule(g, 0, exclude, forced, nil, true)
+		c, ok := p.pickRule(g, 0, forced, nil, true)
 		if !ok || c.leader < 0 {
 			return nil, nil, 0, false
 		}
@@ -181,7 +180,7 @@ func (p *planner) choose(g *groupState, exclude []bool) (voters, rules []int, le
 					}
 				}
 			}
-			if s := p.searchRules(g, exclude, host, must, forbid, &rs); s.ok && (!best.ok || s.c.cmp(best.c) < 0) {
+			if s := p.searchRules(g, host, must, forbid, &rs); s.ok && (!best.ok || s.c.cmp(best.c) < 0) {
 				best = s
 			}
 		})
@@ -234,11 +233,11 @@ func (*planner) accepts(g *groupState, ri int, s int) bool {
 	return false
 }
 
-func (p *planner) searchRules(g *groupState, exclude []bool, host int, must, forbid [][]int, rs *ruleSearch) solution {
+func (p *planner) searchRules(g *groupState, host int, must, forbid [][]int, rs *ruleSearch) solution {
 	rs.nodes++
 	sels := make([]choice, len(g.Rules))
 	for ri := range g.Rules {
-		c, ok := p.pickRule(g, ri, exclude, must[ri], forbid[ri], ri == host)
+		c, ok := p.pickRule(g, ri, must[ri], forbid[ri], ri == host)
 		if !ok {
 			return solution{}
 		}
@@ -266,7 +265,7 @@ func (p *planner) searchRules(g *groupState, exclude []bool, host int, must, for
 						next[rj] = append(slices.Clone(forbid[rj]), s)
 					}
 				}
-				if sol := p.searchRules(g, exclude, host, must, next, rs); sol.ok && (!best.ok || sol.c.cmp(best.c) < 0) {
+				if sol := p.searchRules(g, host, must, next, rs); sol.ok && (!best.ok || sol.c.cmp(best.c) < 0) {
 					best = sol
 				}
 			}
@@ -293,11 +292,11 @@ func (p *planner) searchRules(g *groupState, exclude []bool, host int, must, for
 // This is stricter than PD's best-location check, which accounts for stores
 // occupied by other rules. Competing rules may have no complete target that
 // meets their independent optima; visit then keeps voters and only picks a leader.
-func (p *planner) pickRule(g *groupState, ri int, exclude []bool, must, forbid []int, host bool) (choice, bool) {
+func (p *planner) pickRule(g *groupState, ri int, must, forbid []int, host bool) (choice, bool) {
 	r := g.Rules[ri]
 	var skip func(int) bool
-	if exclude != nil || len(forbid) > 0 {
-		skip = func(s int) bool { return exclude != nil && exclude[s] || slices.Contains(forbid, s) }
+	if len(forbid) > 0 {
+		skip = func(s int) bool { return slices.Contains(forbid, s) }
 	}
 	cands := p.candidates(p.candBuf, g, ri, skip)
 	p.candBuf = cands // reused: the pick below does not keep cands
@@ -405,32 +404,6 @@ func (*planner) candidates(dst []int, g *groupState, ri int, skip func(int) bool
 		if i, found := slices.BinarySearch(out, s); !found {
 			out = slices.Insert(out, i, s)
 		}
-	}
-	return out
-}
-
-type alternative struct {
-	voters, rules []int
-	leader        int
-}
-
-// alternatives lists cheap legal targets other than the working one: it
-// excludes one current voter at a time and chooses again. Trying combinations
-// per domain did no better in the parameter study.
-func (p *planner) alternatives(g *groupState) []alternative {
-	if len(p.exclude) < p.n {
-		p.exclude = make([]bool, p.n)
-	}
-	var out []alternative
-	for _, s := range g.cur {
-		if g.isForced(s) {
-			continue
-		}
-		p.exclude[s] = true
-		if v, rr, l, ok := p.choose(g, p.exclude); ok && (l != g.lead || !sameSet(v, g.cur)) {
-			out = append(out, alternative{v, rr, l})
-		}
-		p.exclude[s] = false
 	}
 	return out
 }
