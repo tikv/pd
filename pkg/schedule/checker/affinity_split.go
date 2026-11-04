@@ -15,7 +15,6 @@
 package checker
 
 import (
-	"bytes"
 	"slices"
 	"time"
 
@@ -27,10 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
-	sche "github.com/tikv/pd/pkg/schedule/core"
-	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 const (
@@ -53,8 +49,9 @@ type affinitySplitAttempt struct {
 }
 
 // prepareAffinityPeerMove requests a SCAN split before adding a voter when size
-// or keys exceed TiKV's ordinary split thresholds. Each child is checked again
-// on a later patrol; an unchanged epoch can move after the split wait timeout.
+// or keys exceed TiKV's ordinary split thresholds. It only looks at this Region:
+// each child is checked on a later patrol after its heartbeat reports it, and an
+// unchanged epoch can move after the split wait timeout.
 func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState) (*operator.Operator, bool) {
 	if !slices.ContainsFunc(group.VoterStoreIDs, func(id uint64) bool { return region.GetStorePeer(id) == nil }) {
 		return nil, true
@@ -103,11 +100,6 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if time.Since(c.startTime) < recentMergeTTL || c.recentMergeCache.Exists(region.GetID()) {
 		return wait("recent-merge-or-startup")
 	}
-	// SplitRegion.IsFinish only observes the original Region's changed boundary.
-	// Check the persisted group ranges too, including after a checker restart.
-	if !affinityGroupRegionsReady(c.cluster, group, false) {
-		return wait("incomplete-region-heartbeats")
-	}
 	if splitWait > affinitySplitWaitTimeout {
 		// The engine may have no split key at all. Eventually allow convergence,
 		// accepting the same large snapshot as a move without a preliminary split.
@@ -117,44 +109,4 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		affinityCheckerSplitTimeoutCounter.Inc()
 	}
 	return nil, true
-}
-
-// affinityGroupRegionsReady verifies coverage using the RegionTree, not the
-// manager's cache, which may not have observed all children yet. During a move,
-// siblings may already be adding peers; merging additionally requires every
-// Region to be healthy and at the current target.
-func affinityGroupRegionsReady(cluster sche.SharedCluster, group *affinity.GroupState, requireTarget bool) bool {
-	manager := cluster.GetAffinityManager()
-	ranges := manager.GetAffinityGroupKeyRanges(group)
-	if len(ranges.KeyRanges) == 0 {
-		return false
-	}
-	keyRanges := keyutil.NewKeyRanges(ranges.KeyRanges)
-	slices.SortFunc(keyRanges.Ranges(), func(a, b *keyutil.KeyRange) int { return bytes.Compare(a.StartKey, b.StartKey) })
-	regions, err := cluster.BatchScanRegions(keyRanges, core.WithOutputMustContainAllKeyRange())
-	if err != nil || len(regions) == 0 {
-		return false
-	}
-	// BatchScanRegions checks bounded gaps. Check the unbounded ends too;
-	// an empty key denotes -infinity at the start and +infinity at the end.
-	merged := keyRanges.Ranges()
-	if len(merged[0].StartKey) == 0 && len(regions[0].GetStartKey()) != 0 ||
-		len(merged[len(merged)-1].EndKey) == 0 && len(regions[len(regions)-1].GetEndKey()) != 0 {
-		return false
-	}
-	for _, region := range regions {
-		if region.GetLeader() == nil || region.GetApproximateSize() <= 0 {
-			return false
-		}
-		current, isAffinity := manager.GetRegionAffinityGroupState(region)
-		if current == nil || current.ID != group.ID || current.CreateTimestamp != group.CreateTimestamp ||
-			!current.AffinitySchedulingAllowed || current.LeaderStoreID != group.LeaderStoreID ||
-			!slices.Equal(current.VoterStoreIDs, group.VoterStoreIDs) {
-			return false
-		}
-		if requireTarget && (!isAffinity || !filter.IsRegionHealthy(region)) {
-			return false
-		}
-	}
-	return true
 }
