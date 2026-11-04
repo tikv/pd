@@ -183,7 +183,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, tc.GetRegion(1).GetStartKey(), tc.GetRegion(1).GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// Check should create move peer operator (from 4 to 3)
@@ -248,11 +248,8 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	tc.AddRegionStore(2, 10)
 	tc.AddRegionStore(3, 10)
 	tc.AddRegionStore(4, 10)
-	tc.AddLeaderRegionWithRange(100, "", "m", 4, 2, 3)
-	tc.AddLeaderRegionWithRange(200, "m", "", 1, 2, 3)
-	for _, id := range []uint64{100, 200} {
-		tc.PutRegion(tc.GetRegion(id).Clone(core.SetApproximateSize(10)))
-	}
+	tc.AddLeaderRegion(100, 4, 2, 3)
+	tc.AddLeaderRegion(200, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
 	affinityChecker := newTestAffinityChecker(ctx, tc, opt)
@@ -513,7 +510,7 @@ func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
 		LeaderStoreID: 3,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, tc.GetRegion(1).GetStartKey(), tc.GetRegion(1).GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// Check should create move peer operator first (replace 4 with 3)
@@ -691,7 +688,7 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck should create merge operator
@@ -743,7 +740,7 @@ func TestAffinityCheckerMergePath(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region2.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// Regions match affinity config, so Check should go to MergeCheck path.
@@ -1086,7 +1083,7 @@ func TestAffinityMergeCheckBothDirections(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region3.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// MergeCheck on region2 can merge with either prev (region1) or next (region3)
@@ -1342,7 +1339,7 @@ func TestAffinityCheckerComplexMove(t *testing.T) {
 		LeaderStoreID: 5,
 		VoterStoreIDs: []uint64{3, 5, 6},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, tc.GetRegion(1).GetStartKey(), tc.GetRegion(1).GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// Check should create a combo operator for the complex transformation
@@ -1381,7 +1378,7 @@ func TestAffinityCheckerPartialOverlap(t *testing.T) {
 		LeaderStoreID: 4,
 		VoterStoreIDs: []uint64{1, 4, 5},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, tc.GetRegion(1).GetStartKey(), tc.GetRegion(1).GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	ops := checker.Check(tc.GetRegion(1))
@@ -1450,7 +1447,7 @@ func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, tc.GetRegion(1).GetStartKey(), tc.GetRegion(1).GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	ops := checker.Check(tc.GetRegion(1))
@@ -1804,7 +1801,7 @@ func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err = createAffinityGroupForTest(affinityManager, group, tc.GetRegion(1).GetStartKey(), tc.GetRegion(1).GetEndKey())
+	err = createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	ops := checker.Check(region)
@@ -1873,7 +1870,7 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 6},
 	}
-	err = createAffinityGroupForTest(affinityManager, group, tc.GetRegion(1).GetStartKey(), tc.GetRegion(1).GetEndKey())
+	err = createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	ops := checker.Check(region)
@@ -2116,9 +2113,8 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	re.NoError(err)
 
 	// No scheduling is generated because the source Region is not at the best location.
-	tc.AddLeaderRegionWithRange(100, "", "a", 1, 3, 4)
-	region := tc.GetRegion(100).Clone(core.SetApproximateSize(10))
-	tc.PutRegion(region)
+	tc.AddLeaderRegion(100, 1, 3, 4)
+	region := tc.GetRegion(100)
 	re.False(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
 	ops := checker.Check(region)
 	re.Nil(ops)
@@ -2129,9 +2125,8 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	// Because the Group’s currently specified Peers are not at the best location,
 	// they are cleared and replaced with the source Region’s Peers.
 	// In this case, no scheduling is generated, but the Peers are updated.
-	tc.AddLeaderRegionWithRange(200, "a", "b", 1, 4, 5)
-	region = tc.GetRegion(200).Clone(core.SetApproximateSize(10))
-	tc.PutRegion(region)
+	tc.AddLeaderRegion(200, 1, 4, 5)
+	region = tc.GetRegion(200)
 	re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, false))
 	ops = checker.Check(region)
 	re.Nil(ops)
@@ -2140,9 +2135,8 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	re.Equal([]uint64{1, 4, 5}, groupState.VoterStoreIDs)
 
 	// When both the source Region and the target Region are at the best location, scheduling is generated.
-	tc.AddLeaderRegionWithRange(300, "b", "", 1, 4, 6)
-	region = tc.GetRegion(300).Clone(core.SetApproximateSize(10))
-	tc.PutRegion(region)
+	tc.AddLeaderRegion(300, 1, 4, 6)
+	region = tc.GetRegion(300)
 	re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
 	ops = checker.Check(region)
 	re.NotNil(ops)
@@ -2544,7 +2538,7 @@ func TestAffinityMergeCheckWithOperatorController(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group, region1.GetStartKey(), region3.GetEndKey())
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// Phase 1: Create merge operators for region1 + region2

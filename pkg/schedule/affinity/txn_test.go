@@ -199,7 +199,6 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	state2 := manager2.GetAffinityGroupState("persist")
 	re.NotNil(state2)
 	re.Equal(10, state2.RangeCount)
-	re.Equal(GroupKeyRanges{GroupID: "persist", KeyRanges: keyRanges}, manager2.GetAffinityGroupKeyRanges(state2))
 
 	// Remove ranges and ensure cache/label are cleared.
 	re.NoError(manager2.UpdateAffinityGroupKeyRanges(

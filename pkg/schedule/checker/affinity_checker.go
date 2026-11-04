@@ -348,11 +348,6 @@ func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.Gr
 		return nil
 	}
 
-	// Already moved children must remain separate until the whole group is ready.
-	if !affinityGroupRegionsReady(c.cluster, group, true) {
-		return nil
-	}
-
 	log.Debug("try to merge affinity region",
 		logutil.ZapRedactStringer("from", core.RegionToHexMeta(region.GetMeta())),
 		logutil.ZapRedactStringer("to", core.RegionToHexMeta(target.GetMeta())),
