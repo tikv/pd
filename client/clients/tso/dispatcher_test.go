@@ -479,6 +479,52 @@ func TestTSORecoveryUsesKnownNewLeader(t *testing.T) {
 	}
 }
 
+func TestDispatcherCanceledStreamRefreshesBeforeReconnect(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		streamURL  string
+		leaderURL  string
+		forwarding bool
+		schedules  int32
+	}{
+		{name: "forwarded-stream", streamURL: "backup", leaderURL: "leader", forwarding: true, schedules: 1},
+		{name: "current-direct-leader", streamURL: "leader", leaderURL: "leader", schedules: 1},
+		{name: "obsolete-direct-leader", streamURL: "old-leader", leaderURL: "new-leader"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &countingServiceDiscovery{conn: new(grpc.ClientConn), servingURL: tc.leaderURL}
+			var builds, scheduledBeforeBuild atomic.Int32
+			builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+				// A real connection attempt may block. Observe discovery at entry so
+				// scheduling it after the attempt cannot satisfy the regression check.
+				builds.Add(1)
+				scheduledBeforeBuild.Store(svc.scheduleCount.Load())
+				return newTSOStream(ctx, tc.leaderURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+			})
+			option := opt.NewOption()
+			option.EnableForwarding = tc.forwarding
+			client := NewClient(t.Context(), option, svc, builder)
+			client.leaderURL.Store(tc.leaderURL)
+			t.Cleanup(client.cancel)
+
+			ctx, cancel := context.WithCancel(client.ctx)
+			stream := newTSOStream(ctx, tc.streamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
+			require.True(t, client.conCtxMgr.Store(ctx, cancel, tc.streamURL, stream))
+			// The deadline watcher cancels this outer context when a request times out.
+			cancel()
+			stream.WaitForClosed()
+
+			_, req := startRecoveryDispatcher(t, client)
+			physical, _, err := req.waitTimeout(time.Second)
+			require.NoError(t, err)
+			require.Positive(t, physical)
+			require.Equal(t, int32(1), builds.Load())
+			require.Equal(t, tc.schedules, scheduledBeforeBuild.Load(), "refresh must be scheduled before reconnecting")
+			require.Equal(t, tc.schedules, svc.scheduleCount.Load(), "successful reconnect must not add another refresh")
+		})
+	}
+}
+
 func TestTSOLeaderChangeCancelsObsoleteBuild(t *testing.T) {
 	svc := &countingServiceDiscovery{conn: new(grpc.ClientConn)}
 	started := make(chan context.Context, 1)

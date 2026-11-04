@@ -265,7 +265,9 @@ tsoBatchLoop:
 				// Set `stream` to nil and remove this stream from the `connectionCtxs` due to being canceled.
 				conCtxMgr.Release(streamURL)
 				stream = nil
-				if ctx.Err() == nil && streamURL == svcDiscovery.GetServingURL() {
+				// A canceled forwarding stream is keyed by the backup URL. Refresh
+				// discovery before rebuilding a direct connection to the cached leader.
+				if ctx.Err() == nil && (option.EnableForwarding || streamURL == svcDiscovery.GetServingURL()) {
 					svcDiscovery.ScheduleCheckMemberChanged()
 				}
 				continue
