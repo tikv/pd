@@ -263,31 +263,17 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 	policy := cluster.GetSharedConfig().GetKeyType()
 	switch policy {
 	case constant.Table:
-		if !cluster.GetSharedConfig().IsCrossTableMergeEnabled() && !isSameTableIdentity(region, adjacent) {
-			return false
+		if cluster.GetSharedConfig().IsCrossTableMergeEnabled() {
+			return true
 		}
-	case constant.Raw, constant.Txn:
+		return isSameTableIdentity(region, adjacent)
+	case constant.Raw:
+		return true
+	case constant.Txn:
+		return true
 	default:
-		if !isSameTableIdentity(region, adjacent) {
-			return false
-		}
+		return isSameTableIdentity(region, adjacent)
 	}
-
-	if manager := cluster.GetAffinityManager(); manager != nil && cluster.GetSharedConfig().IsPlacementRulesEnabled() &&
-		cluster.GetSharedConfig().GetAffinityScheduleLimit() > 0 {
-		var checkedGroup string
-		for _, r := range []*core.RegionInfo{region, adjacent} {
-			group, _ := manager.GetRegionAffinityGroupState(r)
-			if group == nil || group.RegularSchedulingAllowed || group.ID == checkedGroup {
-				continue
-			}
-			if !group.AffinitySchedulingAllowed || !affinityGroupRegionsReady(cluster, group, true) {
-				return false
-			}
-			checkedGroup = group.ID
-		}
-	}
-	return true
 }
 
 // isSameTableIdentity reports whether two regions belong to the same logical
