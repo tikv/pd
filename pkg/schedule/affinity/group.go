@@ -76,6 +76,7 @@ type Phase string
 const (
 	// PhasePending indicates that the Group is still determining the StoreIDs.
 	// If the Group has no KeyRanges, it remains in PhasePending forever.
+	// Overlapping key ranges also keep a group pending until the conflict is repaired.
 	PhasePending = Phase("pending")
 	// PhasePreparing indicates that the Group is scheduling Regions according to the required Peers.
 	PhasePreparing = Phase("preparing")
@@ -130,7 +131,8 @@ type GroupState struct {
 	AffinityRegionCount int `json:"affinity_region_count"`
 
 	// affinityVer is used to mark the version of the cache.
-	affinityVer uint64
+	affinityVer   uint64
+	rangeConflict bool
 	// groupInfoPtr is a pointer to the original information.
 	// It is used only for pointer comparison and should not access any internal data.
 	groupInfoPtr *runtimeGroupInfo
@@ -179,6 +181,8 @@ type runtimeGroupInfo struct {
 	LabelRule *labeler.LabelRule
 	// RangeCount counts how many KeyRanges exist in the Label.
 	RangeCount int
+	// rangeConflict disables affinity for the entire group until its ranges no longer overlap.
+	rangeConflict bool
 }
 
 // newGroupState creates a GroupState from the given runtimeGroupInfo.
@@ -207,6 +211,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		RegionCount:               len(g.Regions),
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
+		rangeConflict:             g.rangeConflict,
 		groupInfoPtr:              g,
 	}
 }
@@ -271,12 +276,12 @@ func newDegradedExpiredAtFromNow() uint64 {
 
 // IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
 func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
-	return g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
+	return !g.rangeConflict && g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
 }
 
 // IsRegularSchedulingAllowed indicates whether balance scheduling is allowed.
 func (g *runtimeGroupInfo) IsRegularSchedulingAllowed() bool {
-	return g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
+	return g.rangeConflict || g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
 }
 
 // AdjustGroup validates the group and sets default values.
