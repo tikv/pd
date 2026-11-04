@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -702,19 +703,51 @@ type flattenKeyRange struct {
 }
 
 // validateNoOverlapLocked validates that the given key ranges do not overlap with existing ones.
-// It should be called with the manager lock held.
+// It should be called with metaMutex held.
 // Uses in-memory keyRanges cache to avoid repeated labeler access and reduce lock contention.
 // Complexity: O(M log M) where M is the total number of ranges (new + existing).
 func (m *Manager) validateNoOverlapLocked(newRanges []GroupKeyRanges) error {
-	// Combine new ranges with existing ranges
-	combined := slices.Concat(newRanges, slices.Collect(maps.Values(m.keyRanges)))
-	return validateNoOverlap(combined)
+	if err := validateNoOverlap(newRanges); err != nil {
+		return err
+	}
+	added := flattenRanges(newRanges)
+	existing := flattenRanges(slices.Collect(maps.Values(m.keyRanges)))
+	// Persisted conflicts must not block changes to unrelated ranges. Only
+	// compare new ranges with old ones, not old ranges with each other.
+	for i, j := 0, 0; i < len(added) && j < len(existing); {
+		if checkKeyRangesOverlap(added[i].StartKey, added[i].EndKey, existing[j].StartKey, existing[j].EndKey) {
+			return overlapError(added[i], existing[j])
+		}
+		if bytes.Compare(added[i].StartKey, existing[j].StartKey) < 0 {
+			i++
+		} else {
+			j++
+		}
+	}
+	return nil
 }
 
 // validateNoOverlap validates that ranges in the given slice don't overlap with each other.
 // This is a pure function that doesn't access any manager state.
 // Complexity: O(M log M) where M is the total number of ranges.
 func validateNoOverlap(ranges []GroupKeyRanges) error {
+	allRanges := flattenRanges(ranges)
+	for i := range len(allRanges) - 1 {
+		if checkKeyRangesOverlap(allRanges[i].StartKey, allRanges[i].EndKey, allRanges[i+1].StartKey, allRanges[i+1].EndKey) {
+			return overlapError(allRanges[i], allRanges[i+1])
+		}
+	}
+	return nil
+}
+
+func overlapError(a, b flattenKeyRange) error {
+	if a.groupID == b.groupID {
+		return errs.ErrAffinityGroupContent.FastGenByArgs("key ranges overlap within group " + a.groupID)
+	}
+	return errs.ErrAffinityGroupContent.FastGenByArgs("key range overlaps between groups: " + a.groupID + " and " + b.groupID)
+}
+
+func flattenRanges(ranges []GroupKeyRanges) []flattenKeyRange {
 	var allRanges []flattenKeyRange
 	for _, gkr := range ranges {
 		for _, kr := range gkr.KeyRanges {
@@ -725,34 +758,72 @@ func validateNoOverlap(ranges []GroupKeyRanges) error {
 		}
 	}
 
-	// Sort by start key
 	slices.SortFunc(allRanges, func(a, b flattenKeyRange) int {
-		return bytes.Compare(a.StartKey, b.StartKey)
+		if cmp := bytes.Compare(a.StartKey, b.StartKey); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.groupID, b.groupID)
 	})
+	return allRanges
+}
 
-	// Check adjacent ranges for overlap
-	// After sorting, if any two ranges overlap, they must be adjacent in the sorted order
-	for i := range len(allRanges) - 1 {
-		if checkKeyRangesOverlap(
-			allRanges[i].StartKey, allRanges[i].EndKey,
-			allRanges[i+1].StartKey, allRanges[i+1].EndKey,
-		) {
-			if allRanges[i].groupID == allRanges[i+1].groupID {
-				return errs.ErrAffinityGroupContent.FastGenByArgs(
-					"key ranges overlap within group " + allRanges[i].groupID)
+// reconcileRangeConflictsLocked preserves the raw ranges for administrative
+// repairs, but excludes every conflicting group from affinity scheduling.
+// Both metaMutex and the manager write lock must be held.
+func (m *Manager) reconcileRangeConflictsLocked() {
+	ranges := flattenRanges(slices.Collect(maps.Values(m.keyRanges)))
+	conflicts := make(map[string]struct{})
+	if len(ranges) > 0 {
+		furthest := ranges[0]
+		for _, current := range ranges[1:] {
+			if checkKeyRangesOverlap(furthest.StartKey, furthest.EndKey, current.StartKey, current.EndKey) {
+				conflicts[furthest.groupID] = struct{}{}
+				conflicts[current.groupID] = struct{}{}
 			}
-			return errs.ErrAffinityGroupContent.FastGenByArgs(
-				"key range overlaps between groups: " +
-					allRanges[i].groupID + " and " + allRanges[i+1].groupID)
+			// Keep the furthest end, including infinity, so nested ranges do
+			// not hide a conflict with a later range.
+			if len(furthest.EndKey) > 0 && (len(current.EndKey) == 0 || bytes.Compare(current.EndKey, furthest.EndKey) > 0) {
+				furthest = current
+			}
 		}
 	}
+	for id, group := range m.groups {
+		_, conflict := conflicts[id]
+		if group.rangeConflict != conflict {
+			group.rangeConflict = conflict
+			m.clearGroupCacheLocked(id)
+			m.rangeConflictsChanged = true
+		}
+	}
+}
 
-	return nil
+func (m *Manager) logRangeConflictsLocked() {
+	if !m.rangeConflictsChanged {
+		return
+	}
+	m.rangeConflictsChanged = false
+	var conflicts []map[string]any
+	for _, id := range slices.Sorted(maps.Keys(m.keyRanges)) {
+		if group, ok := m.groups[id]; ok && group.rangeConflict {
+			ranges := make([]map[string]string, 0, len(m.keyRanges[id].KeyRanges))
+			for _, kr := range m.keyRanges[id].KeyRanges {
+				ranges = append(ranges, map[string]string{
+					"start-key": logutil.RedactString(hex.EncodeToString(kr.StartKey)),
+					"end-key":   logutil.RedactString(hex.EncodeToString(kr.EndKey)),
+				})
+			}
+			conflicts = append(conflicts, map[string]any{"group-id": id, "ranges": ranges})
+		}
+	}
+	if len(conflicts) > 0 {
+		log.Error("overlapping affinity key ranges; delete or update conflicting groups to restore affinity scheduling",
+			zap.Reflect("conflicting-groups", conflicts))
+	}
 }
 
 // loadRegionLabel rebuilds the mapping between groups and label rules after restart.
 // It should be called with the manager lock held.
-func (m *Manager) loadRegionLabel() error {
+func (m *Manager) loadRegionLabel() {
 	// Collect all key ranges from label rules and populate in-memory cache
 	var allRanges []GroupKeyRanges
 
@@ -791,10 +862,8 @@ func (m *Manager) loadRegionLabel() error {
 		return true
 	})
 
-	// Validate that all key ranges are non-overlapping
-	if err := validateNoOverlap(allRanges); err != nil {
-		return err
-	}
+	m.reconcileRangeConflictsLocked()
+	m.logRangeConflictsLocked()
 
 	log.Info("rebuilt group-label mapping",
 		zap.Int("total-groups", len(m.keyRanges)),
@@ -805,6 +874,4 @@ func (m *Manager) loadRegionLabel() error {
 			}
 			return total
 		}()))
-
-	return nil
 }
