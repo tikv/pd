@@ -186,18 +186,74 @@ func (w *blockingTargetWriter) WriteGroupTargets(ctx context.Context, targets []
 	}
 }
 
-// TestTargetSenderStopsWithManager checks that the sender goroutine and its write
-// in flight end with the context of the Manager, without counting a failure.
-// synctest.Test fails if a goroutine started in the bubble is still blocked.
+// unresponsiveTargetWriter stands for a PD that does not answer. Like the writer
+// of the scheduling service, it fails each write after 3 seconds.
+type unresponsiveTargetWriter struct {
+	calls atomic.Int32
+}
+
+func (w *unresponsiveTargetWriter) WriteGroupTargets(ctx context.Context, _ []GroupTarget) ([]string, error) {
+	w.calls.Add(1)
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil, context.DeadlineExceeded
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// TestTargetSenderDropsQueuedTargetsAfterFailure checks that a failed write drops
+// the queued targets instead of sending each of them, so that a PD that does not
+// answer costs one timeout, and that the groups of the dropped targets back off.
+func TestTargetSenderDropsQueuedTargetsAfterFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		writer := &unresponsiveTargetWriter{}
+		sender := newTargetSender(writer)
+		go sender.run(t.Context())
+		target := func(i int) GroupTarget {
+			return GroupTarget{Expected: Group{ID: fmt.Sprintf("g%d", i)}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}
+		}
+		const groups = 10
+		for i := range groups {
+			re.True(sender.send(target(i)))
+		}
+		synctest.Wait()
+		re.Equal(int32(1), writer.calls.Load())
+
+		failures := testutil.ToFloat64(targetWriteFailureCounter)
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
+		re.Equal(int32(1), writer.calls.Load(), "the queued targets are dropped, not sent")
+		re.Equal(failures+1, testutil.ToFloat64(targetWriteFailureCounter))
+		re.Empty(sender.queue)
+		for i := range groups {
+			re.False(sender.send(target(i)), "group %d backs off", i)
+		}
+		time.Sleep(minTargetSendBackoff)
+		for i := range groups {
+			re.True(sender.send(target(i)), "group %d may send again", i)
+		}
+	})
+}
+
+// TestTargetSenderStopsWithManager checks that the sender goroutine stops with
+// the context of the Manager, which also cancels its write in flight without
+// counting a failure, and that observations after that neither block nor send.
+// synctest.Test also fails if a goroutine started in the bubble is still blocked
+// when the test ends.
 func TestTargetSenderStopsWithManager(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		re := require.New(t)
 		ctx, cancel := context.WithCancel(t.Context())
 		manager := newTargetTestManagerWithContext(t, ctx)
-		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}, {GroupID: "h"}}))
 		var calls atomic.Int32
 		manager.SetTargetWriter(&blockingTargetWriter{release: make(chan struct{}), calls: &calls})
-		manager.ObserveAvailableRegion(generateRegionForTest(10, []uint64{1, 2, 3}, nonOverlappingRange), manager.GetAffinityGroupState("g"))
+		region := generateRegionForTest(10, []uint64{1, 2, 3}, nonOverlappingRange)
+		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
 		synctest.Wait()
 		re.Equal(int32(1), calls.Load())
 
@@ -205,9 +261,10 @@ func TestTargetSenderStopsWithManager(t *testing.T) {
 		cancel()
 		synctest.Wait()
 		re.Equal(failures, testutil.ToFloat64(targetWriteFailureCounter))
-		// Observing after the Manager stops neither blocks nor sends.
-		manager.ObserveAvailableRegion(generateRegionForTest(11, []uint64{2, 1, 3}, nonOverlappingRange), manager.GetAffinityGroupState("g"))
+		// The goroutine has stopped, so a target observed now stays in the queue.
+		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("h"))
 		synctest.Wait()
 		re.Equal(int32(1), calls.Load())
+		re.Len(manager.targetSender.queue, 1)
 	})
 }

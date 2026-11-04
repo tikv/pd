@@ -43,8 +43,11 @@ const (
 // It sends one target at a time, and a group has at most one target queued or
 // in flight. After a write the group waits before it sends again, and backs off
 // exponentially after failed writes, so that the Regions of a group do not
-// repeat the request while PD is unavailable. A target that is not queued is
-// dropped; a later observation of the group decides the target again.
+// repeat the request while PD is unavailable. A failed write also drops the
+// queued targets, which PD would most likely fail too, so that a PD that does
+// not answer costs one request timeout instead of one for each queued target.
+// A target that is not sent is dropped; a later observation of the group
+// decides the target again.
 type targetSender struct {
 	writer TargetWriter
 	// queue holds the targets to send. Each of them belongs to a group that is
@@ -120,11 +123,28 @@ func (s *targetSender) run(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			s.finish(target.Expected.ID, err)
 			if err != nil {
 				targetWriteFailureCounter.Inc()
-				log.Warn("failed to write affinity group target", zap.String("group-id", target.Expected.ID), errs.ZapError(err))
+				dropped := s.dropQueued(err)
+				log.Warn("failed to write affinity group target",
+					zap.String("group-id", target.Expected.ID), zap.Int("dropped-target-count", dropped), errs.ZapError(err))
 			}
+		}
+	}
+}
+
+// dropQueued drops the queued targets after a write failed with err and returns
+// how many it dropped. Their groups back off as if their writes failed with err.
+func (s *targetSender) dropQueued(err error) int {
+	dropped := 0
+	for {
+		select {
+		case target := <-s.queue:
 			s.finish(target.Expected.ID, err)
+			dropped++
+		default:
+			return dropped
 		}
 	}
 }
