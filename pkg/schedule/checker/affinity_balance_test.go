@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -79,14 +78,12 @@ func newAffinityBalanceTest(t testing.TB, stores uint64, zones ...string) *affin
 		// Keep stores connected through long benchmark runs.
 		tc.SetStoreLastHeartbeatInterval(id, -time.Hour)
 	}
-	// Directly driven tests and benchmarks do not start a worker goroutine.
-	c := &AffinityChecker{
-		cluster:          tc,
-		ruleManager:      tc.GetRuleManager(),
-		affinityManager:  tc.GetAffinityManager(),
-		conf:             tc.PersistOptions,
-		recentMergeCache: cache.NewIDTTL(t.Context(), gcInterval, recentMergeTTL),
-	}
+	// Initialize checker state through the constructor, but stop background work
+	// because these tests and benchmarks drive the balancer directly.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	c := NewAffinityChecker(ctx, tc, tc.PersistOptions)
+	c.startTime = time.Now().Add(-2 * recentMergeTTL)
 	c.balancer = &affinityBalancer{checker: c, tables: make(map[affinity.TableID]struct{}), idle: make(map[affinity.TableID]balanceIdle)}
 	if len(zones) > 0 {
 		for id := uint64(1); id <= stores; id++ {
