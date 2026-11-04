@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -127,32 +128,19 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
 		} else {
-			for _, ep := range members.Members {
-				if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
-					log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
-					continue
-				}
-				// A stopped member must not block discovering the next PD leader.
-				statusCtx, statusCancel := context.WithTimeout(s.serverCtx, requestTimeout)
-				status, err := s.getClient().Status(statusCtx, ep.ClientURLs[0])
-				statusCancel()
-				if err != nil {
-					log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
-					continue
-				}
-				if status.Leader != ep.ID {
-					continue
-				}
-				leaderAddr := ep.ClientURLs[0]
-				if s.pdLeaderAddr.CompareAndSwap(s.pdLeaderAddr.Load(), leaderAddr) {
+			etcdutil.ScanEtcdLeader(s.serverCtx, s.getClient(), members.Members, requestTimeout,
+				func(ep *etcdserverpb.Member, status *clientv3.StatusResponse) bool {
+					leaderAddr := ep.ClientURLs[0]
+					if !s.pdLeaderAddr.CompareAndSwap(s.pdLeaderAddr.Load(), leaderAddr) {
+						return false
+					}
 					if status.Leader != curLeader {
-						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", leaderAddr))
 						s.reconnectCh <- true
 					}
 					curLeader = ep.ID
-					break
-				}
-			}
+					return true
+				})
 		}
 
 		select {

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -45,11 +44,9 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -902,33 +899,6 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 // return an empty string.
 func (c *TestCluster) WaitLeaderChange(oldLeader string, ops ...WaitOption) string {
 	return c.waitLeaderExcept(oldLeader, ops...)
-}
-
-// MoveLeaderToFirstMember makes the leader the first member in the etcd member
-// list, which is the first one that PD microservices probe when looking up the
-// PD leader. Stopping this leader exercises a failed probe before any live
-// member can be found.
-func (c *TestCluster) MoveLeaderToFirstMember(re *require.Assertions) *TestServer {
-	leaderName := c.WaitLeader()
-	re.NotEmpty(leaderName)
-	leader := c.GetServer(leaderName)
-	members, err := etcdutil.ListEtcdMembers(context.Background(), leader.GetEtcdClient())
-	re.NoError(err)
-	re.NotEmpty(members.Members)
-	for i := 1; i < len(members.Members); i++ {
-		re.Less(members.Members[i-1].ID, members.Members[i].ID)
-	}
-	firstID := members.Members[0].ID
-	if leader.GetServerID() != firstID {
-		testutil.Eventually(re, func() bool {
-			return leader.MoveEtcdLeader(leader.GetServerID(), firstID) == nil
-		})
-		leaderName = c.WaitLeaderChange(leaderName)
-		re.NotEmpty(leaderName)
-		leader = c.GetServer(leaderName)
-	}
-	re.Equal(firstID, leader.GetServerID())
-	return leader
 }
 
 func (c *TestCluster) waitLeaderExcept(oldLeader string, ops ...WaitOption) string {
