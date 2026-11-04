@@ -26,7 +26,69 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/operator"
 )
+
+type storeLimitReadHook struct {
+	sc.SharedConfigProvider
+	afterRead func()
+}
+
+func (c *storeLimitReadHook) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	rate := c.SharedConfigProvider.GetStoreLimitByType(storeID, typ)
+	if afterRead := c.afterRead; afterRead != nil {
+		c.afterRead = nil
+		afterRead()
+	}
+	return rate
+}
+
+func TestRefreshStoreRateLimitsWithOperator(t *testing.T) {
+	for _, typ := range []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer, storelimit.TransferLeaderIn} {
+		t.Run(typ.String(), func(t *testing.T) {
+			re := require.New(t)
+			const initialRate = 0.00006
+			persistConfig := NewPersistConfig(&Config{Schedule: sc.ScheduleConfig{
+				StoreLimit: map[uint64]sc.StoreLimitConfig{1: {
+					AddPeer: initialRate, RemovePeer: initialRate, TransferLeaderIn: initialRate,
+				}},
+			}}, nil)
+			basicCluster := core.NewBasicCluster()
+			limiter := storelimit.NewStoreRateLimit(initialRate / operator.StoreBalanceBaseTime)
+			store := core.NewStoreInfo(&metapb.Store{Id: 1}, core.SetStoreLimit(limiter))
+			basicCluster.PutStore(store)
+			peers := []*metapb.Peer{{Id: 2, StoreId: 2}}
+			var step operator.OpStep = operator.AddPeer{ToStore: 1, PeerID: 1}
+			if typ != storelimit.AddPeer {
+				peers = append(peers, &metapb.Peer{Id: 1, StoreId: 1})
+				step = operator.RemovePeer{FromStore: 1, PeerID: 1}
+				if typ == storelimit.TransferLeaderIn {
+					step = operator.TransferLeader{FromStore: 2, ToStore: 1}
+				}
+			}
+			region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0], core.SetApproximateSize(96))
+			basicCluster.PutRegion(region)
+			watcher := &Watcher{basicCluster: basicCluster}
+			cfg := &storeLimitReadHook{SharedConfigProvider: persistConfig}
+			// Complete a watcher update after the controller reads the old rate,
+			// before it can reset the limiter with that stale value.
+			cfg.afterRead = func() {
+				updated := persistConfig.GetScheduleConfig().Clone()
+				updated.StoreLimit[1] = updated.StoreLimit[1].SetLimit(typ, storelimit.Unlimited)
+				persistConfig.SetScheduleConfig(updated)
+				watcher.refreshStoreRateLimits(updated)
+			}
+			controller := operator.NewController(t.Context(), basicCluster, cfg, nil)
+			op := operator.NewTestOperator(1, region.GetRegionEpoch(), operator.OpRegion, step)
+
+			re.False(controller.ExceedStoreLimit(op))
+			re.Nil(cfg.afterRead)
+			re.Equal(storelimit.Unlimited/operator.StoreBalanceBaseTime, limiter.(*storelimit.StoreRateLimit).Rate(typ))
+			re.True(limiter.Take(storelimit.RegionInfluence[typ], typ, constant.Medium))
+			re.True(store.IsAvailable(typ, constant.Medium))
+		})
+	}
+}
 
 func TestRefreshStoreRateLimits(t *testing.T) {
 	re := require.New(t)
