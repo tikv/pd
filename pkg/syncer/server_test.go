@@ -318,6 +318,44 @@ func TestIncrementalHistoryReplayOverflowDisconnectsStream(t *testing.T) {
 	})
 }
 
+func TestSyncHandlesMissingClientURLs(t *testing.T) {
+	testCases := []struct {
+		name   string
+		member *pdpb.Member
+	}{
+		{name: "missing-client-urls", member: &pdpb.Member{Name: "pd-follower"}},
+		{name: "empty-client-urls", member: &pdpb.Member{Name: "pd-follower", ClientUrls: []string{}}},
+		{name: "missing-member"},
+		{name: "valid-client-urls", member: &pdpb.Member{Name: "pd-follower", ClientUrls: []string{"http://127.0.0.1:2379"}}},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			syncer, _ := newTestRegionSyncer(t, newHistoryBufferTestRegion(1))
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			stream := newMockSyncRegionsServer()
+			t.Cleanup(stream.cancel)
+			done := startTestRegionSync(ctx, syncer, stream)
+			stream.recvCh <- &pdpb.SyncRegionRequest{
+				Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+				Member: testCase.member,
+			}
+
+			response := mustRecvSyncRegionResponse(t, stream, "expected region sync response")
+			re.Equal(keypath.ClusterID(), response.GetHeader().GetClusterId())
+			re.Len(response.GetRegions(), 1)
+			re.Equal(uint64(1), response.GetRegions()[0].GetId())
+			re.Equal([]string{testCase.member.GetName()}, syncer.GetAllDownstreamNames())
+
+			cancel()
+			waitTestRegionSyncerUnavailable(re, done)
+			re.Empty(syncer.GetAllDownstreamNames())
+		})
+	}
+}
+
 func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
