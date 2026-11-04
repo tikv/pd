@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tikv/pd/pkg/cache"
@@ -127,9 +128,11 @@ func (d *DiagnosticRecorder) GetLastResult() *DiagnosticResult {
 			statusCounter[curStat] += 1
 		}
 		if len(statusCounter) > 0 {
+			parts := make([]string, 0, len(statusCounter))
 			for k, v := range statusCounter {
-				resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
+				parts = append(parts, fmt.Sprintf("%d store(s) %s", v, k.String()))
 			}
+			resStr = strings.Join(parts, "; ") + "; "
 		} else if firstStatus == Pending {
 			// This is used to handle pending status because of reach limit in `IsScheduleAllowed`
 			resStr = fmt.Sprintf("%v reach limit", d.schedulerType)
