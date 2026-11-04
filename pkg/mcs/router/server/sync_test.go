@@ -73,6 +73,22 @@ func TestRegionSyncerCanceledRetryDoesNotEnqueue(t *testing.T) {
 	re.Empty(syncer.reconnectCh)
 }
 
+func TestRegionSyncerRetryWithoutLeader(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		syncer := NewRegionSyncer(t.Context(), nil, nil, nil, "test", "")
+		defer syncer.cancelFunc()
+		syncer.startSyncWithLeader()
+		select {
+		case force := <-syncer.reconnectCh:
+			re.False(force)
+		default:
+			t.Fatal("missing retry after leader discovery has not completed")
+		}
+	})
+}
+
 func TestRegionSyncerJoinsPreviousStream(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	synctest.Test(t, func(t *testing.T) {
