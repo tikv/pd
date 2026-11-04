@@ -101,9 +101,49 @@ func TestAllowSplit(t *testing.T) {
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_ADMIN))
 	conf.SetAffinityScheduleLimit(oldLimit)
 
-	// Case 4: small affinity region will be split when affinity group expired
-	manager.ExpireAffinityGroup(groupID)
+	// Targets continue to suppress automatic splits across availability changes.
+	conf.SetMaxAffinityMergeRegionSize(256)
+	maxSize = (256 + affinityRegionSizeBufferMB) * affinityRegionSizeMultiplier
+	for _, state := range []string{"available", "degraded", "expired", "degraded-expired"} {
+		t.Run(state, func(t *testing.T) {
+			manager.Lock()
+			group := manager.groups[groupID]
+			group.availability = groupAvailable
+			if state == "degraded" || state == "degraded-expired" {
+				group.SetAvailability(groupDegraded)
+				if state == "degraded-expired" {
+					group.degradedExpiredAt = uint64(time.Now().Unix() - 1)
+				}
+			}
+			manager.Unlock()
+			if state == "expired" {
+				manager.ExpireAffinityGroup(groupID)
+			}
+			for _, reason := range []pdpb.SplitReason{pdpb.SplitReason_SIZE, pdpb.SplitReason_LOAD} {
+				t.Run(reason.String(), func(t *testing.T) {
+					re := require.New(t)
+					re.False(manager.AllowSplit(smallRegion, reason))
+					re.False(manager.AllowSplit(smallRegion.Clone(
+						core.SetApproximateSize(maxSize-1),
+						core.SetApproximateKeys(maxSize*config.RegionSizeToKeysRatio-1),
+					), reason))
+					re.True(manager.AllowSplit(smallRegion.Clone(core.SetApproximateSize(maxSize)), reason))
+					re.True(manager.AllowSplit(smallRegion.Clone(core.SetApproximateKeys(maxSize*config.RegionSizeToKeysRatio)), reason))
+				})
+			}
+			require.True(t, manager.AllowSplit(smallRegion, pdpb.SplitReason_ADMIN))
+		})
+	}
+
+	conf.SetAffinityScheduleLimit(0)
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_SIZE))
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_LOAD))
-	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_ADMIN))
+	conf.SetAffinityScheduleLimit(oldLimit)
+	conf.SetMaxAffinityMergeRegionSize(0)
+	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_SIZE))
+	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_LOAD))
+	conf.SetMaxAffinityMergeRegionSize(256)
+	manager.SyncGroupFromEtcd(&Group{ID: groupID})
+	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_SIZE))
+	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_LOAD))
 }

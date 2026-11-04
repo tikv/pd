@@ -1446,13 +1446,23 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 		bs.cur.revertRegion != nil && bs.cur.revertRegion.GetID() == bs.cur.revertPeerStat.ID()
 }
 
+// Hot scheduling must not fragment groups that retain a target, even when
+// regular scheduling is allowed after expiration.
+func (bs *balanceSolver) isRegionSplitAllowed(region *core.RegionInfo) bool {
+	if manager := bs.GetAffinityManager(); manager != nil {
+		group, _ := manager.GetRegionAffinityGroupState(region)
+		return group == nil || group.LeaderStoreID == 0 || len(group.VoterStoreIDs) == 0
+	}
+	return true
+}
+
 func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	enabledBucket := bs.GetStoreConfig().IsEnableRegionBucket()
 	splitRegions := make([]*core.RegionInfo, 0)
 
 	if bs.opTy == movePeer && enabledBucket {
 		for _, region := range []*core.RegionInfo{bs.cur.region, bs.cur.revertRegion} {
-			if region == nil {
+			if region == nil || !bs.isRegionSplitAllowed(region) {
 				continue
 			}
 			if region.GetApproximateSize() > bs.GetSchedulerConfig().GetMaxMovableHotPeerSize() {
@@ -1615,6 +1625,9 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strateg
 	var hotBuckets map[uint64][]*buckets.BucketStat
 
 	createFunc := func(region *core.RegionInfo) {
+		if !bs.isRegionSplitAllowed(region) {
+			return
+		}
 		switch strategy {
 		case bySize:
 			if op := bs.splitBucketBySize(region); op != nil {

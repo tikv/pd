@@ -103,6 +103,7 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	re := require.New(t)
 
 	svc, cluster, stream := newTestSchedulingServiceForSplit(t)
+	cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000})
 
 	region := newAffinitySplitTestRegion()
 	cluster.PutRegion(region)
@@ -121,25 +122,34 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	hbStreams.BindStream(1, stream)
 	waitHeartbeatStreamBound(t, hbStreams, region, stream)
 
-	resp, err := svc.AskBatchSplit(context.Background(), &schedulingpb.AskBatchSplitRequest{
-		Region:     region.GetMeta(),
-		SplitCount: 1,
-		Reason:     pdpb.SplitReason_LOAD,
-	})
-	re.NoError(err)
-	re.Equal(schedulingpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
-	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
-	re.Empty(resp.GetIds())
-
-	select {
-	case msg := <-stream.ch:
-		heartbeatResp, ok := msg.(*schedulingpb.RegionHeartbeatResponse)
-		re.True(ok)
-		re.Equal(region.GetID(), heartbeatResp.GetRegionId())
-		re.NotNil(heartbeatResp.GetChangeSplit())
-		re.False(heartbeatResp.GetChangeSplit().GetAutoSplitEnabled())
-	case <-time.After(time.Second):
-		re.Fail("expected ChangeSplit heartbeat response")
+	for _, state := range []string{"available", "expired"} {
+		t.Run(state, func(t *testing.T) {
+			if state == "expired" {
+				cluster.GetAffinityManager().ExpireAffinityGroup("g1")
+			}
+			for _, reason := range []pdpb.SplitReason{pdpb.SplitReason_SIZE, pdpb.SplitReason_LOAD} {
+				t.Run(reason.String(), func(t *testing.T) {
+					re := require.New(t)
+					resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
+						Region: region.GetMeta(), SplitCount: 1, Reason: reason,
+					})
+					re.NoError(err)
+					re.Equal(schedulingpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
+					re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
+					re.Empty(resp.GetIds())
+					select {
+					case msg := <-stream.ch:
+						heartbeatResp, ok := msg.(*schedulingpb.RegionHeartbeatResponse)
+						re.True(ok)
+						re.Equal(region.GetID(), heartbeatResp.GetRegionId())
+						re.NotNil(heartbeatResp.GetChangeSplit())
+						re.False(heartbeatResp.GetChangeSplit().GetAutoSplitEnabled())
+					case <-time.After(time.Second):
+						re.Fail("expected ChangeSplit heartbeat response")
+					}
+				})
+			}
+		})
 	}
 }
 
