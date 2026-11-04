@@ -45,7 +45,7 @@ type Operation struct {
 	SplitRegion     *pdpb.SplitRegion
 	ChangePeerV2    *pdpb.ChangePeerV2
 	SwitchWitnesses *pdpb.BatchSwitchWitness
-	// PD requires preventing the auto-splitting of this region.
+	// PD enables or disables automatic splitting for this region.
 	ChangeSplit *pdpb.ChangeSplit
 }
 
