@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -829,4 +830,119 @@ func TestSyncGroupPrefersBufferedLabelRule(t *testing.T) {
 	re.NotContains(manager.labelRuleBuffer, groupID)
 	re.Equal(newer, manager.keyRanges[groupID])
 	re.Equal(1, manager.GetAffinityGroupState(groupID).RangeCount)
+}
+
+// TestSyncGroupAndLabelRuleInAnyOrder applies the events of the affinity group
+// watcher and the affinity label watcher in every order the two watchers can
+// deliver them. The region labeler, which another watcher syncs, still holds
+// the old rule. The group must end up with the ranges of the latest rule.
+func TestSyncGroupAndLabelRuleInAnyOrder(t *testing.T) {
+	const groupID = "g"
+	oldRanges := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}
+	newRanges := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("c"), EndKey: []byte("d")}}}
+	type event struct {
+		name  string
+		apply func(re *require.Assertions, m *Manager)
+	}
+	putGroup := event{"put group", func(_ *require.Assertions, m *Manager) {
+		m.SyncGroupFromEtcd(&Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+	}}
+	deleteGroup := event{"delete group", func(_ *require.Assertions, m *Manager) {
+		m.SyncGroupDeleteFromEtcd(groupID)
+	}}
+	putRule := func(name string, ranges GroupKeyRanges) event {
+		return event{"put " + name, func(re *require.Assertions, m *Manager) {
+			// The affinity label watcher decodes its own copy of the rule.
+			data, err := json.Marshal(MakeLabelRule(ranges))
+			re.NoError(err)
+			rule, err := labeler.NewLabelRuleFromJSON(data)
+			re.NoError(err)
+			re.NoError(m.SyncKeyRangesFromEtcd(rule))
+		}}
+	}
+	deleteRule := event{"delete rule", func(_ *require.Assertions, m *Manager) {
+		m.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID(groupID))
+	}}
+	testCases := []struct {
+		name string
+		// synced is applied by both watchers before the events.
+		synced      []event
+		groupEvents []event
+		labelEvents []event
+		// expected is nil if the group must not exist.
+		expected *GroupKeyRanges
+	}{
+		{
+			// Removing all ranges of a group deletes its label rule.
+			name:        "create group and remove all ranges",
+			groupEvents: []event{putGroup},
+			labelEvents: []event{putRule("old rule", oldRanges), deleteRule},
+			expected:    &GroupKeyRanges{GroupID: groupID},
+		},
+		{
+			// PD deletes the group and its rule in one transaction, then creates
+			// both again in another.
+			name:        "recreate group with other ranges",
+			synced:      []event{putGroup, putRule("old rule", oldRanges)},
+			groupEvents: []event{deleteGroup, putGroup},
+			labelEvents: []event{deleteRule, putRule("new rule", newRanges)},
+			expected:    &newRanges,
+		},
+		{
+			name:        "delete group",
+			synced:      []event{putGroup, putRule("old rule", oldRanges)},
+			groupEvents: []event{deleteGroup},
+			labelEvents: []event{deleteRule},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, events := range interleave(tc.groupEvents, tc.labelEvents) {
+				names := make([]string, 0, len(events))
+				for _, e := range events {
+					names = append(names, e.name)
+				}
+				t.Run(strings.Join(names, ", "), func(t *testing.T) {
+					re := require.New(t)
+					store := storage.NewStorageWithMemoryBackend()
+					stores := core.NewStoresInfo()
+					stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+					regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, time.Second*5)
+					re.NoError(err)
+					manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
+					re.NoError(err)
+					re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(oldRanges)))
+					for _, e := range slices.Concat(tc.synced, events) {
+						e.apply(re, manager)
+					}
+
+					re.NotContains(manager.labelRuleBuffer, groupID)
+					state := manager.GetAffinityGroupState(groupID)
+					if tc.expected == nil {
+						re.Nil(state)
+						re.NotContains(manager.keyRanges, groupID)
+						return
+					}
+					re.NotNil(state)
+					re.Equal(tc.expected.KeyRanges, manager.keyRanges[groupID].KeyRanges)
+					re.Equal(len(tc.expected.KeyRanges), state.RangeCount)
+				})
+			}
+		})
+	}
+}
+
+// interleave returns every merge of a and b that keeps the order within each.
+func interleave[T any](a, b []T) [][]T {
+	if len(a) == 0 || len(b) == 0 {
+		return [][]T{slices.Concat(a, b)}
+	}
+	var result [][]T
+	for _, rest := range interleave(a[1:], b) {
+		result = append(result, slices.Concat([]T{a[0]}, rest))
+	}
+	for _, rest := range interleave(a, b[1:]) {
+		result = append(result, slices.Concat([]T{b[0]}, rest))
+	}
+	return result
 }

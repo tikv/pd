@@ -167,6 +167,10 @@ func TestRegionLabelWatcherClearsAffinityCache(t *testing.T) {
 	re.NoError(err)
 	re.NoError(rw.initializeRegionLabelWatcher())
 	affinityManager.SyncGroupFromEtcd(&affinity.Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+	// The affinity label watcher applies the same rule to the Manager.
+	initialRule, err := labeler.NewLabelRuleFromJSON(makeRule(oldRange, otherRange))
+	re.NoError(err)
+	re.NoError(affinityManager.SyncKeyRangesFromEtcd(initialRule))
 	affinityManager.RestoreAffinityGroup(groupID)
 	fixture.cluster.AddLeaderRegionWithRange(100, "a", "b", 1)
 	region := fixture.cluster.GetRegion(100)

@@ -82,8 +82,10 @@ type Manager struct {
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
 	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges
-	// labelRuleBuffer is a buffer used during etcd synchronization.
-	// When synchronizing via etcd, LabelRule information may arrive earlier than group information.
+	// labelRuleBuffer is a buffer used during etcd synchronization. It holds the
+	// label rule that the affinity label watcher has applied for a group ID that
+	// has no group, because the group watcher may be behind: the rule may arrive
+	// before its group, or before the deletion of the group that it replaces.
 	labelRuleBuffer map[string]*labeler.LabelRule // {group_id} -> labelRule
 }
 
@@ -489,21 +491,20 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	}
 	m.RUnlock()
 
-	// If the group is newly created, try to attach existing label rule without holding the write lock.
+	// If the group is newly created, try to attach the buffered label rule without holding the write lock.
 	var (
 		labelRule *labeler.LabelRule
 		gkr       GroupKeyRanges
 		labelErr  error
 	)
 	if !exists {
-		// Prefer the rule buffered by SyncKeyRangesFromEtcd, which later events from
-		// the same watcher update. The labeler is synced by another watcher and may
-		// still hold an older rule that no later affinity event corrects.
+		// Only use the buffered rule, which later events of the affinity label watcher
+		// replace or delete. If nothing is buffered, that watcher has not delivered a
+		// rule of the group or has deleted it, and SyncKeyRangesFromEtcd attaches a
+		// rule that arrives later. Do not read the region labeler: another watcher
+		// syncs it, so it may still hold a rule that has been replaced or deleted, and
+		// no later affinity event would correct it.
 		labelRule = m.labelRuleBuffer[group.ID]
-		if labelRule == nil {
-			labelRule = m.regionLabeler.GetLabelRule(GetLabelRuleID(group.ID))
-		}
-
 		if labelRule != nil {
 			gkr, labelErr = extractKeyRangesFromLabelRule(labelRule)
 		}
@@ -556,15 +557,22 @@ func (m *Manager) SyncGroupDeleteFromEtcd(groupID string) {
 	defer m.metaMutex.Unlock()
 
 	delete(m.keyRanges, groupID)
-	delete(m.labelRuleBuffer, groupID)
 
 	m.Lock()
 	defer m.Unlock()
-	if _, exists := m.groups[groupID]; !exists {
+	groupInfo, exists := m.groups[groupID]
+	if !exists {
 		log.Warn("affinity group not found during etcd sync delete", zap.String("group-id", groupID))
 		return
 	}
-
+	// The affinity label watcher may be ahead and have applied the rule of a group
+	// recreated with the same ID to this group. Move the rule to the buffer for the
+	// new group. If it is still the rule of this group, PD deleted it together with
+	// the group, and the affinity label watcher clears the buffer when it delivers
+	// the deletion.
+	if groupInfo.LabelRule != nil && groupInfo.RangeCount > 0 {
+		m.labelRuleBuffer[groupID] = groupInfo.LabelRule
+	}
 	m.deleteGroupLocked(groupID)
 }
 
