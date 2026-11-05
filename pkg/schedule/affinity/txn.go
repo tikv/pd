@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -814,7 +813,9 @@ func flattenRanges(ranges []GroupKeyRanges) []flattenKeyRange {
 }
 
 // reconcileRangeConflictsLocked preserves the raw ranges for administrative
-// repairs, but excludes every conflicting group from affinity scheduling.
+// repairs, but excludes every conflicting group from affinity scheduling. It
+// logs the groups that start or stop conflicting, at the error level if any
+// group starts conflicting.
 // Both metaMutex and the manager write lock must be held.
 func (m *Manager) reconcileRangeConflictsLocked() {
 	ranges := flattenRanges(slices.Collect(maps.Values(m.keyRanges)))
@@ -833,37 +834,27 @@ func (m *Manager) reconcileRangeConflictsLocked() {
 			}
 		}
 	}
+	var conflicting, resolved []string
 	for id, group := range m.groups {
 		_, conflict := conflicts[id]
 		if group.rangeConflict != conflict {
 			group.rangeConflict = conflict
 			m.clearGroupCacheLocked(id)
-			m.rangeConflictsChanged = true
-		}
-	}
-}
-
-func (m *Manager) logRangeConflictsLocked() {
-	if !m.rangeConflictsChanged {
-		return
-	}
-	m.rangeConflictsChanged = false
-	var conflicts []map[string]any
-	for _, id := range slices.Sorted(maps.Keys(m.keyRanges)) {
-		if group, ok := m.groups[id]; ok && group.rangeConflict {
-			ranges := make([]map[string]string, 0, len(m.keyRanges[id].KeyRanges))
-			for _, kr := range m.keyRanges[id].KeyRanges {
-				ranges = append(ranges, map[string]string{
-					"start-key": logutil.RedactString(hex.EncodeToString(kr.StartKey)),
-					"end-key":   logutil.RedactString(hex.EncodeToString(kr.EndKey)),
-				})
+			if conflict {
+				conflicting = append(conflicting, id)
+			} else {
+				resolved = append(resolved, id)
 			}
-			conflicts = append(conflicts, map[string]any{"group-id": id, "ranges": ranges})
 		}
 	}
-	if len(conflicts) > 0 {
+	slices.Sort(conflicting)
+	slices.Sort(resolved)
+	if len(conflicting) > 0 {
 		log.Error("overlapping affinity key ranges; delete or update conflicting groups to restore affinity scheduling",
-			zap.Reflect("conflicting-groups", conflicts))
+			zap.Strings("newly-conflicting-group-ids", conflicting),
+			zap.Strings("resolved-group-ids", resolved))
+	} else if len(resolved) > 0 {
+		log.Info("affinity key range conflicts resolved", zap.Strings("resolved-group-ids", resolved))
 	}
 }
 
@@ -909,7 +900,6 @@ func (m *Manager) loadRegionLabel() {
 	})
 
 	m.reconcileRangeConflictsLocked()
-	m.logRangeConflictsLocked()
 
 	log.Info("rebuilt group-label mapping",
 		zap.Int("total-groups", len(m.keyRanges)),
