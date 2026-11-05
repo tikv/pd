@@ -284,6 +284,14 @@ func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, coun
 		unSelectPeers(candidates)
 		return better
 	}
+	if len(candidates) >= 8 && w.needIsolation {
+		if classes, classCount := w.classifyCandidates(candidates, index, count); classCount > 0 {
+			if classCount == 1 {
+				return w.fixRuleWithCandidates(candidates[:count], index, count)
+			}
+			return w.fitEquivalentCandidates(candidates, classes, classCount, index, count)
+		}
+	}
 
 	// Visit combinations in increasing bitmask order without depending on the
 	// machine word size or scanning subsets with a different number of peers.
@@ -324,6 +332,148 @@ func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, coun
 			indexes[j] = j
 		}
 	}
+}
+
+type peerClass struct {
+	id       int
+	previous int // Number of earlier candidates in this class.
+}
+
+// classifyCandidates groups peers that are interchangeable for every remaining
+// rule. Keep ordinary replica sets on the existing enumeration path.
+func (w *fitWorker) classifyCandidates(candidates []*fitPeer, index, count int) ([]peerClass, int) {
+	// Replacing equivalent peers can change the order of isolation additions.
+	// Only prune when all possible sums are exact integers in float64. Leave a
+	// conservative margin below 2^53, including for the bound's own rounding.
+	pairs := float64(len(w.peers)) * float64(len(w.peers)-1) / 2
+	for _, rule := range w.rules[index:] {
+		if len(rule.LocationLabels) > 0 && pairs*math.Pow(replicaBaseScore, float64(len(rule.LocationLabels)-1)) >= 1<<52 {
+			return nil, 0
+		}
+	}
+	// Bound the classification prepass and keep its representatives on the
+	// stack. If peers have too many distinct uses, fall back without allocating.
+	var representatives [8]*fitPeer
+	limit := min(count, len(candidates)-count, len(representatives))
+	classCount := 0
+	for _, peer := range candidates {
+		class := 0
+		for ; class < classCount; class++ {
+			if w.equivalentPeers(peer, representatives[class], index) {
+				break
+			}
+		}
+		if class == classCount {
+			if classCount == limit {
+				return nil, 0
+			}
+			representatives[classCount] = peer
+			classCount++
+		}
+	}
+	if classCount == 1 {
+		return nil, 1
+	}
+	if classCount == len(candidates) {
+		return nil, 0
+	}
+	classes := make([]peerClass, len(candidates))
+	var sizes [8]int
+	for i, peer := range candidates {
+		for class := range classCount {
+			if w.equivalentPeers(peer, representatives[class], index) {
+				classes[i] = peerClass{id: class, previous: sizes[class]}
+				sizes[class]++
+				break
+			}
+		}
+	}
+	return classes, classCount
+}
+
+func (w *fitWorker) equivalentPeers(a, b *fitPeer, index int) bool {
+	if a.store == nil || b.store == nil || a.IsWitness != b.IsWitness {
+		return false
+	}
+	for _, rule := range w.rules[index:] {
+		if a.matchRoleStrict(rule.Role) != b.matchRoleStrict(rule.Role) ||
+			MatchLabelConstraints(a.store, rule.LabelConstraints) != MatchLabelConstraints(b.store, rule.LabelConstraints) {
+			return false
+		}
+		if w.supportWitness && rule.IsWitness && (a.isLeader != b.isLeader || a.store.GetWitnessCount() != b.store.GetWitnessCount()) {
+			return false
+		}
+		for _, label := range rule.LocationLabels {
+			if a.store.GetLabelValue(label) != b.store.GetLabelValue(label) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// fitEquivalentCandidates visits only combinations containing a prefix of each
+// equivalence class. Any omitted combination can exchange a peer for an earlier
+// equivalent peer without changing this or any later rule's best scores. The
+// prefix is visited first in the original order, preserving deterministic ties.
+func (w *fitWorker) fitEquivalentCandidates(candidates []*fitPeer, classes []peerClass, classCount, index, count int) bool {
+	selected := make([]*fitPeer, count)
+	required := make([]bool, classCount)
+	const (
+		excludeCandidate = iota
+		includeCandidate
+		unselectCandidate
+		unselectAndResetClass
+	)
+	type frame struct {
+		candidate int
+		count     int
+		forced    int
+		phase     int
+	}
+	// Walk high candidate indexes first, excluding before including, to retain
+	// increasing bitmask order. Use an explicit stack to avoid recursion depth
+	// depending on the number of peers.
+	stack := make([]frame, 1, len(candidates)+1)
+	stack[0] = frame{candidate: len(candidates) - 1, count: count}
+	var better bool
+	for len(stack) > 0 {
+		f := &stack[len(stack)-1]
+		if f.phase >= unselectCandidate {
+			candidates[f.candidate].selected = false
+			if f.phase == unselectAndResetClass {
+				required[classes[f.candidate].id] = false
+			}
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		if w.exit || f.count < f.forced || f.count > f.candidate+1 {
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		if f.count == 0 {
+			better = w.compareBest(selected, index) || better
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		class := classes[f.candidate]
+		if f.phase == excludeCandidate && !required[class.id] {
+			f.phase = includeCandidate
+			stack = append(stack, frame{candidate: f.candidate - 1, count: f.count, forced: f.forced})
+			continue
+		}
+		forced := f.forced - 1
+		f.phase = unselectCandidate
+		if !required[class.id] {
+			forced = f.forced + class.previous
+			required[class.id] = true
+			f.phase = unselectAndResetClass
+		}
+		selected[f.count-1] = candidates[f.candidate]
+		candidates[f.candidate].selected = true
+		stack = append(stack, frame{candidate: f.candidate - 1, count: f.count - 1, forced: forced})
+	}
+	return better
 }
 
 func unSelectPeers(selected []*fitPeer) {
