@@ -177,13 +177,20 @@ func (s *TSODispatcher) dispatch(
 
 func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) error {
 	// Merge the requests
-	count := uint32(0)
+	count := uint64(0)
 	for _, request := range requests {
-		count += request.getCount()
+		requestCount := request.getCount()
+		if requestCount == 0 {
+			return ValidateTSOCount(0)
+		}
+		count += uint64(requestCount)
+	}
+	if err := ValidateTSOCount(count); err != nil {
+		return err
 	}
 
 	start := time.Now()
-	resp, err := requests[0].process(forwardStream, count)
+	resp, err := requests[0].process(forwardStream, uint32(count))
 	if err != nil {
 		return err
 	}

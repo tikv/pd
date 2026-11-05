@@ -55,7 +55,27 @@ const (
 	batchSearchSize = 128
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
+	// maxBatchSplitAllocation limits the response objects, peer IDs and region
+	// ID slices allocated by one batch split. Serialization and allocator
+	// overhead are additional; this is not a limit on the protobuf wire size.
+	maxBatchSplitAllocation = 64 * units.MiB
 )
+
+// ValidateBatchSplitCount checks the allocation budget before IDs or response
+// slices are allocated. Charging by peer count also bounds the total ID count.
+func ValidateBatchSplitCount(splitCount uint32, peerCount int) error {
+	if splitCount == 0 {
+		return nil
+	}
+	const idBytes = uint64(unsafe.Sizeof(uint64(0)))
+	const fixedBytes = uint64(unsafe.Sizeof(pdpb.SplitID{})) + uint64(unsafe.Sizeof((*pdpb.SplitID)(nil))) + 2*idBytes
+	peers := uint64(peerCount)
+	if peers > (maxBatchSplitAllocation-fixedBytes)/idBytes ||
+		uint64(splitCount) > (maxBatchSplitAllocation-idBytes)/(fixedBytes+peers*idBytes) {
+		return errors.Errorf("split request exceeds %d-byte allocation budget: split count %d, peer count %d", maxBatchSplitAllocation, splitCount, peerCount)
+	}
+	return nil
+}
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {

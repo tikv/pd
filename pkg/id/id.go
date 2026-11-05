@@ -114,20 +114,15 @@ func (alloc *allocatorImpl) Alloc(count uint32) (uint64, uint32, error) {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
-	for range count {
-		// If current base is already at or beyond the effective end,
-		// we need to return an error.
-		if alloc.base >= alloc.effectiveEnd {
+	if uint64(count) > alloc.end-alloc.base {
+		if alloc.base >= alloc.effectiveEnd || uint64(count) > alloc.effectiveEnd-alloc.base {
 			return 0, 0, errs.ErrIDExhausted.FastGenByArgs()
 		}
-		if alloc.base == alloc.end {
-			if err := alloc.rebaseLocked(true); err != nil {
-				return 0, 0, err
-			}
+		if err := alloc.rebaseLocked(true, count); err != nil {
+			return 0, 0, err
 		}
-
-		alloc.base++
 	}
+	alloc.base += uint64(count)
 
 	return alloc.base, count, nil
 }
@@ -142,9 +137,13 @@ func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 		return errs.ErrIDExhausted.FastGenByArgs()
 	}
 	// set current end to new base, rebaseLocked will change it later.
+	previousEnd := alloc.end
 	alloc.end = newBase
-
-	return alloc.rebaseLocked(false)
+	if err := alloc.rebaseLocked(false, 0); err != nil {
+		alloc.end = previousEnd
+		return err
+	}
+	return nil
 }
 
 // Rebase resets the base for the allocator from the persistent window boundary,
@@ -154,10 +153,10 @@ func (alloc *allocatorImpl) Rebase() error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
-	return alloc.rebaseLocked(true)
+	return alloc.rebaseLocked(true, 0)
 }
 
-func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
+func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool, count uint32) error {
 	var key string
 	if alloc.label == KeyspaceLabel {
 		key = keypath.KeyspaceAllocIDPath()
@@ -192,14 +191,24 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		end = alloc.end
 	}
 
-	// make sure the end is not beyond the effective end
-	if end+alloc.step > alloc.effectiveEnd {
-		end = alloc.effectiveEnd
-	} else {
-		end += alloc.step
+	base := end
+	if count != 0 && end == alloc.end {
+		// Extend our current window only if no other allocator reserved IDs
+		// after it. Otherwise discard the remainder to keep the batch contiguous.
+		base = alloc.base
+	}
+	required := max(uint64(count), 1)
+	if end >= alloc.effectiveEnd || required > alloc.effectiveEnd-base {
+		return errs.ErrIDExhausted.FastGenByArgs()
+	}
+	needed := required - (end - base)
+	steps := (needed-1)/alloc.step + 1
+	newEnd := alloc.effectiveEnd
+	if steps <= (alloc.effectiveEnd-end)/alloc.step {
+		newEnd = end + steps*alloc.step
 	}
 
-	value := typeutil.Uint64ToBytes(end)
+	value := typeutil.Uint64ToBytes(newEnd)
 	txn := kv.NewSlowLogTxn(alloc.client)
 	resp, err := txn.If(cmps...).Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
@@ -209,12 +218,12 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
-	alloc.metrics.idGauge.Set(float64(end))
-	alloc.end = end
-	alloc.base = end - alloc.step
+	alloc.metrics.idGauge.Set(float64(newEnd))
+	alloc.end = newEnd
+	alloc.base = base
 	// please do not reorder the first field, it's need when getting the new-end
 	// see: https://docs.pingcap.com/tidb/dev/pd-recover#get-allocated-id-from-pd-log
-	log.Info("idAllocator allocates a new id", zap.Uint64("new-end", end), zap.Uint64("new-base", alloc.base),
+	log.Info("idAllocator allocates a new id", zap.Uint64("new-end", newEnd), zap.Uint64("new-base", alloc.base),
 		zap.String("label", string(alloc.label)), zap.Bool("check-curr-end", checkCurrEnd))
 	return nil
 }

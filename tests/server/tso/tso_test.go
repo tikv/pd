@@ -16,6 +16,7 @@ package tso_test
 
 import (
 	"context"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -166,6 +168,52 @@ func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoReques
 
 func (s *tsoTestSuite) TestLogicalOverflow() {
 	s.env.RunTestInNonMicroserviceEnv(s.checkLogicalOverflow)
+}
+
+func (s *tsoTestSuite) TestInvalidCount() {
+	s.env.RunTest(func(cluster *tests.TestCluster) {
+		re := s.Require()
+		leader := cluster.GetLeaderServer()
+		if leader.GetServer().IsServiceIndependent(constant.TSOServiceName) {
+			tsoCluster, err := tests.NewTestTSOCluster(s.T().Context(), 1, leader.GetAddr())
+			re.NoError(err)
+			defer tsoCluster.Destroy()
+			tsoCluster.WaitForDefaultPrimaryServing(re)
+			testutil.Eventually(re, func() bool {
+				_, ready := leader.GetServer().GetServicePrimaryAddr(s.T().Context(), constant.TSOServiceName)
+				return ready
+			})
+		}
+		var invalidAllocations atomic.Int64
+		const beforeGenerate = "github.com/tikv/pd/pkg/tso/beforeGenerateTSO"
+		re.NoError(failpoint.EnableCall(beforeGenerate, func(_ int64, _ *int64, count int64) {
+			if count >= 1<<18 {
+				invalidAllocations.Add(1)
+			}
+		}))
+		defer func() { re.NoError(failpoint.Disable(beforeGenerate)) }()
+		client, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+		defer conn.Close()
+		for _, count := range []uint32{0, 1 << 18, 1<<18 + 1, math.MaxUint32} {
+			ctx, cancel := context.WithTimeout(s.T().Context(), 10*time.Second)
+			stream, err := client.Tso(ctx)
+			re.NoError(err)
+			re.NoError(stream.Send(&pdpb.TsoRequest{Header: testutil.NewRequestHeader(leader.GetClusterID()), Count: count}))
+			_, err = stream.Recv()
+			re.Error(err)
+			re.Contains(err.Error(), "tso count")
+			cancel()
+		}
+		re.Zero(invalidAllocations.Load())
+		stream, err := client.Tso(s.T().Context())
+		re.NoError(err)
+		re.NoError(stream.Send(&pdpb.TsoRequest{Header: testutil.NewRequestHeader(leader.GetClusterID()), Count: 1}))
+		resp, err := stream.Recv()
+		re.NoError(err)
+		re.Equal(uint32(1), resp.GetCount())
+		re.Positive(resp.GetTimestamp().GetLogical())
+		re.NoError(stream.CloseSend())
+	})
 }
 
 func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {

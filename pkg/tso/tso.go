@@ -432,8 +432,8 @@ var maxRetryCount = 10
 func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
-	if count == 0 {
-		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
+	if err := tsoutil.ValidateTSOCount(uint64(count)); err != nil {
+		return resp, err
 	}
 	for i := range maxRetryCount {
 		currentPhysical, _ := t.getTSO()

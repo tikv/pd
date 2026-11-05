@@ -17,6 +17,7 @@ package tsoutil
 import (
 	"context"
 	"errors"
+	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
@@ -39,6 +41,76 @@ type mockStream struct {
 	// delay is used to simulate a long-running processRequest call
 	delay     time.Duration
 	succCount int // Counter for successfully processed requests
+}
+
+type countRecordingStream struct {
+	count uint32
+	calls int
+}
+
+func (s *countRecordingStream) process(_ uint64, count, _, _ uint32) (tsoResp, error) {
+	s.count = count
+	s.calls++
+	return &pdpb.TsoResponse{Timestamp: &pdpb.Timestamp{Physical: 1234, Logical: int64(count)}}, nil
+}
+
+type countResponseStream struct {
+	pdpb.PD_TsoServer
+	response *pdpb.TsoResponse
+}
+
+func (s *countResponseStream) Send(response *pdpb.TsoResponse) error {
+	s.response = response
+	return nil
+}
+
+func TestTSODispatcherCountValidation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		counts []uint32
+		valid  bool
+	}{
+		{name: "single", counts: []uint32{1}, valid: true},
+		{name: "largest batch", counts: []uint32{1, logicalBits - 1}, valid: true},
+		{name: "zero", counts: []uint32{0}},
+		{name: "zero in batch", counts: []uint32{1, 0}},
+		{name: "logical overflow", counts: []uint32{logicalBits + 1}},
+		{name: "merged logical overflow", counts: []uint32{logicalBits, 1}},
+		{name: "uint32 overflow", counts: []uint32{math.MaxUint32, 2}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			requests := make([]Request, 0, len(test.counts))
+			responses := make([]*countResponseStream, 0, len(test.counts))
+			for _, count := range test.counts {
+				response := &countResponseStream{}
+				responses = append(responses, response)
+				requests = append(requests, NewPDProtoRequest("", nil, &pdpb.TsoRequest{
+					Header: &pdpb.RequestHeader{ClusterId: 1}, Count: count,
+				}, response))
+			}
+			forward := &countRecordingStream{}
+			dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "count_validation"}), nil)
+			err := dispatcher.processRequests(forward, requests)
+			if !test.valid {
+				require.Error(t, err)
+				require.Zero(t, forward.calls, "invalid counts must not reach the allocator")
+				for _, response := range responses {
+					require.Nil(t, response.response)
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, 1, forward.calls)
+			var countSum uint32
+			for i, count := range test.counts {
+				countSum += count
+				require.Equal(t, count, responses[i].response.GetCount())
+				require.Equal(t, int64(1234), responses[i].response.GetTimestamp().GetPhysical())
+				require.Equal(t, int64(countSum), responses[i].response.GetTimestamp().GetLogical())
+			}
+			require.Equal(t, countSum, forward.count)
+		})
+	}
 }
 
 // process simulates the process of handling TSO requests
