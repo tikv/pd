@@ -309,6 +309,94 @@ func TestMultiCN(t *testing.T) {
 	re.Error(testAllowedCN(ctx, endpoints, testClientTLSInfo))
 }
 
+func TestClientCertAllowedCN(t *testing.T) {
+	re := require.New(t)
+	certPath := t.TempDir()
+	generateCerts(re, certPath)
+	serverTLSInfo := buildTLSInfo(certPath, "pd-server")
+
+	testCases := []struct {
+		name        string
+		legacyCNs   []string
+		clientCNs   []string
+		allowClient bool
+		allowTiDB   bool
+	}{
+		{name: "legacy unrestricted", allowClient: true, allowTiDB: true},
+		{name: "legacy single CN", legacyCNs: []string{"pd-server"}, allowClient: true, allowTiDB: true},
+		{name: "explicit single CN", clientCNs: []string{"pd-server"}},
+		{name: "explicit overrides legacy", legacyCNs: []string{"pd-server", "client"}, clientCNs: []string{"pd-server"}},
+		{name: "explicit multiple CNs", legacyCNs: []string{"pd-server"}, clientCNs: []string{"pd-server", "tidb"}, allowTiDB: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+				conf.Security.TLSConfig = grpcutil.TLSConfig{
+					KeyPath:        serverTLSInfo.KeyFile,
+					CertPath:       serverTLSInfo.CertFile,
+					CAPath:         serverTLSInfo.TrustedCAFile,
+					CertAllowedCNs: testCase.legacyCNs,
+				}
+				conf.Security.ClientCertAllowedCNs = testCase.clientCNs
+				conf.AdvertiseClientUrls = strings.ReplaceAll(conf.AdvertiseClientUrls, "http", "https")
+				conf.ClientUrls = strings.ReplaceAll(conf.ClientUrls, "http", "https")
+				conf.AdvertisePeerUrls = strings.ReplaceAll(conf.AdvertisePeerUrls, "http", "https")
+				conf.PeerUrls = strings.ReplaceAll(conf.PeerUrls, "http", "https")
+				conf.InitialCluster = strings.ReplaceAll(conf.InitialCluster, "http", "https")
+			})
+			re.NoError(err)
+			defer clus.Destroy()
+			re.NoError(clus.RunInitialServers())
+			clus.WaitLeader()
+
+			var endpoints []string
+			for _, server := range clus.GetServers() {
+				endpoints = append(endpoints, server.GetConfig().AdvertiseClientUrls)
+			}
+			for _, client := range []struct {
+				name    string
+				allowed bool
+			}{
+				{name: "pd-server", allowed: true},
+				{name: "client", allowed: testCase.allowClient},
+				{name: "tidb-client", allowed: testCase.allowTiDB},
+			} {
+				t.Run(client.name, func(t *testing.T) {
+					re := require.New(t)
+					clientTLSInfo := buildTLSInfo(certPath, client.name)
+					err := testAllowedCN(ctx, endpoints, clientTLSInfo)
+					if client.allowed {
+						re.NoError(err)
+					} else {
+						re.Error(err)
+					}
+
+					tlsConfig, err := clientTLSInfo.ClientConfig()
+					re.NoError(err)
+					transport := &http.Transport{TLSClientConfig: tlsConfig}
+					t.Cleanup(transport.CloseIdleConnections)
+					httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
+					request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoints[0]+"/health", nil)
+					re.NoError(err)
+					response, err := httpClient.Do(request)
+					if client.allowed {
+						re.NoError(err)
+						defer response.Body.Close()
+						re.Equal(http.StatusOK, response.StatusCode)
+					} else {
+						if response != nil {
+							re.NoError(response.Body.Close())
+						}
+						re.Error(err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInfo) error {
 	ctx1, cancel1 := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel1()

@@ -20,6 +20,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,49 @@ func TestTLS(t *testing.T) {
 	tls, err := cfg.Security.ToClientTLSConfig()
 	re.NoError(err)
 	re.Nil(tls)
+}
+
+func TestClientCertAllowedCNValidation(t *testing.T) {
+	testCases := []struct {
+		name       string
+		clientURLs string
+		missing    string
+		wantErr    string
+	}{
+		{name: "https", clientURLs: "https://127.0.0.1:2379"},
+		{name: "missing ca", clientURLs: "https://127.0.0.1:2379", missing: "cacert-path", wantErr: "requires cacert-path, cert-path and key-path"},
+		{name: "missing certificate", clientURLs: "https://127.0.0.1:2379", missing: "cert-path", wantErr: "requires cacert-path, cert-path and key-path"},
+		{name: "missing key", clientURLs: "https://127.0.0.1:2379", missing: "key-path", wantErr: "requires cacert-path, cert-path and key-path"},
+		{name: "http", clientURLs: "http://127.0.0.1:2379", wantErr: "requires HTTPS client URLs"},
+		{name: "mixed protocols", clientURLs: "https://127.0.0.1:2379,http://127.0.0.1:2381", wantErr: "requires HTTPS client URLs"},
+		{name: "default http", wantErr: "requires HTTPS client URLs"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			text := []string{fmt.Sprintf("client-urls = %q\n[security]\nclient-cert-allowed-cn = [\"pd-server\"]\n", testCase.clientURLs)}
+			for _, key := range []string{"cacert-path", "cert-path", "key-path"} {
+				if key != testCase.missing {
+					text = append(text, fmt.Sprintf("%s = %q\n", key, "test.pem"))
+				}
+			}
+			cfg := NewConfig()
+			meta, err := toml.Decode(strings.Join(text, ""), cfg)
+			re.NoError(err)
+			re.Empty(meta.Undecoded())
+			err = cfg.Adjust(&meta, false)
+			if testCase.wantErr != "" {
+				re.ErrorContains(err, testCase.wantErr)
+				return
+			}
+			re.NoError(err)
+			re.NoError(logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog))
+			etcdCfg, err := cfg.GenEmbedEtcdConfig()
+			re.NoError(err)
+			re.Equal([]string{"pd-server"}, etcdCfg.ClientTLSInfo.AllowedCNs)
+			re.Empty(etcdCfg.PeerTLSInfo.AllowedCNs)
+		})
+	}
 }
 
 func TestBadFormatJoinAddr(t *testing.T) {

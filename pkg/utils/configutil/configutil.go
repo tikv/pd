@@ -83,6 +83,10 @@ func (m *ConfigMetaData) CheckUndecoded() error {
 // SecurityConfig indicates the security configuration
 type SecurityConfig struct {
 	grpcutil.TLSConfig
+	// ClientCertAllowedCNs restricts incoming certificates on the PD client port.
+	// A non-empty list overrides CertAllowedCNs for that port, including a single CN.
+	// An empty list preserves the legacy CertAllowedCNs behavior.
+	ClientCertAllowedCNs []string `toml:"client-cert-allowed-cn" json:"client-cert-allowed-cn"`
 	// RedactInfoLog indicates that whether to enable the log redaction. It can be the following values:
 	//   - false: disable redact log.
 	//   - true: enable redact log, which will replace the sensitive information with "?".

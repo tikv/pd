@@ -353,6 +353,23 @@ func (c *Config) Validate() error {
 		return errors.New("log directory shouldn't be the subdirectory of data directory")
 	}
 
+	if len(c.Security.ClientCertAllowedCNs) > 0 {
+		if c.Security.CAPath == "" || c.Security.CertPath == "" || c.Security.KeyPath == "" {
+			return errors.New("security.client-cert-allowed-cn requires cacert-path, cert-path and key-path")
+		}
+		clientURLs := c.ClientUrls
+		configutil.AdjustString(&clientURLs, defaultClientUrls)
+		urls, err := parseUrls(clientURLs)
+		if err != nil {
+			return err
+		}
+		for _, u := range urls {
+			if u.Scheme != "https" {
+				return errors.New("security.client-cert-allowed-cn requires HTTPS client URLs")
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -739,9 +756,11 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
-	// Keep compatibility with https://github.com/tikv/pd/pull/2305
-	// Only check client cert when there are multiple CNs.
-	if len(c.Security.CertAllowedCNs) > 1 {
+	if len(c.Security.ClientCertAllowedCNs) > 0 {
+		cfg.ClientTLSInfo.AllowedCNs = c.Security.ClientCertAllowedCNs
+	} else if len(c.Security.CertAllowedCNs) > 1 {
+		// Preserve the legacy single-CN behavior for existing configurations.
+		// See https://github.com/tikv/pd/pull/2305.
 		cfg.ClientTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
 	}
 	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
