@@ -818,6 +818,7 @@ func flattenRanges(ranges []GroupKeyRanges) []flattenKeyRange {
 // group starts conflicting.
 // Both metaMutex and the manager write lock must be held.
 func (m *Manager) reconcileRangeConflictsLocked() {
+	m.rangeConflictsStale = false
 	ranges := flattenRanges(slices.Collect(maps.Values(m.keyRanges)))
 	conflicts := make(map[string]struct{})
 	if len(ranges) > 0 {

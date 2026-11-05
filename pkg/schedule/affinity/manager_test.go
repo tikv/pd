@@ -329,7 +329,8 @@ func TestRegionCountStaleCache(t *testing.T) {
 
 // TestSyncOverlappingAffinityRanges verifies that the watcher sync path suspends
 // both groups of an overlap in either event order, drops their cached Regions,
-// and restores the remaining group after the other one is deleted.
+// and restores the remaining group after the other one is deleted. Conflicts
+// change only when ReconcileRangeConflicts runs at the end of a batch.
 func TestSyncOverlappingAffinityRanges(t *testing.T) {
 	for _, labelFirst := range []bool{false, true} {
 		t.Run(fmt.Sprintf("label-first=%t", labelFirst), func(t *testing.T) {
@@ -362,11 +363,19 @@ func TestSyncOverlappingAffinityRanges(t *testing.T) {
 				re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(groupRanges)))
 				manager.RestoreAffinityGroup(groupRanges.GroupID)
 				if i == 0 {
+					manager.ReconcileRangeConflicts()
 					// Cache the Region in group a before the conflict appears.
 					_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
 					re.True(isAffinity)
 				}
 			}
+			// Before the batch that adds b ends, lookups see the old state.
+			for _, groupRanges := range ranges {
+				re.True(manager.GetAffinityGroupState(groupRanges.GroupID).AffinitySchedulingAllowed)
+			}
+			group, _ := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Equal("a", group.ID)
+			manager.ReconcileRangeConflicts()
 			for _, groupRanges := range ranges {
 				state := manager.GetAffinityGroupState(groupRanges.GroupID)
 				re.False(state.AffinitySchedulingAllowed)
@@ -374,7 +383,7 @@ func TestSyncOverlappingAffinityRanges(t *testing.T) {
 				re.Zero(state.RegionCount)
 				re.Zero(state.AffinityRegionCount)
 			}
-			group, _ := manager.GetAndCacheRegionAffinityGroupState(region)
+			group, _ = manager.GetAndCacheRegionAffinityGroupState(region)
 			re.Nil(group)
 
 			re.NoError(regionLabeler.DeleteLabelRule(GetLabelRuleID("b")))
@@ -385,6 +394,8 @@ func TestSyncOverlappingAffinityRanges(t *testing.T) {
 			if !labelFirst {
 				manager.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID("b"))
 			}
+			re.False(manager.GetAffinityGroupState("a").AffinitySchedulingAllowed)
+			manager.ReconcileRangeConflicts()
 			group, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
 			re.NotNil(group)
 			re.Equal("a", group.ID)
