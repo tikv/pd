@@ -91,19 +91,34 @@ func (s *Service) checkServing() error {
 // without a trailing slash.
 func validateMetaStorageAccess(key, rangeEnd []byte) error {
 	start, end := string(key), string(rangeEnd)
-	for _, prefix := range [...]string{
-		"/ms/", "resource_group/", "/tidb/br-stream",
-		strings.TrimSuffix(keypath.RegionLabelPathPrefix(), "/"),
-	} {
-		if !strings.HasPrefix(start, prefix) {
-			continue
+	var upper string
+	if strings.HasPrefix(start, "/pd/") {
+		prefix := strings.TrimSuffix(keypath.RegionLabelPathPrefix(), "/")
+		if strings.HasPrefix(start, prefix) {
+			if len(rangeEnd) == 0 {
+				return nil
+			}
+			upper = clientv3.GetPrefixRangeEnd(prefix)
 		}
+	} else {
+		// The fixed upper bounds are each prefix's lexicographic successor.
+		for _, scope := range [...]struct{ prefix, upper string }{
+			{"/ms/", "/ms0"},
+			{"resource_group/", "resource_group0"},
+			{"/tidb/br-stream", "/tidb/br-strean"},
+		} {
+			if strings.HasPrefix(start, scope.prefix) {
+				upper = scope.upper
+				break
+			}
+		}
+	}
+	if upper != "" {
 		if len(rangeEnd) == 0 {
 			return nil
 		}
 		// etcd ranges are half-open. A whole-prefix query ends at the prefix's
 		// successor, which need not itself start with the allowed prefix.
-		upper := clientv3.GetPrefixRangeEnd(prefix)
 		// The NUL sentinel means all keys from start onwards, beyond this prefix.
 		if end != "\x00" && end > start && end <= upper {
 			return nil
