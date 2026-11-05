@@ -336,8 +336,6 @@ func TestLoadOverlappingAffinityRanges(t *testing.T) {
 			for _, change := range testCase.groups {
 				re.Contains(string(logs), change.GroupID)
 			}
-			re.Contains(string(logs), "start-key")
-			re.Contains(string(logs), "end-key")
 
 			if testCase.name == "nested ranges" {
 				extra := []GroupKeyRanges{{GroupID: "unrelated", KeyRanges: []keyutil.KeyRange{keyRange("y", "z")}}}

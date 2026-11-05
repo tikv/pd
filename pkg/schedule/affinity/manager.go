@@ -67,11 +67,10 @@ type Manager struct {
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
 
 	// The following members are protected by RWMutex.
-	affinityRegionCount   int
-	groups                map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
-	regions               map[uint64]regionCache       // {region_id} -> regionCache
-	unavailableStores     map[uint64]storeCondition    // {store_id} -> storeCondition
-	rangeConflictsChanged bool
+	affinityRegionCount int
+	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
+	regions             map[uint64]regionCache       // {region_id} -> regionCache
+	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -193,7 +192,6 @@ func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule)
 		m.updateGroupLabelRuleLocked(group.ID, labelRules[i], false)
 	}
 	m.reconcileRangeConflictsLocked()
-	m.logRangeConflictsLocked()
 }
 
 func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
@@ -270,9 +268,6 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	} else {
 		m.resetCountLocked(groupInfo)
 	}
-	if groupInfo.rangeConflict {
-		m.rangeConflictsChanged = true
-	}
 	// Set LabelRule
 	groupInfo.LabelRule = labelRule
 	groupInfo.RangeCount = rangeCount
@@ -285,7 +280,6 @@ func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, ne
 		m.updateGroupLabelRuleLocked(groupID, labelRule, needClear)
 	}
 	m.reconcileRangeConflictsLocked()
-	m.logRangeConflictsLocked()
 }
 
 func (m *Manager) clearGroupCacheLocked(groupID string) {
@@ -302,9 +296,6 @@ func (m *Manager) clearGroupCacheLocked(groupID string) {
 }
 
 func (m *Manager) deleteGroupLocked(groupID string) {
-	if group, ok := m.groups[groupID]; ok && group.rangeConflict {
-		m.rangeConflictsChanged = true
-	}
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
 }
@@ -316,7 +307,6 @@ func (m *Manager) deleteGroups(groupIDs []string) {
 		m.deleteGroupLocked(groupID)
 	}
 	m.reconcileRangeConflictsLocked()
-	m.logRangeConflictsLocked()
 }
 
 func (m *Manager) deleteCacheLocked(regionID uint64) {
@@ -634,13 +624,4 @@ func (m *Manager) SyncKeyRangesDeleteFromEtcd(ruleID string) {
 		m.updateGroupLabelRuleLocked(groupID, nil, true)
 	}
 	m.reconcileRangeConflictsLocked()
-}
-
-// LogRangeConflicts emits one summary for conflict changes in a watch batch.
-func (m *Manager) LogRangeConflicts() {
-	m.metaMutex.Lock()
-	defer m.metaMutex.Unlock()
-	m.Lock()
-	defer m.Unlock()
-	m.logRangeConflictsLocked()
 }
