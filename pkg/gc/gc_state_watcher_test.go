@@ -28,6 +28,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -547,6 +548,45 @@ func (s *gcStateManagerTestSuite) TestGCStateWatchSlowConsumerIsolation() {
 	re.Empty(state.GCBarriers)
 }
 
+func TestGCStateWatcherBulkRemovalsKeepBackpressure(t *testing.T) {
+	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{})
+	defer clean()
+	defer cancel()
+	slow, err := manager.registerGCStateWatcher(context.Background(), true, gcStateWatchConfig{liveChannelCapacity: 2})
+	require.NoError(t, err)
+	defer slow.Close()
+	const count = 128
+	healthy, err := manager.registerGCStateWatcher(context.Background(), true, gcStateWatchConfig{liveChannelCapacity: count})
+	require.NoError(t, err)
+	defer healthy.Close()
+	index := newEnabledKeyspaceIndex(nil, "")
+	generation := manager.generation
+	index.onRemoved = func(ids []uint32) { manager.publishGCStateRemovals(generation, ids) }
+	entries := make(map[uint32]enabledKeyspace, count)
+	changes := make(map[uint32]*enabledKeyspace, count)
+	want := make([]uint32, 0, count)
+	for id := uint32(100); id < 100+count; id++ {
+		entries[id] = enabledKeyspace{id: id}
+		changes[id] = nil
+		want = append(want, id)
+	}
+	require.True(t, index.publish(context.Background(), entries, 1))
+	index.publishProgress(context.Background(), changes, 2)
+	require.ErrorIs(t, slow.Err(), errs.ErrGCStateWatcherSlowConsumer)
+	require.NotContains(t, manager.watchers, slow.id)
+	require.NoError(t, healthy.Err())
+	require.Len(t, healthy.liveCh, count)
+	batch, err := healthy.RecvBatch(count)
+	require.NoError(t, err)
+	got := make([]uint32, 0, len(batch))
+	for _, change := range batch {
+		id, removed := change.RemovedKeyspaceID()
+		require.True(t, removed)
+		got = append(got, id)
+	}
+	require.ElementsMatch(t, want, got)
+}
+
 func (s *gcStateManagerTestSuite) TestGCStateWatcherMetrics() {
 	re := s.Require()
 	activeBefore := promtestutil.ToFloat64(gcStateWatcherGauge)
@@ -724,6 +764,88 @@ func TestGCStateWatcherDonePublishesFirstCause(t *testing.T) {
 	w.Close()
 	require.ErrorIs(t, w.Err(), errs.ErrNotLeader)
 	require.Equal(t, done, w.Done())
+}
+
+func TestGCStateWatcherRemovesDisabledKeyspace(t *testing.T) {
+	var client *clientv3.Client
+	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
+		useEnabledKeyspaceIndex: true,
+		beforeLeader:            func(c *clientv3.Client) { client = c },
+	})
+	defer clean()
+	defer cancel()
+	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	index := manager.generation.index
+	require.NoError(t, index.waitReady(ctx))
+	select {
+	case <-manager.generation.warmup.done:
+	case <-ctx.Done():
+		t.Fatal("initial warmup did not finish")
+	}
+	w, err := manager.WatchGCStates(ctx, true)
+	require.NoError(t, err)
+	defer w.Close()
+
+	_, err = manager.keyspaceManager.UpdateKeyspaceState("ks2", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	require.NoError(t, err)
+	committed, err := client.Get(ctx, keypath.KeyspaceMetaPath(2))
+	require.NoError(t, err)
+	entries, _, err := index.snapshotAtLeast(ctx, committed.Header.Revision)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		require.NotEqual(t, uint32(2), entry.id)
+	}
+
+	changes, err := w.RecvBatch(1)
+	require.NoError(t, err, "a keyspace leaving the enabled index must notify GC watchers")
+	require.Len(t, changes, 1)
+	id, removed := changes[0].RemovedKeyspaceID()
+	require.True(t, removed)
+	require.Equal(t, uint32(2), id)
+
+	// Later non-enabled updates, including a keyspace absent from the initial
+	// index, must not repeat removals. Deleting another indexed keyspace gives
+	// this watcher a second event and a barrier for checking the whole batch.
+	for _, update := range []struct {
+		name  string
+		state keyspacepb.KeyspaceState
+	}{
+		{"ks2", keyspacepb.KeyspaceState_DISABLED},
+		{"ks2", keyspacepb.KeyspaceState_ARCHIVED},
+		{"ks4", keyspacepb.KeyspaceState_ARCHIVED},
+	} {
+		_, err = manager.keyspaceManager.UpdateKeyspaceState(update.name, update.state, time.Now().Unix())
+		require.NoError(t, err)
+	}
+	_, err = client.Delete(ctx, keypath.KeyspaceMetaPath(1))
+	require.NoError(t, err)
+	changes, err = w.RecvBatch(1)
+	require.NoError(t, err)
+	id, removed = changes[0].RemovedKeyspaceID()
+	require.True(t, removed)
+	require.Equal(t, uint32(1), id)
+	manager.mu.Lock()
+	queued := len(w.liveCh)
+	manager.mu.Unlock()
+	require.Zero(t, queued, "non-enabled updates must not repeat removals")
+}
+
+func TestGCStateWatcherIgnoresOldRemovalCallback(t *testing.T) {
+	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{useEnabledKeyspaceIndex: true})
+	defer clean()
+	defer cancel()
+	oldCallback := manager.generation.index.onRemoved
+	require.NotNil(t, oldCallback)
+	stop := manager.OnNodeBecomesLeader()
+	defer stop()
+	w, err := manager.WatchGCStates(context.Background(), true)
+	require.NoError(t, err)
+	defer w.Close()
+
+	oldCallback([]uint32{2})
+	require.Empty(t, w.liveCh)
+	require.NoError(t, w.Err())
 }
 
 func TestGCStateWatcherUsesEnabledMetadataIndex(t *testing.T) {
