@@ -66,7 +66,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			zap.String("group-id", group.ID), zap.String("reason", reason))
 		return nil, false
 	}
-	if region.GetApproximateSize() <= 0 {
+	if region.GetApproximateSize() <= 0 || region.IsApproximateSizeUnknown() {
 		return wait("unknown-size")
 	}
 	storeConfig := c.cluster.GetStoreConfig()
