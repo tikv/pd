@@ -281,6 +281,72 @@ func TestRegionCountStaleCache(t *testing.T) {
 	re.Len(groupInfo.Regions, 1)
 }
 
+// TestSyncOverlappingAffinityRanges verifies that the watcher sync path suspends
+// both groups of an overlap in either event order, drops their cached Regions,
+// and restores the remaining group after the other one is deleted.
+func TestSyncOverlappingAffinityRanges(t *testing.T) {
+	for _, labelFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("label-first=%t", labelFirst), func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+			ranges := []GroupKeyRanges{
+				{GroupID: "a", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("d")}}},
+				{GroupID: "b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
+			}
+			region := generateRegionForTest(1, []uint64{1}, ranges[1].KeyRanges[0])
+			for i, groupRanges := range ranges {
+				// The affinity watcher passes rules parsed from JSON, and the rule
+				// watcher updates the labeler on its own.
+				data, err := json.Marshal(MakeLabelRule(groupRanges))
+				re.NoError(err)
+				rule, err := labeler.NewLabelRuleFromJSON(data)
+				re.NoError(err)
+				if labelFirst {
+					re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+				}
+				manager.SyncGroupFromEtcd(&Group{ID: groupRanges.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+				if !labelFirst {
+					re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+				}
+				re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(groupRanges)))
+				manager.RestoreAffinityGroup(groupRanges.GroupID)
+				if i == 0 {
+					// Cache the Region in group a before the conflict appears.
+					_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+					re.True(isAffinity)
+				}
+			}
+			for _, groupRanges := range ranges {
+				state := manager.GetAffinityGroupState(groupRanges.GroupID)
+				re.False(state.AffinitySchedulingAllowed)
+				re.True(state.RegularSchedulingAllowed)
+				re.Zero(state.RegionCount)
+				re.Zero(state.AffinityRegionCount)
+			}
+			group, _ := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(group)
+
+			re.NoError(regionLabeler.DeleteLabelRule(GetLabelRuleID("b")))
+			if labelFirst {
+				manager.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID("b"))
+			}
+			manager.SyncGroupDeleteFromEtcd("b")
+			if !labelFirst {
+				manager.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID("b"))
+			}
+			group, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.NotNil(group)
+			re.Equal("a", group.ID)
+			re.True(isAffinity)
+		})
+	}
+}
+
 // TestDeleteGroupClearsCache verifies that deleting a group clears all related region caches.
 func TestDeleteGroupClearsCache(t *testing.T) {
 	re := require.New(t)
