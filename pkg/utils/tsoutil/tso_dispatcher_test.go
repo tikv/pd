@@ -17,6 +17,7 @@ package tsoutil
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"runtime"
 	"sync"
@@ -73,7 +74,6 @@ func TestTSODispatcherCountValidation(t *testing.T) {
 		{name: "single", counts: []uint32{1}, valid: true},
 		{name: "largest batch", counts: []uint32{1, logicalBits - 1}, valid: true},
 		{name: "zero", counts: []uint32{0}},
-		{name: "zero in batch", counts: []uint32{1, 0}},
 		{name: "logical overflow", counts: []uint32{logicalBits + 1}},
 		{name: "merged logical overflow", counts: []uint32{logicalBits, 1}},
 		{name: "uint32 overflow", counts: []uint32{math.MaxUint32, 2}},
@@ -109,6 +109,47 @@ func TestTSODispatcherCountValidation(t *testing.T) {
 				require.Equal(t, int64(countSum), responses[i].response.GetTimestamp().GetLogical())
 			}
 			require.Equal(t, countSum, forward.count)
+		})
+	}
+}
+
+func TestTSODispatcherInvalidRequestIsolation(t *testing.T) {
+	for _, count := range []uint32{0, logicalBits + 1, math.MaxUint32} {
+		t.Run(fmt.Sprintf("count-%d", count), func(t *testing.T) {
+			dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "request_isolation"}), nil)
+			invalid := NewPDProtoRequest("host", nil, &pdpb.TsoRequest{Count: count}, &countResponseStream{})
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			queue := &tsoRequestProxyQueue{ctx: ctx, cancel: cancel, requestCh: make(chan Request, 3)}
+			dispatcher.dispatchChs.Store("host", queue)
+			responses := []*countResponseStream{{}, {}}
+			for i, response := range responses {
+				request := NewPDProtoRequest("host", nil, &pdpb.TsoRequest{
+					Header: &pdpb.RequestHeader{ClusterId: 1}, Count: 1,
+				}, response)
+				require.Same(t, ctx, dispatcher.DispatchRequest(t.Context(), request, nil))
+				if i == 0 {
+					invalidCtx := dispatcher.DispatchRequest(t.Context(), invalid, nil)
+					require.ErrorContains(t, context.Cause(invalidCtx), "tso count")
+					require.NoError(t, context.Cause(ctx), "an invalid request must not cancel other streams")
+				}
+			}
+			require.Len(t, queue.requestCh, 2, "only valid requests may enter the shared batch")
+			requests := []Request{<-queue.requestCh, <-queue.requestCh}
+			forward := &countRecordingStream{}
+			require.NoError(t, dispatcher.processRequests(forward, requests))
+			require.Equal(t, uint32(2), forward.count)
+			for i, response := range responses {
+				require.Equal(t, uint32(1), response.response.GetCount())
+				require.Equal(t, int64(i+1), response.response.GetTimestamp().GetLogical())
+			}
+			require.NoError(t, context.Cause(ctx))
+
+			dispatcher.dispatchChs.Delete("host")
+			invalidCtx := dispatcher.DispatchRequest(t.Context(), invalid, nil)
+			require.ErrorContains(t, context.Cause(invalidCtx), "tso count")
+			_, exists := dispatcher.dispatchChs.Load("host")
+			require.False(t, exists, "an invalid request must not create a forwarding queue")
 		})
 	}
 }

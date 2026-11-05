@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -168,6 +169,52 @@ func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoReques
 
 func (s *tsoTestSuite) TestLogicalOverflow() {
 	s.env.RunTestInNonMicroserviceEnv(s.checkLogicalOverflow)
+}
+
+func (s *tsoTestSuite) TestForwardedInvalidCountIsolation() {
+	s.env.RunTestInNonMicroserviceEnv(func(cluster *tests.TestCluster) {
+		re := s.Require()
+		leader := cluster.GetLeaderServer()
+		var follower *tests.TestServer
+		for name, server := range cluster.GetServers() {
+			if name != cluster.GetLeader() {
+				follower = server
+				break
+			}
+		}
+		re.NotNil(follower)
+		client, conn := testutil.MustNewGrpcClient(re, follower.GetAddr())
+		defer conn.Close()
+		ctx, cancel := context.WithTimeout(s.T().Context(), 10*time.Second)
+		defer cancel()
+		ctx = grpcutil.BuildForwardContext(ctx, leader.GetAddr())
+		valid, err := client.Tso(ctx)
+		re.NoError(err)
+		defer func() { re.NoError(valid.CloseSend()) }()
+		request := &pdpb.TsoRequest{Header: testutil.NewRequestHeader(leader.GetClusterID()), Count: 1}
+		re.NoError(valid.Send(request))
+		previous, err := valid.Recv()
+		re.NoError(err)
+		checkAndReturnTimestampResponse(re, request, previous)
+
+		for _, count := range []uint32{0, 1 << 18, math.MaxUint32} {
+			invalidCtx, invalidCancel := context.WithCancel(ctx)
+			invalid, err := client.Tso(invalidCtx)
+			re.NoError(err)
+			re.NoError(invalid.Send(&pdpb.TsoRequest{Header: request.Header, Count: count}))
+			_, err = invalid.Recv()
+			invalidCancel()
+			re.ErrorContains(err, "tso count")
+
+			// Keep using the same valid stream after the other stream is rejected.
+			re.NoError(valid.Send(request))
+			response, err := valid.Recv()
+			re.NoError(err)
+			checkAndReturnTimestampResponse(re, request, response)
+			re.Greater(tsoutil.GenerateTS(response.GetTimestamp()), tsoutil.GenerateTS(previous.GetTimestamp()))
+			previous = response
+		}
+	})
 }
 
 func (s *tsoTestSuite) TestInvalidCount() {
