@@ -48,6 +48,11 @@ type affinitySplitAttempt struct {
 	startedAt        time.Time
 	expiresAt        time.Time
 	fallbackReported bool
+	// split is the last split operator of the attempt. The operator controller
+	// starts an operator when it admits it, and then sends the split request.
+	// startedAt is the start time of the first split that started, and zero
+	// until then.
+	split *operator.Operator
 }
 
 // prepareAffinityPeerMove requests a SCAN split before adding a voter when size
@@ -80,7 +85,6 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		attempt = affinitySplitAttempt{
 			version:       region.GetRegionEpoch().GetVersion(),
 			voterStoreIDs: group.VoterStoreIDs,
-			startedAt:     now,
 		}
 		if value, ok := c.splitAttempts.Get(region.GetID()); ok {
 			previous := value.(affinitySplitAttempt)
@@ -90,8 +94,16 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 				attempt = previous
 			}
 		}
+		// A split that the controller rejects or cancels before it starts, for
+		// example because the waiting queue is full, sends no request, so the
+		// wait does not start and the next patrol requests the split again.
+		if attempt.startedAt.IsZero() && attempt.split != nil {
+			attempt.startedAt = attempt.split.GetStartTime()
+		}
 		attempt.expiresAt = now.Add(affinitySplitCacheTTL)
-		splitWait = now.Sub(attempt.startedAt)
+		if !attempt.startedAt.IsZero() {
+			splitWait = now.Sub(attempt.startedAt)
+		}
 		if splitWait <= affinitySplitWaitTimeout {
 			op, err := operator.CreateSplitRegionOperator("affinity-split-region", region,
 				operator.OpAffinity|operator.OpSplit, pdpb.CheckPolicy_SCAN, nil)
@@ -101,6 +113,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 					zap.String("group-id", group.ID), errs.ZapError(err))
 				return nil, false
 			}
+			attempt.split = op
 			c.splitAttempts.Put(region.GetID(), attempt)
 			return op, false
 		}
