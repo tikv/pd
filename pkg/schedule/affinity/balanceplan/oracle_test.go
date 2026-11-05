@@ -235,6 +235,35 @@ func matchesTarget(legal []oracleTarget, voters, rules []int, leader int) bool {
 	})
 }
 
+// leaderOptimum enumerates every legal leader of the given voter sets and
+// returns the lowest leader score.
+func leaderOptimum(in *Input, legal [][]oracleTarget, voters [][]int) int64 {
+	best := int64(math.MaxInt64)
+	l := slices.Clone(in.BaseLeaders)
+	var rec func(int)
+	rec = func(gi int) {
+		if gi == len(voters) {
+			var s int64
+			for _, x := range l {
+				s += int64(x * x)
+			}
+			best = min(best, s)
+			return
+		}
+		var seen []int
+		for _, o := range legal[gi] {
+			if !slices.Contains(seen, o.leader) && sameSet(o.voters, voters[gi]) {
+				seen = append(seen, o.leader)
+				l[o.leader]++
+				rec(gi + 1)
+				l[o.leader]--
+			}
+		}
+	}
+	rec(0)
+	return best
+}
+
 func choiceCost(v, l []int, voters []int, leader int) Score {
 	out := Score{Leader: int64(l[leader])}
 	for _, s := range voters {
@@ -298,6 +327,11 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 				optimal++
 			} else {
 				gaps[Score{r.Score.Voter - opt.Voter, r.Score.Leader - opt.Leader}]++
+			}
+			// With one rule per group, every legal leader of the planned voters
+			// is a transfer target, so the leaders must be optimal for them.
+			if len(sh.counts) == 1 {
+				re.Equal(leaderOptimum(in, legal, r.Voters), r.Score.Leader, "%s case %d: leaders not optimal for the planned voters", sh.name, cases)
 			}
 			// The single-group choice must minimize (sum V', L' of leader).
 			p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
