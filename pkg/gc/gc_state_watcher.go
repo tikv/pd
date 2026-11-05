@@ -480,6 +480,8 @@ func (m *GCStateManager) terminateGCStateWatcher(
 	m.terminateGCStateWatcherLocked(watcher, cause, reason)
 }
 
+// Metadata changes only publish removals; live upserts come from successful
+// safe-point updates.
 func (m *GCStateManager) publishGCStateRemovals(generation *gcStateGeneration, ids []uint32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -509,7 +511,6 @@ func (m *GCStateManager) publishGCStateChangeLocked(change GCStateChange) {
 			m.terminateGCStateWatcherLocked(watcher, errs.ErrGCStateWatcherSlowConsumer, watcherTerminationSlowConsumer)
 		}
 	}
-	// TODO: Publish keyspace metadata upserts through this same serialized path when an authoritative GC-leader-owned lifecycle hook exists.
 }
 
 func (m *GCStateManager) terminateGCStateWatcherLocked(
