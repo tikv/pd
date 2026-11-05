@@ -225,14 +225,16 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 
 	// Preserve all existing learner peers
 	// Since regions that violate placement rules won't reach this function,
-	// we can safely assume all existing learners should be preserved
+	// the rules require these learners, and moveConflictingLearners moves the
+	// ones on target voter stores.
 	for _, learner := range region.GetLearners() {
 		storeID := learner.GetStoreId()
 		if _, exists := roles[storeID]; !exists {
 			roles[storeID] = placement.Learner
 		}
 	}
-	if !c.moveConflictingLearners(region, group, roles) {
+	movedLearners, ok := c.moveConflictingLearners(region, group, roles)
+	if !ok {
 		return nil
 	}
 
@@ -260,6 +262,9 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 			errs.ZapError(err))
 		affinityCheckerCreateOpFailedCounter.Inc()
 		return nil
+	}
+	if movedLearners {
+		affinityCheckerLearnerMoveCounter.Inc()
 	}
 
 	return op

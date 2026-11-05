@@ -34,17 +34,18 @@ import (
 // moveConflictingLearners gives each learner of region that sits on a target
 // voter store another store in roles, so that the affinity operator promotes
 // that learner and the Region keeps the learners its rules require. A learner
-// takes a voter store that the target drops, which swaps the roles of two
-// peers without copying data, or else a store chosen as the rule checker adds
-// a learner. The resulting layout must satisfy the rules at the best location.
-// A witness does not move. It reports whether the operator can be built. The
-// move waits for a later check if the stores that fit a learner are only
+// tries in turn each voter store that the target drops and its rule allows,
+// which swaps the roles of two peers without copying data, before a store
+// chosen as the rule checker adds a learner. The first layout that satisfies
+// the rules at the best location is used. A witness does not move. It reports
+// whether it moved a learner and whether the operator can be built. The move
+// waits for a later check if the stores that fit a learner are only
 // temporarily unavailable, or if a layout fails only because a better store is
 // temporarily unavailable, so that the learner is not taken for one that
 // cannot move. If no store fits, the group expires and first-win relearns a
 // target.
 func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group *affinity.GroupState,
-	roles map[uint64]placement.PeerRoleType) bool {
+	roles map[uint64]placement.PeerRoleType) (moved, ok bool) {
 	var conflicts []*metapb.Peer
 	var stores []uint64
 	for _, learner := range region.GetLearners() {
@@ -54,26 +55,29 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 		}
 	}
 	if len(conflicts) == 0 {
-		return true
+		return false, true
 	}
 	fit := c.ruleManager.FitRegion(c.cluster, region)
 	temporary := false
+	accept := func(target map[uint64]placement.PeerRoleType) bool {
+		layout := regionWithRoles(region, group.LeaderStoreID, target)
+		if c.isRegionPlacementRuleSatisfiedWithBestLocation(layout, false) {
+			return true
+		}
+		temporary = temporary || c.waitsForBetterStore(layout)
+		return false
+	}
 	for _, swap := range []bool{true, false} {
-		target, swapped, blocked := c.placeLearners(region, fit, roles, conflicts, swap)
+		target, swapped, blocked := c.placeLearners(region, fit, roles, conflicts, swap, accept)
 		temporary = temporary || blocked
 		if target != nil {
-			layout := regionWithRoles(region, group.LeaderStoreID, target)
-			if c.isRegionPlacementRuleSatisfiedWithBestLocation(layout, false) {
-				maps.Copy(roles, target)
-				affinityCheckerLearnerMoveCounter.Inc()
-				log.Debug("move learners off affinity voter stores",
-					zap.Uint64("region-id", region.GetID()),
-					zap.String("group-id", group.ID),
-					zap.Uint64s("learner-stores", stores),
-					zap.Bool("swap", swapped))
-				return true
-			}
-			temporary = temporary || c.waitsForBetterStore(layout)
+			maps.Copy(roles, target)
+			log.Debug("move learners off affinity voter stores",
+				zap.Uint64("region-id", region.GetID()),
+				zap.String("group-id", group.ID),
+				zap.Uint64s("learner-stores", stores),
+				zap.Bool("swap", swapped))
+			return true, true
 		}
 		// Without a swap, a second pass would place the learners the same way.
 		if !swapped {
@@ -81,7 +85,7 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 		}
 	}
 	if temporary {
-		return false
+		return false, false
 	}
 	affinityCheckerLearnerPeerConflictCounter.Inc()
 	// The learners must stay, so let first-win relearn a target from a healthy
@@ -91,7 +95,7 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 		zap.Uint64("region-id", region.GetID()),
 		zap.String("group-id", group.ID),
 		zap.Uint64s("learner-stores", stores))
-	return false
+	return false, false
 }
 
 // waitsForBetterStore reports whether region fails the check of
@@ -119,43 +123,63 @@ func (c *AffinityChecker) waitsForBetterStore(region *core.RegionInfo) bool {
 }
 
 // placeLearners returns roles with another store for each learner of
-// conflicts, or nil and whether a store is temporarily unavailable. With swap,
-// a learner first takes a voter store of the Region that roles does not keep.
+// conflicts, the first such layout that accept takes, or nil. With swap, a
+// learner takes in turn each voter store of the Region that the layout does
+// not keep and its rule allows, and only a learner without such a store takes
+// a store chosen as the rule checker adds a learner. It also reports whether a
+// learner took a voter store and whether a store was temporarily unavailable.
 func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.RegionFit,
-	roles map[uint64]placement.PeerRoleType, conflicts []*metapb.Peer, swap bool) (target map[uint64]placement.PeerRoleType, swapped, temporary bool) {
-	target = maps.Clone(roles)
-	for _, learner := range conflicts {
-		rf := fit.GetRuleFit(learner.GetId())
-		if rf == nil || learner.GetIsWitness() {
-			return nil, swapped, false
+	roles map[uint64]placement.PeerRoleType, conflicts []*metapb.Peer, swap bool,
+	accept func(map[uint64]placement.PeerRoleType) bool) (target map[uint64]placement.PeerRoleType, swapped, temporary bool) {
+	if len(conflicts) == 0 {
+		if accept(roles) {
+			return roles, false, false
 		}
-		storeID := uint64(0)
-		if swap {
-			storeID = c.learnerSwapStore(region, rf.Rule, target)
-			swapped = swapped || storeID != 0
-		}
-		if storeID == 0 {
-			used := make(map[uint64]struct{}, len(target))
-			for id := range target {
-				used[id] = struct{}{}
-			}
-			stores := slices.DeleteFunc(getRuleFitStores(c.cluster, rf), func(store *core.StoreInfo) bool {
-				return store.GetID() == learner.GetStoreId()
-			})
-			storeID, temporary = c.strategy(region, rf.Rule, false).SelectStoreToAdd(stores, filter.NewExcludedFilter(c.Name(), nil, used))
-			if storeID == 0 {
-				return nil, swapped, temporary
-			}
-		}
-		target[storeID] = placement.Learner
+		return nil, false, false
 	}
-	return target, swapped, false
+	learner := conflicts[0]
+	rf := fit.GetRuleFit(learner.GetId())
+	if rf == nil || learner.GetIsWitness() {
+		return nil, false, false
+	}
+	var storeIDs []uint64
+	if swap {
+		storeIDs = c.learnerSwapStores(region, rf.Rule, roles)
+		swapped = len(storeIDs) > 0
+	}
+	if !swapped {
+		used := make(map[uint64]struct{}, len(roles))
+		for id := range roles {
+			used[id] = struct{}{}
+		}
+		stores := slices.DeleteFunc(getRuleFitStores(c.cluster, rf), func(store *core.StoreInfo) bool {
+			return store.GetID() == learner.GetStoreId()
+		})
+		storeID, blocked := c.strategy(region, rf.Rule, false).SelectStoreToAdd(stores, filter.NewExcludedFilter(c.Name(), nil, used))
+		if storeID == 0 {
+			return nil, false, blocked
+		}
+		storeIDs = []uint64{storeID}
+	}
+	for _, storeID := range storeIDs {
+		next := maps.Clone(roles)
+		next[storeID] = placement.Learner
+		var nextSwapped, blocked bool
+		target, nextSwapped, blocked = c.placeLearners(region, fit, next, conflicts[1:], swap, accept)
+		swapped, temporary = swapped || nextSwapped, temporary || blocked
+		if target != nil {
+			break
+		}
+	}
+	return target, swapped, temporary
 }
 
-// learnerSwapStore returns a voter store of region that roles does not keep
-// and that rule allows, or 0. The voter there becomes the learner.
-func (c *AffinityChecker) learnerSwapStore(region *core.RegionInfo, rule *placement.Rule, roles map[uint64]placement.PeerRoleType) uint64 {
+// learnerSwapStores returns the voter stores of region that roles does not
+// keep and that rule allows, in the order of the voters. The voter on such a
+// store becomes the learner.
+func (c *AffinityChecker) learnerSwapStores(region *core.RegionInfo, rule *placement.Rule, roles map[uint64]placement.PeerRoleType) []uint64 {
 	state := &filter.StoreStateFilter{ActionScope: c.Name(), MoveRegion: true, AllowTemporaryStates: true}
+	var stores []uint64
 	for _, voter := range region.GetVoters() {
 		if _, kept := roles[voter.GetStoreId()]; kept || voter.GetIsWitness() {
 			continue
@@ -163,10 +187,10 @@ func (c *AffinityChecker) learnerSwapStore(region *core.RegionInfo, rule *placem
 		store := c.cluster.GetStore(voter.GetStoreId())
 		if store != nil && placement.MatchLabelConstraints(store, rule.LabelConstraints) &&
 			state.Target(c.cluster.GetCheckerConfig(), store).IsOK() {
-			return store.GetID()
+			stores = append(stores, store.GetID())
 		}
 	}
-	return 0
+	return stores
 }
 
 // regionWithRoles returns region with the peers of roles and the leader on

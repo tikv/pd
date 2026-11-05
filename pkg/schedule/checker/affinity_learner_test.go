@@ -76,7 +76,8 @@ func checkAndApply(c *Controller, tc *mockcluster.Cluster, regionIDs ...uint64) 
 }
 
 // A learner on a target voter store swaps roles with the voter that the target
-// drops, so no data is copied and the group keeps its target.
+// drops, so no data is copied and the group keeps its target. While the target
+// leader store rejects leaders, no operator is built and no move is counted.
 func TestAffinityCheckerLearnerSwap(t *testing.T) {
 	for _, target := range []struct {
 		name   string
@@ -96,6 +97,9 @@ func TestAffinityCheckerLearnerSwap(t *testing.T) {
 			moves := promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter)
 			conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
 
+			tc.SetStoreEvictLeader(target.leader, true)
+			re.Empty(c.CheckRegion(region))
+			tc.SetStoreEvictLeader(target.leader, false)
 			ops := c.CheckRegion(region)
 			re.Len(ops, 1)
 			re.Zero(ops[0].Kind()&operator.OpRegion, "a swap adds or removes no peer")
@@ -109,10 +113,49 @@ func TestAffinityCheckerLearnerSwap(t *testing.T) {
 			state := manager.GetAffinityGroupState(id)
 			re.Equal(affinity.PhaseStable, state.Phase)
 			re.Equal([]uint64{1, 2, 4}, state.VoterStoreIDs)
-			re.Equal(moves+1, promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter))
+			re.Equal(moves+1, promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter), "only the built operator counts")
 			re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
 		})
 	}
+}
+
+// The target drops the voters on stores 1 and 3. A learner on store 1 would
+// share a zone with the learner on store 5, so the learner on store 4 takes
+// store 3 instead, although store 1 comes first.
+func TestAffinityCheckerLearnerSwapIsolation(t *testing.T) {
+	re := require.New(t)
+	c, tc, _ := newLearnerConflictController(t)
+	tc.AddRegionStore(6, 10)
+	for i, zone := range []string{"z1", "z2", "z3", "z4", "z1", "z3"} {
+		tc.SetStoreLabel(uint64(i+1), map[string]string{"zone": zone})
+	}
+	rule := tc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	rule.LocationLabels, rule.IsolationLevel = []string{"zone"}, "zone"
+	re.NoError(tc.GetRuleManager().SetRule(rule))
+	rule = newLearnerRule()
+	rule.Count, rule.LocationLabels, rule.IsolationLevel = 2, []string{"zone"}, "zone"
+	re.NoError(tc.GetRuleManager().SetRule(rule))
+	putLearner(tc, 1, 4)
+	region := tc.GetRegion(1).Clone(core.WithAddPeer(&metapb.Peer{Id: 201, StoreId: 5, Role: metapb.PeerRole_Learner}))
+	tc.PutRegion(region)
+	manager := tc.GetAffinityManager()
+	const id = "learner-swap-isolation"
+	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+		ID: id, LeaderStoreID: 2, VoterStoreIDs: []uint64{2, 4, 6},
+	}, region.GetStartKey(), region.GetEndKey()))
+	moves := promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter)
+	conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
+
+	checkAndApply(c, tc, 1, 1)
+	moved := tc.GetRegion(1)
+	re.NotNil(moved.GetStoreLearner(3), "the learner takes store 3")
+	re.NotNil(moved.GetStoreLearner(5))
+	re.True(tc.GetRuleManager().FitRegionWithoutCache(tc, moved).IsSatisfied())
+	state := manager.GetAffinityGroupState(id)
+	re.Equal(affinity.PhaseStable, state.Phase)
+	re.Equal([]uint64{2, 4, 6}, state.VoterStoreIDs)
+	re.Equal(moves+1, promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter))
+	re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
 }
 
 // If the rule of the learner does not allow the voter store that the target
@@ -195,7 +238,7 @@ func TestAffinityCheckerScatteredLearners(t *testing.T) {
 // can take moves. A TiFlash learner is on a store that no valid target uses as
 // a voter store, and the learners of a peer move in progress and an orphan
 // learner fail the placement check first. A witness, or a learner that its rule
-// pins to its store, cannot move, so the group expires as before.
+// pins to its store, cannot move, so the group expires.
 func TestAffinityCheckerLearnerNotMoved(t *testing.T) {
 	for _, kind := range []string{"tiflash", "peer-move", "orphan", "witness", "pinned"} {
 		t.Run(kind, func(t *testing.T) {
