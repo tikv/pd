@@ -173,6 +173,50 @@ func TestBasicGroupOperations(t *testing.T) {
 	re.False(manager.IsGroupExist("group1"))
 }
 
+// TestGroupRuleSyncOrder ensures that a group and its label rule, which share a
+// revision but reach the scheduling service through different watchers, are
+// synced in either order. Both put orders reach the same state, so each delete
+// order runs once.
+func TestGroupRuleSyncOrder(t *testing.T) {
+	for _, ruleFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rule-first=%t", ruleFirst), func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+			change := GroupKeyRanges{GroupID: "sync-order", KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}
+			// Simulate the watcher path (JSON roundtrip) to match the Data type of real events.
+			data, err := json.Marshal(MakeLabelRule(change))
+			re.NoError(err)
+			rule, err := labeler.NewLabelRuleFromJSON(data)
+			re.NoError(err)
+			if ruleFirst {
+				re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+			}
+			manager.SyncGroupFromEtcd(&Group{ID: change.GroupID})
+			if !ruleFirst {
+				re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+			}
+			re.Equal(1, manager.GetAffinityGroupState(change.GroupID).RangeCount)
+			re.Equal(change, manager.keyRanges[change.GroupID])
+			re.Empty(manager.labelRuleBuffer)
+			if ruleFirst {
+				manager.SyncKeyRangesDeleteFromEtcd(rule.ID)
+			}
+			manager.SyncGroupDeleteFromEtcd(change.GroupID)
+			if !ruleFirst {
+				manager.SyncKeyRangesDeleteFromEtcd(rule.ID)
+			}
+			re.False(manager.IsGroupExist(change.GroupID))
+			re.Empty(manager.keyRanges)
+			re.Empty(manager.labelRuleBuffer)
+		})
+	}
+}
+
 // TestSyncLabelRuleBeforeGroup ensures label rules arriving before group sync are applied after group creation.
 func TestSyncLabelRuleBeforeGroup(t *testing.T) {
 	re := require.New(t)
