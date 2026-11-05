@@ -29,6 +29,11 @@ import (
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/spf13/cobra"
+<<<<<<< HEAD
+=======
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+>>>>>>> 5f665420bd (mcs: bound member status checks when looking up the PD leader (#11485))
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -200,35 +205,36 @@ func (s *Server) updatePDMemberLoop() {
 			log.Warn("failed to list members", errs.ZapError(err))
 			continue
 		}
-		for _, ep := range members.Members {
-			if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
-				log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
-				continue
-			}
-			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
-			if err != nil {
-				log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
-				continue
-			}
-			if status.Leader == ep.ID {
+		etcdutil.ScanEtcdLeader(ctx, s.GetClient(), members.Members, requestTimeout,
+			func(ep *etcdserverpb.Member, status *clientv3.StatusResponse) bool {
 				cc, err := s.GetDelegateClient(ctx, s.GetTLSConfig(), ep.ClientURLs[0])
 				if err != nil {
 					log.Info("failed to get delegate client", errs.ZapError(err))
-					continue
+					return false
 				}
 				if !s.IsServing() {
 					// double check
-					break
+					return true
 				}
+<<<<<<< HEAD
 				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
 					if status.Leader != curLeader {
 						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
 					}
 					curLeader = ep.ID
 					break
+=======
+				cluster := s.GetCluster()
+				if cluster == nil || !cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
+					return false
+>>>>>>> 5f665420bd (mcs: bound member status checks when looking up the PD leader (#11485))
 				}
-			}
-		}
+				if status.Leader != curLeader {
+					log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+				}
+				curLeader = ep.ID
+				return true
+			})
 	}
 }
 
