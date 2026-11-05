@@ -104,21 +104,7 @@ func (s *Service) checkServing() error {
 
 // GetResourceGroup implements ResourceManagerServer.GetResourceGroup.
 func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroupRequest) (*rmpb.GetResourceGroupResponse, error) {
-	if err := s.checkServing(); err != nil {
-		return nil, err
-	}
-	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
-	rg, err := s.manager.GetResourceGroup(keyspaceID, req.ResourceGroupName, req.WithRuStats)
-	if err != nil {
-		return nil, err
-	}
-	if rg == nil {
-		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(req.ResourceGroupName)
-	}
-	resp := rg.IntoProtoResourceGroup(keyspaceID)
-	return &rmpb.GetResourceGroupResponse{
-		Group: resp,
-	}, nil
+	return nil, status.Error(codes.Unavailable, "resource manager is unavailable")
 }
 
 // ListResourceGroups implements ResourceManagerServer.ListResourceGroups.
