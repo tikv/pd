@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -31,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/client/clients/gc"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
@@ -45,7 +48,10 @@ func (s *gcReadErrorServer) GetGCState(context.Context, *pdpb.GetGCStateRequest)
 	if s.rpcErr != nil {
 		return nil, s.rpcErr
 	}
-	return &pdpb.GetGCStateResponse{Header: &pdpb.ResponseHeader{Error: s.headerErr}}, nil
+	return &pdpb.GetGCStateResponse{
+		Header:  &pdpb.ResponseHeader{Error: s.headerErr},
+		GcState: &pdpb.GCState{KeyspaceScope: wrapKeyspaceScope(42), IsKeyspaceLevelGc: true},
+	}, nil
 }
 
 func (s *gcReadErrorServer) GetAllKeyspacesGCStates(context.Context, *pdpb.GetAllKeyspacesGCStatesRequest) (*pdpb.GetAllKeyspacesGCStatesResponse, error) {
@@ -75,9 +81,16 @@ func (d *gcReadServiceDiscovery) GetServiceClient() sd.ServiceClient { return d.
 func (d *gcReadServiceDiscovery) ScheduleCheckMemberChanged()        { d.checks++ }
 
 func TestGCReadErrorsScheduleMemberDiscovery(t *testing.T) {
+	sampleCount := func(observer prometheus.Observer) uint64 {
+		metric := &dto.Metric{}
+		require.NoError(t, observer.(prometheus.Metric).Write(metric))
+		return metric.GetHistogram().GetSampleCount()
+	}
 	for _, api := range []struct {
-		name string
-		read func(context.Context, gc.GCStatesClient) error
+		name              string
+		read              func(context.Context, gc.GCStatesClient) error
+		cmdDuration       prometheus.Observer
+		cmdFailedDuration prometheus.Observer
 	}{
 		{
 			name: "GetGCState",
@@ -85,6 +98,8 @@ func TestGCReadErrorsScheduleMemberDiscovery(t *testing.T) {
 				_, err := c.GetGCState(ctx)
 				return err
 			},
+			cmdDuration:       metrics.CmdDurationGetGCState,
+			cmdFailedDuration: metrics.CmdFailedDurationGetGCState,
 		},
 		{
 			name: "GetAllKeyspacesGCStates",
@@ -92,6 +107,8 @@ func TestGCReadErrorsScheduleMemberDiscovery(t *testing.T) {
 				_, err := c.GetAllKeyspacesGCStates(ctx)
 				return err
 			},
+			cmdDuration:       metrics.CmdDurationGetAllKeyspacesGCStates,
+			cmdFailedDuration: metrics.CmdFailedDurationGetAllKeyspacesGCStates,
 		},
 	} {
 		t.Run(api.name, func(t *testing.T) {
@@ -101,6 +118,11 @@ func TestGCReadErrorsScheduleMemberDiscovery(t *testing.T) {
 				wantCode   codes.Code
 				wantChecks int
 			}{
+				{
+					name:     "success",
+					server:   &gcReadErrorServer{},
+					wantCode: codes.OK,
+				},
 				{
 					name:       "leader loss RPC error",
 					server:     &gcReadErrorServer{rpcErr: status.Error(codes.Unavailable, "not leader")},
@@ -139,13 +161,22 @@ func TestGCReadErrorsScheduleMemberDiscovery(t *testing.T) {
 						serviceClient:        &gcReadServiceClient{conn: conn},
 					}
 					c := &client{inner: &innerClient{serviceDiscovery: discovery, option: opt.NewOption()}}
+					cmdCount := sampleCount(api.cmdDuration)
+					failedCount := sampleCount(api.cmdFailedDuration)
 					err = api.read(t.Context(), c.GetGCStatesClient(42))
-					require.Error(t, err)
+					if testCase.wantCode == codes.OK {
+						require.NoError(t, err)
+					} else {
+						require.Error(t, err)
+						failedCount++
+					}
 					require.Equal(t, testCase.wantCode, status.Code(err))
 					if testCase.server.headerErr != nil {
 						require.ErrorContains(t, err, "gc state read failed")
 					}
 					require.Equal(t, testCase.wantChecks, discovery.checks)
+					require.Equal(t, cmdCount+1, sampleCount(api.cmdDuration), "each call records one command duration")
+					require.Equal(t, failedCount, sampleCount(api.cmdFailedDuration), "only failed calls record a failed duration")
 				})
 			}
 		})
