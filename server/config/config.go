@@ -493,6 +493,91 @@ func (c *Config) AdjustWithMetadata(configMetaData *configutil.ConfigMetaData, r
 	return nil
 }
 
+const grpcGatewayDefaultFile = "grpc-gateway-default"
+
+// grpcGatewayDefault preserves the old default for initialized members. New
+// members record the new default before etcd creates its WAL, so restarting them
+// does not enable the gateway. An explicit configuration overrides this default.
+func (c *Config) grpcGatewayDefault() (bool, error) {
+	data, err := os.ReadFile(filepath.Join(c.DataDir, grpcGatewayDefaultFile))
+	if err == nil {
+		var enabled *bool
+		if err = json.Unmarshal(data, &enabled); err != nil {
+			return false, errors.Annotate(err, "read gRPC gateway default")
+		}
+		if enabled == nil {
+			return false, errors.New("gRPC gateway default must be a boolean")
+		}
+		return *enabled, nil
+	}
+	if !os.IsNotExist(err) {
+		return false, errors.Annotate(err, "read gRPC gateway default")
+	}
+	info, err := os.Stat(filepath.Join(c.DataDir, "member", "wal"))
+	if err == nil {
+		if !info.IsDir() {
+			return false, errors.New("etcd WAL path is not a directory")
+		}
+		return true, nil
+	}
+	if !os.IsNotExist(err) {
+		return false, errors.Annotate(err, "check existing etcd member")
+	}
+	return defaultEnableGRPCGateway, nil
+}
+
+// PersistGRPCGatewayDefault records the member's default before starting etcd.
+// It does not persist an explicit override from the configuration file.
+func (c *Config) PersistGRPCGatewayDefault() error {
+	path := filepath.Join(c.DataDir, grpcGatewayDefaultFile)
+	if _, err := os.Stat(path); err == nil {
+		return syncGRPCGatewayDefaultDir(c.DataDir)
+	} else if !os.IsNotExist(err) {
+		return errors.Annotate(err, "check gRPC gateway default")
+	}
+	enabled, err := c.grpcGatewayDefault()
+	if err != nil {
+		return err
+	}
+	if err = os.MkdirAll(c.DataDir, 0700); err != nil {
+		return errors.WithStack(err)
+	}
+	file, err := os.CreateTemp(c.DataDir, ".grpc-gateway-default-*")
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	defer os.Remove(file.Name())
+	if err = json.NewEncoder(file).Encode(enabled); err == nil {
+		err = file.Sync()
+	}
+	closeErr := file.Close()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if closeErr != nil {
+		return errors.WithStack(closeErr)
+	}
+	if err = os.Rename(file.Name(), path); err != nil {
+		return errors.WithStack(err)
+	}
+	// Make the rename durable before etcd can create a WAL. Otherwise a crash
+	// could leave a new member looking like an upgraded member on restart.
+	return syncGRPCGatewayDefaultDir(c.DataDir)
+}
+
+func syncGRPCGatewayDefaultDir(dataDir string) error {
+	dir, err := os.Open(dataDir)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	err = dir.Sync()
+	closeErr := dir.Close()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return errors.WithStack(closeErr)
+}
+
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
