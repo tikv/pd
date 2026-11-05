@@ -15,8 +15,10 @@
 package affinity
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -32,6 +34,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -397,6 +401,82 @@ func TestLabelRuleIntegration(t *testing.T) {
 	err = manager.DeleteAffinityGroups([]string{"group_no_label"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group_no_label"))
+}
+
+// failingAffinityStorage fails the failAt-th transaction, so a request that
+// spans several transactions commits only the earlier ones.
+type failingAffinityStorage struct {
+	endpoint.AffinityStorage
+	txnCount int
+	failAt   int
+}
+
+func (s *failingAffinityStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	s.txnCount++
+	if s.txnCount == s.failAt {
+		return errors.New("injected affinity transaction failure")
+	}
+	return s.AffinityStorage.RunInTxn(ctx, f)
+}
+
+// TestAffinityGroupsBatchFailure verifies that when a later transaction of a
+// batch creation or deletion fails, each group with ranges is persisted together
+// with its label rule, and the manager does not apply the request to memory.
+func TestAffinityGroupsBatchFailure(t *testing.T) {
+	for _, deleting := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deleting=%t", deleting), func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			failingStore := &failingAffinityStorage{AffinityStorage: store}
+			manager, err := NewManager(ctx, failingStore, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+			// Both requests need two transactions. The first group has no label
+			// rule, so cutting the operations every MaxEtcdTxnOps would separate
+			// a later group from its rule.
+			changes := make([]GroupKeyRanges, etcdutil.MaxEtcdTxnOps/2+2)
+			ids := make([]string, len(changes))
+			for i := range changes {
+				ids[i] = fmt.Sprintf("batch-group-%d", i)
+				changes[i].GroupID = ids[i]
+				if i > 0 {
+					changes[i].KeyRanges = []keyutil.KeyRange{{StartKey: fmt.Appendf(nil, "%04d", i), EndKey: fmt.Appendf(nil, "%04d", i+1)}}
+				}
+			}
+			if deleting {
+				re.NoError(manager.CreateAffinityGroups(changes))
+			}
+			failingStore.txnCount, failingStore.failAt = 0, 2
+			if deleting {
+				err = manager.DeleteAffinityGroups(ids, true)
+			} else {
+				err = manager.CreateAffinityGroups(changes)
+			}
+			re.ErrorContains(err, "injected affinity transaction failure")
+			re.Equal(2, failingStore.txnCount)
+
+			// Rebuild the labeler and the manager from storage as a restart does.
+			reloadedLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			reloaded, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), reloadedLabeler)
+			re.NoError(err)
+			for _, change := range changes {
+				ruleID, hasRanges := GetLabelRuleID(change.GroupID), len(change.KeyRanges) > 0
+				re.Equal(deleting, manager.IsGroupExist(change.GroupID))
+				re.Equal(deleting && hasRanges, regionLabeler.GetLabelRule(ruleID) != nil)
+				state := reloaded.GetAffinityGroupState(change.GroupID)
+				re.Equal(state != nil && hasRanges, reloadedLabeler.GetLabelRule(ruleID) != nil,
+					"group %s and its label rule must persist together", change.GroupID)
+				if state != nil {
+					re.Equal(len(change.KeyRanges), state.RangeCount)
+				}
+			}
+			// Only the first transaction committed.
+			re.NotEqual(reloaded.IsGroupExist(ids[0]), reloaded.IsGroupExist(ids[len(ids)-1]))
+		})
+	}
 }
 
 // TestUpdateAffinityGroupKeyRangesAddToEmptyGroup documents the current failure

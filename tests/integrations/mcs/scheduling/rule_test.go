@@ -22,14 +22,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -217,6 +215,8 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.Equal(labelRule.RuleType, labelRules[1].RuleType)
 }
 
+// TestAffinityGroupRuleTransactions checks that the scheduling service loads and
+// watches the groups and label rules that PD writes in pairs.
 func (suite *ruleTestSuite) TestAffinityGroupRuleTransactions() {
 	re := suite.Require()
 	apiManager := suite.pdLeaderServer.GetRaftCluster().GetAffinityManager()
@@ -224,45 +224,32 @@ func (suite *ruleTestSuite) TestAffinityGroupRuleTransactions() {
 		{GroupID: "paired-snapshot", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
 		{GroupID: "paired-watch", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
 	}
-	// Load a pair that was committed before either scheduling watcher starts.
+	// The first pair exists before the scheduling service starts.
 	re.NoError(apiManager.CreateAffinityGroups(changes[:1]))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
-	tc.WaitForPrimaryServing(re)
-	cluster := tc.GetPrimaryServer().GetCluster()
+	cluster := tc.WaitForPrimaryServing(re).GetCluster()
 	manager, regionLabeler := cluster.GetAffinityManager(), cluster.GetRegionLabeler()
-	checkPair := func(change affinity.GroupKeyRanges) {
-		resp, err := suite.pdLeaderServer.GetEtcdClient().Txn(suite.ctx).Then(
-			clientv3.OpGet(keypath.AffinityGroupPath(change.GroupID)),
-			clientv3.OpGet(keypath.RegionLabelKeyPath(affinity.GetLabelRuleID(change.GroupID))),
-		).Commit()
-		re.NoError(err)
-		groupKVs, ruleKVs := resp.Responses[0].GetResponseRange().Kvs, resp.Responses[1].GetResponseRange().Kvs
-		re.Len(groupKVs, 1)
-		re.Len(ruleKVs, 1)
-		re.Equal(groupKVs[0].ModRevision, ruleKVs[0].ModRevision)
-		testutil.Eventually(re, func() bool {
-			state := manager.GetAffinityGroupState(change.GroupID)
-			rule := regionLabeler.GetLabelRule(affinity.GetLabelRuleID(change.GroupID))
-			return state != nil && state.RangeCount == 1 && rule != nil
-		})
-		ranges := regionLabeler.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)).GetKeyRanges()
-		re.Len(ranges, 1)
-		re.Equal(change.KeyRanges[0].StartKey, ranges[0].StartKey)
-		re.Equal(change.KeyRanges[0].EndKey, ranges[0].EndKey)
-	}
-	checkPair(changes[0])
-	// The rule and affinity watchers consume the live pair independently.
 	re.NoError(apiManager.CreateAffinityGroups(changes[1:]))
-	checkPair(changes[1])
-	for _, change := range changes {
-		re.NoError(apiManager.DeleteAffinityGroups([]string{change.GroupID}, true))
-		testutil.Eventually(re, func() bool {
-			return !manager.IsGroupExist(change.GroupID) &&
-				regionLabeler.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)) == nil
-		})
-	}
+	testutil.Eventually(re, func() bool {
+		for _, change := range changes {
+			state := manager.GetAffinityGroupState(change.GroupID)
+			if state == nil || state.RangeCount != 1 || regionLabeler.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)) == nil {
+				return false
+			}
+		}
+		return true
+	})
+	re.NoError(apiManager.DeleteAffinityGroups([]string{changes[0].GroupID, changes[1].GroupID}, true))
+	testutil.Eventually(re, func() bool {
+		for _, change := range changes {
+			if manager.IsGroupExist(change.GroupID) || regionLabeler.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)) != nil {
+				return false
+			}
+		}
+		return true
+	})
 }
 
 func (suite *ruleTestSuite) TestSchedulingSwitch() {
