@@ -70,7 +70,9 @@ func (tc *TestSchedulingCluster) AddServer(addr string) error {
 	if err != nil {
 		return err
 	}
-	// Follow the PD cluster so that its config options also control log redaction.
+	// Log redaction is process-wide, and InitLogger applies it only once. Follow
+	// the PD setting so that the scheduling server's default does not override a
+	// test that disables redaction on the PD cluster.
 	generatedCfg.Security.RedactInfoLog = tc.pd.GetLeaderServer().GetConfig().Security.RedactInfoLog
 	err = InitLogger(generatedCfg.Log, generatedCfg.Logger, generatedCfg.LogProps, generatedCfg.Security.RedactInfoLog)
 	if err != nil {

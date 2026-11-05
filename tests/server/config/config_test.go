@@ -178,11 +178,6 @@ func TestMetricStorageValidationAtQueryTime(t *testing.T) {
 	}
 }
 
-type configTestSuite struct {
-	suite.Suite
-	env *tests.SchedulingTestEnvironment
-}
-
 func TestRedactInfoLogWithPersistedConfig(t *testing.T) {
 	re := require.New(t)
 	cluster, err := tests.NewTestCluster(t.Context(), 1)
@@ -205,14 +200,19 @@ func TestRedactInfoLogWithPersistedConfig(t *testing.T) {
 	re.True(exist)
 	re.Equal(logutil.RedactInfoLogOFF, persisted.Security.RedactInfoLog)
 
-	// After a restart, the default still applies because the configuration file does not set it.
+	// The restarted leader reloads the persisted configuration. The reload must not
+	// apply its security section, so the server keeps the value it started with.
 	re.NoError(cluster.StopAll())
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
-	re.Equal("?", logutil.RedactString("key"))
 	cfg := &config.Config{}
 	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, cluster.GetLeaderServer().GetAddr()+"/pd/api/v1/config", cfg))
 	re.Equal(logutil.RedactInfoLogON, cfg.Security.RedactInfoLog)
+}
+
+type configTestSuite struct {
+	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestConfigTestSuite(t *testing.T) {
