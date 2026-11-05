@@ -109,10 +109,7 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 		strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "/"),
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
-		func([]*clientv3.Event) error {
-			w.affinityManager.LogRangeConflicts()
-			return nil
-		},
+		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
 	w.groupWatcher.SetReconcileDeletedKeys()
@@ -152,10 +149,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		strings.TrimSuffix(keypath.RegionLabelKeyPath(affinity.LabelRuleIDPrefix), "/"), // Filter: only process affinity group label rules
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
-		func([]*clientv3.Event) error {
-			w.affinityManager.LogRangeConflicts()
-			return nil
-		},
+		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
 	w.labelWatcher.SetReconcileDeletedKeys()
