@@ -94,6 +94,29 @@ func TestRevertChainStops(t *testing.T) {
 	}
 }
 
+// A reversion restores the rule assignment of the input voters, which the
+// leader transfers read. The chooser lists voters in rule order; the input
+// may not.
+func TestRevertRestoresRuleAssignment(t *testing.T) {
+	re := require.New(t)
+	rules := []*Rule{
+		{Role: RoleLeader, Count: 1, Stores: []int{0, 1}},
+		{Role: RoleFollower, Count: 1, Stores: []int{2, 3}},
+	}
+	in := &Input{Stores: 4, BaseVoters: make([]int, 4), BaseLeaders: make([]int, 4), Groups: []Group{{
+		Rules: rules, Voters: []int{2, 0}, RuleOf: []int{1, 0}, Leader: 0, CanLead: allTrue(4)}}}
+	p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
+	origV, origL := p.layout()
+	// Another target with the same score, as the chooser returns it.
+	g := &p.gs[0]
+	p.move(g, []int{1, 3}, 1)
+	g.curRule = []int{0, 1}
+	voters, leaders := p.layout()
+	re.Equal(Score{2, 1}, p.revert(origV, origL, voters, leaders))
+	re.Equal([]int{2, 0}, g.cur)
+	re.Equal([]int{1, 0}, g.curRule)
+}
+
 func TestPlanRevertStops(t *testing.T) {
 	const groups = 32
 	in := revertChain(groups)

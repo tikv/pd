@@ -94,16 +94,18 @@ type Input struct {
 // Options bounds the search. Zero values select the defaults.
 type Options struct {
 	Sweeps int
-	// WorkBudget limits candidate and reversion load entries processed by the
-	// whole plan, including entries restored after a rejected reversion.
+	// WorkBudget limits candidate, reversion and leader transfer load entries
+	// processed by the whole plan, including entries restored after a
+	// rejected reversion.
 	WorkBudget int64
 	Seed       uint64
-	// Cancel is checked before every group visit and reversion trial.
+	// Cancel is checked before every group visit, reversion trial and round
+	// of leader transfers.
 	Cancel func() bool
 }
 
-// Default search limits. The work budget is shared by greedy candidate scans
-// and reversion cleanup.
+// Default search limits. The work budget is shared by greedy candidate scans,
+// reversion cleanup and leader transfers.
 const (
 	DefaultSweeps     = 4
 	DefaultWorkBudget = 10_000_000
