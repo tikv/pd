@@ -44,6 +44,7 @@ var affinitySplitWaitTimeout = defaultAffinitySplitWaitTimeout
 
 type affinitySplitAttempt struct {
 	version          uint64
+	voterStoreIDs    []uint64
 	startedAt        time.Time
 	expiresAt        time.Time
 	fallbackReported bool
@@ -52,7 +53,9 @@ type affinitySplitAttempt struct {
 // prepareAffinityPeerMove requests a SCAN split before adding a voter when size
 // or keys exceed TiKV's ordinary split thresholds. It only looks at this Region:
 // each child is checked on a later patrol after its heartbeat reports it, and an
-// unchanged epoch can move after the split wait timeout.
+// unchanged epoch can move after the split wait timeout. An attempt belongs to
+// one move: other target voters start a new one, and Check removes it once the
+// Region is at the target.
 func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState) (*operator.Operator, bool) {
 	if !slices.ContainsFunc(group.VoterStoreIDs, func(id uint64) bool { return region.GetStorePeer(id) == nil }) {
 		return nil, true
@@ -74,10 +77,16 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if uint64(region.GetApproximateSize()) > storeConfig.GetRegionSplitSize() ||
 		uint64(region.GetApproximateKeys()) > storeConfig.GetRegionSplitKeys() {
 		now := time.Now()
-		attempt = affinitySplitAttempt{version: region.GetRegionEpoch().GetVersion(), startedAt: now}
+		attempt = affinitySplitAttempt{
+			version:       region.GetRegionEpoch().GetVersion(),
+			voterStoreIDs: group.VoterStoreIDs,
+			startedAt:     now,
+		}
 		if value, ok := c.splitAttempts.Get(region.GetID()); ok {
 			previous := value.(affinitySplitAttempt)
-			if previous.version == attempt.version && now.Before(previous.expiresAt) {
+			// Both lists are sorted.
+			if previous.version == attempt.version && slices.Equal(previous.voterStoreIDs, attempt.voterStoreIDs) &&
+				now.Before(previous.expiresAt) {
 				attempt = previous
 			}
 		}

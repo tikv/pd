@@ -161,6 +161,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
+		// The move is done, so a later move of the Region tries to split it again.
+		c.splitAttempts.Remove(region.GetID())
 		return c.mergeCheck(region, group)
 	}
 
