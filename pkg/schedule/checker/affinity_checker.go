@@ -177,7 +177,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 // moving the region to match the expected configuration in one operation.
 //
 // This function preserves:
-// - Existing learner peers (e.g., TiFlash peers)
+// - Existing learner peers (e.g., TiFlash peers); moveConflictingLearners moves one off a target voter store
 //
 // Note: This function assumes that regions passed to it already comply with placement rules.
 // The affinity checker focuses solely on adjusting voter peers according to affinity group configuration.
@@ -228,20 +228,12 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 	// we can safely assume all existing learners should be preserved
 	for _, learner := range region.GetLearners() {
 		storeID := learner.GetStoreId()
-		if existingRole, exists := roles[storeID]; !exists {
+		if _, exists := roles[storeID]; !exists {
 			roles[storeID] = placement.Learner
-		} else if existingRole != placement.Learner {
-			affinityCheckerLearnerPeerConflictCounter.Inc()
-			// The learner must be preserved, so let first-win relearn a target
-			// from a healthy Region instead of retrying an impossible peer move.
-			c.affinityManager.ExpireAffinityGroup(group.ID)
-			log.Debug("expire affinity group after learner-voter conflict",
-				zap.Uint64("region-id", region.GetID()),
-				zap.String("group-id", group.ID),
-				zap.Uint64("store-id", storeID),
-				zap.String("conflicting-role", string(existingRole)))
-			return nil
 		}
+	}
+	if !c.moveConflictingLearners(region, group, roles) {
+		return nil
 	}
 
 	// Skip building if target leader store currently disallows leader in (e.g., evict-leader / reject-leader).
