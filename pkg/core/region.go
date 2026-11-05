@@ -96,9 +96,10 @@ type RegionInfo struct {
 	reportBuckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
-	// approximateSizeUnknown is set while the store has not reported the size of a
-	// Region that PD did not know before. Its approximateSize is
-	// EmptyRegionApproximateSize meanwhile, the same as for an empty Region.
+	// approximateSizeUnknown is set while the store has reported no size for the
+	// Region since PD added it or since its epoch version changed. Its
+	// approximateSize is EmptyRegionApproximateSize or the size from before the
+	// change meanwhile.
 	approximateSizeUnknown bool
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
 	ref atomic.Int32
@@ -314,7 +315,10 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 		if origin != nil {
 			r.approximateSize = origin.approximateSize
 			r.approximateKeys = origin.approximateKeys
-			r.approximateSizeUnknown = origin.approximateSizeUnknown
+			// A split or merge changes the range, so the size of the origin is not the
+			// size of this Region.
+			r.approximateSizeUnknown = origin.approximateSizeUnknown ||
+				r.GetRegionEpoch().GetVersion() != origin.GetRegionEpoch().GetVersion()
 		} else {
 			r.approximateSize = EmptyRegionApproximateSize
 			r.approximateSizeUnknown = true
@@ -721,9 +725,9 @@ func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
 }
 
-// IsApproximateSizeUnknown returns whether the store has not reported the size of
-// a Region that PD did not know before. GetApproximateSize returns
-// EmptyRegionApproximateSize for such a Region.
+// IsApproximateSizeUnknown returns whether the store has reported no size for the
+// Region since PD added it or since its epoch version changed. GetApproximateSize
+// returns EmptyRegionApproximateSize or the size from before the change meanwhile.
 func (r *RegionInfo) IsApproximateSizeUnknown() bool {
 	return r.approximateSizeUnknown
 }

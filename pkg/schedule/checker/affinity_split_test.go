@@ -113,17 +113,19 @@ func TestAffinitySplitBeforeMoveUnreportedSize(t *testing.T) {
 	cluster, checker := newAffinitySplitTest(t)
 	// A USEKEY split of the 64 MiB Region 1 adds Regions 2 and 3. TiKV does not
 	// share the parent's size with them, so a new Region reports 0 bytes until
-	// its first split check, and an empty Region reports 1 byte.
+	// its first split check, and an empty Region reports 1 byte. Region 1 keeps
+	// its ID and reports 0 bytes as well if TiKV had no size for it before the
+	// split, for example right after a leader transfer.
 	parent := cluster.GetRegion(1)
-	cluster.PutRegion(parent.Clone(core.WithEndKey([]byte("g")), core.WithIncVersion()))
-	children := map[uint64]*core.RegionInfo{
+	regions := map[uint64]*core.RegionInfo{
+		1: parent.Clone(core.WithEndKey([]byte("g")), core.WithIncVersion()),
 		2: parent.Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("g")), core.WithEndKey([]byte("m")), core.WithIncVersion()),
 		3: parent.Clone(core.WithNewRegionID(3), core.WithStartKey([]byte("m")), core.WithIncVersion()),
 	}
 	// heartbeat handles a heartbeat as processRegionHeartbeat does and checks the Region.
 	heartbeat := func(id, size uint64) []*operator.Operator {
 		region := core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
-			Region: children[id].GetMeta(), Leader: children[id].GetLeader(), ApproximateSize: size,
+			Region: regions[id].GetMeta(), Leader: regions[id].GetLeader(), ApproximateSize: size,
 		}, 0)
 		origin := cluster.GetRegion(id)
 		region.Inherit(origin, false)
@@ -136,6 +138,7 @@ func TestAffinitySplitBeforeMoveUnreportedSize(t *testing.T) {
 		re.Len(ops, 1)
 		re.Equal("affinity-move-region", ops[0].Desc())
 	}
+	re.Empty(heartbeat(1, 0), "the size after the split is not reported yet")
 	re.Empty(heartbeat(2, 0), "the size is not reported yet")
 	re.Empty(heartbeat(2, 0), "the size is still not reported")
 	requireMove(heartbeat(2, 1))
