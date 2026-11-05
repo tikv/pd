@@ -63,7 +63,7 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 	// Double-check the group ID from the label rule.
 	var groupIDFromLabel string
 	for _, label := range rule.Labels {
-		if label.Key == labelKey {
+		if label.Key == AffinityLabelKey {
 			groupIDFromLabel = label.Value
 			break
 		}
@@ -85,7 +85,7 @@ func MakeLabelRule(groupKeyRanges GroupKeyRanges) *labeler.LabelRule {
 	}
 	return &labeler.LabelRule{
 		ID:       GetLabelRuleID(groupKeyRanges.GroupID),
-		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: groupKeyRanges.GroupID}},
+		Labels:   []labeler.RegionLabel{{Key: AffinityLabelKey, Value: groupKeyRanges.GroupID}},
 		RuleType: labeler.KeyRange,
 		Data:     labelData,
 	}
