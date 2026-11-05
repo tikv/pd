@@ -20,6 +20,7 @@ import (
 	"slices"
 	"time"
 
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -219,6 +220,8 @@ type etcdTxn struct {
 	operations []clientv3.Op
 }
 
+var _ BatchLoadTxn = (*etcdTxn)(nil)
+
 // RunInTxn runs user provided function f in a transaction.
 func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
 	return kv.RunInTxnWithConditions(ctx, nil, f)
@@ -275,29 +278,73 @@ func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	return txn.guardLoaded(key, resp.Kvs, compareRevision)
+}
+
+// guardLoaded returns the value that a read of key returned in kvs and puts a
+// comparator into conditions, so that the commit fails if the key changes after
+// the read.
+func (txn *etcdTxn) guardLoaded(key string, kvs []*mvccpb.KeyValue, compareRevision bool) (string, error) {
 	var condition clientv3.Cmp
 	var value string
-	switch respLen := len(resp.Kvs); respLen {
+	switch respLen := len(kvs); respLen {
 	case 0:
 		// If target key does not contain a value, pin the CreateRevision of the key to 0.
 		// Returned value should be empty string.
 		value = ""
 		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
 	case 1:
-		value = string(resp.Kvs[0].Value)
+		value = string(kvs[0].Value)
 		if compareRevision {
-			condition = clientv3.Compare(clientv3.ModRevision(key), "=", resp.Kvs[0].ModRevision)
+			condition = clientv3.Compare(clientv3.ModRevision(key), "=", kvs[0].ModRevision)
 		} else {
 			// If target key has value, must make sure it stays the same at the time of commit.
 			condition = clientv3.Compare(clientv3.Value(key), "=", value)
 		}
 	default:
 		// If response contains multiple kvs, error occurred.
-		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(kvs)
 	}
 	// Append the check condition to transaction.
 	txn.conditions = append(txn.conditions, condition)
 	return value, nil
+}
+
+// BatchLoad implements BatchLoadTxn. It reads all keys in one etcd transaction
+// that only reads, so they are read at one revision in one round trip, and
+// guards each of them as Load does.
+func (txn *etcdTxn) BatchLoad(keys []string) ([]string, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	ops := make([]clientv3.Op, 0, len(keys))
+	for _, key := range keys {
+		ops = append(ops, clientv3.OpGet(key))
+	}
+	resp, err := NewSlowLogTxnWithContext(txn.ctx, txn.kv.client).Then(ops...).Commit()
+	if err != nil {
+		e := errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
+		log.Error("batch load from etcd meet error",
+			zap.Int("key-count", len(keys)), zap.String("first-key", keys[0]), errs.ZapError(e))
+		return nil, e
+	}
+	if len(resp.Responses) != len(keys) {
+		return nil, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
+			fmt.Sprintf("expected %d responses, got %d", len(keys), len(resp.Responses)))
+	}
+	values := make([]string, 0, len(keys))
+	for i, item := range resp.Responses {
+		rangeResp := item.GetResponseRange()
+		if rangeResp == nil {
+			return nil, errs.ErrEtcdTxnResponse.GenWithStackByArgs(fmt.Sprintf("index: %v, response: %v", i, item))
+		}
+		value, err := txn.guardLoaded(keys[i], rangeResp.Kvs, false)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, nil
 }
 
 // LoadRange loads the target range from etcd,

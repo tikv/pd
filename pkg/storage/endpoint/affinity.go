@@ -28,6 +28,10 @@ type AffinityStorage interface {
 	// LoadAllAffinityGroups loads all affinity groups, passing raw key/value strings to the callback.
 	LoadAllAffinityGroups(f func(k, v string)) error
 
+	// LoadAffinityGroupsInTxn loads affinity groups as raw JSON strings within a transaction,
+	// in their order and with an empty string for a missing group. An etcd transaction loads
+	// them in one request, and its commit fails if any of the values changes after it is loaded.
+	LoadAffinityGroupsInTxn(txn kv.Txn, groupIDs []string) ([]string, error)
 	// SaveAffinityGroup saves an affinity group within a transaction.
 	SaveAffinityGroup(txn kv.Txn, groupID string, group any) error
 	// DeleteAffinityGroup deletes an affinity group within a transaction.
@@ -38,6 +42,27 @@ type AffinityStorage interface {
 }
 
 var _ AffinityStorage = (*StorageEndpoint)(nil)
+
+// LoadAffinityGroupsInTxn loads affinity group configurations as raw strings within a transaction.
+// A transaction that cannot load several keys at once loads them one by one.
+func (*StorageEndpoint) LoadAffinityGroupsInTxn(txn kv.Txn, groupIDs []string) ([]string, error) {
+	keys := make([]string, 0, len(groupIDs))
+	for _, groupID := range groupIDs {
+		keys = append(keys, keypath.AffinityGroupPath(groupID))
+	}
+	if batchTxn, ok := txn.(kv.BatchLoadTxn); ok {
+		return batchTxn.BatchLoad(keys)
+	}
+	values := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value, err := txn.Load(key)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
 
 // SaveAffinityGroup stores an affinity group configuration to storage.
 func (*StorageEndpoint) SaveAffinityGroup(txn kv.Txn, groupID string, group any) error {

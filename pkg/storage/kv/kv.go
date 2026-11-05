@@ -134,6 +134,16 @@ type RevisionTxn interface {
 	LoadWithRevision(key string) (string, error)
 }
 
+// BatchLoadTxn is a transaction that can load several keys in one request. Each
+// key it loads is guarded like a key loaded by Load, so the commit fails if any
+// of them changes, or if one that was missing is created.
+type BatchLoadTxn interface {
+	Txn
+	// BatchLoad returns the values of keys in their order, with an empty value
+	// for a missing key. The keys must fit in one etcd transaction.
+	BatchLoad(keys []string) ([]string, error)
+}
+
 // ConditionalTxnRunner runs a transaction with additional etcd comparisons.
 // The comparisons and the transaction operations are committed atomically.
 type ConditionalTxnRunner interface {

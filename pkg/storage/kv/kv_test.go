@@ -48,6 +48,7 @@ func TestEtcd(t *testing.T) {
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
 	testRevisionLoadConflict(re, kv)
+	testBatchLoadConflict(re, kv)
 	testRunInTxnWithConditions(re, kv)
 	testRawTxn(re, kv)
 
@@ -236,6 +237,46 @@ func testRevisionLoadConflict(re *require.Assertions, kv *etcdKVBase) {
 	value, err := kv.Load(resultKey)
 	re.NoError(err)
 	re.Empty(value)
+}
+
+// testBatchLoadConflict checks that BatchLoad guards every key it loads as Load
+// does: the commit fails if a loaded key changes, including one with an empty
+// value, or if a missing key is created.
+func testBatchLoadConflict(re *require.Assertions, kv *etcdKVBase) {
+	const resultKey = "batch-load-result"
+	keys := []string{"batch-load-value", "batch-load-empty", "batch-load-missing"}
+	run := func(change func()) error {
+		re.NoError(kv.Save(keys[0], "value"))
+		re.NoError(kv.Save(keys[1], ""))
+		re.NoError(kv.Remove(keys[2]))
+		re.NoError(kv.Remove(resultKey))
+		return kv.RunInTxn(context.Background(), func(txn Txn) error {
+			values, err := txn.(BatchLoadTxn).BatchLoad(keys)
+			if err != nil {
+				return err
+			}
+			re.Equal([]string{"value", "", ""}, values)
+			change()
+			return txn.Save(resultKey, "committed")
+		})
+	}
+	re.NoError(run(func() {}))
+	value, err := kv.Load(resultKey)
+	re.NoError(err)
+	re.Equal("committed", value)
+	for _, key := range keys {
+		err := run(func() { re.NoError(kv.Save(key, "changed")) })
+		re.ErrorIs(err, errs.ErrEtcdTxnConflict, "key %s", key)
+		value, err := kv.Load(resultKey)
+		re.NoError(err)
+		re.Empty(value, "key %s", key)
+	}
+
+	re.NoError(kv.RunInTxn(context.Background(), func(txn Txn) error {
+		values, err := txn.(BatchLoadTxn).BatchLoad(nil)
+		re.Empty(values)
+		return err
+	}))
 }
 
 // nolint:unparam
