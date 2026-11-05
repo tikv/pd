@@ -71,6 +71,15 @@ func (p *Plan) DeleteLabelRule(id string) error {
 	return nil
 }
 
+// Prefix returns a plan with the first n changes of the plan, for example the
+// changes that have committed when a later transaction fails.
+func (p *Plan) Prefix(n int) *Plan {
+	if p.err != nil {
+		return p
+	}
+	return &Plan{labeler: p.labeler, commitOps: p.commitOps[:n], applyLockedOps: p.applyLockedOps[:n]}
+}
+
 // CommitOps retrieves all operations in the transaction.
 func (p *Plan) CommitOps() []func(txn kv.Txn) error {
 	if p.err != nil {
