@@ -23,7 +23,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestReportSplit(t *testing.T) {
@@ -56,4 +58,36 @@ func TestReportBatchSplit(t *testing.T) {
 	}
 	_, err = cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
 	re.NoError(err)
+}
+
+func TestHandleRegionHeartbeatEnablesSplitAfterAffinityDenial(t *testing.T) {
+	re := require.New(t)
+	cluster, _ := newSplitScatterTestCluster(t)
+	cluster.opt.SetAffinityScheduleLimit(4)
+	var err error
+	cluster.affinityManager, err = affinity.NewManager(t.Context(), cluster.storage, cluster, cluster.opt, cluster.regionLabeler)
+	re.NoError(err)
+	// The test streams do not run, so sent messages stay queued. The Region has
+	// no operator, so a heartbeat can only queue a ChangeSplit message.
+	cluster.hbstreams = cluster.GetCoordinator().GetHeartbeatStreams()
+	region := cluster.GetRegion(100)
+	manager := cluster.GetAffinityManager()
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+	}}))
+	_, err = manager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+
+	_, err = cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
+		Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_SIZE,
+	})
+	re.ErrorContains(err, "cannot split affinity region")
+	re.Equal(1, cluster.hbstreams.MsgLength(), "ChangeSplit(false)")
+	re.NoError(cluster.hbstreams.Drain(1))
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	re.Zero(cluster.hbstreams.MsgLength(), "still denied")
+
+	re.NoError(manager.DeleteAffinityGroups([]string{"g1"}, true))
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	re.Equal(1, cluster.hbstreams.MsgLength(), "ChangeSplit(true)")
 }
