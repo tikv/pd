@@ -347,6 +347,8 @@ func TestSyncHandlesMissingClientURLs(t *testing.T) {
 			re.Equal(keypath.ClusterID(), response.GetHeader().GetClusterId())
 			re.Len(response.GetRegions(), 1)
 			re.Equal(uint64(1), response.GetRegions()[0].GetId())
+			// A missing member is accepted under the empty name, so nameless streams replace
+			// each other. The URL panic fix intentionally leaves name validation unchanged.
 			re.Equal([]string{testCase.member.GetName()}, syncer.GetAllDownstreamNames())
 
 			cancel()
