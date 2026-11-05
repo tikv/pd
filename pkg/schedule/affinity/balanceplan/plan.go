@@ -713,10 +713,12 @@ func (p *planner) move(g *groupState, voters []int, leader int) Score {
 //
 // A leader moves as in visitLeader: a pinned leader stays, and a leader moves
 // only to a voter of a rule that may hold it, on a store that may lead. A
-// path ends at the lowest count, then the shortest path, the lowest count of
-// other tables and the lowest ID. Every round is checked for cancellation and
-// charged to the work budget; a cutoff keeps the paths already moved. It
-// updates leaders and returns the change of the leader score.
+// path ends on the store with the fewest leaders, which lowers the score
+// most, then on the nearest one, which transfers the fewest leaders; other
+// tables and the store ID break the remaining ties. Every round is checked
+// for cancellation and charged to the work budget; a cutoff keeps the paths
+// already moved. It updates leaders and returns the change of the leader
+// score.
 func (p *planner) chainLeaders(leaders []int, bound int64) int64 {
 	score := p.score().Leader
 	if score <= bound || p.stopped() {
@@ -724,7 +726,7 @@ func (p *planner) chainLeaders(leaders []int, bound int64) int64 {
 	}
 	// alt[at[i]:at[i+1]] lists the voters that may lead group i.
 	at := make([]int, len(p.gs)+1)
-	alt := make([]int, 0, 3*len(p.gs))
+	var alt []int
 	for i := range p.gs {
 		g := &p.gs[i]
 		at[i] = len(alt)
@@ -732,15 +734,9 @@ func (p *planner) chainLeaders(leaders []int, bound int64) int64 {
 		if g.LeaderPinned {
 			continue
 		}
-		// A single rule hosts the leader unless it is a follower rule, which
-		// leaderCapable rejects.
-		multi := len(g.Rules) > 1
-		var hosts []int
-		if multi {
-			hosts = p.leaderHosts(g)
-		}
+		hosts := p.leaderHosts(g)
 		for k, s := range g.cur {
-			if ri := g.curRule[k]; (!multi || slices.Contains(hosts, ri)) && p.leaderCapable(g, g.Rules[ri], s) {
+			if ri := g.curRule[k]; slices.Contains(hosts, ri) && p.leaderCapable(g, g.Rules[ri], s) {
 				alt = append(alt, s)
 			}
 		}
@@ -778,11 +774,11 @@ func (p *planner) chainLeaders(leaders []int, bound int64) int64 {
 		low := slices.Min(p.l)
 		// Sources go from the highest count down. A source without a path
 		// reaches only stores whose count is at least its own minus one, and
-		// so do all stores they reach. Later sources have no higher count, so
-		// they skip the stores seen before, and a round that moves nothing
-		// proves that no path exists. The stores reached by the search of a
-		// moved path stay seen too, so the later paths of a round share no
-		// store, count or group with it.
+		// so do all stores they reach, so later sources, which have no higher
+		// count, skip them. The stores reached for a moved path stay seen too:
+		// later paths of the round share no store or group with it, and what
+		// they skip is searched again in the next round. A round that moves
+		// nothing therefore proves that no path exists.
 		moved := false
 		for _, a := range order {
 			if p.l[a]-2 < low {

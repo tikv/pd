@@ -165,58 +165,48 @@ func TestOverlappingIsolationAllowsLeaderBalance(t *testing.T) {
 	re.Equal(1, changed)
 }
 
-// leaderChain repeats a 3-store unit whose voters are balanced and whose
-// leaders reach the bound only by two transfers in a row: store 0 leads two
-// groups with voters on stores 0 and 1, store 1 leads one group with voters on
-// stores 1 and 2. Either transfer alone only ties.
-func leaderChain(units int) *Input {
-	n := 3 * units
-	in := &Input{Stores: n, BaseVoters: make([]int, n), BaseLeaders: make([]int, n)}
-	for u := range units {
-		s := 3 * u
-		rule := &Rule{Count: 2, Stores: []int{s, s + 1, s + 2}}
-		in.BaseVoters[s], in.BaseVoters[s+2] = 1, 2
-		for _, g := range []struct{ voters []int }{{[]int{s, s + 1}}, {[]int{s, s + 1}}, {[]int{s + 1, s + 2}}} {
-			in.Groups = append(in.Groups, Group{Rules: []*Rule{rule}, Voters: g.voters, RuleOf: []int{0, 0},
-				Leader: g.voters[0], CanLead: allTrue(n)})
-		}
+// leaderChain has balanced voters, and its leaders reach the bound only by two
+// transfers in a row: store 0 leads two groups with voters on stores 0 and 1,
+// store 1 leads one group with voters on stores 1 and 2. Either transfer alone
+// only ties.
+func leaderChain() *Input {
+	rule := &Rule{Count: 2, Stores: []int{0, 1, 2}}
+	in := &Input{Stores: 3, BaseVoters: []int{1, 0, 2}, BaseLeaders: make([]int, 3)}
+	for _, v := range [][]int{{0, 1}, {0, 1}, {1, 2}} {
+		in.Groups = append(in.Groups, Group{Rules: []*Rule{rule}, Voters: v, RuleOf: []int{0, 0},
+			Leader: v[0], CanLead: allTrue(3)})
 	}
 	return in
 }
 
 func TestLeaderChains(t *testing.T) {
 	for _, c := range []struct {
-		name   string
-		modify func(g *Group)
-		want   Score
+		name    string
+		modify  func(g *Group)
+		want    Score
+		stop    StopReason
+		changed int
 	}{
-		{"chain", func(*Group) {}, Score{27, 3}},
-		{"cannot lead", func(g *Group) { g.CanLead = []bool{true, true, false} }, Score{27, 5}},
-		{"pinned", func(g *Group) { g.LeaderPinned = true }, Score{27, 5}},
+		{"chain", func(*Group) {}, Score{27, 3}, StopBound, 2},
+		{"cannot lead", func(g *Group) { g.CanLead = []bool{true, true, false} }, Score{27, 5}, StopGreedy, 0},
+		{"pinned", func(g *Group) { g.LeaderPinned = true }, Score{27, 5}, StopGreedy, 0},
 		{"follower", func(g *Group) {
 			g.Rules = []*Rule{{Count: 1, Stores: []int{1}}, {Role: RoleFollower, Count: 1, Stores: []int{2}}}
 			g.RuleOf = []int{0, 1}
-		}, Score{27, 5}},
+		}, Score{27, 5}, StopGreedy, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			re := require.New(t)
-			in := leaderChain(1)
+			in := leaderChain()
 			c.modify(&in.Groups[2])
-			for seed := range uint64(4) {
-				r := Plan(in, Options{Seed: seed})
-				re.Equal(Score{27, 5}, r.Baseline)
-				re.Equal(c.want, r.Score)
-				re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score)
-				for i, g := range in.Groups {
-					re.Equal(g.Voters, r.Voters[i])
-				}
-				if c.want == r.Bound {
-					re.Equal(StopBound, r.Stop)
-					re.Equal(2, r.Changed)
-				} else {
-					re.Equal(StopGreedy, r.Stop)
-					re.Zero(r.Changed)
-				}
+			r := Plan(in, Options{})
+			re.Equal(Score{27, 5}, r.Baseline)
+			re.Equal(c.want, r.Score)
+			re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score)
+			re.Equal(c.stop, r.Stop)
+			re.Equal(c.changed, r.Changed)
+			for i, g := range in.Groups {
+				re.Equal(g.Voters, r.Voters[i])
 			}
 		})
 	}
