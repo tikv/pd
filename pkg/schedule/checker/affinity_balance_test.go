@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,7 +77,7 @@ func newAffinityBalanceTest(t testing.TB, stores uint64, zones ...string) *affin
 	for id := uint64(1); id <= stores; id++ {
 		tc.AddRegionStore(id, 10)
 		tc.SetStoreUp(id)
-		// Keep stores connected through long benchmark runs.
+		// Keep stores connected however long a test runs.
 		tc.SetStoreLastHeartbeatInterval(id, -time.Hour)
 	}
 	// The tests drive the balancer directly instead of running it.
@@ -273,6 +274,84 @@ func TestAffinityBalanceLearnerInLaterRegion(t *testing.T) {
 	re.NotNil(op)
 	operator.ApplyOperator(f.Cluster, op)
 	re.Equal(learner, f.GetRegion(later.GetID()).GetStoreLearner(4))
+}
+
+type heartbeatTargetWriter struct {
+	targets []affinity.GroupTarget
+}
+
+func (w *heartbeatTargetWriter) WriteGroupTargets(_ context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	w.targets = append(w.targets, targets...)
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, target.Expected.ID)
+	}
+	return ids, nil
+}
+
+func newMissingHeartbeatBalanceTest(t *testing.T) (*affinityBalanceTest, *core.RegionInfo, *heartbeatTargetWriter) {
+	t.Helper()
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 3)
+	group := &affinity.Group{ID: balanceTestGroupID("_tidb_pt_100_p1"), LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+	re.NoError(createAffinityGroupForTest(f.affinityManager, group, []byte(balanceTestKey("a")), []byte(balanceTestKey("c"))))
+	f.AddLeaderRegionWithRange(1, balanceTestKey("a"), balanceTestKey("b"), 1, 2, 3)
+	f.PutRegion(f.GetRegion(1).Clone(core.SetApproximateSize(1)))
+	f.group(balanceTestGroupID("_tidb_pt_100_p2"), 3, 1, []uint64{1, 2, 3}, "d", "e")
+	f.group(balanceTestGroupID("_tidb_pt_100_p3"), 4, 2, []uint64{1, 2, 3}, "f", "g")
+	f.policy(affinity.BalancePolicyFixed, balanceTestGroupID("_tidb_pt_100_p2"), balanceTestGroupID("_tidb_pt_100_p3"))
+	for _, region := range f.GetRegions() {
+		region = region.Clone(core.SetSource(core.Heartbeat))
+		f.PutRegion(region)
+		f.affinityManager.GetAndCacheRegionAffinityGroupState(region)
+	}
+	// This Region has never entered the cluster cache; the reported [a,b)
+	// Region keeps its original boundaries throughout the test.
+	missing := f.GetRegion(1).Clone(core.WithNewRegionID(2), core.WithStartKey([]byte(balanceTestKey("b"))), core.WithEndKey([]byte(balanceTestKey("c"))), core.SetSource(core.Heartbeat))
+	writer := &heartbeatTargetWriter{}
+	f.affinityManager.SetTargetWriter(writer)
+	return f, missing, writer
+}
+
+func TestAffinityBalanceWithRegionGaps(t *testing.T) {
+	re := require.New(t)
+	f, missing, writer := newMissingHeartbeatBalanceTest(t)
+	f.SetMaxAffinityMergeRegionSize(0)
+	re.Nil(f.GetRegion(missing.GetID()))
+	re.True(f.step())
+	re.Len(writer.targets, 1)
+	re.Equal(uint64(3), writer.targets[0].LeaderStoreID)
+	// Deliver the persisted target before the missing Region's first heartbeat.
+	written, err := f.affinityManager.UpdateAffinityGroupTargets(writer.targets)
+	re.NoError(err)
+	re.Equal([]string{writer.targets[0].Expected.ID}, written)
+	f.PutRegion(missing)
+	ops := f.Check(missing)
+	re.Len(ops, 1)
+	operator.ApplyOperator(f.Cluster, ops[0])
+	moved := f.GetRegion(missing.GetID())
+	re.Equal(uint64(3), moved.GetLeader().GetStoreId())
+	re.True(f.ruleManager.FitRegionWithoutCache(f.Cluster, moved).IsSatisfied())
+}
+
+func TestAffinityBalanceWaitsForStorageRegionHeartbeat(t *testing.T) {
+	re := require.New(t)
+	f, heartbeat, writer := newMissingHeartbeatBalanceTest(t)
+	// Region storage persists metadata, not the leader supplied by a heartbeat.
+	stored := core.NewRegionInfo(heartbeat.GetMeta(), nil, core.SetSource(core.Storage))
+	f.PutRegion(stored)
+	re.True(f.GetRegion(stored.GetID()).LoadedFromStorage())
+	re.Nil(f.GetRegion(stored.GetID()).GetLeader())
+	before := f.snapshot()
+	re.False(f.step())
+	re.Empty(writer.targets)
+	re.Equal(before.Groups, f.snapshot().Groups)
+	f.PutRegion(heartbeat)
+	f.affinityManager.GetAndCacheRegionAffinityGroupState(heartbeat)
+	re.False(f.GetRegion(heartbeat.GetID()).LoadedFromStorage())
+	re.True(f.step())
+	re.Len(writer.targets, 1)
+	re.Equal(uint64(3), writer.targets[0].LeaderStoreID)
 }
 
 func TestAffinityBalanceTiFlashRecordRules(t *testing.T) {
@@ -702,6 +781,146 @@ func TestAffinityBalanceCommitAllowsOtherGroupChanges(t *testing.T) {
 		re.LessOrEqual(score[1], 2)
 	}
 	re.Equal(fixed, f.affinityManager.GetAffinityGroupState(ids[1]).Group)
+}
+
+type balanceExecutionTargetWriter struct {
+	write func([]affinity.GroupTarget) ([]string, error)
+}
+
+func (w balanceExecutionTargetWriter) WriteGroupTargets(_ context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	return w.write(targets)
+}
+
+func TestAffinityBalanceExecutionAfterRegionChanges(t *testing.T) {
+	// Both events are checked with the operators of an allowed target. A
+	// rejected target takes the same expiration and first-win path after either
+	// event, so each rejecting gate runs once.
+	for _, tc := range []struct{ event, gate string }{
+		{"split", "allowed"}, {"merge", "allowed"}, {"split", "placement"}, {"merge", "best-location"},
+	} {
+		t.Run(tc.event+"/"+tc.gate, func(t *testing.T) {
+			re := require.New(t)
+			f := newAffinityBalanceTest(t, 4, "a", "b", "c", "a")
+			f.SetEnableUseJointConsensus(false)
+			f.SetMaxAffinityMergeRegionSize(0)
+			for id := uint64(1); id <= 4; id++ {
+				zone := f.GetStore(id).GetLabelValue("zone")
+				f.SetStoreLabel(id, map[string]string{"zone": zone, "disk": "ssd"})
+			}
+			rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+			rule.LabelConstraints = []placement.LabelConstraint{{Key: "disk", Op: placement.In, Values: []string{"ssd"}}}
+			re.NoError(f.ruleManager.SetRule(rule))
+			id := balanceTestGroupID("_tidb_pt_100_p1")
+			f.group(id, 1, 1, []uint64{1, 2, 3}, "a", "b", "c")
+			fixedID := balanceTestGroupID("_tidb_pt_100_p2")
+			f.group(fixedID, 3, 1, []uint64{1, 2, 3}, "d", "e")
+			f.policy(affinity.BalancePolicyFixed, fixedID)
+			snapshot := f.snapshot()
+			revision := f.ruleManager.GetRevision()
+			res, err := f.planBalanceTargets(t.Context(), snapshot)
+			re.NoError(err)
+			re.Len(res.targets, 1)
+			target := res.targets[0]
+			re.Equal(id, target.ID)
+			re.Contains(target.VoterStoreIDs, uint64(4))
+			var changed []*core.RegionInfo
+			beforeAffinityBalanceCommit(t, func() {
+				first := f.GetRegion(1)
+				if tc.event == "split" {
+					mid := []byte(balanceTestKey("am"))
+					changed = []*core.RegionInfo{
+						first.Clone(core.WithEndKey(mid), core.WithIncVersion()),
+						first.Clone(core.WithNewRegionID(4), core.WithStartKey(mid), core.WithIncVersion()),
+					}
+				} else {
+					changed = []*core.RegionInfo{first.Clone(core.WithEndKey(f.GetRegion(2).GetEndKey()), core.WithIncVersion())}
+				}
+				for _, region := range changed {
+					f.PutRegion(region)
+				}
+				switch tc.gate {
+				case "placement":
+					f.SetStoreLabel(4, map[string]string{"zone": "a", "disk": "hdd"})
+				case "best-location":
+					f.SetStoreLabel(4, map[string]string{"zone": "b", "disk": "ssd"})
+				}
+			})
+			written, reason, err := f.commitBalancePlan(t.Context(), snapshot, res, revision)
+			re.NoError(err)
+			re.Empty(reason)
+			re.Equal([]string{id}, written)
+			re.Equal(*target, f.affinityManager.GetAffinityGroupState(id).Group)
+			re.Equal(revision, f.ruleManager.GetRevision())
+			if tc.event == "merge" {
+				re.Nil(f.GetRegion(2))
+			}
+			if tc.gate == "allowed" {
+				for _, region := range changed {
+					ops := f.Check(region)
+					re.Len(ops, 1)
+					re.NotEqual(operator.OpKind(0), ops[0].Kind()&operator.OpAffinity)
+					operator.ApplyOperator(f.Cluster, ops[0])
+					moved := f.GetRegion(region.GetID())
+					re.Equal(target.LeaderStoreID, moved.GetLeader().GetStoreId())
+					re.True(f.ruleManager.FitRegionWithoutCache(f.Cluster, moved).IsSatisfied())
+					re.True(f.isRegionPlacementRuleSatisfiedWithBestLocation(moved, true))
+				}
+				return
+			}
+			region := changed[0]
+			re.True(f.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+			virtual := cloneRegionWithReplacePeerStores(region, target.LeaderStoreID, target.VoterStoreIDs...)
+			fit := f.ruleManager.FitRegionWithoutCache(f.Cluster, virtual)
+			if tc.gate == "placement" {
+				re.False(fit.IsSatisfied())
+			} else {
+				re.True(fit.IsSatisfied())
+				re.Equal(bestLocationRejected, f.regionPlacementBestLocation(virtual, fit))
+			}
+			type firstWin struct {
+				expired *affinity.GroupState
+				targets []affinity.GroupTarget
+				err     error
+			}
+			firstWins := make(chan firstWin, 1)
+			var firstWinCount atomic.Int32
+			f.affinityManager.SetTargetWriter(balanceExecutionTargetWriter{write: func(targets []affinity.GroupTarget) ([]string, error) {
+				firstWinCount.Add(1)
+				expired := f.affinityManager.GetAffinityGroupState(id)
+				ids, err := f.affinityManager.UpdateAffinityGroupTargets(targets)
+				select {
+				case firstWins <- firstWin{expired: expired, targets: targets, err: err}:
+				default:
+				}
+				return ids, err
+			}})
+			re.Empty(f.Check(region))
+			var observed firstWin
+			select {
+			case observed = <-firstWins:
+			case <-time.After(10 * time.Second):
+				re.FailNow("first-win did not write a target")
+			}
+			re.NoError(observed.err)
+			re.True(observed.expired.RegularSchedulingAllowed)
+			re.False(observed.expired.AffinitySchedulingAllowed)
+			re.Len(observed.targets, 1)
+			re.Equal(observed.targets[0].Expected, *target)
+			re.Equal(uint64(1), observed.targets[0].LeaderStoreID)
+			re.Equal([]uint64{1, 2, 3}, observed.targets[0].VoterStoreIDs)
+			learned := f.affinityManager.GetAffinityGroupState(id)
+			re.True(learned.AffinitySchedulingAllowed)
+			re.False(learned.RegularSchedulingAllowed)
+			re.Equal(uint64(1), learned.LeaderStoreID)
+			re.Equal([]uint64{1, 2, 3}, learned.VoterStoreIDs)
+			raw, err := f.GetStorage().LoadAffinityGroup(id)
+			re.NoError(err)
+			var stored affinity.Group
+			re.NoError(json.Unmarshal([]byte(raw), &stored))
+			re.Equal(learned.Group, stored)
+			re.Equal(int32(1), firstWinCount.Load())
+		})
+	}
 }
 
 func TestAffinityBalanceModelsLeaderAndFollowerRules(t *testing.T) {

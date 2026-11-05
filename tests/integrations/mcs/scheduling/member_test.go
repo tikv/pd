@@ -71,6 +71,12 @@ func TestAllocIDAfterFirstPDMemberStops(t *testing.T) {
 	cluster := primary.GetCluster()
 	before := retryAllocID(re, cluster)
 	re.NotZero(before)
+	// The scheduling etcd client starts with the leader as its only endpoint.
+	// Stopping the leader before it learns the other members would make the
+	// member list itself fail, which is a different failure from the one under test.
+	testutil.Eventually(re, func() bool {
+		return len(primary.GetClient().Endpoints()) > 1
+	})
 
 	re.NoError(leader.Stop())
 	re.NotEmpty(pd.WaitLeaderChange(leaderName))
