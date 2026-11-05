@@ -169,6 +169,9 @@ func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 	if r.IsRegionStatsType(regionID, LearnerPeer) != (len(region.GetLearners()) != 0) {
 		return true
 	}
+	if r.IsRegionStatsType(regionID, EmptyRegion) != core.IsEmptyRegion(region.GetApproximateSize(), region.GetApproximateKeys()) {
+		return true
+	}
 
 	// merge
 	return r.IsRegionStatsType(regionID, UndersizedRegion) !=
@@ -249,7 +252,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	if len(learners) > 0 {
 		conditions |= LearnerPeer
 	}
-	if regionSize <= core.EmptyRegionApproximateSize {
+	if core.IsEmptyRegion(regionSize, region.GetApproximateKeys()) {
 		conditions |= EmptyRegion
 	}
 	if region.IsOversized(regionMaxSize, regionMaxKeys) {

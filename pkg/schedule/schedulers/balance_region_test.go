@@ -836,7 +836,7 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 		},
 		&metapb.Peer{Id: 7, StoreId: 3},
 		core.SetApproximateSize(1),
-		core.SetApproximateKeys(1),
+		core.SetApproximateKeys(0),
 	)
 	tc.PutRegion(region)
 
