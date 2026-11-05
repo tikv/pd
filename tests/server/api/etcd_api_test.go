@@ -18,8 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -46,30 +44,28 @@ func TestGRPCGateway(t *testing.T) {
 }
 
 func TestGRPCGatewayRestart(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("previously-enabled=%t", enabled), func(t *testing.T) {
 			re := require.New(t)
-			cluster, err := tests.NewTestCluster(t.Context(), 1)
+			cluster, err := tests.NewTestCluster(t.Context(), 1, func(cfg *config.Config, _ string) {
+				cfg.EnableGRPCGateway = enabled
+			})
 			re.NoError(err)
 			defer cluster.Destroy()
 			re.NoError(cluster.RunInitialServers())
 			re.NotEmpty(cluster.WaitLeader())
 			original := cluster.GetLeaderServer()
-			checkGRPCGateway(t, original, false)
+			checkGRPCGateway(t, original, enabled)
 			cfg := original.GetConfig().Clone()
 			re.NoError(original.Stop())
-			if legacy {
-				// Older PD versions left an etcd WAL without a gateway default.
-				re.NoError(os.Remove(filepath.Join(cfg.DataDir, "grpc-gateway-default")))
-			}
 			re.NoError(cfg.Adjust(nil, false))
-			re.Equal(legacy, cfg.EnableGRPCGateway)
+			re.False(cfg.EnableGRPCGateway)
 			restarted, err := tests.NewTestServer(t.Context(), cfg, nil)
 			re.NoError(err)
 			re.NoError(restarted.Run())
 			defer func() { re.NoError(restarted.Stop()) }()
 			testutil.Eventually(re, func() bool { return restarted.GetServer().GetMember().IsServing() })
-			checkGRPCGateway(t, restarted, legacy)
+			checkGRPCGateway(t, restarted, false)
 		})
 	}
 }

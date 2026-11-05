@@ -13,10 +13,7 @@
 ## if not set, use ${peer-urls}
 # advertise-peer-urls = ""
 
-## Enable the etcd HTTP/JSON gateway. New members default to false.
-## Members initialized by an older PD retain the previous default on upgrade.
-## An explicit value overrides the default recorded in the data directory.
-## Keep ${data-dir}/grpc-gateway-default when moving or restoring that directory.
+## Enable the etcd HTTP/JSON gateway. Default: false.
 # enable-grpc-gateway = false
 
 ## The initial cluster configuration for bootstrapping.
