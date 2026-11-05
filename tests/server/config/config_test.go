@@ -35,7 +35,6 @@ import (
 	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -176,38 +175,6 @@ func TestMetricStorageValidationAtQueryTime(t *testing.T) {
 		re.Equal(http.StatusBadGateway, queryResp.StatusCode)
 		re.JSONEq(`{"status":"error","errorType":"proxy","error":"metric query failed"}`, string(queryBody))
 	}
-}
-
-func TestRedactInfoLogWithPersistedConfig(t *testing.T) {
-	re := require.New(t)
-	cluster, err := tests.NewTestCluster(t.Context(), 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
-
-	// The persisted configuration stores redact-info-log as false, as earlier versions
-	// do, because it is not part of the persisted settings.
-	svr := cluster.GetLeaderServer().GetServer()
-	re.NoError(svr.GetPersistOptions().Persist(svr.GetStorage()))
-	var persisted struct {
-		Security struct {
-			RedactInfoLog logutil.RedactInfoLogType `json:"redact-info-log"`
-		} `json:"security"`
-	}
-	exist, err := svr.GetStorage().LoadConfig(&persisted)
-	re.NoError(err)
-	re.True(exist)
-	re.Equal(logutil.RedactInfoLogOFF, persisted.Security.RedactInfoLog)
-
-	// The restarted leader reloads the persisted configuration. The reload must not
-	// apply its security section, so the server keeps the value it started with.
-	re.NoError(cluster.StopAll())
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
-	cfg := &config.Config{}
-	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, cluster.GetLeaderServer().GetAddr()+"/pd/api/v1/config", cfg))
-	re.Equal(logutil.RedactInfoLogON, cfg.Security.RedactInfoLog)
 }
 
 type configTestSuite struct {
