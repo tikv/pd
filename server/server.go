@@ -257,6 +257,9 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
+	if err := cfg.PersistGRPCGatewayDefault(); err != nil {
+		return nil, err
+	}
 	// TODO: Currently, whether we enable microservice or not is determined by the service list.
 	// It's equal to whether we enable the keyspace group or not.
 	// But indeed the keyspace group is independent of the microservice.
