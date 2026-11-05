@@ -325,7 +325,6 @@ func TestSyncHandlesMissingClientURLs(t *testing.T) {
 	}{
 		{name: "missing-client-urls", member: &pdpb.Member{Name: "pd-follower"}},
 		{name: "empty-client-urls", member: &pdpb.Member{Name: "pd-follower", ClientUrls: []string{}}},
-		{name: "missing-member"},
 		{name: "valid-client-urls", member: &pdpb.Member{Name: "pd-follower", ClientUrls: []string{"http://127.0.0.1:2379"}}},
 	}
 
@@ -347,12 +346,48 @@ func TestSyncHandlesMissingClientURLs(t *testing.T) {
 			re.Equal(keypath.ClusterID(), response.GetHeader().GetClusterId())
 			re.Len(response.GetRegions(), 1)
 			re.Equal(uint64(1), response.GetRegions()[0].GetId())
-			// A missing member is accepted under the empty name, so nameless streams replace
-			// each other. The URL panic fix intentionally leaves name validation unchanged.
 			re.Equal([]string{testCase.member.GetName()}, syncer.GetAllDownstreamNames())
 
 			cancel()
 			waitTestRegionSyncerUnavailable(re, done)
+			re.Empty(syncer.GetAllDownstreamNames())
+		})
+	}
+}
+
+func TestSyncRejectsMissingMemberName(t *testing.T) {
+	testCases := []struct {
+		name   string
+		member *pdpb.Member
+	}{
+		{name: "missing-member"},
+		{name: "empty-member", member: &pdpb.Member{}},
+		{name: "empty-name-with-client-urls", member: &pdpb.Member{ClientUrls: []string{"http://127.0.0.1:2379"}}},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			syncer, _ := newTestRegionSyncer(t, newHistoryBufferTestRegion(1))
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			stream := newMockSyncRegionsServer()
+			t.Cleanup(stream.cancel)
+			done := startTestRegionSync(ctx, syncer, stream)
+			stream.recvCh <- &pdpb.SyncRegionRequest{
+				Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+				Member: testCase.member,
+			}
+
+			select {
+			case err := <-done:
+				re.Equal(codes.InvalidArgument, status.Code(err))
+			case <-stream.sendCh:
+				re.FailNow("request without a member name received a region response")
+			case <-time.After(3 * time.Second):
+				re.FailNow("request without a member name was not rejected")
+			}
+			re.Empty(stream.sendCh)
 			re.Empty(syncer.GetAllDownstreamNames())
 		})
 	}
