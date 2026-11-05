@@ -278,6 +278,44 @@ func TestObserveAvailableRegionKeepsFixedTarget(t *testing.T) {
 	re.Equal(uint64(1), state.LeaderStoreID)
 }
 
+// TestObserveAvailableRegionBeforeAvailabilityCheck checks that a group loaded
+// by another PD keeps its target leader until the first availability check, and
+// that an auto group takes the leader of a Region once a store degrades it.
+func TestObserveAvailableRegionBeforeAvailabilityCheck(t *testing.T) {
+	for _, tc := range []struct {
+		policy         BalancePolicy
+		degradedLeader uint64
+	}{
+		{policy: BalancePolicyAuto, degradedLeader: 2},
+		{policy: BalancePolicyFixed, degradedLeader: 1},
+	} {
+		t.Run(string(tc.policy), func(t *testing.T) {
+			re := require.New(t)
+			manager, store := newTargetTestManager(t)
+			re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+			_, err := manager.UpdateAffinityGroupPolicy("g", tc.policy)
+			re.NoError(err)
+			// The target leader moves to store 1 before the leader of the Region.
+			_, err = manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+			re.NoError(err)
+
+			loaded := newTargetTestManagerWithStorage(t, store)
+			region := generateRegionForTest(10, []uint64{2, 1, 3}, nonOverlappingRange)
+			observe := func() uint64 {
+				loaded.ObserveAvailableRegion(region, loaded.GetAffinityGroupState("g"))
+				leader := loaded.GetAffinityGroupState("g").LeaderStoreID
+				re.Equal(leader, loadStoredGroup(re, store, "g").LeaderStoreID)
+				return leader
+			}
+			re.False(loaded.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+			re.Equal(uint64(1), observe())
+
+			loaded.applyStoreConditions(map[uint64]storeCondition{1: storeBusy})
+			re.Equal(tc.degradedLeader, observe())
+		})
+	}
+}
+
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()

@@ -405,9 +405,11 @@ func (m *Manager) observedGroupTargetLocked(groupID string, affinityVer uint64, 
 	}
 	// Leaders move away while a store restarts. A fixed group keeps its target
 	// until it expires, so while it is degraded a Region can only confirm the
-	// target. The policy is read here, under metaMutex, because a policy update
-	// keeps affinityVer.
-	if group.BalancePolicy.IsFixed() && !group.RegularSchedulingAllowed && leaderStoreID != group.LeaderStoreID {
+	// target. So does a group initialized before the store conditions are known,
+	// for example after a PD leader change, because it is degraded only for that.
+	// The policy is read here, under metaMutex, because a policy update keeps
+	// affinityVer.
+	if (group.BalancePolicy.IsFixed() || group.storeConditionsUnknown) && !group.RegularSchedulingAllowed && leaderStoreID != group.LeaderStoreID {
 		return nil, group, nil
 	}
 	expected := group.Group

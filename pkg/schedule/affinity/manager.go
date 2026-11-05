@@ -78,8 +78,9 @@ type Manager struct {
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
 	// storeConditionsKnown is set once the availability check has recorded the
 	// store conditions. Until then, a group loaded or recreated with a target
-	// stays degraded, while a target that is written, synced or confirmed uses
-	// the conditions recorded so far. The first check sets every group.
+	// stays degraded and a Region can only confirm the target, while a target
+	// that is written, synced or confirmed uses the conditions recorded so far.
+	// The first check sets every group.
 	storeConditionsKnown bool
 	balanceTables        map[TableID]*balanceTable // {table_id} -> balanceTable
 	lastBalanceVersion   uint64
@@ -188,6 +189,8 @@ func (m *Manager) initGroupLocked(group *Group) {
 	// the groups loaded before it.
 	if m.storeConditionsKnown {
 		m.setTargetAvailabilityLocked(groupInfo)
+	} else {
+		groupInfo.storeConditionsUnknown = true
 	}
 }
 
