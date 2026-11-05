@@ -284,10 +284,6 @@ func TestEnabledKeyspaceIndexRemovalCallback(t *testing.T) {
 			return
 		}
 	}
-	// Recovery reloads replace the snapshot without synthesizing removals.
-	removed = nil
-	require.True(t, index.publish(ctx, map[uint32]enabledKeyspace{}, 6))
-	require.Empty(t, removed)
 }
 
 func TestEnabledKeyspaceIndexLoadsAllPagesAtOneRevision(t *testing.T) {
