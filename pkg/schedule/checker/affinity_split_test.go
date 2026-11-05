@@ -209,6 +209,22 @@ func TestAffinitySplitBeforeMoveFallbackReportsOnce(t *testing.T) {
 	region = region.Clone(core.WithIncVersion())
 	cluster.PutRegion(region)
 	fallBack(region, 2)
+
+	// Each later move of the unsplit Region starts a new attempt as well.
+	move := func(from, to uint64) {
+		region = region.Clone(core.WithReplacePeerStore(from, to), core.WithIncConfVer())
+		cluster.PutRegion(region)
+	}
+	move(4, 3)
+	// The target changes before a patrol checks the Region at the old target.
+	_, err := cluster.GetAffinityManager().UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 4})
+	re.NoError(err)
+	fallBack(region, 3)
+	move(3, 4)
+	re.Empty(checker.Check(region), "at the target")
+	// The Region leaves the target, for example when a down peer is replaced.
+	move(4, 3)
+	fallBack(region, 4)
 }
 
 func TestAffinitySplitBeforeMoveFallbackKeepsGates(t *testing.T) {
