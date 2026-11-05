@@ -40,9 +40,11 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
@@ -1317,6 +1319,87 @@ func (suite *serverTestSuite) TestBatchSplit() {
 	re.NoError(err)
 	re.Empty(resp.GetHeader().GetError())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+
+	suite.TearDownSuite()
+	suite.SetupSuite()
+}
+
+func (suite *serverTestSuite) TestAffinitySplitRecovery() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	cluster := tc.WaitForPrimaryServing(re).GetCluster()
+	suite.pdLeader.GetPersistOptions().SetAffinityScheduleLimit(4)
+	persistConfig(re, suite.pdLeader)
+
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	header := testutil.NewRequestHeader(suite.pdLeader.GetClusterID())
+	for id := uint64(1); id <= 3; id++ {
+		// A store without a recent heartbeat is down, which expires the group.
+		resp, err := s.PutStore(suite.ctx, &pdpb.PutStoreRequest{Header: header, Store: &metapb.Store{
+			Id: id, Address: fmt.Sprintf("mock://tikv-%d:%d", id, id), Version: "7.0.0",
+			NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano(),
+		}})
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	manager := suite.pdLeader.GetRaftCluster().GetAffinityManager()
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: "split-recovery", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}},
+	}}))
+	_, err = manager.UpdateAffinityGroupPeers("split-recovery", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetAddr())
+	defer conn.Close()
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
+	enabled := make(chan *pdpb.RegionHeartbeatResponse, 1)
+	go func() {
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				return
+			}
+			if resp.GetChangeSplit().GetAutoSplitEnabled() {
+				enabled <- resp
+				return
+			}
+		}
+	}()
+	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 33, StoreId: 3}}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: header, Region: &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader: peers[0], ApproximateSize: 5 * units.MiB, ApproximateKeys: 500,
+	}
+	testutil.Eventually(re, func() bool {
+		re.NoError(stream.Send(regionReq))
+		region := cluster.GetRegion(10)
+		return region != nil && !cluster.GetAffinityManager().AllowSplit(region, pdpb.SplitReason_SIZE)
+	})
+	splitResp, err := grpcPDClient.AskBatchSplit(suite.ctx, &pdpb.AskBatchSplitRequest{
+		Header: header, Region: regionReq.GetRegion(), SplitCount: 1, Reason: pdpb.SplitReason_SIZE,
+	})
+	re.NoError(err)
+	re.Contains(splitResp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
+
+	re.NoError(manager.DeleteAffinityGroups([]string{"split-recovery"}, true))
+	testutil.Eventually(re, func() bool {
+		// Recovery must not depend on a Region metadata change, so resend the same heartbeat.
+		re.NoError(stream.Send(regionReq))
+		select {
+		case resp := <-enabled:
+			re.Equal(uint64(10), resp.GetRegionId())
+			re.Equal(peers[0], resp.GetTargetPeer())
+			return true
+		default:
+			return false
+		}
+	})
 
 	suite.TearDownSuite()
 	suite.SetupSuite()

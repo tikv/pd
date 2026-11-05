@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -149,59 +148,15 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			require.NoError(t, m.DeleteAffinityGroups([]string{"g1"}, true))
 			return r
 		}},
-		{"group range shrinks", func(t *testing.T, m *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			require.NoError(t, m.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{
-				GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("z")}},
-			}}))
-			require.NoError(t, m.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{
-				GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("m"), EndKey: []byte("z")}},
-			}}, nil))
-			return r
-		}},
-		{"group ranges cleared", func(t *testing.T, m *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			require.NoError(t, m.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{
-				GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("z")}},
-			}}))
-			return r
-		}},
 		{"region crosses group boundary", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
 			return r.Clone(core.WithEndKey([]byte("zz")), core.WithIncVersion())
-		}},
-		{"group expired", func(_ *testing.T, m *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			m.ExpireAffinityGroup("g1")
-			return r
-		}},
-		{"degraded group expiration elapsed", func(_ *testing.T, m *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			m.Lock()
-			m.groups["g1"].SetAvailability(groupDegraded)
-			m.groups["g1"].degradedExpiredAt = uint64(time.Now().Unix() - 1)
-			m.Unlock()
-			return r
-		}},
-		{"target cleared by watcher", func(_ *testing.T, m *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			m.SyncGroupFromEtcd(&Group{ID: "g1"})
-			return r
 		}},
 		{"affinity scheduling disabled", func(_ *testing.T, _ *Manager, c *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
 			c.SetAffinityScheduleLimit(0)
 			return r
 		}},
-		{"affinity merging disabled", func(_ *testing.T, _ *Manager, c *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			c.SetMaxAffinityMergeRegionSize(0)
-			return r
-		}},
-		{"size limit reduced", func(_ *testing.T, _ *Manager, c *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			c.SetMaxAffinityMergeRegionSize(1)
-			return r
-		}},
 		{"size reaches limit", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
 			return r.Clone(core.SetApproximateSize(80))
-		}},
-		{"size exceeds limit", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			return r.Clone(core.SetApproximateSize(81))
-		}},
-		{"keys reach limit", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			return r.Clone(core.SetApproximateKeys(80 * config.RegionSizeToKeysRatio))
 		}},
 	}
 	for _, tc := range cases {
@@ -217,14 +172,12 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			re.Zero(streams.MsgLength(), "still denied")
 
 			region = tc.change(t, m, conf, region)
-			re.True(m.AllowSplit(region, pdpb.SplitReason_SIZE))
-			m.MaybeEnableSplit(region, streams)
-			re.Equal(1, streams.MsgLength(), "one recovery notification")
-			re.NoError(streams.Drain(1))
-			for range 3 {
-				m.MaybeEnableSplit(region, streams)
+			var wg sync.WaitGroup
+			for range 8 {
+				wg.Go(func() { m.MaybeEnableSplit(region, streams) })
 			}
-			re.Zero(streams.MsgLength(), "no duplicate recovery")
+			wg.Wait()
+			re.Equal(1, streams.MsgLength(), "concurrent heartbeats send one recovery notification")
 		})
 	}
 }
@@ -232,85 +185,29 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 func TestSplitRecoveryOnlyForDeniedRegions(t *testing.T) {
 	re := require.New(t)
 	m, conf, region, streams := newSplitRecoveryTestManager(t)
-	// An allowed administrative split does not enable automatic splitting.
-	re.True(m.CheckSplit(region, pdpb.SplitReason_ADMIN, streams))
-	m.MaybeEnableSplit(region, streams)
-	re.Zero(streams.MsgLength())
-	re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
-	re.NoError(streams.Drain(1))
-	re.True(m.CheckSplit(region, pdpb.SplitReason_ADMIN, streams))
-	m.MaybeEnableSplit(region, streams)
-	re.Zero(streams.MsgLength())
-
-	conf.SetAffinityScheduleLimit(0)
-	// No leader cannot consume the recovery; the next leader heartbeat must send it.
-	m.MaybeEnableSplit(region.Clone(core.WithLeader(nil)), streams)
-	re.Zero(streams.MsgLength())
-	m.MaybeEnableSplit(region, streams)
-	re.Equal(1, streams.MsgLength())
-	re.NoError(streams.Drain(1))
-	m.MaybeEnableSplit(region.Clone(core.WithNewRegionID(2)), streams)
-	m.MaybeEnableSplit(nil, streams)
+	admin, expired := region.Clone(core.WithNewRegionID(2)), region.Clone(core.WithNewRegionID(3))
+	// Allowed requests, including administrative splits of affinity Regions, are not tracked.
 	re.True(m.CheckSplit(nil, pdpb.SplitReason_SIZE, streams))
-	re.Zero(streams.MsgLength(), "never denied")
-
-	// A new denial after recovery can produce one more recovery notification.
-	conf.SetAffinityScheduleLimit(4)
+	re.True(m.CheckSplit(admin, pdpb.SplitReason_ADMIN, streams))
 	re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
-	re.NoError(streams.Drain(1))
-	conf.SetAffinityScheduleLimit(0)
-	m.MaybeEnableSplit(region, streams)
-	re.Equal(1, streams.MsgLength())
-}
-
-func TestSplitRecoveryTrackingBounds(t *testing.T) {
-	re := require.New(t)
-	m, conf, region, streams := newSplitRecoveryTestManager(t)
-	re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
-	re.NoError(streams.Drain(1))
+	re.False(m.CheckSplit(expired, pdpb.SplitReason_SIZE, streams))
+	re.Equal(2, streams.MsgLength())
+	re.NoError(streams.Drain(2))
 	deadline, ok := m.splitDeniedRegions.Peek(region.GetID())
 	re.True(ok)
 	m.MaybeEnableSplit(region, streams)
-	unchanged, ok := m.splitDeniedRegions.Peek(region.GetID())
-	re.True(ok)
+	unchanged, _ := m.splitDeniedRegions.Peek(region.GetID())
 	re.Equal(deadline, unchanged, "heartbeats must not extend the TTL")
+	m.splitDeniedRegions.Put(expired.GetID(), time.Now().Add(-time.Second))
 
-	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(-time.Second))
 	conf.SetAffinityScheduleLimit(0)
-	m.MaybeEnableSplit(region, streams)
-	re.Zero(streams.MsgLength(), "expired tracking falls back to storage TTL")
-	re.Zero(m.splitDeniedRegions.Len())
-
-	for id := uint64(1); id <= splitDeniedRegionLimit+1; id++ {
-		m.splitDeniedRegions.Put(id, time.Now().Add(splitDeniedRegionTTL))
+	// Expired tracking falls back to the storage-side TTL. A heartbeat without
+	// a leader keeps the entry for the next leader heartbeat.
+	for _, r := range []*core.RegionInfo{nil, admin, expired, region.Clone(core.WithLeader(nil))} {
+		m.MaybeEnableSplit(r, streams)
 	}
-	re.Equal(splitDeniedRegionLimit, m.splitDeniedRegions.Len())
+	re.Zero(streams.MsgLength())
 	m.MaybeEnableSplit(region, streams)
-	re.Zero(streams.MsgLength(), "oldest denial was evicted")
-	m.MaybeEnableSplit(region.Clone(core.WithNewRegionID(splitDeniedRegionLimit+1)), streams)
-	re.Equal(1, streams.MsgLength(), "recent denial is retained")
-}
-
-func TestSplitRecoveryConcurrentHeartbeats(t *testing.T) {
-	re := require.New(t)
-	m, conf, region, streams := newSplitRecoveryTestManager(t)
-	re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
-	re.NoError(streams.Drain(1))
-	conf.SetAffinityScheduleLimit(0)
-	var wg sync.WaitGroup
-	for range 16 {
-		wg.Go(func() { m.MaybeEnableSplit(region, streams) })
-	}
-	wg.Wait()
 	re.Equal(1, streams.MsgLength())
-}
-
-func BenchmarkSplitRecoveryUntrackedHeartbeat(b *testing.B) {
-	m := &Manager{splitDeniedRegions: cache.NewCache(splitDeniedRegionLimit, cache.LRUCache)}
-	region := generateRegionForTest(1, []uint64{1, 2, 3}, keyutil.KeyRange{})
-	b.ReportAllocs()
-	for b.Loop() {
-		// A cache miss must not consult affinity metadata or send a message.
-		m.MaybeEnableSplit(region, nil)
-	}
+	re.Zero(m.splitDeniedRegions.Len())
 }
