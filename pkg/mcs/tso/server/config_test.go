@@ -22,6 +22,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 func TestConfigBasic(t *testing.T) {
@@ -96,4 +97,21 @@ max-gap-reset-ts = "1h"
 	re.Equal(time.Duration(10)*time.Second, cfg.TSOSaveInterval.Duration)
 	re.Equal(time.Duration(100)*time.Millisecond, cfg.TSOUpdatePhysicalInterval.Duration)
 	re.Equal(time.Duration(1)*time.Hour, cfg.MaxResetTSGap.Duration)
+}
+
+func TestRedactInfoLogDefault(t *testing.T) {
+	re := require.New(t)
+	for _, tc := range []struct {
+		data     string
+		expected logutil.RedactInfoLogType
+	}{
+		{"", logutil.RedactInfoLogON},
+		{"[security]\nredact-info-log = false", logutil.RedactInfoLogOFF},
+	} {
+		cfg := NewConfig()
+		meta, err := toml.Decode(tc.data, cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta))
+		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
+	}
 }
