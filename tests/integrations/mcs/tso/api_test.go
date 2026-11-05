@@ -316,6 +316,10 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 		}
 	}
 	re.NotNil(follower)
+	// Primary readiness does not wait for the follower's membership watcher.
+	testutil.Eventually(re, func() bool {
+		return follower.GetKeyspaceGroupManager().GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID) != nil
+	})
 	re.True(primary.IsServing())
 	re.False(follower.IsServing())
 	re.NotEqual(follower.GetConfig().GetListenAddr(), primary.GetConfig().GetListenAddr())

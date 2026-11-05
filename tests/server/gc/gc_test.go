@@ -1531,6 +1531,7 @@ func waitWatchGCStatesSignal(t *testing.T, signal <-chan struct{}, message strin
 }
 
 func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
+	const liveQueueCapacity = 1024
 	for _, tc := range []struct {
 		name      string
 		reason    string
@@ -1558,6 +1559,23 @@ func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
 			re.NotNil(leaderServer)
 			pdServer := leaderServer.GetServer()
 			manager := pdServer.GetGCStateManager()
+			if tc.name == "slow consumer" {
+				// Prepare the upper bound once so queue filling does not reload GC barriers.
+				res, err := manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 11+liveQueueCapacity, time.Now())
+				re.NoError(err)
+				re.Equal(uint64(11+liveQueueCapacity), res.NewTxnSafePoint)
+			}
+			advance := func(target uint64) {
+				if tc.name == "slow consumer" {
+					_, actual, err := manager.AdvanceGCSafePoint(constant.NullKeyspaceID, target)
+					re.NoError(err)
+					re.Equal(target, actual)
+					return
+				}
+				res, err := manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, target, time.Now())
+				re.NoError(err)
+				re.Equal(target, res.NewTxnSafePoint)
+			}
 			proxyAddr, forwardedHost := leaderServer.GetAddr(), ""
 			if tc.forwarded {
 				follower := cluster.GetServer(cluster.GetFollower())
@@ -1597,21 +1615,22 @@ func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
 			re.Equal(activeBefore+1, prometheusMetricValue(t, "pd_gc_watcher_count", nil))
 			_, current := limiter.GetConcurrencyLimiterStatus("WatchGCStates")
 			re.Equal(uint64(1), current)
-			res, err := manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 10, time.Now())
-			re.NoError(err)
-			re.Equal(uint64(10), res.NewTxnSafePoint)
+			advance(10)
 			waitWatchGCStatesSignal(t, stream.sendStarted, "send did not start")
 			if tc.reason == "leader_lost" {
 				stop := manager.OnNodeBecomesLeader()
 				t.Cleanup(stop)
 			} else if tc.name == "slow consumer" {
-				// The sending worker cannot receive these 1025 updates, overflowing
-				// the default live queue's 1024 slots.
-				for target := uint64(11); target <= 1035; target++ {
-					res, err := manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, target, time.Now())
-					re.NoError(err)
-					re.Equal(target, res.NewTxnSafePoint)
+				// Fill the default live queue before the final update overflows it.
+				for target := uint64(11); target < 11+liveQueueCapacity; target++ {
+					advance(target)
 				}
+				select {
+				case <-handlerDone:
+					re.FailNow("public handler returned before the live queue overflowed")
+				default:
+				}
+				advance(11 + liveQueueCapacity)
 			}
 			waitWatchGCStatesSignal(t, handlerDone, "public handler did not return while send was blocked")
 			re.Equal(tc.code, status.Code(handlerErr))
@@ -1638,7 +1657,7 @@ func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
 			cancelStream()
 			waitWatchGCStatesSignal(t, stream.sendExited, "send did not exit after transport teardown")
 			cancelNext()
-			_, err = nextStream.Recv()
+			_, err := nextStream.Recv()
 			re.Equal(codes.Canceled, status.Code(err))
 			testutil.Eventually(re, func() bool {
 				_, current := limiter.GetConcurrencyLimiterStatus("WatchGCStates")
