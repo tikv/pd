@@ -1123,7 +1123,7 @@ func (c *RaftCluster) GetKeyspaceManager() *keyspace.Manager {
 }
 
 // GetKeyspaceIDInRange returns the keyspace info by the keyspace ID.
-func (c *RaftCluster) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+func (c *RaftCluster) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
 	return c.keyspaceManager.GetKeyspaceIDInRange(start, end, limit)
 }
 

@@ -135,9 +135,9 @@ func (mc *Cluster) AddKeyspace(ids ...uint32) {
 
 // GetKeyspaceIDInRange returns the keyspace IDs in the range [startKeyspaceID, endKeyspaceID] with a limit on the number of keyspace IDs returned.
 // No keyspace exists unless registered via AddKeyspace.
-func (mc *Cluster) GetKeyspaceIDInRange(startKeyspaceID uint32, endKeyspaceID uint32, limit int) ([]uint32, bool) {
+func (mc *Cluster) GetKeyspaceIDInRange(startKeyspaceID uint32, endKeyspaceID uint32, limit int) ([]uint32, error) {
 	if startKeyspaceID > endKeyspaceID {
-		return nil, false
+		return nil, nil
 	}
 	ret := make([]uint32, 0, max(limit, 0))
 	// Wide region ranges can cover the entire 24-bit ID space. Iterate only
@@ -152,7 +152,7 @@ func (mc *Cluster) GetKeyspaceIDInRange(startKeyspaceID uint32, endKeyspaceID ui
 	if limit > 0 && len(ret) > limit {
 		ret = ret[:limit]
 	}
-	return ret, len(ret) > 0
+	return ret, nil
 }
 
 // KeyspaceExist checks if a keyspace exists by ID. No keyspace exists unless

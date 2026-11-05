@@ -225,7 +225,7 @@ func (c *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 }
 
 // GetKeyspaceIDInRange returns the keyspace IDs in the specified range.
-func (c *Cluster) GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID uint32, limit int) ([]uint32, bool) {
+func (c *Cluster) GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID uint32, limit int) ([]uint32, error) {
 	return c.keyspaceCache.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID, limit)
 }
 

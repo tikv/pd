@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
@@ -489,25 +490,67 @@ func (m *mockKeyspaceChecker) KeyspaceExist(id uint32) bool {
 	return m.existingKeyspaces[id]
 }
 
-func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
 	if start > end {
-		return nil, false
+		return nil, nil
 	}
 	if m.allExist {
-		return []uint32{start}, true
+		return []uint32{start}, nil
 	}
-	found := false
 	ret := make([]uint32, 0)
 	for id, exists := range m.existingKeyspaces {
 		if exists && id >= start && id <= end {
 			ret = append(ret, id)
-			found = true
 			if limit > 0 && len(ret) >= limit {
 				break
 			}
 		}
 	}
-	return ret, found
+	return ret, nil
+}
+
+func mustSpanKeyspaces(t *testing.T, start, end []byte, checker Checker) bool {
+	t.Helper()
+	spans, err := RegionSpansMultipleKeyspaces(start, end, checker)
+	require.NoError(t, err)
+	return spans
+}
+
+func mustKeyspaceSplitKeys(t *testing.T, start, end []byte, keyType coreconstant.KeyType, checker Checker) [][]byte {
+	t.Helper()
+	keys, err := GetKeyspaceSplitKeys(start, end, keyType, checker)
+	require.NoError(t, err)
+	return keys
+}
+
+type unavailableKeyspaceChecker struct {
+	err error
+}
+
+func (c *unavailableKeyspaceChecker) GetKeyspaceIDInRange(uint32, uint32, int) ([]uint32, error) {
+	return nil, c.err
+}
+
+func TestKeyspaceBoundaryChecksPropagateLookupErrors(t *testing.T) {
+	checker := &unavailableKeyspaceChecker{err: errors.New("keyspace metadata unavailable")}
+	for _, bounds := range [][2][]byte{
+		{MakeRegionBound(100).TxnLeftBound, MakeRegionBound(103).TxnLeftBound},
+		{deeperTxnKey(100, 'a'), deeperTxnKey(101, 'b')},
+		{nil, deeperTxnKey(0, 'a')},
+		{deeperTxnKey(constant.MaxValidKeyspaceID, 'a'), nil},
+	} {
+		spans, err := RegionSpansMultipleKeyspaces(bounds[0], bounds[1], checker)
+		require.ErrorIs(t, err, checker.err)
+		require.False(t, spans)
+		keys, err := GetKeyspaceSplitKeys(bounds[0], bounds[1], coreconstant.Txn, checker)
+		require.ErrorIs(t, err, checker.err)
+		require.Empty(t, keys)
+	}
+	// No lookup is necessary to prove a region already lies within one keyspace.
+	bound := MakeRegionBound(100)
+	spans, err := RegionSpansMultipleKeyspaces(bound.TxnLeftBound, bound.TxnRightBound, checker)
+	require.NoError(t, err)
+	require.False(t, spans)
 }
 
 func TestRegionSpansMultipleKeyspaces(t *testing.T) {
@@ -664,7 +707,7 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
-			result := RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, tc.checker)
+			result := mustSpanKeyspaces(t, tc.startKey, tc.endKey, tc.checker)
 			re.Equal(tc.expectedResult, result, "test case: %s", tc.name)
 		})
 	}
@@ -680,7 +723,7 @@ func TestRegionSpansMultipleKeyspacesWithMissingEndpoints(t *testing.T) {
 	}
 	start := MakeRegionBound(100).TxnLeftBound
 	end := MakeRegionBound(102).TxnRightBound // encoded endpoint ID is 103
-	require.True(t, RegionSpansMultipleKeyspaces(start, end, checker))
+	require.True(t, mustSpanKeyspaces(t, start, end, checker))
 }
 
 func TestKeyspaceBoundaryChecksMatchMetadata(t *testing.T) {
@@ -714,11 +757,11 @@ func TestKeyspaceBoundaryChecksMatchMetadata(t *testing.T) {
 				}
 				slices.SortFunc(expected, bytes.Compare)
 				expected = slices.CompactFunc(expected, bytes.Equal)
-				require.Equal(t, expected, GetKeyspaceSplitKeys(start, end, keyType, cache),
+				require.Equal(t, expected, mustKeyspaceSplitKeys(t, start, end, keyType, cache),
 					"start=%x end=%x mode=%s", start, end, keyType)
 				expectedSpan = expectedSpan || len(expected) > 0
 			}
-			require.Equal(t, expectedSpan, RegionSpansMultipleKeyspaces(start, end, cache), "start=%x end=%x", start, end)
+			require.Equal(t, expectedSpan, mustSpanKeyspaces(t, start, end, cache), "start=%x end=%x", start, end)
 		}
 	}
 }
@@ -740,8 +783,8 @@ func TestKeyspaceSplitPartialPrefixes(t *testing.T) {
 			start := codec.EncodeBytes([]byte{prefix, 1})
 			end := codec.EncodeBytes([]byte{prefix, 2})
 			left, right := keyTypeToRegionBoundType(keyType).bounds(MakeRegionBound(1 << 16))
-			require.True(t, RegionSpansMultipleKeyspaces(start, end, cache))
-			require.Equal(t, [][]byte{left, right}, GetKeyspaceSplitKeys(start, end, keyType, cache))
+			require.True(t, mustSpanKeyspaces(t, start, end, cache))
+			require.Equal(t, [][]byte{left, right}, mustKeyspaceSplitKeys(t, start, end, keyType, cache))
 		})
 	}
 }
@@ -898,24 +941,29 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
-			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, tc.keyType, tc.checker)
+			splitKeys := mustKeyspaceSplitKeys(t, tc.startKey, tc.endKey, tc.keyType, tc.checker)
 			re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
 		})
 	}
 }
 
-// existOnlyChecker only answers KeyspaceExist; it panics if GetKeyspaceIDInRange
-// is called, so it can assert a code path never falls back to a range scan.
-type existOnlyChecker struct {
+// narrowRangeChecker rejects broad lookups so tests can verify that same-ID
+// and adjacent-ID regions only query the relevant IDs.
+type narrowRangeChecker struct {
 	existing map[uint32]bool
 }
 
-func (c *existOnlyChecker) KeyspaceExist(id uint32) bool {
-	return c.existing[id]
-}
-
-func (*existOnlyChecker) GetKeyspaceIDInRange(uint32, uint32, int) ([]uint32, bool) {
-	panic("GetKeyspaceIDInRange should not be called when the ID window can hold no keyspace of its own")
+func (c *narrowRangeChecker) GetKeyspaceIDInRange(start, end uint32, _ int) ([]uint32, error) {
+	if end-start > 1 {
+		panic("unexpected broad keyspace ID lookup")
+	}
+	var ids []uint32
+	for id, exists := range c.existing {
+		if exists && id >= start && id <= end {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 func TestGetKeyspaceSplitKeysForeignModeKeys(t *testing.T) {
@@ -974,7 +1022,7 @@ func TestGetKeyspaceSplitKeysForeignModeKeys(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
-			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, tc.keyType, tc.checker)
+			splitKeys := mustKeyspaceSplitKeys(t, tc.startKey, tc.endKey, tc.keyType, tc.checker)
 			re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
 		})
 	}
@@ -1004,15 +1052,15 @@ func TestGetKeyspaceSplitKeysAdjacentIDsWithSyntheticStart(t *testing.T) {
 				}
 				// An end at keyspace 1's left bound must not hide keyspace 0's
 				// left bound. An end inside keyspace 1 needs both boundaries.
-				require.Equal(t, [][]byte{left}, GetKeyspaceSplitKeys(start, right, keyType, checker))
+				require.Equal(t, [][]byte{left}, mustKeyspaceSplitKeys(t, start, right, keyType, checker))
 				end := codec.EncodeBytes(append(codec.MakeKeyspacePrefix(endPrefix, 1), 'a'))
-				require.Equal(t, [][]byte{left, right}, GetKeyspaceSplitKeys(start, end, keyType, checker))
+				require.Equal(t, [][]byte{left, right}, mustKeyspaceSplitKeys(t, start, end, keyType, checker))
 			}
 		})
 	}
 }
 
-func TestGetKeyspaceSplitKeysAdjacentIDsSkipsRangeScan(t *testing.T) {
+func TestGetKeyspaceSplitKeysAdjacentIDsUseBoundedLookup(t *testing.T) {
 	re := require.New(t)
 
 	// startKey sits inside keyspace 100 and endKey sits inside keyspace 101,
@@ -1027,35 +1075,35 @@ func TestGetKeyspaceSplitKeysAdjacentIDsSkipsRangeScan(t *testing.T) {
 		name              string
 		startKey          []byte
 		endKey            []byte
-		checker           *existOnlyChecker
+		checker           *narrowRangeChecker
 		expectedSplitKeys [][]byte
 	}{
 		{
 			name:              "boundary between existing adjacent keyspaces is split",
 			startKey:          startKey,
 			endKey:            endKey,
-			checker:           &existOnlyChecker{existing: map[uint32]bool{100: true, 101: true}},
+			checker:           &narrowRangeChecker{existing: map[uint32]bool{100: true, 101: true}},
 			expectedSplitKeys: [][]byte{boundary},
 		},
 		{
 			name:              "only the lower keyspace exists",
 			startKey:          startKey,
 			endKey:            endKey,
-			checker:           &existOnlyChecker{existing: map[uint32]bool{100: true}},
+			checker:           &narrowRangeChecker{existing: map[uint32]bool{100: true}},
 			expectedSplitKeys: [][]byte{boundary},
 		},
 		{
 			name:              "neither adjacent keyspace exists",
 			startKey:          startKey,
 			endKey:            endKey,
-			checker:           &existOnlyChecker{},
+			checker:           &narrowRangeChecker{},
 			expectedSplitKeys: nil,
 		},
 		{
 			name:              "boundary coincides with the region's own end key, so it is excluded",
 			startKey:          MakeRegionBound(100).TxnLeftBound,
 			endKey:            MakeRegionBound(100).TxnRightBound,
-			checker:           &existOnlyChecker{existing: map[uint32]bool{100: true, 101: true}},
+			checker:           &narrowRangeChecker{existing: map[uint32]bool{100: true, 101: true}},
 			expectedSplitKeys: nil,
 		},
 	}
@@ -1063,7 +1111,7 @@ func TestGetKeyspaceSplitKeysAdjacentIDsSkipsRangeScan(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
 			re.NotPanics(func() {
-				splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, coreconstant.Txn, tc.checker)
+				splitKeys := mustKeyspaceSplitKeys(t, tc.startKey, tc.endKey, coreconstant.Txn, tc.checker)
 				re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
 			})
 		})
@@ -1093,8 +1141,8 @@ func TestGetKeyspaceSplitKeysAdjacentIDsAtMax(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			checker := &existOnlyChecker{existing: tc.existing}
-			require.Equal(t, tc.expected, GetKeyspaceSplitKeys(startKey, nil, coreconstant.Txn, checker))
+			checker := &narrowRangeChecker{existing: tc.existing}
+			require.Equal(t, tc.expected, mustKeyspaceSplitKeys(t, startKey, nil, coreconstant.Txn, checker))
 		})
 	}
 }
@@ -1143,17 +1191,17 @@ func TestGetKeyspaceIDInRange(t *testing.T) {
 	re.Equal([]uint32{100, 101, 102, 103}, all())
 
 	// 103 is tombstone, so it should not be returned.
-	ids, ok := cache.GetKeyspaceIDInRange(100, 103, 1)
-	re.True(ok)
+	ids, err := cache.GetKeyspaceIDInRange(100, 103, 1)
+	re.NoError(err)
 	re.Equal([]uint32{102}, ids)
 
-	ids, ok = cache.GetKeyspaceIDInRange(101, 102, 1)
-	re.True(ok)
+	ids, err = cache.GetKeyspaceIDInRange(101, 102, 1)
+	re.NoError(err)
 	re.Equal([]uint32{102}, ids)
 
 	// 102 is tombstone, so it returns nothings.
-	ids, ok = cache.GetKeyspaceIDInRange(103, 104, 1)
-	re.False(ok)
+	ids, err = cache.GetKeyspaceIDInRange(103, 104, 1)
+	re.NoError(err)
 	re.Empty(ids)
 
 	// Delete 101 and check the cache again.
@@ -1163,8 +1211,8 @@ func TestGetKeyspaceIDInRange(t *testing.T) {
 	re.Equal([]uint32{100, 102, 103}, all())
 
 	// the order of returned keyspace IDs should be descending.
-	ids, ok = cache.GetKeyspaceIDInRange(100, 103, 5)
-	re.True(ok)
+	ids, err = cache.GetKeyspaceIDInRange(100, 103, 5)
+	re.NoError(err)
 	re.Len(ids, 2)
 	re.Equal([]uint32{102, 100}, ids)
 }

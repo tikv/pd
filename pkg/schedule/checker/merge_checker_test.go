@@ -616,27 +616,25 @@ func (m *mockKeyspaceManagerForMerge) KeyspaceExist(id uint32) bool {
 	return ok && exist
 }
 
-func (m *mockKeyspaceManagerForMerge) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
-	if start >= end {
-		return nil, false
+func (m *mockKeyspaceManagerForMerge) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
+	if start > end {
+		return nil, nil
 	}
 	if m.existing == nil {
-		return nil, false
+		return nil, nil
 	}
-	found := false
 	ret := make([]uint32, 0, limit)
 
 	for id, exists := range m.existing {
 		if exists && id >= start && id <= end {
 			ret = append(ret, id)
-			found = true
 			if limit > 0 && len(ret) >= limit {
 				break
 			}
 		}
 	}
 	slices.Sort(ret)
-	return ret, found
+	return ret, nil
 }
 
 type mockClusterWithKeyspaceManager struct {
@@ -644,7 +642,7 @@ type mockClusterWithKeyspaceManager struct {
 	manager *mockKeyspaceManagerForMerge
 }
 
-func (c *mockClusterWithKeyspaceManager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+func (c *mockClusterWithKeyspaceManager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
 	return c.manager.GetKeyspaceIDInRange(start, end, limit)
 }
 
@@ -685,7 +683,8 @@ func TestNotMergeAfterSplit(t *testing.T) {
 }
 
 func testNoMerge(re *require.Assertions, cluster *mockClusterWithKeyspaceManager, keyType coreconstant.KeyType, startKey []byte, endKey []byte) {
-	keys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, keyType, cluster)
+	keys, err := keyspace.GetKeyspaceSplitKeys(startKey, endKey, keyType, cluster)
+	re.NoError(err)
 	re.NotEmpty(keys)
 	keys = append(keys, endKey)
 	preRegion := newRegionInfo(uint64(99), string(startKey), string(keys[0]), 1, 1, []uint64{1, 1}, []uint64{1, 1})

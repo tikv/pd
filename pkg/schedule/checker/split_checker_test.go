@@ -20,6 +20,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/codec"
 	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -29,6 +32,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -137,8 +142,11 @@ func TestKeyspaceSplitMixRange(t *testing.T) {
 	// GetKeyspaceSplitKeys to find a split boundary in [402, MaxValidKeyspaceID).
 	cluster.AddKeyspace(402)
 
-	re.True(keyspace.RegionSpansMultipleKeyspaces(startkey, endKey, sc.cluster.(checkGetter)))
-	keys := keyspace.GetKeyspaceSplitKeys(startkey, endKey, coreconstant.Raw, sc.cluster.(checkGetter))
+	spans, err := keyspace.RegionSpansMultipleKeyspaces(startkey, endKey, sc.cluster)
+	re.NoError(err)
+	re.True(spans)
+	keys, err := keyspace.GetKeyspaceSplitKeys(startkey, endKey, coreconstant.Raw, sc.cluster)
+	re.NoError(err)
 	re.NotEmpty(keys)
 }
 
@@ -197,7 +205,9 @@ func TestKeyspaceSplitExtremeBounds(t *testing.T) {
 					re.Empty(cluster.GetAllLabelRules())
 					re.Nil(sc.Check(region))
 					cluster.AddKeyspace(tc.id)
-					re.True(keyspace.RegionSpansMultipleKeyspaces(tc.start, tc.end, cluster))
+					spans, err := keyspace.RegionSpansMultipleKeyspaces(tc.start, tc.end, cluster)
+					re.NoError(err)
+					re.True(spans)
 					op := sc.Check(region)
 					re.NotNil(op)
 					re.Equal("keyspace-split-region", op.Desc())
@@ -214,6 +224,75 @@ func TestKeyspaceSplitExtremeBounds(t *testing.T) {
 					}
 				})
 			}
+		})
+	}
+}
+
+type keyspaceLookupCluster struct {
+	*mockcluster.Cluster
+	manager *keyspace.Manager
+}
+
+func (c *keyspaceLookupCluster) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
+	return c.manager.GetKeyspaceIDInRange(start, end, limit)
+}
+
+func TestKeyspaceSchedulingRejectsIncompleteBackfill(t *testing.T) {
+	for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn} {
+		t.Run(keyType.String(), func(t *testing.T) {
+			re := require.New(t)
+			store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+			re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+				return store.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
+					Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101},
+					Name:     "ks101",
+					State:    keyspacepb.KeyspaceState_ENABLED,
+				})
+			}))
+			manager := keyspace.NewKeyspaceManager(t.Context(), store, nil, nil, nil, nil, nil)
+			cfg := mockconfig.NewTestOptions()
+			cfg.GetPDServerConfig().KeyType = keyType.String()
+			cluster := &keyspaceLookupCluster{Cluster: mockcluster.NewCluster(t.Context(), cfg), manager: manager}
+			cluster.AddLeaderStore(1, 1)
+			re.Empty(cluster.GetAllLabelRules())
+			start, middle, end := keyspace.MakeRegionBound(100).RawLeftBound, keyspace.MakeRegionBound(101).RawLeftBound, keyspace.MakeRegionBound(103).RawLeftBound
+			expected := [][]byte{keyspace.MakeRegionBound(101).RawLeftBound, keyspace.MakeRegionBound(101).RawRightBound}
+			if keyType == coreconstant.Txn {
+				start, middle, end = keyspace.MakeRegionBound(100).TxnLeftBound, keyspace.MakeRegionBound(101).TxnLeftBound, keyspace.MakeRegionBound(103).TxnLeftBound
+				expected = [][]byte{keyspace.MakeRegionBound(101).TxnLeftBound, keyspace.MakeRegionBound(101).TxnRightBound}
+			}
+			cluster.AddLeaderRegionWithRange(1, string(start), string(middle), 1)
+			cluster.AddLeaderRegionWithRange(2, string(middle), string(end), 1)
+			first, second := cluster.GetRegion(1), cluster.GetRegion(2)
+			sc := NewSplitChecker(cluster, cluster.RuleManager, cluster.RegionLabeler)
+			cluster.AddLeaderRegionWithRange(3, string(start), string(end), 1)
+			region := cluster.GetRegion(3)
+			fp := "github.com/tikv/pd/pkg/keyspace/backfillKeyspaceIDRangeBeforeApply"
+			re.NoError(failpoint.EnableCall(fp, func() {
+				// An unrelated publication invalidates every attempted scan.
+				// Keyspace 101 remains uncached while backfill keeps failing.
+				manager.UpdateKeyspaceMetaToCache(&keyspacepb.KeyspaceMeta{
+					Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 999},
+					Name:     "unrelated",
+					State:    keyspacepb.KeyspaceState_ENABLED,
+				})
+			}))
+			enabled := true
+			t.Cleanup(func() {
+				if enabled {
+					re.NoError(failpoint.Disable(fp))
+				}
+			})
+			for range 3 {
+				re.False(AllowMerge(cluster, first, second), "unknown metadata must not approve a merge")
+				re.Nil(sc.Check(region), "unknown metadata must not generate split keys either")
+			}
+			re.NoError(failpoint.Disable(fp))
+			enabled = false
+			re.False(AllowMerge(cluster, first, second), "the recovered cache must expose the real boundary")
+			op := sc.Check(region)
+			re.NotNil(op)
+			re.Equal(expected, op.Step(0).(operator.SplitRegion).SplitKeys)
 		})
 	}
 }

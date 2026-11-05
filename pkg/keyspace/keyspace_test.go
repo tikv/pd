@@ -82,6 +82,21 @@ type failingKeyspaceStorage struct {
 	failSaveKeyspaceMeta bool
 }
 
+type failingKeyspaceRangeStorage struct {
+	*endpoint.StorageEndpoint
+	failAfter int
+	reads     int
+	err       error
+}
+
+func (s *failingKeyspaceRangeStorage) LoadRangeKeyspace(txn kv.Txn, start uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
+	s.reads++
+	if s.err != nil && s.reads > s.failAfter {
+		return nil, s.err
+	}
+	return s.StorageEndpoint.LoadRangeKeyspace(txn, start, limit)
+}
+
 func (s *failingKeyspaceStorage) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
 	if s.failSaveKeyspaceMeta {
 		return errors.New("injected SaveKeyspaceMeta failure")
@@ -845,8 +860,8 @@ func TestGetKeyspaceIDInRangeBackfillsFromStorage(t *testing.T) {
 		re.False(ok, "freshly constructed Manager should start with an empty cache")
 	}
 
-	ids, ok := fresh.GetKeyspaceIDInRange(10, 12, 10)
-	re.True(ok)
+	ids, err := fresh.GetKeyspaceIDInRange(10, 12, 10)
+	re.NoError(err)
 	re.ElementsMatch([]uint32{10, 11, 12}, ids)
 }
 
@@ -876,8 +891,8 @@ func TestGetKeyspaceIDInRangeBackfillScansToCompletion(t *testing.T) {
 
 	fresh := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
 
-	ids, ok := fresh.GetKeyspaceIDInRange(20, 24, 10)
-	re.True(ok)
+	ids, err := fresh.GetKeyspaceIDInRange(20, 24, 10)
+	re.NoError(err)
 	re.ElementsMatch([]uint32{20, 21, 22, 23, 24}, ids)
 	re.Equal(constant.MaxValidKeyspaceID+1, fresh.keyspaceIDVerifiedUpTo,
 		"a single call should scan all of storage to completion, not just up to the queried end")
@@ -923,21 +938,21 @@ func TestManagerClearCache(t *testing.T) {
 	})
 	re.NoError(err)
 
-	ids, ok := manager.GetKeyspaceIDInRange(30, 30, 10)
-	re.True(ok)
+	ids, err := manager.GetKeyspaceIDInRange(30, 30, 10)
+	re.NoError(err)
 	re.Equal([]uint32{30}, ids)
 	re.Positive(manager.keyspaceIDVerifiedUpTo)
 
 	manager.ClearCache()
-	_, ok = manager.cache.getKeyspaceByID(id)
+	_, ok := manager.cache.getKeyspaceByID(id)
 	re.False(ok, "ClearCache should empty the cache")
 	re.Zero(manager.keyspaceIDVerifiedUpTo, "ClearCache should reset the backfill watermark")
 
 	// GetKeyspaceIDInRange must still work correctly after the cache is
 	// cleared, by re-backfilling from storage rather than trusting a stale
 	// watermark over an empty cache.
-	ids, ok = manager.GetKeyspaceIDInRange(30, 30, 10)
-	re.True(ok)
+	ids, err = manager.GetKeyspaceIDInRange(30, 30, 10)
+	re.NoError(err)
 	re.Equal([]uint32{30}, ids)
 }
 
@@ -967,8 +982,8 @@ func TestEvictKeyspacesFromCacheRollsBackVerifiedWatermark(t *testing.T) {
 	re.NoError(err)
 
 	// Advance the watermark past 50 by querying a range that reaches it.
-	_, ok := manager.GetKeyspaceIDInRange(0, 100, 10)
-	re.True(ok)
+	_, err = manager.GetKeyspaceIDInRange(0, 100, 10)
+	re.NoError(err)
 	re.Greater(manager.keyspaceIDVerifiedUpTo, id)
 
 	// Simulate a removal call evicting keyspace 50 on an ambiguous commit
@@ -980,8 +995,8 @@ func TestEvictKeyspacesFromCacheRollsBackVerifiedWatermark(t *testing.T) {
 	// A query reaching past 50 now re-verifies against storage instead of
 	// trusting the eviction, and correctly rediscovers keyspace 50 - which
 	// was never actually removed from storage in this scenario.
-	ids, ok := manager.GetKeyspaceIDInRange(50, 50, 1)
-	re.True(ok)
+	ids, err := manager.GetKeyspaceIDInRange(50, 50, 1)
+	re.NoError(err)
 	re.Equal([]uint32{50}, ids)
 }
 
@@ -1014,8 +1029,8 @@ func TestCreateKeyspaceByIDEvictsCacheAfterSplitTimeout(t *testing.T) {
 	re.Error(err, "manager.cluster is nil, so the region bound can never be observed and the wait must time out")
 
 	re.False(manager.KeyspaceExist(id), "the rolled-back keyspace must not still appear to exist via cache")
-	ids, ok := manager.GetKeyspaceIDInRange(id, id, 1)
-	re.False(ok, "the range lookup must agree storage has nothing in this range, not trust a ghost cache entry")
+	ids, err := manager.GetKeyspaceIDInRange(id, id, 1)
+	re.NoError(err)
 	re.Empty(ids)
 }
 
@@ -1049,8 +1064,8 @@ func TestCreateKeyspaceEvictsCacheAfterSplitTimeout(t *testing.T) {
 	re.Nil(meta)
 
 	re.False(manager.KeyspaceExist(id), "the rolled-back keyspace must not still appear to exist via cache")
-	ids, ok := manager.GetKeyspaceIDInRange(id, id, 1)
-	re.False(ok, "the range lookup must agree storage has nothing in this range, not trust a ghost cache entry")
+	ids, err := manager.GetKeyspaceIDInRange(id, id, 1)
+	re.NoError(err)
 	re.Empty(ids)
 }
 
@@ -1102,8 +1117,8 @@ func TestCreateKeyspaceByIDFailsWhenCompatibilityLabelWriteFails(t *testing.T) {
 	re.Error(err, "a failed compatibility label write must fail creation outright")
 
 	re.False(manager.KeyspaceExist(id), "the rolled-back keyspace must not still appear to exist via cache")
-	ids, ok := manager.GetKeyspaceIDInRange(id, id, 1)
-	re.False(ok, "the range lookup must agree storage has nothing in this range, not trust a ghost cache entry")
+	ids, err := manager.GetKeyspaceIDInRange(id, id, 1)
+	re.NoError(err)
 	re.Empty(ids)
 }
 
@@ -1631,9 +1646,10 @@ func TestBackfillKeyspaceIDRangeDoesNotClobberConcurrentUpdate(t *testing.T) {
 	}()
 
 	scanDone := make(chan struct{})
+	var scanErr error
 	go func() {
 		defer close(scanDone)
-		manager.GetKeyspaceIDInRange(0, 200, 10)
+		_, scanErr = manager.GetKeyspaceIDInRange(0, 200, 10)
 	}()
 
 	// Let the scan finish paging through storage (picking up id in its
@@ -1645,6 +1661,7 @@ func TestBackfillKeyspaceIDRangeDoesNotClobberConcurrentUpdate(t *testing.T) {
 	re.NoError(err)
 	close(releaseScan)
 	<-scanDone
+	re.ErrorContains(scanErr, "keyspace metadata changed during backfill")
 
 	item, ok := manager.cache.getKeyspaceByID(id)
 	re.True(ok)
@@ -1652,6 +1669,83 @@ func TestBackfillKeyspaceIDRangeDoesNotClobberConcurrentUpdate(t *testing.T) {
 		"the concurrent update's value must survive; the stale scan's buffered write must have been rejected")
 	re.LessOrEqual(manager.keyspaceIDVerifiedUpTo, verifiedUpToBefore,
 		"a rejected buffer must not advance the watermark; a later call must retry the full range fresh")
+}
+
+func TestGetKeyspaceIDInRangeRejectsIncompleteBackfill(t *testing.T) {
+	for _, emptySnapshot := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty=%t", emptySnapshot), func(t *testing.T) {
+			re := require.New(t)
+			store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+			manager := NewKeyspaceManager(t.Context(), store, nil, mockid.NewIDAllocator(), &mockConfig{}, nil, nil)
+			if !emptySnapshot {
+				re.NoError(manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+					Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101},
+					Name:     "ks101",
+					State:    keyspacepb.KeyspaceState_ENABLED,
+				}))
+				manager.ClearCache()
+			}
+			fp := "github.com/tikv/pd/pkg/keyspace/backfillKeyspaceIDRangeBeforeApply"
+			re.NoError(failpoint.EnableCall(fp, func() {
+				// A real, unrelated write races the scan, including when the
+				// snapshot is empty. Neither case may certify a partial cache.
+				re.NoError(manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+					Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 300},
+					Name:     "ks300",
+					State:    keyspacepb.KeyspaceState_ENABLED,
+				}))
+			}))
+			enabled := true
+			t.Cleanup(func() {
+				if enabled {
+					re.NoError(failpoint.Disable(fp))
+				}
+			})
+			ids, err := manager.GetKeyspaceIDInRange(100, 301, 10)
+			re.ErrorContains(err, "keyspace metadata changed during backfill")
+			re.Empty(ids, "partial cached results must not escape on failure")
+			re.Zero(manager.keyspaceIDVerifiedUpTo)
+			re.NoError(failpoint.Disable(fp))
+			enabled = false
+			ids, err = manager.GetKeyspaceIDInRange(100, 301, 10)
+			re.NoError(err)
+			if emptySnapshot {
+				re.Equal([]uint32{300}, ids)
+			} else {
+				re.Equal([]uint32{300, 101}, ids)
+			}
+		})
+	}
+}
+
+func TestGetKeyspaceIDInRangePropagatesStorageError(t *testing.T) {
+	for _, pages := range []int{0, 1} {
+		t.Run(fmt.Sprintf("successful-pages=%d", pages), func(t *testing.T) {
+			re := require.New(t)
+			store := &failingKeyspaceRangeStorage{StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), failAfter: pages}
+			writer := NewKeyspaceManager(t.Context(), store, nil, mockid.NewIDAllocator(), &mockConfig{}, nil, nil)
+			for i := range etcdutil.MaxEtcdTxnOps + 1 {
+				id := uint32(i + 1)
+				re.NoError(writer.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+					Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id},
+					Name:     fmt.Sprintf("ks%d", id),
+					State:    keyspacepb.KeyspaceState_ENABLED,
+				}))
+			}
+			manager := NewKeyspaceManager(t.Context(), store, nil, mockid.NewIDAllocator(), &mockConfig{}, nil, nil)
+			store.err = errors.New("injected keyspace range failure")
+			ids, err := manager.GetKeyspaceIDInRange(1, 3, 10)
+			re.ErrorIs(err, store.err)
+			re.Empty(ids)
+			re.Zero(manager.keyspaceIDVerifiedUpTo)
+			_, cached := manager.cache.getKeyspaceByID(1)
+			re.False(cached, "successful pages must not be published as a complete cache")
+			store.err = nil
+			ids, err = manager.GetKeyspaceIDInRange(1, 3, 10)
+			re.NoError(err)
+			re.Equal([]uint32{3, 2, 1}, ids)
+		})
+	}
 }
 
 func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
@@ -1663,30 +1757,30 @@ func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
 		re.NoError(err)
 	}
 
-	ids, ok := manager.GetKeyspaceIDInRange(2, 5, 1)
-	re.True(ok)
+	ids, err := manager.GetKeyspaceIDInRange(2, 5, 1)
+	re.NoError(err)
 	re.Equal([]uint32{5}, ids)
 
-	ids, ok = manager.GetKeyspaceIDInRange(1, 4, 1)
-	re.True(ok)
+	ids, err = manager.GetKeyspaceIDInRange(1, 4, 1)
+	re.NoError(err)
 	re.Equal([]uint32{4}, ids)
 
-	ids, ok = manager.GetKeyspaceIDInRange(1, 6, 1)
-	re.True(ok)
+	ids, err = manager.GetKeyspaceIDInRange(1, 6, 1)
+	re.NoError(err)
 	re.Equal([]uint32{5}, ids)
 
-	ids, ok = manager.GetKeyspaceIDInRange(6, 10, 1)
-	re.False(ok)
+	ids, err = manager.GetKeyspaceIDInRange(6, 10, 1)
+	re.NoError(err)
 	re.Empty(ids)
 
 	// limit > 1 should return multiple IDs in descending order.
-	ids, ok = manager.GetKeyspaceIDInRange(1, 5, 3)
-	re.True(ok)
+	ids, err = manager.GetKeyspaceIDInRange(1, 5, 3)
+	re.NoError(err)
 	re.Equal([]uint32{5, 4, 3}, ids)
 
 	// limit larger than the number of matches should return all of them.
-	ids, ok = manager.GetKeyspaceIDInRange(1, 5, 10)
-	re.True(ok)
+	ids, err = manager.GetKeyspaceIDInRange(1, 5, 10)
+	re.NoError(err)
 	re.Equal([]uint32{5, 4, 3, 2, 1}, ids)
 }
 
@@ -2045,11 +2139,11 @@ func (suite *keyspaceTestSuite) TestChecker() {
 	re.False(suite.manager.KeyspaceExist(10002))
 
 	// keyspace id in range check.
-	arr, exist := suite.manager.GetKeyspaceIDInRange(10000, 10010, 1)
-	re.True(exist)
+	arr, err := suite.manager.GetKeyspaceIDInRange(10000, 10010, 1)
+	re.NoError(err)
 	re.Equal([]uint32{10000}, arr)
-	arr, exist = suite.manager.GetKeyspaceIDInRange(10005, 10010, 1)
-	re.False(exist)
+	arr, err = suite.manager.GetKeyspaceIDInRange(10005, 10010, 1)
+	re.NoError(err)
 	re.Empty(arr)
 }
 

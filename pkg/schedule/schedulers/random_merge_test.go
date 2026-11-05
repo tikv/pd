@@ -19,6 +19,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/errors"
+
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -60,4 +64,46 @@ func checkRandomMergeSchedule(re *require.Assertions, enablePlacementRules bool)
 
 	oc.AddWaitingOperator(ops...)
 	re.False(mb.IsScheduleAllowed(tc))
+}
+
+type metadataErrorSchedulerCluster struct {
+	*mockcluster.Cluster
+	metadataErr error
+}
+
+func (c *metadataErrorSchedulerCluster) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
+	if c.metadataErr != nil {
+		return nil, c.metadataErr
+	}
+	return c.Cluster.GetKeyspaceIDInRange(start, end, limit)
+}
+
+func TestRandomMergeRejectsUnknownKeyspaceMetadata(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.GetPDServerConfig().KeyType = "raw"
+	tc.SetEnablePlacementRules(false)
+	tc.SetMaxReplicasWithLabel(false, 1)
+	tc.SetMergeScheduleLimit(1)
+	tc.AddRegionStore(1, 2)
+	start := keyspace.MakeRegionBound(100).RawLeftBound
+	middle := keyspace.MakeRegionBound(101).RawLeftBound
+	end := keyspace.MakeRegionBound(103).RawLeftBound
+	tc.AddLeaderRegionWithRange(1, string(start), string(middle), 1)
+	tc.AddLeaderRegionWithRange(2, string(middle), string(end), 1)
+	re.Empty(tc.GetAllLabelRules())
+	scheduler, err := CreateScheduler(types.RandomMergeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.RandomMergeScheduler, []string{"", ""}))
+	re.NoError(err)
+	cluster := &metadataErrorSchedulerCluster{Cluster: tc, metadataErr: errors.New("keyspace metadata changed during backfill")}
+	for range 10 {
+		ops, _ := scheduler.Schedule(cluster, false)
+		re.Empty(ops, "unknown metadata must not generate a merge operator outside patrol")
+	}
+	cluster.metadataErr = nil
+	ops, _ := scheduler.Schedule(cluster, false)
+	re.Len(ops, 2, "a successful, empty lookup must still allow an otherwise valid merge")
+	tc.AddKeyspace(101)
+	ops, _ = scheduler.Schedule(cluster, false)
+	re.Empty(ops, "a known keyspace boundary must prevent merging too")
 }

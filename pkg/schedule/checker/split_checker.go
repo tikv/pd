@@ -72,25 +72,12 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 
 	if len(keys) == 0 {
-		// First check if the region spans multiple keyspaces
-		// This ensures one region corresponds to one keyspace
-		checker, ok := c.cluster.(checkGetter)
-		if !ok {
-			log.Warn("cluster does not implement checkGetter, skipping keyspace split check")
+		desc = "keyspace-split-region"
+		var err error
+		keys, err = keyspace.GetKeyspaceSplitKeys(start, end, c.cluster.GetSharedConfig().GetKeyType(), c.cluster)
+		if err != nil {
+			log.Debug("skip keyspace split while metadata is unavailable", errs.ZapError(err))
 			return nil
-		}
-
-		if keyspace.RegionSpansMultipleKeyspaces(start, end, checker) {
-			desc = "keyspace-split-region"
-			keys = keyspace.GetKeyspaceSplitKeys(start, end, c.cluster.GetSharedConfig().GetKeyType(), checker)
-			if len(keys) > 0 {
-				op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, keys)
-				if err != nil {
-					log.Debug("create keyspace split region operator failed", errs.ZapError(err))
-					return nil
-				}
-				return op
-			}
 		}
 	}
 

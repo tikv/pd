@@ -191,6 +191,12 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 	}
 
 	// Test RegionSpansMultipleKeyspaces function
+	// Bootstrap pre-allocation is asynchronous. Wait for every required ID and
+	// a complete metadata lookup before asserting deterministic boundaries.
+	testutil.Eventually(re, func() bool {
+		ids, err := manager.GetKeyspaceIDInRange(1, 3, 3)
+		return err == nil && len(ids) == 3
+	})
 	spanTestCases := []struct {
 		name       string
 		startKey   []byte
@@ -224,20 +230,22 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 	}
 
 	for _, tc := range spanTestCases {
-		spans := keyspace.RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, manager)
+		spans, err := keyspace.RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, manager)
+		re.NoError(err)
 		re.Equal(tc.shouldSpan, spans, "test case: %s", tc.name)
 	}
 
 	// Test GetKeyspaceSplitKeys function
 	// For a region spanning keyspaces 1-3, it should generate split keys at boundaries 2 and 3
 	testutil.Eventually(re, func() bool {
-		_, ok := suite.server.GetKeyspaceManager().GetKeyspaceIDInRange(1, 3, 1)
-		return ok
+		ids, err := suite.server.GetKeyspaceManager().GetKeyspaceIDInRange(1, 3, 1)
+		return err == nil && len(ids) > 0
 	})
 
 	startKey := keyspace.MakeRegionBound(1).TxnLeftBound
 	endKey := keyspace.MakeRegionBound(3).TxnRightBound
-	splitKeys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, coreconstant.Txn, manager)
+	splitKeys, err := keyspace.GetKeyspaceSplitKeys(startKey, endKey, coreconstant.Txn, manager)
+	re.NoError(err)
 	re.NotNil(splitKeys)
 	re.GreaterOrEqual(len(splitKeys), 1, "Should generate at least one split key")
 

@@ -1436,12 +1436,19 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 	return keyspaces, nil
 }
 
-// GetKeyspaceIDInRange returns one existing keyspace ID in [start, end].
-func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+// GetKeyspaceIDInRange returns existing keyspace IDs in [start, end], in descending
+// order. An error means the metadata is incomplete, not that no keyspace exists.
+func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
 	if manager == nil {
-		return []uint32{start}, true
+		return nil, errors.New("keyspace manager is unavailable")
 	}
-	manager.backfillKeyspaceIDRange()
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
+	// Keep eviction/ClearCache serialized through the lookup too: otherwise an
+	// eviction after a successful backfill could expose an incomplete cache.
+	if err := manager.backfillKeyspaceIDRange(); err != nil {
+		return nil, err
+	}
 	return manager.cache.GetKeyspaceIDInRange(start, end, limit)
 }
 
@@ -1465,11 +1472,10 @@ func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]ui
 // evictKeyspacesFromCache - never on the steady-state path, where the
 // watermark is already at constant.MaxValidKeyspaceID+1 and this returns
 // immediately.
-func (manager *Manager) backfillKeyspaceIDRange() {
-	manager.keyspaceIDRangeMu.Lock()
-	defer manager.keyspaceIDRangeMu.Unlock()
+// The caller must hold keyspaceIDRangeMu through the subsequent cache lookup.
+func (manager *Manager) backfillKeyspaceIDRange() error {
 	if manager.keyspaceIDVerifiedUpTo > constant.MaxValidKeyspaceID {
-		return
+		return nil
 	}
 	startID := manager.keyspaceIDVerifiedUpTo
 	// Capture the generation once, before paging through storage below, so
@@ -1489,20 +1495,18 @@ func (manager *Manager) backfillKeyspaceIDRange() {
 	// to retry the full range fresh.
 	generation := manager.cache.Generation()
 	var buffered []keyspaceItem
-	verifiedUpTo := startID
 	for {
 		keyspaces, err := manager.LoadRangeKeyspace(startID, etcdutil.MaxEtcdTxnOps)
 		if err != nil {
 			log.Warn("[keyspace] failed to backfill keyspace ID range cache",
 				zap.Uint32("start-id", startID), errs.ZapError(err))
-			break
+			return errors.Annotate(err, "failed to backfill keyspace metadata")
 		}
 		for _, meta := range keyspaces {
 			buffered = append(buffered, keyspaceItem{keyspaceID: meta.GetId(), name: meta.GetName(), state: meta.GetState()})
 		}
 		if len(keyspaces) < etcdutil.MaxEtcdTxnOps {
 			// Storage has nothing left beyond this page.
-			verifiedUpTo = constant.MaxValidKeyspaceID + 1
 			break
 		}
 		startID = keyspaces[len(keyspaces)-1].GetId() + 1
@@ -1511,34 +1515,15 @@ func (manager *Manager) backfillKeyspaceIDRange() {
 			// space: there is nothing left to load, so stop here instead of
 			// making one more LoadRangeKeyspace call that would only fail
 			// startID's own upper-bound check.
-			verifiedUpTo = constant.MaxValidKeyspaceID + 1
 			break
 		}
-		verifiedUpTo = startID
-	}
-	if len(buffered) == 0 {
-		// Keep whatever progress this call already made (none, if the very
-		// first page failed to load) so a retry does not have to redo pages
-		// that already succeeded.
-		manager.keyspaceIDVerifiedUpTo = verifiedUpTo
-		return
 	}
 	failpoint.InjectCall("backfillKeyspaceIDRangeBeforeApply")
-	if manager.cache.SaveBatchIfGenerationUnchanged(buffered, generation) {
-		manager.keyspaceIDVerifiedUpTo = verifiedUpTo
+	if !manager.cache.SaveBatchIfGenerationUnchanged(buffered, generation) {
+		return errors.New("keyspace metadata changed during backfill")
 	}
-	// If a concurrent write landed during the scan, leave the watermark
-	// unchanged above: the next call must retry the full range fresh rather
-	// than trust a buffer that raced a real update.
-	//
-	// TODO: on a failed apply, the whole [startID, verifiedUpTo) range is
-	// rescanned from scratch even though only one ID in it actually raced.
-	// Cache could track the minimum ID touched since the last apply attempt
-	// (reset on each attempt); a failure could then commit the prefix of
-	// buffered below that ID and advance the watermark there instead of all
-	// the way back to startID, narrowing the next rescan. Not worth the
-	// added Cache state/locking without evidence that backfill conflicts
-	// and full-range rescans are actually frequent enough to matter.
+	manager.keyspaceIDVerifiedUpTo = constant.MaxValidKeyspaceID + 1
+	return nil
 }
 
 // ClearCache empties the keyspace cache and resets the backfill watermark. It must
