@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,13 +79,9 @@ func newAffinityBalanceTest(t testing.TB, stores uint64, zones ...string) *affin
 		// Keep stores connected through long benchmark runs.
 		tc.SetStoreLastHeartbeatInterval(id, -time.Hour)
 	}
-	// Initialize checker state through the constructor, but stop background work
-	// because these tests and benchmarks drive the balancer directly.
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	c := NewAffinityChecker(ctx, tc, tc.PersistOptions)
+	// The tests drive the balancer directly instead of running it.
+	c := NewAffinityChecker(t.Context(), tc, tc.PersistOptions)
 	c.startTime = time.Now().Add(-2 * recentMergeTTL)
-	c.balancer = &affinityBalancer{checker: c, tables: make(map[affinity.TableID]struct{}), idle: make(map[affinity.TableID]balanceIdle)}
 	if len(zones) > 0 {
 		for id := uint64(1); id <= stores; id++ {
 			tc.SetStoreLabel(id, map[string]string{"zone": zones[(id-1)%uint64(len(zones))]})
@@ -170,6 +167,13 @@ func TestAffinityBalanceLeaderConvergence(t *testing.T) {
 	ids := f.seed("100", 1, 1, 1, 1)
 	m := f.affinityManager
 	c := newTestAffinityChecker(t.Context(), f.Cluster, f.PersistOptions)
+	ctx, cancel := context.WithCancel(t.Context())
+	var wg sync.WaitGroup
+	wg.Go(func() { c.RunBalancer(ctx) })
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 	custom := []string{"custom", balanceTestGroupID("_tidb_t_100")}
 	for _, id := range custom {
 		re.NoError(createAffinityGroupForTest(m, &affinity.Group{ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}, nil, nil))

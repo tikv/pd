@@ -114,6 +114,9 @@ func (sc *schedulingController) initCoordinator(ctx context.Context, cluster sch
 }
 
 func (sc *schedulingController) initCoordinatorLocked(ctx context.Context, cluster sche.ClusterInformer, hbstreams *hbstream.HeartbeatStreams) {
+	// Stop the coordinator that is replaced. It is not running: it was stopped,
+	// or kept for the APIs while the scheduling service was independent.
+	sc.cancel()
 	sc.ctx, sc.cancel = context.WithCancel(ctx)
 	sc.coordinator = schedule.NewCoordinator(sc.ctx, cluster, hbstreams)
 }

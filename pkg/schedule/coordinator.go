@@ -250,7 +250,7 @@ func (c *Coordinator) Run() {
 	log.Info("coordinator starts to run schedulers")
 	c.InitSchedulers(true)
 
-	c.wg.Add(4)
+	c.wg.Add(5)
 	// Starts to patrol regions.
 	go c.PatrolRegions()
 	// Checks suspect key ranges
@@ -258,6 +258,15 @@ func (c *Coordinator) Run() {
 	go c.drivePushOperator()
 	// Checks whether to create evict-slow-trend scheduler.
 	go c.driveSlowNodeScheduler()
+	go c.runAffinityBalancer()
+}
+
+// runAffinityBalancer balances the targets of affinity partition tables until
+// the coordinator stops.
+func (c *Coordinator) runAffinityBalancer() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+	c.checkers.GetAffinityChecker().RunBalancer(c.ctx)
 }
 
 // InitSchedulers initializes schedulers.

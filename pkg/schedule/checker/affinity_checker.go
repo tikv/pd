@@ -64,9 +64,18 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		startTime:        time.Now(),
 	}
 	if c.affinityManager != nil {
-		c.balancer = newAffinityBalancer(ctx, c)
+		c.balancer = newAffinityBalancer(c)
 	}
 	return c
+}
+
+// RunBalancer balances the targets of partition tables until ctx is done. The
+// coordinator runs it with its other background jobs, so that stopping the
+// coordinator waits for it.
+func (c *AffinityChecker) RunBalancer(ctx context.Context) {
+	if c.balancer != nil {
+		c.balancer.run(ctx)
+	}
 }
 
 // GetType return AffinityChecker's type.

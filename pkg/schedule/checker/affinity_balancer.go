@@ -42,7 +42,8 @@ const (
 
 // affinityBalancer is the worker that balances the targets of partition
 // tables. The affinity checker registers a table once a group of it is
-// stable, and every tick plans the registered tables.
+// stable, and every tick plans the registered tables. It runs only while the
+// coordinator runs, see AffinityChecker.RunBalancer.
 type affinityBalancer struct {
 	checker *AffinityChecker
 	mu      sync.Mutex
@@ -57,14 +58,12 @@ type balanceIdle struct {
 	until   time.Time
 }
 
-func newAffinityBalancer(ctx context.Context, checker *AffinityChecker) *affinityBalancer {
-	b := &affinityBalancer{
+func newAffinityBalancer(checker *AffinityChecker) *affinityBalancer {
+	return &affinityBalancer{
 		checker: checker,
 		tables:  make(map[affinity.TableID]struct{}),
 		idle:    make(map[affinity.TableID]balanceIdle),
 	}
-	go b.run(ctx)
-	return b
 }
 
 func (b *affinityBalancer) enqueue(groupID string) {
