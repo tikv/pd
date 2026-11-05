@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestNextGenTiDBGroupOperations(t *testing.T) {
@@ -257,6 +260,108 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 	// Verify groups were loaded from storage
 	re.True(manager2.IsGroupExist("group1"))
 	re.True(manager2.IsGroupExist("group2"))
+}
+
+// TestLoadOverlappingAffinityRanges verifies that persisted overlaps do not stop
+// the manager from loading, and that every group in a conflict stays suspended
+// until the conflict is repaired.
+func TestLoadOverlappingAffinityRanges(t *testing.T) {
+	keyRange := func(start, end string) keyutil.KeyRange {
+		return keyutil.KeyRange{StartKey: []byte(start), EndKey: []byte(end)}
+	}
+	for _, testCase := range []struct {
+		name   string
+		groups []GroupKeyRanges
+	}{
+		{"within group", []GroupKeyRanges{
+			{GroupID: "self", KeyRanges: []keyutil.KeyRange{keyRange("a", "d"), keyRange("b", "c")}},
+		}},
+		// outer covers inner and later, which do not overlap each other, and has
+		// a disjoint range m-n.
+		{"nested ranges", []GroupKeyRanges{
+			{GroupID: "outer", KeyRanges: []keyutil.KeyRange{keyRange("a", "g"), keyRange("m", "n")}},
+			{GroupID: "inner", KeyRanges: []keyutil.KeyRange{keyRange("b", "c")}},
+			{GroupID: "later", KeyRanges: []keyutil.KeyRange{keyRange("d", "e")}},
+		}},
+		{"unbounded ranges", []GroupKeyRanges{
+			{GroupID: "whole", KeyRanges: []keyutil.KeyRange{keyRange("", "")}},
+			{GroupID: "inner", KeyRanges: []keyutil.KeyRange{keyRange("b", "c")}},
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			// Bypass the write validation to persist the overlaps.
+			for _, change := range testCase.groups {
+				re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+					if err := store.SaveAffinityGroup(txn, change.GroupID, &Group{
+						ID: change.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1},
+					}); err != nil {
+						return err
+					}
+					return store.SaveRegionRule(txn, GetLabelRuleID(change.GroupID), MakeLabelRule(change))
+				}))
+			}
+			snapshot := func() map[string]string {
+				data := make(map[string]string)
+				re.NoError(store.LoadAllAffinityGroups(func(k, v string) { data["group/"+k] = v }))
+				re.NoError(store.LoadRegionRules(func(k, v string) { data["rule/"+k] = v }))
+				return data
+			}
+			before := snapshot()
+			logFile := testutil.InitTempFileLogger(t, "error")
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err, "persisted overlaps must not prevent startup")
+			re.Equal(before, snapshot(), "loading must not repair persisted data")
+			for _, change := range testCase.groups {
+				manager.RestoreAffinityGroup(change.GroupID)
+				state := manager.GetAffinityGroupState(change.GroupID)
+				re.NotNil(state)
+				re.Equal(PhasePending, state.Phase)
+				re.False(state.AffinitySchedulingAllowed)
+				re.True(state.RegularSchedulingAllowed)
+				re.Equal(len(change.KeyRanges), state.RangeCount)
+				// No Region in the group, even in a disjoint range, belongs to it.
+				for _, kr := range change.KeyRanges {
+					group, _ := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1}, kr))
+					re.Nil(group)
+				}
+			}
+			logs, err := os.ReadFile(logFile)
+			re.NoError(err)
+			re.Equal(1, strings.Count(string(logs), "overlapping affinity key ranges"))
+			for _, change := range testCase.groups {
+				re.Contains(string(logs), change.GroupID)
+			}
+			re.Contains(string(logs), "start-key")
+			re.Contains(string(logs), "end-key")
+
+			if testCase.name == "nested ranges" {
+				extra := []GroupKeyRanges{{GroupID: "unrelated", KeyRanges: []keyutil.KeyRange{keyRange("y", "z")}}}
+				re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "unrelated", KeyRanges: []keyutil.KeyRange{keyRange("x", "y")}}}))
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(extra, nil))
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, extra))
+				re.NoError(manager.DeleteAffinityGroups([]string{"unrelated"}, true))
+			}
+			re.Error(manager.CreateAffinityGroups([]GroupKeyRanges{{
+				GroupID: "new-overlap", KeyRanges: []keyutil.KeyRange{keyRange("b", "c")},
+			}}), "new overlaps must still be rejected")
+
+			// Removing the second range of a single group, or else the first
+			// group, repairs the conflict.
+			first := testCase.groups[0]
+			if len(testCase.groups) == 1 {
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: first.GroupID, KeyRanges: first.KeyRanges[1:]}}))
+			} else {
+				re.NoError(manager.DeleteAffinityGroups([]string{first.GroupID}, true))
+			}
+			_, isAffinity := manager.GetRegionAffinityGroupState(generateRegionForTest(1, []uint64{1}, keyRange("b", "c")))
+			re.True(isAffinity)
+		})
+	}
 }
 
 func TestParseKeyRangesFromDataInvalidHex(t *testing.T) {
