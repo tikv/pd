@@ -15,9 +15,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
@@ -545,6 +548,110 @@ func TestInitDoesNotWaitForPreviousTerm(t *testing.T) {
 	re.Eventually(func() bool { return len(m.consumptionDispatcher) == 0 }, 5*time.Second, 10*time.Millisecond)
 	close(persistExit)
 	m.close()
+}
+
+type pushRequest struct {
+	method, path string
+	body         []byte
+}
+
+type pushTarget struct {
+	*httptest.Server
+	mu      sync.Mutex
+	latest  pushRequest
+	deleted bool
+}
+
+func newPushTarget() *pushTarget {
+	target := &pushTarget{}
+	target.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		target.mu.Lock()
+		target.latest = pushRequest{r.Method, r.URL.Path, body}
+		target.deleted = target.deleted || r.Method == http.MethodDelete
+		target.mu.Unlock()
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusAccepted)
+		}
+	}))
+	return target
+}
+
+func (t *pushTarget) last() pushRequest {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.latest
+}
+
+func (t *pushTarget) sawDelete() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.deleted
+}
+
+// TestBackgroundMetricsFlushWithdrawsPushedMetrics pins that the push path
+// carries the RU peak and withdraws the pod's group from a target it stops
+// pushing to.
+func TestBackgroundMetricsFlushWithdrawsPushedMetrics(t *testing.T) {
+	re := require.New(t)
+	peakName := []byte("resource_manager_resource_unit_peak_per_second_rolling_60s")
+	t.Setenv("HOSTNAME", "rm-0")
+	groupPath := "/metrics/job/resource_group_svc/pod/rm-0"
+	first, second := newPushTarget(), newPushTarget()
+	defer first.Close()
+	defer second.Close()
+
+	m := newManagerBase(&ControllerConfig{
+		PushMetricsAddress:  first.URL,
+		PushMetricsInterval: typeutil.Duration{Duration: 50 * time.Millisecond},
+	}, ResourceGroupWriteRoleLegacyAll)
+	setPush := func(address string, interval time.Duration) {
+		m.Lock()
+		m.controllerConfig.PushMetricsAddress = address
+		m.controllerConfig.PushMetricsInterval = typeutil.Duration{Duration: interval}
+		m.Unlock()
+	}
+	timeline := m.metrics.ruTimeline
+	now := time.Now()
+	timeline.since = now.Unix() - 3600
+	timeline.record(timelineReport(1, now.Unix()-80, make([][2]float64, 60)), now)
+	timeline.flush(now)
+	pushedPeak := func(target *pushTarget) func() bool {
+		return func() bool {
+			last := target.last()
+			// PUT replaces what the pod pushed before; POST would keep a
+			// withdrawn peak on the receiver.
+			return last.method == http.MethodPut && last.path == groupPath && bytes.Contains(last.body, peakName)
+		}
+	}
+	withdrawn := func(target *pushTarget) func() bool {
+		return func() bool {
+			last := target.last()
+			return last.method == http.MethodDelete && last.path == groupPath
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.wg.Add(1)
+	go m.backgroundMetricsFlush(ctx)
+	testutil.Eventually(re, pushedPeak(first))
+	// Changing only the interval keeps the target.
+	setPush(first.URL, 40*time.Millisecond)
+	time.Sleep(1500 * time.Millisecond)
+	re.False(first.sawDelete())
+	// Moving to another target withdraws everything from the old one.
+	setPush(second.URL, 40*time.Millisecond)
+	testutil.Eventually(re, pushedPeak(second))
+	re.True(withdrawn(first)())
+	// So does disabling the push.
+	setPush("", 0)
+	testutil.Eventually(re, withdrawn(second))
+	// And ending the term.
+	setPush(first.URL, 40*time.Millisecond)
+	testutil.Eventually(re, pushedPeak(first))
+	cancel()
+	m.wg.Wait()
+	re.True(withdrawn(first)())
 }
 
 func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
