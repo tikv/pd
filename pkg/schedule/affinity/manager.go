@@ -19,9 +19,11 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -66,6 +68,11 @@ type Manager struct {
 	conf             config.SharedConfigProvider
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
 
+	// labelRuleVer is increased while holding RWMutex whenever a group's label rule may change.
+	// A lookup reads it before the region labeler and saves its result only if it is unchanged,
+	// because the labeler may have returned the group of an outdated label rule.
+	labelRuleVer atomic.Uint64
+
 	// The following members are protected by RWMutex.
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
@@ -75,8 +82,10 @@ type Manager struct {
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
 	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges
-	// labelRuleBuffer is a buffer used during etcd synchronization.
-	// When synchronizing via etcd, LabelRule information may arrive earlier than group information.
+	// labelRuleBuffer is a buffer used during etcd synchronization. It holds the
+	// label rule that the affinity label watcher has applied for a group ID that
+	// has no group, because the group watcher may be behind: the rule may arrive
+	// before its group, or before the deletion of the group that it replaces.
 	labelRuleBuffer map[string]*labeler.LabelRule // {group_id} -> labelRule
 }
 
@@ -265,6 +274,7 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 		log.Error("group not initialized", zap.String("group-id", groupID))
 		return
 	}
+	m.labelRuleVer.Add(1)
 	if needClear {
 		m.clearGroupCacheLocked(groupID)
 	} else {
@@ -297,6 +307,7 @@ func (m *Manager) clearGroupCacheLocked(groupID string) {
 }
 
 func (m *Manager) deleteGroupLocked(groupID string) {
+	m.labelRuleVer.Add(1)
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
 }
@@ -322,10 +333,14 @@ func (m *Manager) deleteCacheLocked(regionID uint64) {
 	delete(cache.groupInfo.Regions, regionID)
 }
 
-func (m *Manager) saveCache(cache *regionCache) {
+func (m *Manager) saveCache(cache *regionCache, labelRuleVer uint64) {
 	regionID := cache.region.GetID()
 	m.Lock()
 	defer m.Unlock()
+	// If a label rule has changed since the lookup read the labeler, the result may be outdated.
+	if m.labelRuleVer.Load() != labelRuleVer {
+		return
+	}
 	// If the Group has changed, update it but do not save it afterward.
 	groupInfo, ok := m.groups[cache.groupInfo.ID]
 	if ok && groupInfo == cache.groupInfo && groupInfo.AffinityVer == cache.affinityVer {
@@ -384,7 +399,9 @@ func (m *Manager) calcRegionAffinityGroupState(region *core.RegionInfo, saveCach
 	var cache *regionCache
 	cache, group = m.getCache(region)
 	if cache == nil || group == nil || cache.affinityVer != group.affinityVer || region != cache.region {
+		labelRuleVer := m.labelRuleVer.Load()
 		groupID := m.regionLabeler.GetRegionLabel(region, AffinityLabelKey)
+		failpoint.InjectCall("afterRegionLabelLookup")
 		group = m.GetAffinityGroupState(groupID)
 		if group == nil {
 			return nil, false
@@ -396,7 +413,7 @@ func (m *Manager) calcRegionAffinityGroupState(region *core.RegionInfo, saveCach
 			isAffinity:  group.isRegionAffinity(region),
 		}
 		if saveCache {
-			m.saveCache(cache)
+			m.saveCache(cache, labelRuleVer)
 		}
 	}
 
@@ -474,20 +491,20 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	}
 	m.RUnlock()
 
-	// If the group is newly created, try to attach existing label rule without holding the write lock.
+	// If the group is newly created, try to attach the buffered label rule without holding the write lock.
 	var (
 		labelRule *labeler.LabelRule
 		gkr       GroupKeyRanges
 		labelErr  error
 	)
 	if !exists {
-		labelRule = m.regionLabeler.GetLabelRule(GetLabelRuleID(group.ID))
-
-		// If regionLabeler has not been synchronized but SyncKeyRangesFromEtcd has already run, read from the buffer.
-		if labelRule == nil {
-			labelRule = m.labelRuleBuffer[group.ID]
-		}
-
+		// Only use the buffered rule, which later events of the affinity label watcher
+		// replace or delete. If nothing is buffered, that watcher has not delivered a
+		// rule of the group or has deleted it, and SyncKeyRangesFromEtcd attaches a
+		// rule that arrives later. Do not read the region labeler: another watcher
+		// syncs it, so it may still hold a rule that has been replaced or deleted, and
+		// no later affinity event would correct it.
+		labelRule = m.labelRuleBuffer[group.ID]
 		if labelRule != nil {
 			gkr, labelErr = extractKeyRangesFromLabelRule(labelRule)
 		}
@@ -540,15 +557,22 @@ func (m *Manager) SyncGroupDeleteFromEtcd(groupID string) {
 	defer m.metaMutex.Unlock()
 
 	delete(m.keyRanges, groupID)
-	delete(m.labelRuleBuffer, groupID)
 
 	m.Lock()
 	defer m.Unlock()
-	if _, exists := m.groups[groupID]; !exists {
+	groupInfo, exists := m.groups[groupID]
+	if !exists {
 		log.Warn("affinity group not found during etcd sync delete", zap.String("group-id", groupID))
 		return
 	}
-
+	// The affinity label watcher may be ahead and have applied the rule of a group
+	// recreated with the same ID to this group. Move the rule to the buffer for the
+	// new group. If it is still the rule of this group, PD deleted it together with
+	// the group, and the affinity label watcher clears the buffer when it delivers
+	// the deletion.
+	if groupInfo.LabelRule != nil && groupInfo.RangeCount > 0 {
+		m.labelRuleBuffer[groupID] = groupInfo.LabelRule
+	}
 	m.deleteGroupLocked(groupID)
 }
 
@@ -619,5 +643,19 @@ func (m *Manager) SyncKeyRangesDeleteFromEtcd(ruleID string) {
 	defer m.Unlock()
 	if _, exists := m.groups[groupID]; exists {
 		m.updateGroupLabelRuleLocked(groupID, nil, true)
+	}
+}
+
+// InvalidCacheByLabelRules clears the Region cache of the groups whose label rules have changed in the region labeler.
+// The scheduling service updates the region labeler and the Manager from different watchers. If the Manager is
+// updated first, lookups can still cache results computed from the old label rules.
+func (m *Manager) InvalidCacheByLabelRules(ruleIDs []string) {
+	m.Lock()
+	defer m.Unlock()
+	m.labelRuleVer.Add(1)
+	for _, ruleID := range ruleIDs {
+		if groupID, ok := strings.CutPrefix(ruleID, LabelRuleIDPrefix); ok && groupID != "" {
+			m.clearGroupCacheLocked(groupID)
+		}
 	}
 }
