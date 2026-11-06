@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -44,6 +45,58 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+func TestAskBatchSplitRejectsOversizedCount(t *testing.T) {
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+	client := &splitScatterPDClient{next: 1000}
+	cluster.SwitchPDLeader(client)
+	region := newAffinitySplitTestRegion()
+	cluster.PutRegion(region)
+	for _, count := range []uint32{math.MaxUint32, 1 << 30} {
+		resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
+			Region: region.GetMeta(), SplitCount: count,
+		})
+		require.NoError(t, err)
+		require.Contains(t, resp.GetHeader().GetError().GetMessage(), "allocation budget")
+		require.Empty(t, resp.GetIds())
+	}
+	require.Equal(t, uint64(1000), client.next, "rejected requests must not call the ID allocator")
+	resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
+		Region: region.GetMeta(), SplitCount: 1,
+	})
+	require.NoError(t, err)
+	require.Nil(t, resp.GetHeader().GetError())
+	require.Len(t, resp.GetIds(), 1)
+}
+
+func TestAskBatchSplitCountCompatibility(t *testing.T) {
+	for _, nonBatch := range []bool{false, true} {
+		for _, count := range []uint32{0, 1, 10} {
+			t.Run(fmt.Sprintf("non-batch-%t-count-%d", nonBatch, count), func(t *testing.T) {
+				svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+				cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000, nonBatch: nonBatch})
+				region := newAffinitySplitTestRegion()
+				cluster.PutRegion(region)
+				resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
+					Region: region.GetMeta(), SplitCount: count,
+				})
+				require.NoError(t, err)
+				require.Nil(t, resp.GetHeader().GetError())
+				require.Len(t, resp.GetIds(), int(count))
+				var previous uint64
+				for _, split := range resp.GetIds() {
+					require.Greater(t, split.GetNewRegionId(), previous)
+					previous = split.GetNewRegionId()
+					require.Len(t, split.GetNewPeerIds(), len(region.GetPeers()))
+					for _, peer := range split.GetNewPeerIds() {
+						require.Greater(t, peer, previous)
+						previous = peer
+					}
+				}
+			})
+		}
+	}
+}
+
 type captureHeartbeatStream struct {
 	ch chan core.RegionHeartbeatResponse
 }
@@ -55,12 +108,13 @@ func (s *captureHeartbeatStream) Send(resp core.RegionHeartbeatResponse) error {
 
 type splitScatterPDClient struct {
 	pdpb.PDClient
-	next uint64
+	next     uint64
+	nonBatch bool
 }
 
 func (c *splitScatterPDClient) AllocID(_ context.Context, req *pdpb.AllocIDRequest, _ ...grpc.CallOption) (*pdpb.AllocIDResponse, error) {
 	count := req.GetCount()
-	if count == 0 {
+	if count == 0 || c.nonBatch {
 		count = 1
 	}
 	c.next += uint64(count)

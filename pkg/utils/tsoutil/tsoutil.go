@@ -18,12 +18,31 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 const (
 	physicalShiftBits = 18
 	logicalBits       = (1 << physicalShiftBits) - 1
 )
+
+// ValidateTSOCount rejects counts that cannot fit in a timestamp's logical part.
+// It also accepts merged counts before they are narrowed to the wire's uint32.
+func ValidateTSOCount(count uint64) error {
+	if count > 0 && count <= logicalBits {
+		return nil
+	}
+	return invalidTSOCount(count)
+}
+
+// Keep error construction separate so validation stays inlineable on valid requests.
+func invalidTSOCount(count uint64) error {
+	if count == 0 {
+		return errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
+	}
+	return errs.ErrGenerateTimestamp.FastGenByArgs("tso count exceeds logical capacity")
+}
 
 // TimeToTS converts a `time.Time` to an `uint64` TS.
 func TimeToTS(t time.Time) uint64 {

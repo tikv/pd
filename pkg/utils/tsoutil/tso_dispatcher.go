@@ -72,6 +72,12 @@ func NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize prometheus.Histo
 
 // DispatchRequest is the entry point for dispatching/forwarding a tso request to the destination host
 func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, tsoProtoFactory ProtoFactory, tsoPrimaryWatchers ...*etcdutil.LoopWatcher) context.Context {
+	if err := ValidateTSOCount(uint64(req.getCount())); err != nil {
+		// Reject only this request before it can affect a shared forwarding queue.
+		ctx, cancel := context.WithCancelCause(serverCtx)
+		cancel(err)
+		return ctx
+	}
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
 	if !loaded {
@@ -177,13 +183,16 @@ func (s *TSODispatcher) dispatch(
 
 func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) error {
 	// Merge the requests
-	count := uint32(0)
+	count := uint64(0)
 	for _, request := range requests {
-		count += request.getCount()
+		count += uint64(request.getCount())
+	}
+	if err := ValidateTSOCount(count); err != nil {
+		return err
 	}
 
 	start := time.Now()
-	resp, err := requests[0].process(forwardStream, count)
+	resp, err := requests[0].process(forwardStream, uint32(count))
 	if err != nil {
 		return err
 	}

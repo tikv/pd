@@ -16,6 +16,7 @@ package id_test
 
 import (
 	"context"
+	"math"
 	"sync"
 	"testing"
 
@@ -150,6 +151,31 @@ func (s *idAllocatorTestSuite) checkPDRestart(cluster *tests.TestCluster) {
 
 func (s *idAllocatorTestSuite) TestBatchAllocID() {
 	s.env.RunTestInNonMicroserviceEnv(s.checkBatchAllocID)
+}
+
+func (s *idAllocatorTestSuite) TestBatchAllocIDRPC() {
+	s.env.RunTestInNonMicroserviceEnv(func(cluster *tests.TestCluster) {
+		re := s.Require()
+		leader := cluster.GetLeaderServer()
+		client, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+		defer conn.Close()
+		var previous uint64
+		for _, count := range []uint32{0, 1, 10, 5000, math.MaxUint32, 1} {
+			resp, err := client.AllocID(s.T().Context(), &pdpb.AllocIDRequest{
+				Header: testutil.NewRequestHeader(leader.GetClusterID()), Count: count,
+			})
+			re.NoError(err)
+			re.Empty(resp.GetHeader().GetError())
+			actual := max(count, 1)
+			if actual == 1 {
+				re.Zero(resp.GetCount(), "single-ID responses must retain legacy encoding")
+			} else {
+				re.Equal(actual, resp.GetCount())
+			}
+			re.Greater(resp.GetId()-uint64(actual)+1, previous)
+			previous = resp.GetId()
+		}
+	})
 }
 
 func (s *idAllocatorTestSuite) checkBatchAllocID(cluster *tests.TestCluster) {

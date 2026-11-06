@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +38,27 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestHandleAskBatchSplitRejectsOversizedCount(t *testing.T) {
+	cluster, _ := newSplitScatterTestCluster(t)
+	before, _, err := cluster.id.Alloc(1)
+	require.NoError(t, err)
+	for _, count := range []uint32{math.MaxUint32, 1 << 30} {
+		resp, err := cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
+			Region: cluster.GetRegion(100).GetMeta(), SplitCount: count,
+		})
+		require.ErrorContains(t, err, "allocation budget")
+		require.Nil(t, resp)
+	}
+	after, _, err := cluster.id.Alloc(1)
+	require.NoError(t, err)
+	require.Equal(t, before+1, after, "rejected requests must not consume IDs")
+	resp, err := cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
+		Region: cluster.GetRegion(100).GetMeta(), SplitCount: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.GetIds(), 1)
+}
 
 const (
 	// CPU usage is only populated to mimic load-split region heartbeat data.

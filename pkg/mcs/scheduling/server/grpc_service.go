@@ -395,6 +395,11 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	}
 	reqRegion := request.GetRegion()
 	splitCount := request.GetSplitCount()
+	if err := core.ValidateBatchSplitCount(splitCount, len(reqRegion.GetPeers())); err != nil {
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
 	err := c.ValidRegion(reqRegion)
 	if err != nil {
 		return &schedulingpb.AskBatchSplitResponse{

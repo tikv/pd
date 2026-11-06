@@ -129,6 +129,9 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	}
 	reqRegion := request.GetRegion()
 	splitCount := request.GetSplitCount()
+	if err := core.ValidateBatchSplitCount(splitCount, len(reqRegion.GetPeers())); err != nil {
+		return nil, err
+	}
 	err := c.ValidRegion(reqRegion)
 	if err != nil {
 		return nil, err

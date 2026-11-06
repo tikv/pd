@@ -579,7 +579,7 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 			sche.GetCoordinator().GetCheckerController().ClearPendingProcessedRegions()
 		}
-		// reset id allocator
+		// Reset the ID allocator between test cases.
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err = leaderServer.GetServer().RecoverAllocID(ctx, 0)
