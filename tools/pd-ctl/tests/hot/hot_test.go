@@ -17,6 +17,7 @@ package hot_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -179,15 +180,12 @@ func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 					utils.RegionWriteQueryNum: 0,
 					utils.RegionReadCPU:       0,
 				}
-				leader := &metapb.Peer{
-					Id:      100 + regionIDCounter,
-					StoreId: hotStoreID,
-				}
-				region := core.NewRegionInfo(&metapb.Region{
-					Id: hotRegionID,
-				}, leader)
+				// Disjoint ranges keep earlier hot regions in the root cache.
+				region := pdTests.MustPutRegion(re, cluster, hotRegionID, hotStoreID,
+					[]byte(fmt.Sprintf("%020d", hotRegionID)),
+					[]byte(fmt.Sprintf("%020d", hotRegionID+1)))
 				checkReadPeerTask := func(cache *statistics.HotPeerCache) {
-					stats := cache.CheckPeerFlow(region, []*metapb.Peer{leader}, loads, reportInterval)
+					stats := cache.CheckPeerFlow(region, []*metapb.Peer{region.GetLeader()}, loads, reportInterval)
 					for _, stat := range stats {
 						cache.UpdateStat(stat)
 					}
