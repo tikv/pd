@@ -117,11 +117,13 @@ func newTSODispatcher(
 	return td
 }
 
-func (td *tsoDispatcher) revokePendingRequests(err error) {
-	// Preserve the cancellation error seen by callers when their TSO client is replaced.
-	if ctxErr := td.ctx.Err(); ctxErr != nil {
-		err = errors.WithStack(ctxErr)
+func (td *tsoDispatcher) revokePendingRequests() {
+	// Use the context error on shutdown, including TSO client replacement.
+	err := td.ctx.Err()
+	if err == nil {
+		err = errs.ErrClosing
 	}
+	err = errors.WithStack(err)
 	for {
 		select {
 		case req := <-td.tsoRequestCh:
@@ -134,8 +136,7 @@ func (td *tsoDispatcher) revokePendingRequests(err error) {
 
 func (td *tsoDispatcher) close() {
 	td.cancel()
-	tsoErr := errors.WithStack(errs.ErrClosing)
-	td.revokePendingRequests(tsoErr)
+	td.revokePendingRequests()
 }
 
 // push takes ownership of completing the request, even if it cannot be enqueued.
@@ -157,7 +158,7 @@ func (td *tsoDispatcher) push(request *Request) {
 	// Drain again after cancellation so that a late enqueue is also completed.
 	// Do not access request here: the consumer may already have recycled it.
 	if td.ctx.Err() != nil {
-		td.revokePendingRequests(errors.WithStack(errs.ErrClosing))
+		td.revokePendingRequests()
 	}
 }
 
@@ -181,8 +182,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 			// If you encounter this failure, please check the stack in the logs to see if it's a panic.
 			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
 		}
-		tsoErr := errors.WithStack(errs.ErrClosing)
-		td.revokePendingRequests(tsoErr)
+		td.revokePendingRequests()
 		wg.Done()
 	}()
 

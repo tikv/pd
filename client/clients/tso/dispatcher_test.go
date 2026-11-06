@@ -289,7 +289,8 @@ func TestPushToClosedDispatcher(t *testing.T) {
 				td.close()
 			} else {
 				re.NoError(failpoint.EnableCall("github.com/tikv/pd/client/clients/tso/afterPushTSORequest", func() {
-					td.close()
+					// Cancel without draining so push must complete the enqueued request.
+					td.cancel()
 				}))
 				t.Cleanup(func() {
 					re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/afterPushTSORequest"))
@@ -300,7 +301,7 @@ func TestPushToClosedDispatcher(t *testing.T) {
 			select {
 			case err := <-req.done:
 				re.ErrorIs(err, context.Canceled)
-			case <-time.After(time.Second):
+			default:
 				t.Fatal("request sent to a closed dispatcher was not completed")
 			}
 			re.Empty(td.tsoRequestCh)
@@ -329,7 +330,6 @@ func TestPushCancellationWithFullQueue(t *testing.T) {
 			t.Cleanup(func() {
 				td.close()
 				<-pushed
-				td.revokePendingRequests(errs.ErrClosing)
 			})
 			cancel := map[string]context.CancelFunc{
 				"request": cancelRequest, "client": cancelClient, "dispatcher": cancelDispatcher,
