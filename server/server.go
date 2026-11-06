@@ -233,6 +233,7 @@ type Server struct {
 	grpcServiceRateLimiter *ratelimit.Controller
 	grpcServiceLabels      map[string]struct{}
 	grpcServer             *grpc.Server
+	etcdGateway            *etcdGateway
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
@@ -325,6 +326,20 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
+	if len(cfg.Security.ClientCertAllowedCNs) > 0 && cfg.EnableGRPCGateway {
+		// etcd's gateway clones the server TLS config, including its incoming CN
+		// check, for the internal client connection. Use a separate client config.
+		etcdCfg.EnableGRPCGateway = false
+		if etcdCfg.UserHandlers == nil {
+			etcdCfg.UserHandlers = make(map[string]http.Handler)
+		}
+		gateway, err := s.newEtcdGatewayHandler(etcdCfg)
+		if err != nil {
+			return nil, err
+		}
+		s.etcdGateway = gateway
+		etcdCfg.UserHandlers["/v3/"] = gateway
+	}
 
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
@@ -355,6 +370,9 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
+	}
+	if s.etcdGateway != nil {
+		s.etcdGateway.etcd.Store(etcd)
 	}
 	cleanup := func() {
 		// NOTE: `embed.Etcd.Close()` can block for a long time in some failure paths

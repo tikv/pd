@@ -16,13 +16,25 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/gorilla/mux"
+	gw "github.com/grpc-ecosystem/grpc-gateway/runtime"
+	"github.com/tmc/grpc-websocket-proxy/wsproxy"
 	"github.com/urfave/negroni/v3"
+	etcdservergw "go.etcd.io/etcd/api/v3/etcdserverpb/gw"
+	"go.etcd.io/etcd/server/v3/embed"
+	v3electiongw "go.etcd.io/etcd/server/v3/etcdserver/api/v3election/v3electionpb/gw"
+	v3lockgw "go.etcd.io/etcd/server/v3/etcdserver/api/v3lock/v3lockpb/gw"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -136,4 +148,93 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 	apiService.UseHandler(router)
 	userHandlers[pdAPIPrefix] = apiService
 	return userHandlers, nil
+}
+
+type etcdGateway struct {
+	http.Handler
+	etcd atomic.Pointer[embed.Etcd]
+}
+
+// newEtcdGatewayHandler preserves etcd's gateway with an explicit client CN policy.
+// Its backend is published when etcd starts, independently of PD initialization.
+func (s *Server) newEtcdGatewayHandler(cfg *embed.Config) (*etcdGateway, error) {
+	tlsConfig, err := cfg.ClientTLSInfo.ServerConfig()
+	if err != nil {
+		return nil, err
+	}
+	// Match etcd's trust of its local endpoint, without copying the incoming
+	// CN callback: InsecureSkipVerify leaves verifiedChains empty on clients.
+	tlsConfig.InsecureSkipVerify = true
+	tlsConfig.VerifyPeerCertificate = nil
+	g := &etcdGateway{}
+	gateway := sync.OnceValues(func() (http.Handler, error) {
+		conn, err := grpc.NewClient(cfg.ListenClientUrls[0].Host,
+			grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(math.MaxInt32)))
+		if err != nil {
+			return nil, err
+		}
+		closeConn := func() {
+			if err := conn.Close(); err != nil {
+				log.Warn("failed to close etcd gateway connection", zap.Error(err))
+			}
+		}
+		gwmux := gw.NewServeMux()
+		for _, register := range []func(context.Context, *gw.ServeMux, *grpc.ClientConn) error{
+			etcdservergw.RegisterKVHandler,
+			etcdservergw.RegisterWatchHandler,
+			etcdservergw.RegisterLeaseHandler,
+			etcdservergw.RegisterClusterHandler,
+			etcdservergw.RegisterMaintenanceHandler,
+			etcdservergw.RegisterAuthHandler,
+			v3lockgw.RegisterLockHandler,
+			v3electiongw.RegisterElectionHandler,
+		} {
+			if err := register(s.ctx, gwmux, conn); err != nil {
+				closeConn()
+				return nil, err
+			}
+		}
+		go func() {
+			<-g.etcd.Load().Server.StopNotify()
+			closeConn()
+		}()
+		return wsproxy.WebsocketProxy(gwmux,
+			wsproxy.WithRequestMutator(func(_ *http.Request, outgoing *http.Request) *http.Request {
+				outgoing.Method = http.MethodPost
+				return outgoing
+			}),
+			wsproxy.WithMaxRespBodyBufferSize(math.MaxInt32),
+			wsproxy.WithLogger(s.lg.Sugar())), nil
+	})
+	g.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		etcd := g.etcd.Load()
+		if etcd == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		// Preserve etcd's rejection of CN-based gateway authentication when RBAC
+		// is enabled; the internal connection must not impersonate the caller.
+		if r.TLS != nil && etcd.Server.AuthStore().IsAuthEnabled() {
+			for _, chain := range r.TLS.VerifiedChains {
+				if len(chain) > 0 && chain[0].Subject.CommonName != "" {
+					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					w.Header().Set("X-Content-Type-Options", "nosniff")
+					w.WriteHeader(http.StatusBadRequest)
+					if _, err := fmt.Fprintln(w, "CommonName of client sending a request against gateway will be ignored and not used as expected"); err != nil {
+						log.Warn("failed to write etcd gateway error", zap.Error(err))
+					}
+					return
+				}
+			}
+		}
+		handler, err := gateway()
+		if err != nil {
+			log.Error("failed to initialize etcd gateway", zap.Error(err))
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
+	return g, nil
 }

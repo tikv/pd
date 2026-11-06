@@ -354,6 +354,9 @@ func (c *Config) Validate() error {
 	}
 
 	if len(c.Security.ClientCertAllowedCNs) > 0 {
+		if slices.Contains(c.Security.ClientCertAllowedCNs, "") {
+			return errors.New("security.client-cert-allowed-cn must not contain empty CNs")
+		}
 		if c.Security.CAPath == "" || c.Security.CertPath == "" || c.Security.KeyPath == "" {
 			return errors.New("security.client-cert-allowed-cn requires cacert-path, cert-path and key-path")
 		}

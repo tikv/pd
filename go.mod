@@ -30,6 +30,7 @@ require (
 	github.com/gorilla/mux v1.7.4
 	github.com/grafana/pyroscope-go v1.2.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
+	github.com/grpc-ecosystem/grpc-gateway v1.16.0
 	github.com/joho/godotenv v1.4.0
 	github.com/mailru/easyjson v0.9.1
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
@@ -54,6 +55,7 @@ require (
 	github.com/swaggo/http-swagger v1.2.6
 	github.com/swaggo/swag v1.16.6
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
+	github.com/tmc/grpc-websocket-proxy v0.0.0-20220101234140-673ab2c3ae75
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni/v3 v3.1.1
 	go.etcd.io/etcd/api/v3 v3.5.15
@@ -159,7 +161,6 @@ require (
 	github.com/gorilla/websocket v1.5.1 // indirect
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.8 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
-	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/gtank/cryptopasta v0.0.0-20170601214702-1f550f6f2f69 // indirect
 	github.com/ianlancetaylor/demangle v0.0.0-20210905161508-09a460cdf81d // indirect
@@ -211,7 +212,6 @@ require (
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.11 // indirect
 	github.com/tklauser/numcpus v0.6.0 // indirect
-	github.com/tmc/grpc-websocket-proxy v0.0.0-20220101234140-673ab2c3ae75 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
 	github.com/urfave/cli/v2 v2.3.0 // indirect

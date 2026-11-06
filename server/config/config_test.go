@@ -61,10 +61,13 @@ func TestClientCertAllowedCNValidation(t *testing.T) {
 	testCases := []struct {
 		name       string
 		clientURLs string
+		clientCNs  string
 		missing    string
 		wantErr    string
 	}{
 		{name: "https", clientURLs: "https://127.0.0.1:2379"},
+		{name: "empty CN", clientURLs: "https://127.0.0.1:2379", clientCNs: `[""]`, wantErr: "must not contain empty CNs"},
+		{name: "mixed empty CN", clientURLs: "https://127.0.0.1:2379", clientCNs: `["pd-server", ""]`, wantErr: "must not contain empty CNs"},
 		{name: "missing ca", clientURLs: "https://127.0.0.1:2379", missing: "cacert-path", wantErr: "requires cacert-path, cert-path and key-path"},
 		{name: "missing certificate", clientURLs: "https://127.0.0.1:2379", missing: "cert-path", wantErr: "requires cacert-path, cert-path and key-path"},
 		{name: "missing key", clientURLs: "https://127.0.0.1:2379", missing: "key-path", wantErr: "requires cacert-path, cert-path and key-path"},
@@ -75,7 +78,11 @@ func TestClientCertAllowedCNValidation(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
-			text := []string{fmt.Sprintf("client-urls = %q\n[security]\nclient-cert-allowed-cn = [\"pd-server\"]\n", testCase.clientURLs)}
+			clientCNs := testCase.clientCNs
+			if clientCNs == "" {
+				clientCNs = `["pd-server"]`
+			}
+			text := []string{fmt.Sprintf("client-urls = %q\n[security]\nclient-cert-allowed-cn = %s\n", testCase.clientURLs, clientCNs)}
 			for _, key := range []string{"cacert-path", "cert-path", "key-path"} {
 				if key != testCase.missing {
 					text = append(text, fmt.Sprintf("%s = %q\n", key, "test.pem"))
