@@ -494,6 +494,52 @@ func (suite *serverTestSuite) TestRemoveScheduler() {
 	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), true)
 }
 
+func (suite *serverTestSuite) TestDeleteLastStoreAfterRaftClusterRestart() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
+	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
+
+	for _, typ := range []types.CheckerSchedulerType{types.EvictLeaderScheduler, types.GrantLeaderScheduler} {
+		name := typ.String()
+		checkExist := func(exist bool) {
+			testutil.Eventually(re, func() bool {
+				return (schedulersController.GetScheduler(name) != nil) == exist
+			})
+		}
+		tests.MustAddScheduler(re, suite.backendEndpoints, name, map[string]any{"store_id": 1})
+		checkExist(true)
+
+		// A PD restart or leader change creates a new RaftCluster, whose
+		// coordinator loads the persisted scheduler as a handler only.
+		rc := suite.pdLeader.GetServer().GetRaftCluster()
+		rc.Stop()
+		re.NoError(rc.Start(suite.pdLeader.GetServer(), false))
+		testutil.Eventually(re, func() bool {
+			rc := suite.pdLeader.GetServer().GetRaftCluster()
+			if rc == nil {
+				return false
+			}
+			_, ok := rc.GetSchedulerHandlers()[name]
+			return ok
+		})
+
+		// Removing the last store removes the whole scheduler.
+		tests.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", name, 1))
+		rc = suite.pdLeader.GetServer().GetRaftCluster()
+		_, ok := rc.GetSchedulerHandlers()[name]
+		re.False(ok, name)
+		for _, cfg := range rc.GetScheduleConfig().Schedulers {
+			re.NotEqual(types.SchedulerTypeCompatibleMap[typ], cfg.Type)
+		}
+		checkExist(false)
+	}
+}
+
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
