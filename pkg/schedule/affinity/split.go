@@ -54,6 +54,8 @@ func (m *Manager) AllowSplit(region *core.RegionInfo, reason pdpb.SplitReason) b
 	return allowed
 }
 
+// isSplitAllowed also serves heartbeat renewal checks, which must not count a
+// new denied split request each time they evaluate the current policy.
 func (m *Manager) isSplitAllowed(region *core.RegionInfo, reason pdpb.SplitReason) bool {
 	if region == nil {
 		// The default behavior is to allow it.
