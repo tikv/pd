@@ -641,9 +641,11 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			}
 		case wresp := <-watchChan:
 			failpoint.Inject("watchChanBlock", func() {
-				// watchChanBlock is used to simulate the case that the watchChan is blocked for a long time.
-				// So we discard these responses when the failpoint is injected.
-				failpoint.Goto("watchChanLoop")
+				// Discard events and progress notifications to simulate a blocked watch,
+				// but preserve terminal responses before etcd closes the channel.
+				if !wresp.Canceled {
+					failpoint.Goto("watchChanLoop")
+				}
 			})
 			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {

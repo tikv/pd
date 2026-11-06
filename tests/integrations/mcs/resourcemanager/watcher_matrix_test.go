@@ -161,6 +161,18 @@ func (suite *resourceManagerWatcherMatrixTestSuite) TestWatcherRecoversAfterComp
 	rmClient, rmConn := suite.newRMClient(primary.GetAddr())
 	defer rmConn.Close()
 	logFile := testutil.InitTempFileLogger(suite.T(), "debug")
+	waitForWatcherLog := func(message string) {
+		testutil.Eventually(re, func() bool {
+			b, err := os.ReadFile(logFile)
+			re.NoError(err)
+			for line := range strings.SplitSeq(string(b), "\n") {
+				if strings.Contains(line, "resource-manager-metadata-watcher") && strings.Contains(line, message) {
+					return true
+				}
+			}
+			return false
+		}, testutil.WithWaitFor(etcdutil.WatchChTimeoutDuration+2*etcdutil.RequestProgressInterval), testutil.WithTickInterval(100*time.Millisecond))
+	}
 
 	group := newWatcherMatrixResourceGroup("compaction_group", 5, 500, &suite.keyspaceID)
 	suite.putResourceGroup(re, pdClient, group)
@@ -178,13 +190,8 @@ func (suite *resourceManagerWatcherMatrixTestSuite) TestWatcherRecoversAfterComp
 	suite.putResourceGroup(re, pdClient, group)
 	suite.compactGroupSetting(re, group.GetName(), suite.keyspaceID)
 
-	testutil.Eventually(re, func() bool {
-		b, err := os.ReadFile(logFile)
-		re.NoError(err)
-		l := string(b)
-		return strings.Contains(l, "resource-manager-metadata-watcher") &&
-			strings.Contains(l, "watch channel is blocked for a long time")
-	}, testutil.WithWaitFor(etcdutil.WatchChTimeoutDuration+2*etcdutil.RequestProgressInterval), testutil.WithTickInterval(100*time.Millisecond))
+	waitForWatcherLog("watch channel is blocked for a long time")
+	waitForWatcherLog("required revision has been compacted")
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
 
 	group.Priority = 7
