@@ -28,6 +28,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
@@ -766,4 +769,41 @@ func TestLeaderChangeDuringServiceModeSwitch(t *testing.T) {
 	inner.RLock()
 	require.Equal(t, pdpb.ServiceMode_PD_SVC_MODE, inner.serviceMode)
 	inner.RUnlock()
+}
+
+// TestProcessTokenRequestsClosesConnOnRejectedStream covers a token stream
+// rejected by an endpoint which does not provide the resource manager service:
+// Send returns io.EOF, and the connection must still be closed to be recreated.
+func TestProcessTokenRequestsClosesConnOnRejectedStream(t *testing.T) {
+	re := require.New(t)
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	srv := grpc.NewServer()
+	healthpb.RegisterHealthServer(srv, health.NewServer())
+	go func() {
+		_ = srv.Serve(lis)
+	}()
+	defer srv.Stop()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cc, err := grpcutil.GetClientConn(ctx, "http://"+lis.Addr().String(), nil,
+		grpcutil.ExpectedServiceDialOptions("resource_manager.ResourceManager")...)
+	re.NoError(err)
+	defer cc.Close()
+	stream, err := rmpb.NewResourceManagerClient(cc).AcquireTokenBuckets(ctx)
+	re.NoError(err)
+	// Wait for the stream to be rejected.
+	re.Eventually(func() bool {
+		return stream.Send(&rmpb.TokenBucketsRequest{}) != nil
+	}, 5*time.Second, 10*time.Millisecond)
+
+	req := &tokenRequest{
+		done:    make(chan error, 1),
+		Request: &rmpb.TokenBucketsRequest{},
+	}
+	err = (&innerClient{}).processTokenRequests(stream, req)
+	re.Equal(codes.Unimplemented, status.Code(errors.Unwrap(err)))
+	re.Equal(connectivity.Shutdown, cc.GetState())
+	re.Equal(err, <-req.done)
 }
