@@ -219,6 +219,9 @@ func (handler *shuffleHotRegionHandler) updateConfig(w http.ResponseWriter, r *h
 		handler.config.Limit = previous
 		return
 	}
+	log.Info("shuffle-hot-region-scheduler config is updated",
+		zap.Uint64("old-limit", previous),
+		zap.Uint64("new-limit", handler.config.Limit))
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 

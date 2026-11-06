@@ -207,6 +207,9 @@ func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	log.Info("grant-hot-region-scheduler config is updated",
+		zap.Uint64("store-leader-id", leaderID),
+		zap.Uint64s("store-ids", storeIDs))
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
