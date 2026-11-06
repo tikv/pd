@@ -308,22 +308,6 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *schedulerHandler) addBalanceRangeJob(w http.ResponseWriter, r *http.Request, input map[string]any) {
-	// A previous create may have registered the scheduler but failed to
-	// persist the scheduler list. Persist it again so that a success
-	// response always means the scheduler is persisted.
-	if err := h.PersistScheduleConfig(); err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	handler, err := h.GetSchedulerConfigHandler()
-	if err != nil {
-		h.r.JSON(w, http.StatusNotAcceptable, err.Error())
-		return
-	}
-	if handler == nil {
-		h.r.JSON(w, http.StatusNotAcceptable, "scheduler config handler is unavailable")
-		return
-	}
 	data, err := json.Marshal(input)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -332,7 +316,7 @@ func (h *schedulerHandler) addBalanceRangeJob(w http.ResponseWriter, r *http.Req
 	r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
 	r.Method = http.MethodPut
 	r.Body = io.NopCloser(bytes.NewBuffer(data))
-	handler.ServeHTTP(w, r)
+	newSchedulerConfigHandler(h.svr, h.r).handleSchedulerConfig(w, r)
 }
 
 // collectEvictLeaderStoreIDs reads the target store IDs for evict-leader-scheduler
@@ -503,6 +487,15 @@ func (h *schedulerConfigHandler) handleSchedulerConfig(w http.ResponseWriter, r 
 	handler := h.svr.GetHandler()
 	sh, err := handler.GetSchedulerConfigHandler()
 	if err == nil && sh != nil {
+		if r.Method == http.MethodPut && r.URL.Path == path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job") {
+			// A failed initial create may leave the handler and jobs registered
+			// without persisting the scheduler list. Repair it before either
+			// matching or adding a job, for both direct PUT and forwarded POST.
+			if err := handler.PersistScheduleConfig(); err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
 		sh.ServeHTTP(w, r)
 		return
 	}

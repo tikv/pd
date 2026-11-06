@@ -175,6 +175,7 @@ func NewCluster(
 	}
 
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
+	c.coordinator.GetSchedulersController().UsePersistedBalanceRangeConfig()
 	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels(), persistConfig.GetIsolationLevel(), true)
 	if err != nil {
 		storage.Close()
@@ -513,11 +514,21 @@ func (c *Cluster) updateScheduler() {
 				log.Error("scheduler not found", zap.String("type", scheduler.Type))
 				continue
 			}
+			decoder := schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args)
+			if schedulerType == types.BalanceRangeScheduler {
+				if existed, _ := schedulersController.IsSchedulerExisted(schedulerType.String()); existed {
+					continue
+				}
+				failpoint.InjectCall("beforeLoadBalanceRangeScheduler")
+				// PD creates all jobs. AddScheduler loads the latest watched job
+				// list under its registration lock; do not reconstruct job 0.
+				decoder = schedulers.ConfigJSONDecoder([]byte("[]"))
+			}
 			s, err := schedulers.CreateScheduler(
 				schedulerType,
 				c.coordinator.GetOperatorController(),
 				c.storage,
-				schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args),
+				decoder,
 				schedulersController.RemoveScheduler,
 			)
 			if err != nil {
@@ -535,6 +546,9 @@ func (c *Cluster) updateScheduler() {
 				continue
 			}
 			if err := schedulersController.AddScheduler(s, scheduler.Args...); err != nil {
+				if schedulerType == types.BalanceRangeScheduler {
+					failpoint.InjectCall("balanceRangeSchedulerConfigNotReady")
+				}
 				log.Error("failed to add scheduler",
 					zap.String("scheduler-name", name),
 					zap.Strings("scheduler-args", scheduler.Args),

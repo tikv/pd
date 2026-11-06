@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -396,6 +397,22 @@ func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
+	return s.reloadConfigLocked()
+}
+
+func (s *balanceRangeScheduler) updateConfig(storage endpoint.ConfigStorage, data []byte) error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	// GC and local status updates also persist under this lock. Keep the cache
+	// write and in-memory reload together so they cannot write an older job list
+	// between these two steps.
+	if err := storage.SaveSchedulerConfig(s.GetName(), data); err != nil {
+		return err
+	}
+	return s.reloadConfigLocked()
+}
+
+func (s *balanceRangeScheduler) reloadConfigLocked() error {
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
 	if err := s.conf.load(&jobs); err != nil {
 		return err

@@ -1020,22 +1020,28 @@ func (suite *scheduleTestSuite) checkConcurrentBalanceRangeCreation(cluster *tes
 		}()
 	}
 	for range 2 {
-		select {
-		case <-entered:
-		case <-time.After(10 * time.Second):
-			re.FailNow("both requests must observe the scheduler as absent")
-		}
+		testutil.Eventually(re, func() bool {
+			select {
+			case <-entered:
+				return true
+			default:
+				return false
+			}
+		})
 	}
 	releaseOnce.Do(func() { close(release) })
 	for range 2 {
-		select {
-		case res := <-results:
-			re.NoError(res.err)
-			re.Equal(http.StatusOK, res.status, res.body)
-			re.JSONEq(`"0"`, res.body)
-		case <-time.After(10 * time.Second):
-			re.FailNow("concurrent scheduler creation did not finish")
-		}
+		testutil.Eventually(re, func() bool {
+			select {
+			case res := <-results:
+				re.NoError(res.err)
+				re.Equal(http.StatusOK, res.status, res.body)
+				re.JSONEq(`"0"`, res.body)
+				return true
+			default:
+				return false
+			}
+		})
 	}
 
 	// Check the scheduling service as well in microservice mode.
@@ -1056,6 +1062,78 @@ func (suite *scheduleTestSuite) checkConcurrentBalanceRangeCreation(cluster *tes
 	})
 	re.NoError(testutil.CheckDelete(tests.TestDialClient,
 		urlPrefix+"/schedulers/balance-range-scheduler", testutil.StatusOK(re)))
+}
+
+func (suite *scheduleTestSuite) TestBalanceRangePutRecovery() {
+	suite.te.RunTest(suite.checkBalanceRangePutRecovery)
+}
+
+func (suite *scheduleTestSuite) checkBalanceRangePutRecovery(cluster *tests.TestCluster) {
+	re := suite.Require()
+	svr := cluster.GetLeaderServer().GetServer()
+	urlPrefix := cluster.GetLeaderServer().GetAddr() + "/pd/api/v1"
+	input := map[string]any{
+		"name":      types.BalanceRangeScheduler.String(),
+		"alias":     "test.put-recovery",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+	}
+	data, err := json.Marshal(input)
+	re.NoError(err)
+	const fp = "github.com/tikv/pd/server/config/persistFail"
+	re.NoError(failpoint.Enable(fp, "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable(fp))
+		re.NoError(testutil.CheckDelete(tests.TestDialClient,
+			urlPrefix+"/schedulers/balance-range-scheduler", testutil.StatusOK(re)))
+	}()
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data,
+		testutil.Status(re, http.StatusBadRequest)))
+	storage := svr.GetStorage()
+	originalJobs, err := storage.LoadSchedulerConfig(types.BalanceRangeScheduler.String())
+	re.NoError(err)
+	re.NotEmpty(originalJobs)
+
+	jobURL := urlPrefix + "/scheduler-config/balance-range-scheduler/job"
+	// Neither matching an existing job nor adding a new job may report success
+	// while the scheduler list still cannot be persisted.
+	re.NoError(testutil.CheckPutJSON(tests.TestDialClient, jobURL, data,
+		testutil.Status(re, http.StatusInternalServerError)))
+	newInput := maps.Clone(input)
+	newInput["alias"] = "test.put-recovery-new"
+	newData, err := json.Marshal(newInput)
+	re.NoError(err)
+	re.NoError(testutil.CheckPutJSON(tests.TestDialClient, jobURL, newData,
+		testutil.Status(re, http.StatusInternalServerError)))
+	jobs, err := storage.LoadSchedulerConfig(types.BalanceRangeScheduler.String())
+	re.NoError(err)
+	// The monolithic scheduler may update job status concurrently, but neither
+	// failed PUT may append another job or replace the existing one.
+	var persistedJobs []map[string]any
+	re.NoError(json.Unmarshal([]byte(jobs), &persistedJobs))
+	re.Len(persistedJobs, 1)
+	re.Equal(float64(0), persistedJobs[0]["job-id"])
+	re.Equal(input["alias"], persistedJobs[0]["alias"])
+
+	re.NoError(failpoint.Disable(fp))
+	re.NoError(testutil.CheckPutJSON(tests.TestDialClient, jobURL, data, func(body []byte, status int, _ http.Header) {
+		re.Equal(http.StatusOK, status)
+		re.JSONEq(`"0"`, string(body))
+	}))
+	// In microservice mode this checks that the scheduling service actually
+	// loads the scheduler after PUT repairs the missing scheduler-list entry.
+	suite.assertSchedulerExists(urlPrefix+"/schedulers", types.BalanceRangeScheduler.String())
+	var cfg struct {
+		Schedule sc.ScheduleConfig `json:"schedule"`
+	}
+	exists, err := storage.LoadConfig(&cfg)
+	re.NoError(err)
+	re.True(exists)
+	re.True(slices.ContainsFunc(cfg.Schedule.Schedulers, func(c sc.SchedulerConfig) bool {
+		return c.Type == types.SchedulerTypeCompatibleMap[types.BalanceRangeScheduler]
+	}))
 }
 
 func (suite *scheduleTestSuite) TestBalanceRangeAPI() {
