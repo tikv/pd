@@ -177,7 +177,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 // moving the region to match the expected configuration in one operation.
 //
 // This function preserves:
-// - Existing learner peers (e.g., TiFlash peers)
+// - Existing learner peers (e.g., TiFlash peers); moveConflictingLearners moves one off a target voter store
 //
 // Note: This function assumes that regions passed to it already comply with placement rules.
 // The affinity checker focuses solely on adjusting voter peers according to affinity group configuration.
@@ -225,22 +225,17 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 
 	// Preserve all existing learner peers
 	// Since regions that violate placement rules won't reach this function,
-	// we can safely assume all existing learners should be preserved
+	// the rules require these learners, and moveConflictingLearners moves the
+	// ones on target voter stores.
 	for _, learner := range region.GetLearners() {
 		storeID := learner.GetStoreId()
-		// Only add learner if it's not already in the voters list
-		// (in case there's a conflict, voters take precedence)
-		if existingRole, exists := roles[storeID]; !exists {
+		if _, exists := roles[storeID]; !exists {
 			roles[storeID] = placement.Learner
-		} else if existingRole != placement.Learner {
-			affinityCheckerLearnerPeerConflictCounter.Inc()
-			log.Debug("learner peer conflicts with affinity voter, voter takes precedence",
-				zap.Uint64("region-id", region.GetID()),
-				zap.String("group-id", group.ID),
-				zap.Uint64("store-id", storeID),
-				zap.String("conflicting-role", string(existingRole)))
-			return nil
 		}
+	}
+	movedLearners, ok := c.moveConflictingLearners(region, group, roles)
+	if !ok {
+		return nil
 	}
 
 	// Skip building if target leader store currently disallows leader in (e.g., evict-leader / reject-leader).
@@ -267,6 +262,9 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 			errs.ZapError(err))
 		affinityCheckerCreateOpFailedCounter.Inc()
 		return nil
+	}
+	if movedLearners {
+		affinityCheckerLearnerMoveCounter.Inc()
 	}
 
 	return op
