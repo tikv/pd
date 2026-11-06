@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -28,9 +29,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
@@ -206,36 +209,292 @@ func TestAffinityBalanceLeaderConvergence(t *testing.T) {
 	}
 }
 
-// BenchmarkAffinityBalance measures a worker step with 300 stores and 1000 groups.
-func BenchmarkAffinityBalance(b *testing.B) {
-	for _, name := range []string{"first", "replan"} {
-		b.Run(name, func(b *testing.B) {
-			b.StopTimer()
-			re := require.New(b)
-			f := newAffinityBalanceTest(b, 300, "z0", "z1", "z2")
-			ids := f.seed("100", 1, slices.Repeat([]uint64{1}, 1000)...)
-			for rounds := 0; name == "replan" && f.step(); rounds++ {
-				re.Less(rounds, 1000, "table did not converge")
-				f.settle()
-			}
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				b.StopTimer()
-				if name == "first" {
-					for _, id := range ids {
-						_, err := f.affinityManager.UpdateAffinityGroupPeers(id, 1, []uint64{1, 2, 3})
-						re.NoError(err)
-					}
-					f.settle()
-				}
-				clear(f.balancer.idle)
-				b.StartTimer()
-				re.Equal(name == "first", f.step())
-			}
-			b.StopTimer()
-		})
+// balanceBenchShape is a table of BenchmarkAffinityBalance. All its groups
+// start with the same leader and voters, as the concentrated inputs of
+// BenchmarkPlan in balanceplan do.
+type balanceBenchShape struct {
+	name   string
+	stores uint64
+	leader uint64
+	voters []uint64
+	// setup labels the stores and sets the placement rules of a table of groups.
+	setup func(f *affinityBalanceTest, groups int)
+	// learner, if set, returns the store of a learner added to Region r of a
+	// group of n Regions.
+	learner func(r, n int) uint64
+	// improves reports whether the first plan of the table writes targets.
+	improves bool
+}
+
+// balanceBenchKey is the start key of Region r of group g in the benchmark
+// tables, before balanceTestKey encodes it.
+func balanceBenchKey(g, r int) string {
+	return fmt.Sprintf("100-%04d-%05d", g, r)
+}
+
+func balanceBenchShapes() []balanceBenchShape {
+	label := func(f *affinityBalanceTest, labels func(id uint64) map[string]string) {
+		for _, store := range f.GetStores() {
+			f.SetStoreLabel(store.GetID(), labels(store.GetID()))
+		}
 	}
+	zones := func(n uint64, extra func(id uint64, labels map[string]string)) func(id uint64) map[string]string {
+		return func(id uint64) map[string]string {
+			labels := map[string]string{"zone": fmt.Sprintf("z%d", (id-1)%n)}
+			if extra != nil {
+				extra(id, labels)
+			}
+			return labels
+		}
+	}
+	setRules := func(f *affinityBalanceTest, rules ...*placement.Rule) {
+		for _, rule := range rules {
+			require.NoError(f.tb, f.ruleManager.SetRule(rule))
+		}
+	}
+	zone := []string{"zone"}
+	voterRule := func(f *affinityBalanceTest, count int, labels []string, constraints ...placement.LabelConstraint) *placement.Rule {
+		rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+		rule.Count, rule.LocationLabels, rule.LabelConstraints = count, labels, constraints
+		return rule
+	}
+	in := func(key string, values ...string) []placement.LabelConstraint {
+		return []placement.LabelConstraint{{Key: key, Op: placement.In, Values: values}}
+	}
+	// leaderAnd returns a leader rule that overrides the default rule and a rule
+	// for two more voters with the given role.
+	leaderAnd := func(leader []placement.LabelConstraint, role placement.PeerRoleType, others []placement.LabelConstraint) []*placement.Rule {
+		return []*placement.Rule{
+			{GroupID: placement.DefaultGroupID, ID: "leader", Index: 1, Override: true, Role: placement.Leader, Count: 1,
+				LocationLabels: zone, LabelConstraints: leader},
+			{GroupID: placement.DefaultGroupID, ID: "others", Index: 2, Role: role, Count: 2,
+				LocationLabels: zone, LabelConstraints: others},
+		}
+	}
+	return []balanceBenchShape{
+		{name: "one_per_zone", stores: 300, leader: 1, voters: []uint64{1, 2, 3}, improves: true,
+			setup: func(f *affinityBalanceTest, _ int) {
+				label(f, zones(3, nil))
+				setRules(f, voterRule(f, 3, zone))
+			}},
+		{name: "leader_on_3_stores", stores: 12, leader: 1, voters: []uint64{1, 2, 3}, improves: true,
+			setup: func(f *affinityBalanceTest, _ int) {
+				label(f, zones(3, func(id uint64, labels map[string]string) {
+					if id > 3 {
+						labels["leader"] = "reject"
+					}
+				}))
+				f.SetLabelProperty("reject-leader", "leader", "reject")
+				setRules(f, voterRule(f, 3, zone))
+			}},
+		{name: "3_replicas_2_zones", stores: 300, leader: 1, voters: []uint64{1, 2, 3}, improves: true,
+			setup: func(f *affinityBalanceTest, _ int) {
+				label(f, zones(2, nil))
+				setRules(f, voterRule(f, 3, zone))
+			}},
+		{name: "5_replicas_3_zones", stores: 300, leader: 1, voters: []uint64{1, 2, 3, 4, 5}, improves: true,
+			setup: func(f *affinityBalanceTest, _ int) {
+				label(f, zones(3, nil))
+				setRules(f, voterRule(f, 5, zone))
+			}},
+		// The first 90% of the groups may place their zone z0 voter only on
+		// stores 1 and 4, the other 98 stores of z0 are open to the rest.
+		{name: "restricted_90pct", stores: 300, leader: 1, voters: []uint64{1, 2, 3}, improves: true,
+			setup: func(f *affinityBalanceTest, groups int) {
+				label(f, zones(3, func(id uint64, labels map[string]string) {
+					if labels["zone"] == "z0" && id != 1 && id != 4 {
+						labels["pool"] = "other"
+					}
+				}))
+				restricted := voterRule(f, 3, zone, placement.LabelConstraint{Key: "pool", Op: placement.NotIn, Values: []string{"other"}})
+				restricted.ID, restricted.Index, restricted.Override = "restricted", 1, true
+				restricted.StartKeyHex = hex.EncodeToString([]byte(balanceTestKey(balanceBenchKey(0, 0))))
+				restricted.EndKeyHex = hex.EncodeToString([]byte(balanceTestKey(balanceBenchKey(groups*9/10, 0))))
+				setRules(f, voterRule(f, 3, zone), restricted)
+			}},
+		// Each of two zones has 50 hosts of 3 stores.
+		{name: "zone_host", stores: 300, leader: 1, voters: []uint64{1, 4, 151}, improves: true,
+			setup: func(f *affinityBalanceTest, _ int) {
+				label(f, func(id uint64) map[string]string {
+					return map[string]string{"zone": fmt.Sprintf("z%d", (id-1)/150), "host": fmt.Sprintf("h%d", (id-1)/3)}
+				})
+				setRules(f, voterRule(f, 3, []string{"zone", "host"}))
+			}},
+		{name: "leader_rule_followers", stores: 300, leader: 1, voters: []uint64{1, 2, 3}, improves: true,
+			setup: func(f *affinityBalanceTest, _ int) {
+				label(f, zones(3, nil))
+				setRules(f, leaderAnd(in("zone", "z0"), placement.Follower, in("zone", "z1", "z2"))...)
+			}},
+		{name: "leader_rule_overlapping_voters", stores: 300, leader: 1, voters: []uint64{1, 2, 3}, improves: true,
+			setup: func(f *affinityBalanceTest, _ int) {
+				label(f, zones(3, nil))
+				setRules(f, leaderAnd(in("zone", "z0"), placement.Voter, nil)...)
+			}},
+		// The rules allow only the initial leader and voters.
+		{name: "no_improvement", stores: 300, leader: 1, voters: []uint64{1, 2, 3},
+			setup: func(f *affinityBalanceTest, _ int) {
+				label(f, zones(3, func(id uint64, labels map[string]string) {
+					switch id {
+					case 1:
+						labels["pin"] = "leader"
+					case 2, 3:
+						labels["pin"] = "follower"
+					}
+				}))
+				setRules(f, leaderAnd(in("pin", "leader"), placement.Follower, in("pin", "follower"))...)
+			}},
+		// Voters may use stores 1-30, and a learner rule without constraints
+		// allows a learner on any store. The last 27 Regions of a group have
+		// their learners on stores 4-30 and the other Regions on stores 31-300,
+		// so a target that moves a voter conflicts with a learner near the end
+		// of the group, and every round of planning and validation fails until
+		// the round limit.
+		{name: "learner_conflicts", stores: 300, leader: 1, voters: []uint64{1, 2, 3},
+			setup: func(f *affinityBalanceTest, _ int) {
+				label(f, zones(3, func(id uint64, labels map[string]string) {
+					if id <= 30 {
+						labels["pool"] = "voter"
+					}
+				}))
+				learner := &placement.Rule{GroupID: placement.DefaultGroupID, ID: "learner", Role: placement.Learner, Count: 1}
+				setRules(f, voterRule(f, 3, zone, in("pool", "voter")...), learner)
+			},
+			learner: func(r, n int) uint64 {
+				if r >= n-27 {
+					return uint64(4 + r - (n - 27))
+				}
+				return uint64(31 + r%270)
+			}},
+	}
+}
+
+// BenchmarkAffinityBalance measures one step of the balance worker for a
+// partition table: the snapshot, the planner input, planning, the Region
+// validation of the changed groups and the commit. plan=first plans the
+// initial layout of the table, plan=replan the table after it has converged;
+// a table that cannot improve has only plan=first. Each step reports its rounds
+// of planning and validation and the targets it wrote, and the stops of the
+// planner are logged. Tables of 10000 Regions or more, whose first steps take
+// seconds on 300 stores, run only with PD_AFFINITY_BALANCE_BENCH_LARGE=1:
+//
+//	PD_AFFINITY_BALANCE_BENCH_LARGE=1 go test -tags without_dashboard ./pkg/schedule/checker/ \
+//		-run '^$' -bench '^BenchmarkAffinityBalance$' -benchmem -benchtime=1x -count=10 -timeout 30m
+func BenchmarkAffinityBalance(b *testing.B) {
+	level := log.GetLevel()
+	log.SetLevel(zapcore.FatalLevel)
+	b.Cleanup(func() { log.SetLevel(level) })
+	shapes := make(map[string]balanceBenchShape)
+	type benchCase struct {
+		shape           string
+		stores          uint64
+		groups, regions int
+		large           bool
+	}
+	var cases []benchCase
+	for _, shape := range balanceBenchShapes() {
+		shapes[shape.name] = shape
+		if shape.learner == nil {
+			cases = append(cases, benchCase{shape: shape.name, stores: shape.stores, groups: 1000, regions: 1})
+		}
+	}
+	cases = append(cases,
+		benchCase{shape: "one_per_zone", stores: 300, groups: 100, regions: 1},
+		benchCase{shape: "one_per_zone", stores: 300, groups: 100, regions: 10},
+		benchCase{shape: "learner_conflicts", stores: 300, groups: 24, regions: 30},
+		benchCase{shape: "one_per_zone", stores: 300, groups: 100, regions: 100, large: true},
+		benchCase{shape: "one_per_zone", stores: 300, groups: 1000, regions: 10, large: true},
+		benchCase{shape: "one_per_zone", stores: 30, groups: 24, regions: 500, large: true},
+		benchCase{shape: "one_per_zone", stores: 300, groups: 24, regions: 500, large: true},
+		benchCase{shape: "learner_conflicts", stores: 300, groups: 24, regions: 500, large: true},
+	)
+	large := os.Getenv("PD_AFFINITY_BALANCE_BENCH_LARGE") != ""
+	for _, c := range cases {
+		shape := shapes[c.shape]
+		if c.large && !large {
+			continue
+		}
+		plans := []string{"first", "replan"}
+		if !shape.improves {
+			plans = plans[:1]
+		}
+		for _, plan := range plans {
+			name := fmt.Sprintf("%s/stores=%d/groups=%d/regions=%d/plan=%s", c.shape, c.stores, c.groups, c.regions, plan)
+			b.Run(name, func(b *testing.B) {
+				benchmarkAffinityBalanceStep(b, shape, c.stores, c.groups, c.regions, plan == "replan")
+			})
+		}
+	}
+}
+
+func benchmarkAffinityBalanceStep(b *testing.B, shape balanceBenchShape, stores uint64, groups, regions int, replan bool) {
+	b.StopTimer()
+	re := require.New(b)
+	f := newAffinityBalanceTest(b, stores)
+	shape.setup(f, groups)
+	ids := make([]string, 0, groups)
+	for g := range groups {
+		id := balanceTestGroupID(fmt.Sprintf("_tidb_pt_100_p%d", g+1))
+		keys := make([]string, 0, regions+1)
+		for r := range regions + 1 {
+			keys = append(keys, balanceBenchKey(g, r))
+		}
+		firstRegion := uint64(g*regions + 1)
+		f.group(id, firstRegion, shape.leader, shape.voters, keys...)
+		for r := 0; shape.learner != nil && r < regions; r++ {
+			peer, err := f.AllocPeer(shape.learner(r, regions))
+			re.NoError(err)
+			peer.Role = metapb.PeerRole_Learner
+			region := f.GetRegion(firstRegion + uint64(r)).Clone(core.WithAddPeer(peer))
+			f.PutRegion(region)
+			f.affinityManager.GetAndCacheRegionAffinityGroupState(region)
+		}
+		ids = append(ids, id)
+	}
+	for rounds := 0; replan && f.step(); rounds++ {
+		re.Less(rounds, 100, "table did not converge")
+		f.settle()
+	}
+	stops := func() map[string]float64 {
+		counts := make(map[string]float64, len(affinityBalancePlannerStops))
+		for stop, counter := range affinityBalancePlannerStops {
+			counts[string(stop)] = testutil.ToFloat64(counter)
+		}
+		return counts
+	}
+	var rounds, written float64
+	stopped := make(map[string]float64)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		b.StopTimer()
+		if !replan {
+			for _, id := range ids {
+				_, err := f.affinityManager.UpdateAffinityGroupPeers(id, shape.leader, shape.voters)
+				re.NoError(err)
+			}
+			f.settle()
+		}
+		clear(f.balancer.idle)
+		before, writtenBefore := stops(), testutil.ToFloat64(affinityBalanceTargetsWritten)
+		b.StartTimer()
+		re.Equal(!replan && shape.improves, f.step())
+		b.StopTimer()
+		for stop, count := range stops() {
+			stopped[stop] += count - before[stop]
+			rounds += count - before[stop]
+		}
+		written += testutil.ToFloat64(affinityBalanceTargetsWritten) - writtenBefore
+	}
+	b.ReportMetric(rounds/float64(b.N), "rounds/op")
+	b.ReportMetric(written/float64(b.N), "targets/op")
+	reasons := make([]string, 0, len(stopped))
+	for stop, count := range stopped {
+		if count > 0 {
+			reasons = append(reasons, fmt.Sprintf("%s=%g", stop, count/float64(b.N)))
+		}
+	}
+	slices.Sort(reasons)
+	b.Logf("planner stops per step: %s", strings.Join(reasons, " "))
 }
 
 func TestAffinityBalancePlacement(t *testing.T) {

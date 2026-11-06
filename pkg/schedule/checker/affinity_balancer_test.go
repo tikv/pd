@@ -28,12 +28,17 @@ import (
 func (f *affinityBalanceTest) settle() {
 	f.tb.Helper()
 	re := require.New(f.tb)
+	groups := make(map[string]struct{})
 	for _, region := range f.GetRegions() {
 		group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
 		aligned := cloneRegionWithReplacePeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...)
 		f.PutRegion(aligned)
 		f.affinityManager.GetAndCacheRegionAffinityGroupState(aligned)
-		re.Equal(affinity.PhaseStable, f.affinityManager.GetAffinityGroupState(group.ID).Phase)
+		groups[group.ID] = struct{}{}
+	}
+	// A group with several Regions is stable once all of them are aligned.
+	for id := range groups {
+		re.Equal(affinity.PhaseStable, f.affinityManager.GetAffinityGroupState(id).Phase)
 	}
 }
 
