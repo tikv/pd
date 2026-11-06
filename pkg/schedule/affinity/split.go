@@ -15,10 +15,14 @@
 package affinity
 
 import (
+	"time"
+
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 )
 
 // For affinity regions, we use calculation: (maxSize + buffer) * multiplier
@@ -28,10 +32,31 @@ import (
 const (
 	affinityRegionSizeBufferMB   = 10
 	affinityRegionSizeMultiplier = 4
+
+	// Match the storage-side SplitValidator TTL. Evicted or expired entries fall
+	// back to that TTL, as do entries lost on a PD leader or scheduling primary change.
+	splitDeniedRegionTTL   = 600 * time.Second
+	splitDeniedRegionLimit = 100_000
+	// A heartbeat of a Region that is still denied renews ChangeSplit(false) when
+	// less than this is left before the deadline, which restarts the storage-side
+	// TTL. Without the renewal, TiKV rescans the Region for split keys when the TTL
+	// expires, only to be denied again. Half the TTL leaves room for several missed
+	// Region heartbeats, which storage sends every minute by default.
+	splitDeniedRenewMargin = splitDeniedRegionTTL / 2
 )
 
 // AllowSplit returns true if the region can be auto split
 func (m *Manager) AllowSplit(region *core.RegionInfo, reason pdpb.SplitReason) bool {
+	allowed := m.isSplitAllowed(region, reason)
+	if !allowed {
+		regionSplitDenyCount.Inc()
+	}
+	return allowed
+}
+
+// isSplitAllowed also serves heartbeat renewal checks, which must not count a
+// new denied split request each time they evaluate the current policy.
+func (m *Manager) isSplitAllowed(region *core.RegionInfo, reason pdpb.SplitReason) bool {
 	if region == nil {
 		// The default behavior is to allow it.
 		return true
@@ -57,11 +82,73 @@ func (m *Manager) AllowSplit(region *core.RegionInfo, reason pdpb.SplitReason) b
 		// Only block splitting when the Region is in the affinity state.
 		// But still allow splitting if the Region size is too big.
 		if region.GetApproximateSize() < maxSize && region.GetApproximateKeys() < maxKeys {
-			regionSplitDenyCount.Inc()
 			return false
 		}
 	}
 
 	// The default behavior is to allow it.
 	return true
+}
+
+// CheckSplit checks a split request and, if denied, notifies the Region leader
+// and remembers to restore auto-splitting when a later heartbeat allows it.
+func (m *Manager) CheckSplit(region *core.RegionInfo, reason pdpb.SplitReason, streams *hbstream.HeartbeatStreams) bool {
+	m.splitMutex.Lock()
+	defer m.splitMutex.Unlock()
+	if m.AllowSplit(region, reason) {
+		return true
+	}
+	if region.GetLeader() != nil {
+		m.disableSplitLocked(region, streams)
+		// Tests track a new denial as if its renewal were due.
+		failpoint.Inject("shortenSplitDenialTracking", func() {
+			m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
+		})
+	}
+	return false
+}
+
+// disableSplitLocked sends ChangeSplit(false) to the Region leader and tracks the
+// Region until the storage-side TTL that the message restarts. The caller holds
+// splitMutex.
+func (m *Manager) disableSplitLocked(region *core.RegionInfo, streams *hbstream.HeartbeatStreams) {
+	streams.SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRegionTTL))
+}
+
+// MaybeEnableSplit sends one recovery notification for a previously denied Region.
+// While the Region is still denied, it renews ChangeSplit(false) instead when the
+// deadline is near. Call it for accepted heartbeats, including those that do not
+// change Region metadata.
+func (m *Manager) MaybeEnableSplit(region *core.RegionInfo, streams *hbstream.HeartbeatStreams) {
+	if region == nil || region.GetLeader() == nil {
+		return
+	}
+	if _, ok := m.splitDeniedRegions.Peek(region.GetID()); !ok {
+		return
+	}
+
+	// Serialize with CheckSplit through enqueueing so a delayed denial cannot
+	// arrive after its recovery notification, and so concurrent heartbeats renew
+	// a denial once. Do not take this lock for cache misses.
+	m.splitMutex.Lock()
+	defer m.splitMutex.Unlock()
+	deadline, ok := m.splitDeniedRegions.Peek(region.GetID())
+	if !ok {
+		return
+	}
+	remaining := time.Until(deadline.(time.Time))
+	if remaining <= 0 {
+		m.splitDeniedRegions.Remove(region.GetID())
+		return
+	}
+	// ADMIN always succeeds, even when automatic splitting is still denied.
+	if !m.isSplitAllowed(region, pdpb.SplitReason_SIZE) {
+		if remaining < splitDeniedRenewMargin {
+			m.disableSplitLocked(region, streams)
+		}
+		return
+	}
+	streams.SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: true}})
+	m.splitDeniedRegions.Remove(region.GetID())
 }

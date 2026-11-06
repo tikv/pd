@@ -143,6 +143,8 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	}
 }
 
+// TestAskBatchSplitRecordsSplitScatterInSchedulingService keeps split-scatter
+// tracking in the scheduling service that owns the split request's lifecycle.
 func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re := require.New(t)
 
@@ -161,6 +163,30 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re.Len(resp.GetIds(), 1)
 
 	re.Equal(float64(2), splitScatterPendingMetricValue(t))
+}
+
+// TestAskBatchSplitAfterClusterStopDoesNotPanic covers an in-flight denial after
+// primary cleanup clears the cluster's heartbeat streams.
+func TestAskBatchSplitAfterClusterStopDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+	region := putAffinitySplitTestGroup(t, cluster)
+	// A request that got the cluster before the primary exited still runs
+	// after stopCluster clears the cluster's heartbeat streams.
+	cluster.stopCluster()
+
+	var (
+		resp *schedulingpb.AskBatchSplitResponse
+		err  error
+	)
+	re.NotPanics(func() {
+		resp, err = svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
+			Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_LOAD,
+		})
+	})
+	re.NoError(err)
+	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
 }
 
 func newTestSchedulingServiceForSplit(
@@ -234,6 +260,22 @@ func newAffinitySplitTestRegion() *core.RegionInfo {
 		core.SetApproximateSize(5),
 		core.SetApproximateKeys(int64(5*sc.RegionSizeToKeysRatio)),
 	)
+}
+
+// putAffinitySplitTestGroup puts the test Region into affinity group g1, which
+// denies its automatic splits.
+func putAffinitySplitTestGroup(t *testing.T, cluster *Cluster) *core.RegionInfo {
+	t.Helper()
+	re := require.New(t)
+	region := newAffinitySplitTestRegion()
+	cluster.PutRegion(region)
+	manager := cluster.GetAffinityManager()
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("z")}},
+	}}))
+	_, err := manager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	return region
 }
 
 func splitScatterPendingMetricValue(t *testing.T) float64 {
