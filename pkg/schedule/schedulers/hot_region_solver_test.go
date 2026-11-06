@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -41,6 +42,8 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -203,6 +206,100 @@ func TestSplitBucketsByLoad(t *testing.T) {
 			re.Equal(expectOp.Brief(), op.Brief())
 		}
 	})
+}
+
+func TestHotRegionAffinityBucketSplit(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		resource resourceType
+		regionID uint64
+		expired  bool
+	}{
+		// Read leaders split a hot main Region by bucket load; write peers split an
+		// oversized main or revert Region by bucket size before moving it.
+		{name: "load-no-target", resource: readLeader, regionID: 6},
+		{name: "load-expired", resource: readLeader, regionID: 6, expired: true},
+		{name: "main-no-target", resource: writePeer, regionID: 6},
+		{name: "main-expired", resource: writePeer, regionID: 6, expired: true},
+		{name: "revert-expired", resource: writePeer, regionID: 7, expired: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				cancel, _, tc, oc := prepareSchedulersTest()
+				defer cancel()
+				hb := newHotScheduler(oc, initHotRegionScheduleConfig())
+				hb.types = []resourceType{testCase.resource}
+				hb.conf.setRankFormulaVersion("v2")
+				hb.conf.setHistorySampleDuration(0)
+				hb.conf.setSrcToleranceRatio(0)
+				hb.conf.setDstToleranceRatio(0)
+				hb.conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
+				hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+				hb.searchRevertRegions[testCase.resource] = true
+				tc.SetRegionBucketEnabled(true)
+				tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+				rwTy, updateStats, checkTransfer := utils.Write, tc.UpdateStorageWrittenStats, operatorutil.CheckTransferPeer
+				regions := []testRegionInfo{
+					{6, []uint64{3, 2, 4}, 3 * units.MiB, 1.8 * units.MiB, 0},
+					{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
+				}
+				if testCase.resource == readLeader {
+					rwTy, updateStats, checkTransfer = utils.Read, tc.UpdateStorageReadStats, operatorutil.CheckTransferLeader
+					regions[0].peers, regions[1].peers = []uint64{2, 1, 5}, []uint64{5, 4, 2}
+					hb.conf.SplitThresholds = 0.1
+				}
+				for id := uint64(1); id <= 5; id++ {
+					tc.AddRegionStore(id, 20)
+					updateStats(id, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+				}
+				updateStats(2, 20*units.MiB*utils.StoreHeartBeatReportInterval, 14*units.MiB*utils.StoreHeartBeatReportInterval)
+				updateStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
+				addRegionInfo(tc, rwTy, regions)
+				region := tc.GetRegion(testCase.regionID).Clone(core.SetApproximateSize(1024))
+				splitKey := fmt.Appendf(nil, "%20d5", testCase.regionID)
+				bucket := &metapb.Buckets{
+					RegionId: testCase.regionID, PeriodInMs: 1000,
+					Keys: [][]byte{region.GetStartKey(), splitKey, region.GetEndKey()},
+				}
+				re.True(region.UpdateBuckets(bucket, region.GetBuckets()))
+				tc.PutRegion(region)
+				if rwTy == utils.Read {
+					bucket.Stats = &metapb.BucketStats{
+						ReadBytes: []uint64{10 * units.KiB, 10 * units.KiB}, ReadKeys: []uint64{256, 256},
+						ReadQps: make([]uint64, 2), WriteBytes: make([]uint64, 2), WriteKeys: make([]uint64, 2), WriteQps: make([]uint64, 2),
+					}
+					re.True(tc.CheckAsync(buckets.NewCheckPeerTask(bucket)))
+					synctest.Sleep(10 * time.Millisecond)
+				}
+				mgr := tc.GetAffinityManager()
+				re.NoError(mgr.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+					GroupID: "hot-split", KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+				}}))
+				if testCase.expired {
+					peers := regions[testCase.regionID-6].peers
+					_, err := mgr.UpdateAffinityGroupPeers("hot-split", peers[0], peers)
+					re.NoError(err)
+					mgr.ExpireAffinityGroup("hot-split")
+				}
+				ops, _ := hb.Schedule(tc, false)
+				if testCase.expired {
+					// The group keeps its target after expiration: nothing is split, and the
+					// main and revert Regions are still scheduled.
+					re.Len(ops, 2)
+					checkTransfer(re, ops[0], operator.OpHotRegion, 2, 5)
+					checkTransfer(re, ops[1], operator.OpHotRegion, 5, 2)
+					return
+				}
+				re.Len(ops, 1)
+				re.Equal(testCase.regionID, ops[0].RegionID())
+				step, ok := ops[0].Step(0).(operator.SplitRegion)
+				re.True(ok)
+				re.Equal(pdpb.CheckPolicy_USEKEY, step.Policy)
+				re.Equal([][]byte{splitKey}, step.SplitKeys)
+			})
+		})
+	}
 }
 
 func TestSplitBucketsByLoadWithCPUFallback(t *testing.T) {

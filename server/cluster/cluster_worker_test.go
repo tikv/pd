@@ -23,8 +23,33 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
+
+func TestHandleAskBatchSplitRejectsExpiredAffinity(t *testing.T) {
+	re := require.New(t)
+	cluster, _ := newSplitScatterTestCluster(t)
+	cluster.opt.SetAffinityScheduleLimit(4)
+	var err error
+	cluster.affinityManager, err = affinity.NewManager(t.Context(), cluster.storage, cluster, cluster.opt, cluster.regionLabeler)
+	re.NoError(err)
+	cluster.hbstreams = cluster.GetCoordinator().GetHeartbeatStreams()
+	region := cluster.GetRegion(100)
+	re.NoError(cluster.affinityManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+	}}))
+	_, err = cluster.affinityManager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	// The group keeps its target after expiration, so the split is still rejected.
+	cluster.affinityManager.ExpireAffinityGroup("g1")
+	_, err = cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
+		Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_LOAD,
+	})
+	re.ErrorContains(err, "cannot split affinity region")
+	re.Equal(1, cluster.hbstreams.MsgLength())
+}
 
 func TestReportSplit(t *testing.T) {
 	re := require.New(t)
