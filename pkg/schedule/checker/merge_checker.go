@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -34,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -226,13 +228,14 @@ func (c *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	return true
 }
 
-// AllowMerge returns true if two regions can be merged according to the key type.
+// AllowMerge returns true if two regions can be merged according to their rules,
+// keyspace boundaries and key type.
 func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) bool {
-	var start, end []byte
+	var start, middle, end []byte
 	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
-		start, end = region.GetStartKey(), adjacent.GetEndKey()
+		start, middle, end = region.GetStartKey(), region.GetEndKey(), adjacent.GetEndKey()
 	} else if bytes.Equal(adjacent.GetEndKey(), region.GetStartKey()) && len(adjacent.GetEndKey()) != 0 {
-		start, end = adjacent.GetStartKey(), region.GetEndKey()
+		start, middle, end = adjacent.GetStartKey(), adjacent.GetEndKey(), region.GetEndKey()
 	} else {
 		return false
 	}
@@ -260,6 +263,13 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 		}
 	}
 
+	// Reclamation deletes keyspace labels as well as placement rules. In
+	// NextGen, each side must contain a complete keyspace when merging across
+	// keyspaces. Classic raw/txn keys can contain arbitrary APIv2-like bytes.
+	if kerneltype.IsNextGen() && !allowMergeKeyspace(start, middle, end) {
+		return false
+	}
+
 	policy := cluster.GetSharedConfig().GetKeyType()
 	switch policy {
 	case constant.Table:
@@ -274,6 +284,61 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 	default:
 		return isSameTableIdentity(region, adjacent)
 	}
+}
+
+// allowMergeKeyspace permits merges within a keyspace, or across keyspaces when
+// each side contains at least one complete keyspace. It does not depend on labels
+// or keyspace metadata, which can already be removed during reclamation.
+func allowMergeKeyspace(start, middle, end []byte) bool {
+	for _, mode := range codec.KeyspaceModes() {
+		first := codec.EncodeKeyspaceBoundary(mode, 0)
+		fence := codec.EncodeKeyspaceBoundary(mode, keyspaceconstant.MaxValidKeyspaceID+1)
+		if (len(end) > 0 && bytes.Compare(end, first[:]) <= 0) || bytes.Compare(start, fence[:]) >= 0 {
+			continue
+		}
+		if bytes.Compare(start, first[:]) < 0 || len(end) == 0 || bytes.Compare(end, fence[:]) > 0 {
+			return false
+		}
+		leftID := keyspaceBoundaryAtOrAfter(start, mode)
+		left := codec.EncodeKeyspaceBoundary(mode, leftID)
+		nextID := leftID
+		if bytes.Equal(start, left[:]) {
+			nextID++
+		}
+		next := codec.EncodeKeyspaceBoundary(mode, nextID)
+		if bytes.Compare(end, next[:]) <= 0 {
+			return true // The union stays within one keyspace.
+		}
+		rightID := keyspaceBoundaryAtOrAfter(middle, mode)
+		if leftID > keyspaceconstant.MaxValidKeyspaceID || rightID > keyspaceconstant.MaxValidKeyspaceID {
+			return false
+		}
+		leftEnd := codec.EncodeKeyspaceBoundary(mode, leftID+1)
+		rightEnd := codec.EncodeKeyspaceBoundary(mode, rightID+1)
+		return bytes.Compare(middle, leftEnd[:]) >= 0 && bytes.Compare(end, rightEnd[:]) >= 0
+	}
+	return true
+}
+
+// keyspaceBoundaryAtOrAfter finds the first canonical boundary >= key. The caller
+// guarantees key lies within the mode's range. Split keys can be short byte
+// strings rather than complete memcomparable keys.
+func keyspaceBoundaryAtOrAfter(key []byte, mode byte) uint32 {
+	if key[0] != mode {
+		return keyspaceconstant.MaxValidKeyspaceID + 1
+	}
+	var id uint32
+	for pos := 1; pos < codec.KeyspacePrefixLen; pos++ {
+		id <<= 8
+		if pos < len(key) {
+			id |= uint32(key[pos])
+		}
+	}
+	boundary := codec.EncodeKeyspaceBoundary(mode, id)
+	if bytes.Compare(key, boundary[:]) > 0 {
+		id++
+	}
+	return id
 }
 
 // isSameTableIdentity reports whether two regions belong to the same logical
