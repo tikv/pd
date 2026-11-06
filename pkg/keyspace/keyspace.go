@@ -107,12 +107,9 @@ type Manager struct {
 	mgm *MetaServiceGroupManager
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
-	// cached keyspace meta info for each keyspace ID.
-	// keyspaceNameLookup/keyspaceStateLookup are never read or written to
-	// outside of evictKeyspacesFromCache's Delete calls on this branch -
-	// GetKeyspaceNameByID/GetKeyspaceStateByID read manager.cache directly
-	// instead. Kept only so evictKeyspacesFromCache's deletions stay harmless
-	// no-ops rather than requiring that call site to diverge from upstream.
+	// TODO: Remove keyspaceNameLookup/keyspaceStateLookup and their no-op Delete
+	// calls in evictKeyspacesFromCache in a follow-up PR. All metadata lookups
+	// now use cache instead.
 	keyspaceNameLookup   sync.Map // store as ID(uint32) -> name(string)
 	keyspaceStateLookup  sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
 	cache                *Cache
