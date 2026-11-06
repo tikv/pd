@@ -1033,7 +1033,7 @@ func (*isolationFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *pl
 func (f *isolationFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	// No isolation constraint to fit
 	if len(f.constraintSet) == 0 {
-		return statusStoreNotMatchIsolation
+		return statusOK
 	}
 	for _, constrainList := range f.constraintSet {
 		match := true

@@ -2780,3 +2780,56 @@ func TestRecorderRefreshLooksUpStoreIDNotCount(t *testing.T) {
 
 	re.Empty(rec.offlineLeaderCounter)
 }
+
+func (suite *ruleCheckerTestSuite) setSingleLeaderIsolationRules() {
+	zoneIn := func(zones ...string) []placement.LabelConstraint {
+		return []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: zones}}
+	}
+	for i := range 6 {
+		suite.cluster.AddLabelsStore(uint64(i+1), 1, map[string]string{"zone": fmt.Sprintf("z%d", i/2+1), "host": fmt.Sprintf("h%d", i+1)})
+	}
+	suite.Require().NoError(suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Leader, Count: 1,
+			LabelConstraints: zoneIn("z1"), LocationLabels: []string{"zone", "host"}, IsolationLevel: "zone",
+		},
+		{
+			GroupID: placement.DefaultGroupID, ID: "follower", Role: placement.Follower, Count: 2,
+			LabelConstraints: zoneIn("z2", "z3"), LocationLabels: []string{"zone", "host"}, IsolationLevel: "zone",
+		},
+	}))
+}
+
+func (suite *ruleCheckerTestSuite) TestSingleReplicaRuleIsolationOffline() {
+	re := suite.Require()
+	suite.setSingleLeaderIsolationRules()
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 5)
+	suite.cluster.SetStoreOffline(1)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("replace-rule-offline-peer", op.Desc())
+	re.Contains(op.Brief(), "mv peer: store [1] to [2]")
+}
+
+func (suite *ruleCheckerTestSuite) TestSingleReplicaRuleIsolationDown() {
+	re := suite.Require()
+	suite.setSingleLeaderIsolationRules()
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", 3, 1, 5)
+	suite.cluster.SetStoreDown(1)
+	region := suite.cluster.GetRegion(1)
+	downPeer := region.GetStorePeer(1)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 24 * 60 * 60}}))
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("fast-replace-rule-down-peer", op.Desc())
+	re.Contains(op.Brief(), "mv peer: store [1] to [2]")
+}
+
+func (suite *ruleCheckerTestSuite) TestSingleReplicaRuleIsolationMissingPeer() {
+	re := suite.Require()
+	suite.setSingleLeaderIsolationRules()
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", 3, 5)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+}
