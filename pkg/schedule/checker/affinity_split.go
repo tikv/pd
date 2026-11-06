@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 )
 
 const (
@@ -53,14 +54,24 @@ type affinitySplitAttempt struct {
 	split *operator.Operator
 }
 
-// prepareAffinityPeerMove requests a SCAN split before adding a voter when size
-// or keys exceed TiKV's ordinary split thresholds. It only looks at this Region:
-// each child is checked on a later patrol after its heartbeat reports it, and an
-// unchanged epoch can move after the zero-size or split wait timeout. Attempts belong
-// to one move: other target voters start a new one, and Check removes an attempt
-// once the Region is at the target.
-func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState) (*operator.Operator, bool) {
-	if !slices.ContainsFunc(group.VoterStoreIDs, func(id uint64) bool { return region.GetStorePeer(id) == nil }) {
+// prepareAffinityPeerMove requests a SCAN split before the move to roles adds a
+// peer when size or keys exceed TiKV's ordinary split thresholds. A new peer is
+// a target voter, or a learner moved off a target voter store, on a store
+// without a peer of the Region; a role swap copies no data. It only looks at
+// this Region: each child is checked after its heartbeat reports it, and an
+// unchanged epoch can move after the zero-size or split wait timeout. Attempts
+// belong to one move: other target voters start a new one, and Check removes
+// an attempt once the Region is at the target.
+func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState,
+	roles map[uint64]placement.PeerRoleType) (*operator.Operator, bool) {
+	addsPeer := false
+	for storeID := range roles {
+		if region.GetStorePeer(storeID) == nil {
+			addsPeer = true
+			break
+		}
+	}
+	if !addsPeer {
 		return nil, true
 	}
 	c.splitMu.Lock()
