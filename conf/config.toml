@@ -31,8 +31,15 @@
 # cert-path = ""
 ## Path of file that contains X509 key in PEM format.
 # key-path = ""
-## A CN which must be provided by a client
+## Allowed certificate CNs for peer connections. For compatibility, this also
+## restricts the PD client port only when the list contains more than one CN.
 # cert-allowed-cn = ["example.com"]
+## Explicit CN allowlist for incoming connections on the PD client port.
+## A non-empty list is enforced even for a single CN and overrides cert-allowed-cn
+## for the client port. Include the CN of PD's own certificate for internal requests.
+## Requires cacert-path, cert-path, key-path and HTTPS client URLs. Restart to apply.
+## Leave empty to preserve the legacy cert-allowed-cn behavior.
+# client-cert-allowed-cn = ["pd-server"]
 ## Whether to enable the log redaction. It can be the following values:
 ##   - false: disable redact log.
 ##   - true: enable redact log, which will replace the sensitive information with "?".
