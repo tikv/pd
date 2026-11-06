@@ -15,9 +15,13 @@
 package affinity
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +36,10 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestNextGenTiDBGroupOperations(t *testing.T) {
@@ -255,6 +262,106 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 	re.True(manager2.IsGroupExist("group2"))
 }
 
+// TestLoadOverlappingAffinityRanges verifies that persisted overlaps do not stop
+// the manager from loading, and that every group in a conflict stays suspended
+// until the conflict is repaired.
+func TestLoadOverlappingAffinityRanges(t *testing.T) {
+	keyRange := func(start, end string) keyutil.KeyRange {
+		return keyutil.KeyRange{StartKey: []byte(start), EndKey: []byte(end)}
+	}
+	for _, testCase := range []struct {
+		name   string
+		groups []GroupKeyRanges
+	}{
+		{"within group", []GroupKeyRanges{
+			{GroupID: "self", KeyRanges: []keyutil.KeyRange{keyRange("a", "d"), keyRange("b", "c")}},
+		}},
+		// outer covers inner and later, which do not overlap each other, and has
+		// a disjoint range m-n.
+		{"nested ranges", []GroupKeyRanges{
+			{GroupID: "outer", KeyRanges: []keyutil.KeyRange{keyRange("a", "g"), keyRange("m", "n")}},
+			{GroupID: "inner", KeyRanges: []keyutil.KeyRange{keyRange("b", "c")}},
+			{GroupID: "later", KeyRanges: []keyutil.KeyRange{keyRange("d", "e")}},
+		}},
+		{"unbounded ranges", []GroupKeyRanges{
+			{GroupID: "whole", KeyRanges: []keyutil.KeyRange{keyRange("", "")}},
+			{GroupID: "inner", KeyRanges: []keyutil.KeyRange{keyRange("b", "c")}},
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			// Bypass the write validation to persist the overlaps.
+			for _, change := range testCase.groups {
+				re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+					if err := store.SaveAffinityGroup(txn, change.GroupID, &Group{
+						ID: change.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1},
+					}); err != nil {
+						return err
+					}
+					return store.SaveRegionRule(txn, GetLabelRuleID(change.GroupID), MakeLabelRule(change))
+				}))
+			}
+			snapshot := func() map[string]string {
+				data := make(map[string]string)
+				re.NoError(store.LoadAllAffinityGroups(func(k, v string) { data["group/"+k] = v }))
+				re.NoError(store.LoadRegionRules(func(k, v string) { data["rule/"+k] = v }))
+				return data
+			}
+			before := snapshot()
+			logFile := testutil.InitTempFileLogger(t, "error")
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err, "persisted overlaps must not prevent startup")
+			re.Equal(before, snapshot(), "loading must not repair persisted data")
+			for _, change := range testCase.groups {
+				manager.RestoreAffinityGroup(change.GroupID)
+				state := manager.GetAffinityGroupState(change.GroupID)
+				re.NotNil(state)
+				re.Equal(PhasePending, state.Phase)
+				re.False(state.AffinitySchedulingAllowed)
+				re.True(state.RegularSchedulingAllowed)
+				re.Equal(len(change.KeyRanges), state.RangeCount)
+				// No Region in the group, even in a disjoint range, belongs to it.
+				for _, kr := range change.KeyRanges {
+					group, _ := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1}, kr))
+					re.Nil(group)
+				}
+			}
+			logs, err := os.ReadFile(logFile)
+			re.NoError(err)
+			re.Equal(1, strings.Count(string(logs), "overlapping affinity key ranges"))
+			for _, change := range testCase.groups {
+				re.Contains(string(logs), change.GroupID)
+			}
+
+			if testCase.name == "nested ranges" {
+				extra := []GroupKeyRanges{{GroupID: "unrelated", KeyRanges: []keyutil.KeyRange{keyRange("y", "z")}}}
+				re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "unrelated", KeyRanges: []keyutil.KeyRange{keyRange("x", "y")}}}))
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(extra, nil))
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, extra))
+				re.NoError(manager.DeleteAffinityGroups([]string{"unrelated"}, true))
+			}
+			re.Error(manager.CreateAffinityGroups([]GroupKeyRanges{{
+				GroupID: "new-overlap", KeyRanges: []keyutil.KeyRange{keyRange("b", "c")},
+			}}), "new overlaps must still be rejected")
+
+			// Removing the second range of a single group, or else the first
+			// group, repairs the conflict.
+			first := testCase.groups[0]
+			if len(testCase.groups) == 1 {
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: first.GroupID, KeyRanges: first.KeyRanges[1:]}}))
+			} else {
+				re.NoError(manager.DeleteAffinityGroups([]string{first.GroupID}, true))
+			}
+			_, isAffinity := manager.GetRegionAffinityGroupState(generateRegionForTest(1, []uint64{1}, keyRange("b", "c")))
+			re.True(isAffinity)
+		})
+	}
+}
+
 func TestParseKeyRangesFromDataInvalidHex(t *testing.T) {
 	re := require.New(t)
 	_, err := parseKeyRangesFromData([]*labeler.KeyRangeRule{
@@ -397,6 +504,119 @@ func TestLabelRuleIntegration(t *testing.T) {
 	err = manager.DeleteAffinityGroups([]string{"group_no_label"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group_no_label"))
+}
+
+// failingAffinityStorage fails the failAt-th transaction, so a request that
+// spans several transactions commits only the earlier ones.
+type failingAffinityStorage struct {
+	endpoint.AffinityStorage
+	txnCount int
+	failAt   int
+}
+
+func (s *failingAffinityStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	s.txnCount++
+	if s.txnCount == s.failAt {
+		return errors.New("injected affinity transaction failure")
+	}
+	return s.AffinityStorage.RunInTxn(ctx, f)
+}
+
+// TestAffinityGroupsBatchFailure verifies that when a later transaction of a
+// request fails, each group keeps all or none of its changes in storage, and
+// the memory holds the committed transactions only, so that new groups are
+// checked against the committed ranges and a retry that skips existing groups
+// creates the rest.
+func TestAffinityGroupsBatchFailure(t *testing.T) {
+	for _, op := range []string{"create", "delete", "update"} {
+		t.Run(op, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			failingStore := &failingAffinityStorage{AffinityStorage: store}
+			manager, err := NewManager(ctx, failingStore, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+			// Each request needs two transactions. To create or delete, the first
+			// group has no label rule, so cutting the operations every
+			// MaxEtcdTxnOps would separate a later group from its rule. An update
+			// writes one label rule per group.
+			count := etcdutil.MaxEtcdTxnOps/2 + 2
+			if op == "update" {
+				count = etcdutil.MaxEtcdTxnOps + 1
+			}
+			changes, ids := make([]GroupKeyRanges, count), make([]string, count)
+			for i := range changes {
+				ids[i] = fmt.Sprintf("batch-group-%d", i)
+				changes[i].GroupID = ids[i]
+				if i > 0 || op == "update" {
+					changes[i].KeyRanges = []keyutil.KeyRange{{StartKey: fmt.Appendf(nil, "%04d", i), EndKey: fmt.Appendf(nil, "%04d", i+1)}}
+				}
+			}
+			switch op {
+			case "delete":
+				re.NoError(manager.CreateAffinityGroups(changes))
+			case "update":
+				empty := make([]GroupKeyRanges, count)
+				for i := range empty {
+					empty[i].GroupID = ids[i]
+				}
+				re.NoError(manager.CreateAffinityGroups(empty))
+			}
+			failingStore.txnCount, failingStore.failAt = 0, 2
+			switch op {
+			case "create":
+				err = manager.CreateAffinityGroups(changes)
+			case "delete":
+				err = manager.DeleteAffinityGroups(ids, true)
+			case "update":
+				err = manager.UpdateAffinityGroupKeyRanges(changes, nil)
+			}
+			re.ErrorContains(err, "injected affinity transaction failure")
+			re.Equal(2, failingStore.txnCount)
+
+			// Rebuild the labeler and the manager from storage as a restart does.
+			reloadedLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			reloaded, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), reloadedLabeler)
+			re.NoError(err)
+			for _, change := range changes {
+				ruleID := GetLabelRuleID(change.GroupID)
+				stored, hasRule := reloaded.GetAffinityGroupState(change.GroupID), reloadedLabeler.GetLabelRule(ruleID) != nil
+				if op != "update" {
+					re.Equal(stored != nil && len(change.KeyRanges) > 0, hasRule,
+						"group %s and its label rule must persist together", change.GroupID)
+				}
+				// The memory holds the committed changes and only them.
+				state := manager.GetAffinityGroupState(change.GroupID)
+				re.Equal(stored != nil, state != nil, change.GroupID)
+				re.Equal(hasRule, regionLabeler.GetLabelRule(ruleID) != nil, change.GroupID)
+				if stored != nil {
+					re.Equal(stored.RangeCount, state.RangeCount, change.GroupID)
+				}
+			}
+			// Only the first transaction committed.
+			re.NotEqual(reloadedLabeler.GetLabelRule(GetLabelRuleID(ids[1])) != nil, reloadedLabeler.GetLabelRule(GetLabelRuleID(ids[count-1])) != nil)
+
+			// New groups are checked against the committed changes. The first
+			// transaction created group 1, deleted it, or gave it its range.
+			err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "overlap", KeyRanges: changes[1].KeyRanges}})
+			if op == "delete" {
+				re.NoError(err)
+			} else {
+				re.ErrorContains(err, "overlap")
+			}
+			if op == "create" {
+				// Only a retry that skips the existing groups can create the rest.
+				re.ErrorContains(manager.CreateAffinityGroups(changes), "already exists")
+				re.NoError(manager.CreateAffinityGroupsIfNotExists(changes))
+				for _, id := range ids {
+					re.True(manager.IsGroupExist(id))
+				}
+			}
+		})
+	}
 }
 
 // TestUpdateAffinityGroupKeyRangesAddToEmptyGroup documents the current failure
