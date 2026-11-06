@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -120,7 +121,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
-			log.Info("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
+			log.Info("update placement rule", zap.String("key", key), logutil.ZapRedactByteString("value", kv.Value))
 			rule, err := placement.NewRuleFromJSON(kv.Value)
 			if err != nil {
 				return err
@@ -217,7 +218,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		return nil
 	}
 	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Debug("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		log.Debug("update region label rule", zap.String("key", string(kv.Key)), logutil.ZapRedactByteString("value", kv.Value))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			return err
