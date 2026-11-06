@@ -188,6 +188,9 @@ func (suite *resourceManagerWatcherMatrixTestSuite) TestWatcherRecoversAfterComp
 	group.Priority = 6
 	group.RUSettings.RU.Settings.FillRate = 600
 	suite.putResourceGroup(re, pdClient, group)
+	// Advance compaction past the revision where the blocked watcher resumes.
+	group.RUSettings.RU.Settings.FillRate = 601
+	suite.putResourceGroup(re, pdClient, group)
 	suite.compactGroupSetting(re, group.GetName(), suite.keyspaceID)
 
 	waitForWatcherLog("watch channel is blocked for a long time")
