@@ -243,7 +243,10 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl2", "val2", 4)
 	re.NoError(err)
 
-	time.Sleep(3 * time.Second)
+	testutil.Eventually(re, func() bool {
+		resp, err := EtcdKVGet(client, "test/ttl1")
+		return err == nil && resp.Count == 0
+	})
 	// test/ttl1 is outdated
 	resp, err := EtcdKVGet(client, "test/ttl1")
 	re.NoError(err)
@@ -253,7 +256,10 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	re.NoError(err)
 	re.Equal("val2", string(resp.Kvs[0].Value))
 
-	time.Sleep(2 * time.Second)
+	testutil.Eventually(re, func() bool {
+		resp, err := EtcdKVGet(client, "test/ttl2")
+		return err == nil && resp.Count == 0
+	})
 
 	// test/ttl2 is also outdated
 	resp, err = EtcdKVGet(client, "test/ttl2")
@@ -954,7 +960,11 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	for i := range 10 {
 		suite.put(re, fmt.Sprintf("TestCallBack%d", i), "")
 	}
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		cache.RLock()
+		defer cache.RUnlock()
+		return len(cache.data) == 10
+	})
 	cache.RLock()
 	re.Len(cache.data, 10)
 	cache.RUnlock()
@@ -965,7 +975,11 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 		_, err = suite.client.Delete(ctx, key)
 		re.NoError(err)
 	}
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		cache.RLock()
+		defer cache.RUnlock()
+		return len(cache.data) == 0
+	})
 	cache.RLock()
 	re.Empty(cache.data)
 	cache.RUnlock()

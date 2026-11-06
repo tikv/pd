@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
@@ -61,7 +62,7 @@ func TestSimpleJoin(t *testing.T) {
 	re.Len(members.Members, 2)
 
 	// Wait for all nodes becoming healthy.
-	time.Sleep(time.Second * 5)
+	waitForHealthyMembers(t, cluster)
 
 	// Join another PD.
 	pd3, err := cluster.Join(ctx)
@@ -88,7 +89,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	// Wait for all nodes becoming healthy.
-	time.Sleep(time.Second * 5)
+	waitForHealthyMembers(t, cluster)
 
 	pd3 := cluster.GetServer("pd3")
 	err = pd3.Stop()
@@ -120,7 +121,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	// Wait for all nodes becoming healthy.
-	time.Sleep(time.Second * 5)
+	waitForHealthyMembers(t, cluster)
 
 	pd3 := cluster.GetServer("pd3")
 	client := cluster.GetServer("pd1").GetEtcdClient()
@@ -242,4 +243,23 @@ func TestPDJoinsItself(t *testing.T) {
 	re.NoError(err)
 	serverCfg.Join = serverCfg.AdvertiseClientUrls
 	re.Error(join.PrepareJoinCluster(serverCfg))
+}
+
+func waitForHealthyMembers(t *testing.T, cluster *tests.TestCluster) {
+	t.Helper()
+	var healthySince time.Time
+	testutil.Eventually(require.New(t), func() bool {
+		for _, server := range cluster.GetServers() {
+			client := server.GetEtcdClient()
+			if client == nil || !etcdutil.IsHealthy(t.Context(), client) {
+				healthySince = time.Time{}
+				return false
+			}
+		}
+		if healthySince.IsZero() {
+			healthySince = time.Now()
+		}
+		// Keep the existing health window required before another membership change.
+		return time.Since(healthySince) >= 5*time.Second
+	})
 }
