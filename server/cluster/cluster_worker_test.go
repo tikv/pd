@@ -61,6 +61,8 @@ func TestReportBatchSplit(t *testing.T) {
 	re.NoError(err)
 }
 
+// TestHandleRegionHeartbeatAfterAffinitySplitDenial uses unchanged heartbeats
+// to renew and then recover a denial even when no Region metadata needs saving.
 func TestHandleRegionHeartbeatAfterAffinitySplitDenial(t *testing.T) {
 	re := require.New(t)
 	// Track the denial as if its renewal were due.

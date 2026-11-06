@@ -1324,6 +1324,8 @@ func (suite *serverTestSuite) TestBatchSplit() {
 	suite.SetupSuite()
 }
 
+// TestAffinitySplitRecovery exercises ChangeSplit(true) through scheduling and
+// PD streams after removing a group that previously denied an automatic split.
 func (suite *serverTestSuite) TestAffinitySplitRecovery() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
@@ -1405,8 +1407,14 @@ func (suite *serverTestSuite) TestAffinitySplitRecovery() {
 	suite.SetupSuite()
 }
 
+// TestAffinitySplitDenialRenewal requires an accepted heartbeat to deliver a
+// fresh denial through scheduling and PD before storage's existing TTL expires.
 func (suite *serverTestSuite) TestAffinitySplitDenialRenewal() {
 	re := suite.Require()
+	defer func() {
+		suite.TearDownSuite()
+		suite.SetupSuite()
+	}()
 	// Track the denial as if its renewal were due.
 	fname := "github.com/tikv/pd/pkg/schedule/affinity/shortenSplitDenialTracking"
 	re.NoError(failpoint.Enable(fname, "return(true)"))
@@ -1492,9 +1500,6 @@ func (suite *serverTestSuite) TestAffinitySplitDenialRenewal() {
 			return false
 		}
 	})
-
-	suite.TearDownSuite()
-	suite.SetupSuite()
 }
 
 func (suite *serverTestSuite) TestBatchSplitCompatibility() {

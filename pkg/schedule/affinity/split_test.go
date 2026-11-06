@@ -111,6 +111,8 @@ func TestAllowSplit(t *testing.T) {
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_ADMIN))
 }
 
+// newSplitRecoveryTestManager keeps target stores healthy so a group expires
+// only when a test changes its policy, rather than because of stale heartbeats.
 func newSplitRecoveryTestManager(t *testing.T) (*Manager, *serverconfig.PersistOptions, *core.RegionInfo, *hbstream.HeartbeatStreams) {
 	t.Helper()
 	re := require.New(t)
@@ -139,6 +141,8 @@ func newSplitRecoveryTestManager(t *testing.T) (*Manager, *serverconfig.PersistO
 	return manager, conf, region, streams
 }
 
+// TestEnableSplitAfterAffinityChanges requires one recovery notification across
+// concurrent heartbeats, including when the previous policy was already cached.
 func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -182,6 +186,8 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 	}
 }
 
+// TestSplitRecoveryOnlyForDeniedRegions leaves administrative splits untracked
+// and relies on storage's TTL when PD has already expired its denial entry.
 func TestSplitRecoveryOnlyForDeniedRegions(t *testing.T) {
 	re := require.New(t)
 	m, conf, region, streams := newSplitRecoveryTestManager(t)
@@ -212,6 +218,8 @@ func TestSplitRecoveryOnlyForDeniedRegions(t *testing.T) {
 	re.Zero(m.splitDeniedRegions.Len())
 }
 
+// TestRenewSplitDenialBeforeStorageTTL renews the storage-side denial once per
+// window, while a newly allowed Region receives recovery instead of renewal.
 func TestRenewSplitDenialBeforeStorageTTL(t *testing.T) {
 	re := require.New(t)
 	m, _, region, streams := newSplitRecoveryTestManager(t)

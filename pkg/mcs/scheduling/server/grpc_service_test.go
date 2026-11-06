@@ -143,6 +143,8 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	}
 }
 
+// TestAskBatchSplitRecordsSplitScatterInSchedulingService keeps split-scatter
+// tracking in the scheduling service that owns the split request's lifecycle.
 func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re := require.New(t)
 
@@ -163,6 +165,8 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re.Equal(float64(2), splitScatterPendingMetricValue(t))
 }
 
+// TestAskBatchSplitAfterClusterStopDoesNotPanic covers an in-flight denial after
+// primary cleanup clears the cluster's heartbeat streams.
 func TestAskBatchSplitAfterClusterStopDoesNotPanic(t *testing.T) {
 	re := require.New(t)
 
