@@ -33,6 +33,7 @@ func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
 	router.Use(middlewares.BootstrapChecker())
 	router.POST("", PostAffinityGroups)
+	router.POST("/targets", UpdateAffinityGroupTargets)
 	router.PATCH("", BatchModifyAffinityGroups)
 	router.PUT("/:group_id", UpdateAffinityGroupPeers)
 	router.DELETE("/:group_id", DeleteAffinityGroup)
@@ -380,6 +381,39 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 	}
 
 	c.IndentedJSON(http.StatusOK, state)
+}
+
+// UpdateAffinityGroupTargets writes leader and voter targets for several affinity groups.
+// A target is written only if the stored group still equals its expected group.
+// The scheduling service uses it to store the targets it decides.
+//
+//	@Tags		affinity-groups
+//	@Summary	Write leader and voter targets for affinity groups whose stored groups are unchanged.
+//	@Param		body	body	affinity.GroupTargetsRequest	true	"Targets with the groups they were decided from"
+//	@Produce	json
+//	@Success	200	{object}	affinity.GroupTargetsResponse	"IDs of the groups whose targets were written"
+//	@Failure	400	{string}	string							"The input is invalid."
+//	@Failure	500	{string}	string							"PD server failed to proceed the request."
+//	@Router		/affinity-groups/targets [post]
+func UpdateAffinityGroupTargets(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager, err := svr.GetAffinityManager()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	req := &affinity.GroupTargetsRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	written, err := manager.UpdateAffinityGroupTargets(req.Targets)
+	if handleAffinityError(c, err) {
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, &affinity.GroupTargetsResponse{WrittenGroupIDs: written})
 }
 
 // DeleteAffinityGroup deletes a specific affinity group by group id.
