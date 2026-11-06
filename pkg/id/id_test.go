@@ -100,7 +100,7 @@ func TestBatchAllocationAcrossAllocators(t *testing.T) {
 	require.Greater(t, last-uint64(count)+1, end)
 }
 
-func TestSetBasePreservesAllocatedIDs(t *testing.T) {
+func TestSetBaseRecovery(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	_, err := client.Put(t.Context(), leaderPath, memberVal)
@@ -112,103 +112,52 @@ func TestSetBasePreservesAllocatedIDs(t *testing.T) {
 			if label == KeyspaceLabel {
 				key = keypath.KeyspaceAllocIDPath()
 			}
-			require.NoError(t, alloc.SetBase(5000))
-			last, _, err := alloc.Alloc(3)
-			require.NoError(t, err)
-			for _, base := range []uint64{0, 5000, 5000, last} {
-				before, err := client.Get(t.Context(), key)
-				require.NoError(t, err)
+			// Each reset represents a coordinated recovery to the specified state.
+			for _, base := range []uint64{5000, 1000, 1000, 0, 5000, 5500, 10000} {
 				require.NoError(t, alloc.SetBase(base))
-				after, err := client.Get(t.Context(), key)
+				last, count, err := alloc.Alloc(3)
 				require.NoError(t, err)
-				next, _, err := alloc.Alloc(1)
+				require.Equal(t, uint32(3), count)
+				require.Equal(t, base+3, last, "recovery must honor the requested base")
+				persisted, err := client.Get(t.Context(), key)
 				require.NoError(t, err)
-				require.Equal(t, last+1, next, "a smaller recovery request must not rewind allocated IDs")
-				require.Equal(t, before.Header.Revision, after.Header.Revision, "a recovery retry must not rewrite the ID window")
-				last = next
+				require.Len(t, persisted.Kvs, 1)
+				end, err := typeutil.BytesToUint64(persisted.Kvs[0].Value)
+				require.NoError(t, err)
+				require.Equal(t, base+DefaultAllocStep, end, "recovery must replace the persisted window")
 			}
-			// Advance within the current window without lowering its persisted end.
-			before, err := client.Get(t.Context(), key)
-			require.NoError(t, err)
-			require.NoError(t, alloc.SetBase(5500))
-			after, err := client.Get(t.Context(), key)
-			require.NoError(t, err)
-			require.Equal(t, before.Header.Revision, after.Header.Revision)
-			next, _, err := alloc.Alloc(1)
-			require.NoError(t, err)
-			require.Equal(t, uint64(5501), next)
-
-			before, err = client.Get(t.Context(), key)
-			require.NoError(t, err)
-			require.NoError(t, alloc.SetBase(10000))
-			after, err = client.Get(t.Context(), key)
-			require.NoError(t, err)
-			require.Equal(t, before.Header.Revision+1, after.Header.Revision)
-			next, _, err = alloc.Alloc(1)
-			require.NoError(t, err)
-			require.Equal(t, uint64(10001), next)
 		})
 	}
 }
 
-func TestSetBasePreservesOtherAllocatorWindows(t *testing.T) {
+func TestSetBaseAfterRestart(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	_, err := client.Put(t.Context(), leaderPath, memberVal)
 	require.NoError(t, err)
-	params := &AllocatorParams{Client: client, Member: memberVal, Label: DefaultLabel}
-	first, second := NewAllocator(params), NewAllocator(params)
-	_, _, err = first.Alloc(1)
-	require.NoError(t, err)
-	secondLast, _, err := second.Alloc(1)
-	require.NoError(t, err)
-	before, err := client.Get(t.Context(), keypath.AllocIDPath())
-	require.NoError(t, err)
-	end, err := typeutil.BytesToUint64(before.Kvs[0].Value)
-	require.NoError(t, err)
+	for _, label := range []label{DefaultLabel, KeyspaceLabel} {
+		t.Run(string(label), func(t *testing.T) {
+			params := &AllocatorParams{Client: client, Member: memberVal, Label: label}
+			original := NewAllocator(params)
+			require.NoError(t, original.SetBase(5000))
+			_, _, err := original.Alloc(3)
+			require.NoError(t, err)
 
-	// The requested base is in the second allocator's reserved range.
-	require.NoError(t, first.SetBase(secondLast))
-	after, err := client.Get(t.Context(), keypath.AllocIDPath())
-	require.NoError(t, err)
-	firstLast, _, err := first.Alloc(1)
-	require.NoError(t, err)
-	require.Greater(t, firstLast, end)
-	nextSecond, _, err := second.Alloc(1)
-	require.NoError(t, err)
-	require.Equal(t, secondLast+1, nextSecond)
-	require.Less(t, nextSecond, firstLast)
-	require.Equal(t, before.Header.Revision, after.Header.Revision)
+			// The earlier allocator is no longer used after recovery starts.
+			recovered := NewAllocator(params)
+			require.NoError(t, recovered.SetBase(1000))
+			last, count, err := recovered.Alloc(1)
+			require.NoError(t, err)
+			require.Equal(t, uint32(1), count)
+			require.Equal(t, uint64(1001), last)
 
-	// A fresh allocator must also respect a range already persisted by others.
-	before, err = client.Get(t.Context(), keypath.AllocIDPath())
-	require.NoError(t, err)
-	end, err = typeutil.BytesToUint64(before.Kvs[0].Value)
-	require.NoError(t, err)
-	restarted := NewAllocator(params)
-	require.NoError(t, restarted.SetBase(1))
-	next, _, err := restarted.Alloc(1)
-	require.NoError(t, err)
-	require.Greater(t, next, end)
-
-	// Concurrent recovery requests must not reserve overlapping windows.
-	var wg sync.WaitGroup
-	results := make(chan error, 2)
-	for _, alloc := range []Allocator{first, second} {
-		wg.Go(func() { results <- alloc.SetBase(10000) })
+			restarted := NewAllocator(params)
+			require.NoError(t, restarted.Rebase())
+			last, _, err = restarted.Alloc(1)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1000)+DefaultAllocStep+1, last, "restart must use the recovered persisted window")
+		})
 	}
-	wg.Wait()
-	close(results)
-	for err := range results {
-		require.NoError(t, err)
-	}
-	firstLast, _, err = first.Alloc(1)
-	require.NoError(t, err)
-	secondLast, _, err = second.Alloc(1)
-	require.NoError(t, err)
-	require.Greater(t, firstLast, uint64(10000))
-	require.Greater(t, secondLast, uint64(10000))
-	require.NotEqual(t, firstLast, secondLast)
 }
 
 func TestBatchAllocationExhaustion(t *testing.T) {
@@ -232,8 +181,10 @@ func TestBatchAllocationExhaustion(t *testing.T) {
 	require.ErrorIs(t, err, errs.ErrIDExhausted)
 	require.ErrorIs(t, alloc.Rebase(), errs.ErrIDExhausted)
 	require.NoError(t, alloc.SetBase(math.MaxUint64-10))
-	_, _, err = alloc.Alloc(1)
-	require.ErrorIs(t, err, errs.ErrIDExhausted, "recovery must not reopen an exhausted range")
+	last, count, err = alloc.Alloc(1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(math.MaxUint64-9), last)
+	require.Equal(t, uint32(1), count)
 }
 
 func TestBatchAllocationLeaderChange(t *testing.T) {
@@ -326,9 +277,6 @@ func checkIDAllocationEndValue(t *testing.T, client *clientv3.Client, endID uint
 	t.Run("KeyspaceLabel should hit ErrIDExhausted when trying to allocate into unavailable range", func(t *testing.T) {
 		re := require.New(t)
 		for _, step := range []uint64{1, 10, 1024, 1025} {
-			// Each step size starts with a fresh range; SetBase cannot rewind an exhausted one.
-			_, err := client.Delete(t.Context(), keypath.KeyspaceAllocIDPath())
-			re.NoError(err)
 			keyspaceAllocator := NewAllocator(&AllocatorParams{
 				Client: client,
 				Label:  KeyspaceLabel,
@@ -337,7 +285,7 @@ func checkIDAllocationEndValue(t *testing.T, client *clientv3.Client, endID uint
 			})
 			initialBaseValue := endID - step*3
 
-			err = keyspaceAllocator.SetBase(initialBaseValue)
+			err := keyspaceAllocator.SetBase(initialBaseValue)
 			re.NoError(err)
 			var lastAllocatedID uint64
 			for {

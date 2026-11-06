@@ -579,10 +579,7 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 			sche.GetCoordinator().GetCheckerController().ClearPendingProcessedRegions()
 		}
-		// Reset fixture IDs between cases; the recovery API itself must never rewind them.
-		const resetBase = "github.com/tikv/pd/pkg/id/resetBaseForTest"
-		re.NoError(failpoint.Enable(resetBase, "return(true)"))
-		defer func() { re.NoError(failpoint.Disable(resetBase)) }()
+		// Reset the ID allocator between test cases.
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err = leaderServer.GetServer().RecoverAllocID(ctx, 0)

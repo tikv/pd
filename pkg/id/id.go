@@ -21,7 +21,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -48,7 +47,7 @@ const (
 
 // Allocator is the allocator to generate unique ID.
 type Allocator interface {
-	// SetBase advances the base to at least the given ID without moving it backward.
+	// SetBase resets the allocation base to the given ID during recovery.
 	SetBase(newBase uint64) error
 	// Alloc allocs a unique id.
 	Alloc(count uint32) (uint64, uint32, error)
@@ -128,8 +127,8 @@ func (alloc *allocatorImpl) Alloc(count uint32) (uint64, uint32, error) {
 	return alloc.base, count, nil
 }
 
-// SetBase advances the base to at least newBase. Smaller or repeated requests
-// succeed without reusing IDs, so recovery can safely retry an earlier request.
+// SetBase resets the allocation base to newBase during recovery. The caller must
+// coordinate recovery so subsequent allocations cannot conflict with valid IDs.
 func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
@@ -137,63 +136,12 @@ func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	if newBase >= alloc.effectiveEnd {
 		return errs.ErrIDExhausted.FastGenByArgs()
 	}
-	failpoint.Inject("resetBaseForTest", func() {
-		previousEnd := alloc.end
-		alloc.end = newBase
-		err := alloc.rebaseLocked(false, 0)
-		if err != nil {
-			alloc.end = previousEnd
-		}
-		failpoint.Return(err)
-	})
-
-	key := keypath.AllocIDPath()
-	if alloc.label == KeyspaceLabel {
-		key = keypath.KeyspaceAllocIDPath()
+	previousEnd := alloc.end
+	alloc.end = newBase
+	if err := alloc.rebaseLocked(false, 0); err != nil {
+		alloc.end = previousEnd
+		return err
 	}
-	base, end := max(alloc.base, newBase), alloc.end
-	op := clientv3.OpGet(key)
-	reuseWindow := newBase <= alloc.end
-	if !reuseWindow {
-		end = alloc.effectiveEnd
-		if alloc.step <= alloc.effectiveEnd-newBase {
-			end = newBase + alloc.step
-		}
-		// Fixed-width big-endian values preserve ID ordering. Keep a larger
-		// persisted window because another allocator may still be using it.
-		op = clientv3.OpTxn(
-			[]clientv3.Cmp{clientv3.Compare(clientv3.Value(key), ">", string(typeutil.Uint64ToBytes(newBase)))},
-			[]clientv3.Op{clientv3.OpGet(key)},
-			[]clientv3.Op{clientv3.OpPut(key, string(typeutil.Uint64ToBytes(end)))},
-		)
-	}
-	resp, err := kv.NewSlowLogTxn(alloc.client).
-		If(clientv3.Compare(clientv3.Value(keypath.ElectionPath(nil)), "=", alloc.member)).
-		Then(op).Commit()
-	if err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()
-	}
-	if !resp.Succeeded {
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	if !reuseWindow {
-		window := resp.Responses[0].GetResponseTxn()
-		if window.Succeeded {
-			end, err = typeutil.BytesToUint64(window.Responses[0].GetResponseRange().Kvs[0].Value)
-			if err != nil {
-				return err
-			}
-			base = end
-		}
-	}
-	if base == alloc.base && end == alloc.end {
-		return nil
-	}
-	alloc.base, alloc.end = base, end
-	alloc.metrics.idGauge.Set(float64(end))
-	// Keep new-end first for pd-recover log parsing.
-	log.Info("idAllocator allocates a new id", zap.Uint64("new-end", end), zap.Uint64("new-base", base),
-		zap.String("label", string(alloc.label)), zap.Bool("check-curr-end", true))
 	return nil
 }
 
