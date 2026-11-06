@@ -15,6 +15,7 @@
 package checker
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 )
 
 func newAffinitySplitTest(t *testing.T) (*mockcluster.Cluster, *AffinityChecker) {
@@ -232,8 +234,9 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 				checker.splitAttempts.Put(region.GetID(), attempt)
 			case "evicted":
 				group := manager.GetAffinityGroupState("split_before_move")
+				roles := map[uint64]placement.PeerRoleType{1: placement.Leader, 2: placement.Voter, 3: placement.Voter}
 				for id := uint64(2); id <= 3; id++ {
-					op, ready := checker.prepareAffinityPeerMove(region.Clone(core.WithNewRegionID(id)), group)
+					op, ready := checker.prepareAffinityPeerMove(region.Clone(core.WithNewRegionID(id)), group, roles)
 					re.False(ready)
 					requireAffinitySplit(t, []*operator.Operator{op})
 				}
@@ -314,12 +317,13 @@ func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
 	// A caller may skip admission after a store-limit check.
 	ops[0].SetStatusReachTime(operator.CREATED, time.Now().Add(-operator.OperatorExpireTime-time.Second))
 	group := cluster.GetAffinityManager().GetAffinityGroupState("split_before_move")
+	roles := map[uint64]placement.PeerRoleType{1: placement.Leader, 2: placement.Voter, 3: placement.Voter}
 	prepared := make(chan *operator.Operator, 32)
 	start := make(chan struct{})
 	for range cap(prepared) {
 		go func() {
 			<-start
-			op, _ := checker.prepareAffinityPeerMove(region, group)
+			op, _ := checker.prepareAffinityPeerMove(region, group, roles)
 			prepared <- op
 		}()
 	}
@@ -411,6 +415,91 @@ func newAffinitySplitControllerTest(t *testing.T) (*mockcluster.Cluster, *Contro
 	controller := NewController(t.Context(), cluster, cluster.GetCheckerConfig(), ops)
 	controller.GetAffinityChecker().startTime = time.Now().Add(-2 * recentMergeTTL)
 	return cluster, controller, ops
+}
+
+// A learner moved off a target voter store copies data to its new store.
+// Swapping roles with a voter that the target drops copies no data.
+func TestAffinitySplitBeforeLearnerMove(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		voters []uint64
+		// Nil means no learner rule; empty allows a learner on any store.
+		learnerStores []string
+		size          int64
+		wantSplit     bool
+		fallback      bool
+	}{
+		{name: "new voter store", voters: []uint64{1, 2, 5}, size: 64, wantSplit: true},
+		{name: "learner moves to a new store", voters: []uint64{1, 2, 4}, learnerStores: []string{"4", "5"}, size: 64, wantSplit: true},
+		{name: "small learner move", voters: []uint64{1, 2, 4}, learnerStores: []string{"4", "5"}, size: 16},
+		{name: "learner swaps with a dropped voter", voters: []uint64{1, 2, 4}, learnerStores: []string{}, size: 64},
+		{name: "learner move after split timeout", voters: []uint64{1, 2, 4}, learnerStores: []string{"4", "5"}, size: 64, wantSplit: true, fallback: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			c, tc, oc := newLearnerConflictController(t)
+			storeConfig := &config.StoreConfig{RegionMaxSize: "24MiB", RegionSplitSize: "16MiB", RegionSplitKeys: 160000}
+			storeConfig.Adjust()
+			tc.SetStoreConfig(storeConfig)
+			if testCase.learnerStores != nil {
+				// Demoting the dropped voter in a swap needs joint consensus.
+				tc.SetEnableUseJointConsensus(true)
+				re.NoError(tc.GetRuleManager().SetRule(newLearnerRule(testCase.learnerStores...)))
+				putLearners(tc, 1, 4)
+			}
+			region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.size), core.SetApproximateKeys(10), core.SetSource(core.Heartbeat))
+			tc.PutRegion(region)
+			manager := tc.GetAffinityManager()
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: "large", LeaderStoreID: 1, VoterStoreIDs: testCase.voters,
+			}, region.GetStartKey(), region.GetEndKey()))
+			checker := c.GetAffinityChecker()
+			moves := promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter)
+			conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
+			fallbacks := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
+			ops := c.CheckRegion(region)
+			if testCase.wantSplit {
+				requireAffinitySplit(t, ops)
+				re.Equal(moves, promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter))
+				re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
+				re.Equal(testCase.voters, manager.GetAffinityGroupState("large").VoterStoreIDs)
+				if testCase.fallback {
+					split := ops[0]
+					re.Equal(1, oc.AddWaitingOperator(split))
+					re.False(split.GetStartTime().IsZero())
+					split.SetStatusReachTime(operator.STARTED, time.Now().Add(-affinitySplitWaitTimeout-time.Second))
+					oc.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
+					re.Equal(operator.TIMEOUT, split.Status())
+					re.Nil(oc.GetOperator(region.GetID()))
+				} else {
+					// A child at the split size moves without another split.
+					region = region.Clone(core.WithIncVersion(), core.SetApproximateSize(16))
+					tc.PutRegion(region)
+				}
+				ops = c.CheckRegion(region)
+			}
+			requireAffinityMove(t, ops)
+			if testCase.fallback {
+				re.Equal(fallbacks+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+			}
+			if testCase.learnerStores != nil {
+				re.Equal(moves+1, promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter))
+			}
+			re.Zero(ops[0].Kind() & operator.OpSplit)
+			addsStore5 := false
+			for i := range ops[0].Len() {
+				if step, ok := ops[0].Step(i).(operator.AddLearner); ok && step.ToStore == 5 {
+					addsStore5 = true
+				}
+			}
+			re.Equal(len(testCase.learnerStores) > 0 || slices.Contains(testCase.voters, 5), addsStore5)
+			atTarget := applyLearnerOperator(t, tc, ops[0])
+			re.Empty(c.CheckRegion(atTarget))
+			_, exists := checker.splitAttempts.Peek(region.GetID())
+			re.False(exists, "reaching the target must clear the split attempt")
+			re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
+		})
+	}
 }
 
 func TestAffinitySplitBeforeMoveController(t *testing.T) {

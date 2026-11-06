@@ -317,7 +317,7 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		return nil, false
 	}
 
-	if op, ready := c.prepareAffinityPeerMove(region, group); !ready {
+	if op, ready := c.prepareAffinityPeerMove(region, group, roles); !ready {
 		return op, false
 	}
 
