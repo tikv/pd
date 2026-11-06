@@ -34,6 +34,7 @@ type ConnectionCtx[T any] struct {
 type Manager[T any] struct {
 	sync.RWMutex
 	connectionCtxs map[string]*ConnectionCtx[T]
+	updatedCh      chan struct{}
 	// onEvict is called with the stream of a connection context right before the context is
 	// canceled because GC, CleanAllAndStore or an overwriting Store evicts it.
 	onEvict func(T)
@@ -85,6 +86,21 @@ func (c *Manager[T]) Store(ctx context.Context, cancel context.CancelFunc, url s
 func (c *Manager[T]) storeLocked(ctx context.Context, cancel context.CancelFunc, url string, stream T) {
 	c.evictLocked(url)
 	c.connectionCtxs[url] = &ConnectionCtx[T]{ctx, cancel, url, stream}
+	if c.updatedCh != nil {
+		close(c.updatedCh)
+		c.updatedCh = nil
+	}
+}
+
+// Updated returns a channel closed by the next successful store. Capture it before
+// checking for a connection so that a concurrent store cannot be missed.
+func (c *Manager[T]) Updated() <-chan struct{} {
+	c.Lock()
+	defer c.Unlock()
+	if c.updatedCh == nil {
+		c.updatedCh = make(chan struct{})
+	}
+	return c.updatedCh
 }
 
 // CleanAllAndStore is used to store the connection context exclusively. It will evict

@@ -225,6 +225,13 @@ tsoBatchLoop:
 			}
 			// Check stream and retry if necessary.
 			if stream == nil {
+				failpoint.InjectCall("beforeSubscribeTSOStreamUpdates")
+				// Subscribe before checking again: the background updater may publish a
+				// stream between the first lookup and this subscription.
+				updated := conCtxMgr.Updated()
+				if conCtxMgr.Size() > 0 {
+					continue streamChoosingLoop
+				}
 				log.Info("[tso] tso stream is not ready")
 				if provider.updateConnectionCtxs(ctx) {
 					continue streamChoosingLoop
@@ -244,6 +251,9 @@ tsoBatchLoop:
 					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(err))
 					timer.Stop()
 					continue tsoBatchLoop
+				case <-updated:
+					timer.Stop()
+					continue streamChoosingLoop
 				case <-timer.C:
 					timer.Stop()
 					continue streamChoosingLoop
@@ -255,6 +265,11 @@ tsoBatchLoop:
 				// Set `stream` to nil and remove this stream from the `connectionCtxs` due to being canceled.
 				conCtxMgr.Release(streamURL)
 				stream = nil
+				// A canceled forwarding stream is keyed by the backup URL. Refresh
+				// discovery before rebuilding a direct connection to the cached leader.
+				if ctx.Err() == nil && (option.EnableForwarding || streamURL == svcDiscovery.GetServingURL()) {
+					svcDiscovery.ScheduleCheckMemberChanged()
+				}
 				continue
 			default:
 			}
@@ -379,7 +394,15 @@ func (td *tsoDispatcher) handleProcessRequestError(
 	case errs.IsCalleeMismatch(err):
 		// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
 		svcDiscovery.RemoveClientConn(streamURL)
+		svcDiscovery.ScheduleCheckMemberChanged()
 	case errs.IsLeaderChange(err):
+		// An old direct stream can fail after discovery has selected a new leader.
+		option := td.provider.getOption()
+		leaderURL := svcDiscovery.GetServingURL()
+		if !option.EnableForwarding && !option.GetEnableTSOFollowerProxy() && leaderURL != "" && leaderURL != streamURL {
+			svcDiscovery.ScheduleCheckMemberChanged()
+			break
+		}
 		// If the leader changed, we better call `CheckMemberChanged` blockingly to
 		// ensure the next round of TSO requests can be sent to the new leader.
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
