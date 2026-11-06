@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"slices"
 	"sync"
@@ -101,13 +102,11 @@ func (c *Controller) GetSchedulerNames() []string {
 func (c *Controller) GetSchedulerHandlers() map[string]http.Handler {
 	c.RLock()
 	defer c.RUnlock()
-	if len(c.schedulerHandlers) > 0 {
-		return c.schedulerHandlers
-	}
-	handlers := make(map[string]http.Handler, len(c.schedulers))
+	handlers := make(map[string]http.Handler, len(c.schedulers)+len(c.schedulerHandlers))
 	for name, scheduler := range c.schedulers {
 		handlers[name] = scheduler.Scheduler
 	}
+	maps.Copy(handlers, c.schedulerHandlers)
 	return handlers
 }
 

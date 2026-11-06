@@ -17,7 +17,9 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"time"
@@ -353,16 +355,16 @@ func (conf *hotRegionSchedulerConfig) getRankFormulaVersion() string {
 	return conf.getRankFormulaVersionLocked()
 }
 
-func (conf *hotRegionSchedulerConfig) getHistorySampleDuration() time.Duration {
-	conf.RLock()
-	defer conf.RUnlock()
-	return conf.HistorySampleDuration.Duration
-}
-
 func (conf *hotRegionSchedulerConfig) getHistorySampleInterval() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.HistorySampleInterval.Duration
+}
+
+func (conf *hotRegionSchedulerConfig) getHistorySampleConfig() (duration, interval time.Duration) {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.HistorySampleDuration.Duration, conf.HistorySampleInterval.Duration
 }
 
 // nolint: unused, unparam
@@ -442,6 +444,67 @@ func isPriorityValid(priorities []string) (map[string]bool, error) {
 }
 
 func (conf *hotRegionSchedulerParam) validateLocked() error {
+	if conf.MaxPeerNum <= 0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("max-peer-number should be positive")
+	}
+	// Region heartbeats have the longer interval, so this also bounds the store-stat lifetime.
+	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))
+	if conf.MaxZombieRounds < 0 || conf.MaxZombieRounds > maxZombieRounds {
+		return errs.ErrSchedulerConfig.FastGenByArgs(fmt.Sprintf("max-zombie-rounds should be in range [0, %d]", maxZombieRounds))
+	}
+	duration, interval := conf.HistorySampleDuration.Duration, conf.HistorySampleInterval.Duration
+	if duration < 0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-duration should be nonnegative")
+	}
+	if interval < 0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("history-sample-interval should be nonnegative")
+	}
+	for _, item := range []struct {
+		name  string
+		value float64
+	}{
+		{"min-hot-byte-rate", conf.MinHotByteRate},
+		{"min-hot-key-rate", conf.MinHotKeyRate},
+		{"min-hot-query-rate", conf.MinHotQueryRate},
+		{"min-hot-cpu-rate", conf.MinHotCPURate},
+		{"src-tolerance-ratio", conf.SrcToleranceRatio},
+		{"dst-tolerance-ratio", conf.DstToleranceRatio},
+	} {
+		if math.IsNaN(item.value) || math.IsInf(item.value, 0) || item.value < 0 {
+			return errs.ErrSchedulerConfig.FastGenByArgs(item.name + " should be finite and nonnegative")
+		}
+	}
+	for _, item := range []struct {
+		name  string
+		value float64
+	}{
+		{"byte-rate-rank-step-ratio", conf.ByteRateRankStepRatio},
+		{"key-rate-rank-step-ratio", conf.KeyRateRankStepRatio},
+		{"query-rate-rank-step-ratio", conf.QueryRateRankStepRatio},
+		{"cpu-rate-rank-step-ratio", conf.CPURateRankStepRatio},
+		{"count-rank-step-ratio", conf.CountRankStepRatio},
+	} {
+		if !(item.value > 0 && item.value <= 1) {
+			return errs.ErrSchedulerConfig.FastGenByArgs(item.name + " should be finite and in range (0, 1]")
+		}
+	}
+	// V2 clamps finite values to [0.7, 0.95], including legacy values outside (0, 1].
+	if math.IsNaN(conf.GreatDecRatio) || math.IsInf(conf.GreatDecRatio, 0) ||
+		(conf.RankFormulaVersion != "v2" && !(conf.GreatDecRatio > 0 && conf.GreatDecRatio <= 1)) {
+		return errs.ErrSchedulerConfig.FastGenByArgs("great-dec-ratio should be finite and in range (0, 1] for v1")
+	}
+	if math.IsNaN(conf.MinorDecRatio) || math.IsInf(conf.MinorDecRatio, 0) {
+		return errs.ErrSchedulerConfig.FastGenByArgs("minor-dec-ratio should be finite")
+	}
+	// The empty version selects v1. V2 does not use the minor decline ratio.
+	if conf.RankFormulaVersion != "v2" {
+		if !(conf.MinorDecRatio > 0 && conf.MinorDecRatio <= 1) {
+			return errs.ErrSchedulerConfig.FastGenByArgs("minor-dec-ratio should be in range (0, 1]")
+		}
+		if conf.GreatDecRatio > conf.MinorDecRatio {
+			return errs.ErrSchedulerConfig.FastGenByArgs("great-dec-ratio should not exceed minor-dec-ratio")
+		}
+	}
 	if _, err := isPriorityValid(conf.ReadPriorities); err != nil {
 		return err
 	}
@@ -466,12 +529,63 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 		conf.ForbidRWType != "none" && conf.ForbidRWType != "" {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid forbid-rw-type")
 	}
-	if conf.PendingWeight < defaultPendingWeight {
-		return errs.ErrSchedulerConfig.FastGenByArgs("invalid pending-weight, should be at least 1")
+	if math.IsNaN(conf.PendingWeight) || math.IsInf(conf.PendingWeight, 0) || conf.PendingWeight < defaultPendingWeight {
+		return errs.ErrSchedulerConfig.FastGenByArgs("invalid pending-weight, should be finite and at least 1")
 	}
-	if conf.SplitThresholds < 0.01 || conf.SplitThresholds > 1.0 {
+	if math.IsNaN(conf.SplitThresholds) || conf.SplitThresholds < 0.01 || conf.SplitThresholds > 1.0 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid split-thresholds, should be in range [0.01, 1.0]")
 	}
+	return nil
+}
+
+// adjustLegacyConfig keeps previously accepted numeric settings from preventing
+// startup or reload. New configurations and online updates still use strict validation.
+func (conf *hotRegionSchedulerConfig) adjustLegacyConfig() error {
+	validationErr := conf.validateLocked()
+	if validationErr == nil {
+		return nil
+	}
+	defaults := initHotRegionScheduleConfig()
+	if conf.MaxPeerNum <= 0 {
+		conf.MaxPeerNum = defaults.MaxPeerNum
+	}
+	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))
+	conf.MaxZombieRounds = min(max(conf.MaxZombieRounds, 0), maxZombieRounds)
+	conf.HistorySampleDuration.Duration = max(conf.HistorySampleDuration.Duration, 0)
+	conf.HistorySampleInterval.Duration = max(conf.HistorySampleInterval.Duration, 0)
+	for _, value := range []*float64{
+		&conf.MinHotByteRate, &conf.MinHotKeyRate, &conf.MinHotQueryRate, &conf.MinHotCPURate,
+		&conf.SrcToleranceRatio, &conf.DstToleranceRatio,
+	} {
+		*value = max(*value, 0)
+	}
+	for _, item := range []struct {
+		value    *float64
+		fallback float64
+	}{
+		{&conf.ByteRateRankStepRatio, defaults.ByteRateRankStepRatio},
+		{&conf.KeyRateRankStepRatio, defaults.KeyRateRankStepRatio},
+		{&conf.QueryRateRankStepRatio, defaults.QueryRateRankStepRatio},
+		{&conf.CPURateRankStepRatio, defaults.CPURateRankStepRatio},
+		{&conf.CountRankStepRatio, defaults.CountRankStepRatio},
+	} {
+		if !(*item.value > 0 && *item.value <= 1) {
+			*item.value = item.fallback
+		}
+	}
+	if conf.RankFormulaVersion != "v2" {
+		if !(conf.GreatDecRatio > 0 && conf.GreatDecRatio <= 1) {
+			conf.GreatDecRatio = defaults.GreatDecRatio
+		}
+		if !(conf.MinorDecRatio > 0 && conf.MinorDecRatio <= 1) {
+			conf.MinorDecRatio = defaults.MinorDecRatio
+		}
+		conf.GreatDecRatio = min(conf.GreatDecRatio, conf.MinorDecRatio)
+	}
+	if err := conf.validateLocked(); err != nil {
+		return err
+	}
+	log.Warn("adjusted legacy hot-region scheduler configuration to safe values", errs.ZapError(validationErr))
 	return nil
 }
 

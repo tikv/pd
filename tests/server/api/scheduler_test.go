@@ -41,6 +41,104 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
+func TestLegacyHotRegionConfigRemainsEditableThroughAPI(t *testing.T) {
+	re := require.New(t)
+	env := tests.NewSchedulingTestEnvironment(t)
+	env.SkipBootstrap = true
+	defer env.Cleanup()
+	env.RunTestInNonMicroserviceEnv(func(cluster *tests.TestCluster) {
+		leader := cluster.GetLeaderServer()
+		store := leader.GetServer().GetStorage()
+		name := types.BalanceHotRegionScheduler.String()
+		legacy := []byte(`{"min-hot-byte-rate":321,"read-priorities":["key","byte"],"history-sample-duration":"1h","history-sample-interval":"1s"}`)
+		re.NoError(store.SaveSchedulerConfig(name, legacy))
+		re.NoError(leader.BootstrapCluster())
+		rc := leader.GetRaftCluster()
+		re.NotNil(rc)
+		rc.SetPrepared()
+		co := rc.GetCoordinator()
+		testutil.Eventually(re, co.AreSchedulersInitialized)
+		re.NotNil(co.GetSchedulersController().GetScheduler(name))
+
+		configURL := leader.GetAddr() + server.SchedulerConfigHandlerPath + "/" + name
+		var listed map[string]any
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &listed)))
+		re.Equal(float64(321), listed["min-hot-byte-rate"])
+		re.Equal("1h0m0s", listed["history-sample-duration"])
+		re.Equal("1s", listed["history-sample-interval"])
+		// New invalid updates must preserve the existing configuration.
+		before, err := store.LoadSchedulerConfig(name)
+		re.NoError(err)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",
+			[]byte(`{"history-sample-interval":"-1s"}`), testutil.Status(re, http.StatusBadRequest)))
+		saved, err := store.LoadSchedulerConfig(name)
+		re.NoError(err)
+		re.JSONEq(before, saved)
+		re.NotNil(co.GetSchedulersController().GetScheduler(name))
+
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",
+			[]byte(`{"history-sample-interval":"30s"}`), testutil.StatusOK(re)))
+		saved, err = store.LoadSchedulerConfig(name)
+		re.NoError(err)
+		var restored struct {
+			MinHotByteRate        float64  `json:"min-hot-byte-rate"`
+			ReadPriorities        []string `json:"read-priorities"`
+			HistorySampleDuration string   `json:"history-sample-duration"`
+			HistorySampleInterval string   `json:"history-sample-interval"`
+		}
+		re.NoError(json.Unmarshal([]byte(saved), &restored))
+		re.Equal(float64(321), restored.MinHotByteRate)
+		re.Equal([]string{"key", "byte"}, restored.ReadPriorities)
+		re.Equal("1h0m0s", restored.HistorySampleDuration)
+		re.Equal("30s", restored.HistorySampleInterval)
+		// Partial updates must retain the remaining scheduler tuning.
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",
+			[]byte(`{"max-peer-number":123}`), testutil.StatusOK(re)))
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &listed)))
+		re.Equal(float64(123), listed["max-peer-number"])
+		re.Contains(co.GetSchedulersController().GetSchedulerHandlers(), types.BalanceRegionScheduler.String())
+	})
+}
+
+func TestInvalidIndependentSchedulerConfigFallsBackThroughAPI(t *testing.T) {
+	re := require.New(t)
+	env := tests.NewSchedulingTestEnvironment(t)
+	env.SkipBootstrap = true
+	defer env.Cleanup()
+	env.RunTestInNonMicroserviceEnv(func(cluster *tests.TestCluster) {
+		leader := cluster.GetLeaderServer()
+		store := leader.GetServer().GetStorage()
+		name := types.BalanceLeaderScheduler.String()
+		re.NoError(store.SaveSchedulerConfig(name, []byte(`{"batch":"invalid"}`)))
+		re.NoError(leader.BootstrapCluster())
+		rc := leader.GetRaftCluster()
+		re.NotNil(rc)
+		rc.SetPrepared()
+		co := rc.GetCoordinator()
+		testutil.Eventually(re, co.AreSchedulersInitialized)
+		re.NotNil(co.GetSchedulersController().GetScheduler(name))
+
+		configURL := leader.GetAddr() + server.SchedulerConfigHandlerPath + "/" + name
+		var config struct {
+			Batch int `json:"batch"`
+		}
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &config)))
+		re.Equal(schedulerpkg.BalanceLeaderBatchSize, config.Batch)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL+"/config",
+			[]byte(`{"batch":7}`), testutil.StatusOK(re)))
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &config)))
+		re.Equal(7, config.Batch)
+		saved, err := store.LoadSchedulerConfig(name)
+		re.NoError(err)
+		re.NoError(json.Unmarshal([]byte(saved), &config))
+		re.Equal(7, config.Batch)
+	})
+}
+
 type scheduleTestSuite struct {
 	suite.Suite
 	te  *tests.SchedulingTestEnvironment
