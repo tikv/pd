@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -146,6 +147,39 @@ func queryEtcdMembers(ctx context.Context, client *clientv3.Client, linearizable
 		return (*clientv3.MemberListResponse)(resp), errs.ErrEtcdMemberList.Wrap(err).GenWithStackByCause()
 	}
 	return (*clientv3.MemberListResponse)(resp), nil
+}
+
+// ScanEtcdLeader probes the members in order and calls found for each one that
+// reports itself as the etcd leader, until found returns true.
+//
+// Each Status request is bounded by timeout. The etcd client waits for a stopped
+// member to become ready, so without the bound the scan could never reach the
+// members after it.
+func ScanEtcdLeader(
+	ctx context.Context,
+	maintenance clientv3.Maintenance,
+	members []*etcdserverpb.Member,
+	timeout time.Duration,
+	found func(member *etcdserverpb.Member, status *clientv3.StatusResponse) bool,
+) {
+	for _, member := range members {
+		if len(member.GetClientURLs()) == 0 { // This member is not started yet.
+			log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(member.GetID(), 16)))
+			continue
+		}
+		endpoint := member.ClientURLs[0]
+		statusCtx, cancel := context.WithTimeout(ctx, timeout)
+		status, err := maintenance.Status(statusCtx, endpoint)
+		cancel()
+		if err != nil {
+			log.Info("failed to get status of member",
+				zap.String("member-id", strconv.FormatUint(member.GetID(), 16)), zap.String("endpoint", endpoint), errs.ZapError(err))
+			continue
+		}
+		if status.Leader == member.GetID() && found(member, status) {
+			return
+		}
+	}
 }
 
 // RemoveEtcdMember removes a member by the given id.
