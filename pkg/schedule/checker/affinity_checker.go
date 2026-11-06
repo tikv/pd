@@ -286,6 +286,7 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 // - Does NOT skip hot spots regions
 // - Only merges regions within the same affinity group
 // - Skips regions that are recently merged
+// - Skips regions whose size is not reported yet
 func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
 	// Skip merge during startup TTL period
 	if time.Since(c.startTime) < recentMergeTTL {
@@ -310,6 +311,11 @@ func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.Gr
 		return nil
 	}
 	affinityMergeCheckerCounter.Inc()
+
+	if isRegionSizeUnknown(region) {
+		affinityMergeCheckerUnknownSizeCounter.Inc()
+		return nil
+	}
 
 	// Region is not small enough
 	maxSize := int64(maxAffinityMergeRegionSize)
@@ -383,6 +389,11 @@ func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.Region
 
 	if !isAffinity {
 		affinityMergeCheckerAdjNotAffinityCounter.Inc()
+		return false
+	}
+
+	if isRegionSizeUnknown(adjacent) {
+		affinityMergeCheckerAdjUnknownSizeCounter.Inc()
 		return false
 	}
 

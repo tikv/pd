@@ -55,6 +55,14 @@ type affinitySplitAttempt struct {
 	split *operator.Operator
 }
 
+// isRegionSizeUnknown returns whether PD has no reported size for the current
+// range of the Region. PD then shows 0, the size of an empty Region or the size
+// from before a split or merge, so the affinity checker neither moves nor merges
+// the Region.
+func isRegionSizeUnknown(region *core.RegionInfo) bool {
+	return region.GetApproximateSize() <= 0 || region.IsApproximateSizeUnknown()
+}
+
 // prepareAffinityPeerMove requests a SCAN split before adding a voter when size
 // or keys exceed TiKV's ordinary split thresholds. It only looks at this Region:
 // each child is checked on a later patrol after its heartbeat reports it, and an
@@ -71,7 +79,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			zap.String("group-id", group.ID), zap.String("reason", reason))
 		return nil, false
 	}
-	if region.GetApproximateSize() <= 0 || region.IsApproximateSizeUnknown() {
+	if isRegionSizeUnknown(region) {
 		return wait("unknown-size")
 	}
 	storeConfig := c.cluster.GetStoreConfig()
