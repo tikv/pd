@@ -2272,9 +2272,9 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 }
 
 func parsePrimaryName(name string) string {
-	idx := strings.LastIndex(name, "-")
-	if idx != -1 {
-		return name[:idx]
+	before, _, ok := strings.CutLast(name, "-")
+	if ok {
+		return before
 	}
 	return name
 }

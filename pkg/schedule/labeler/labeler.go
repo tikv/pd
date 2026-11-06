@@ -118,9 +118,9 @@ func (l *RegionLabeler) loadRules() error {
 		r, err := NewLabelRuleFromJSON([]byte(v))
 		if err != nil {
 			if errs.ErrRegionRuleContent.Equal(err) {
-				log.Warn("failed to adjust label rule", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(err))
+				log.Warn("failed to adjust label rule", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), zap.Error(err))
 			} else {
-				log.Warn("failed to unmarshal label rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+				log.Warn("failed to unmarshal label rule value", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			}
 			toDelete = append(toDelete, k)
 			return

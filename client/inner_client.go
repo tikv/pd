@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -440,6 +441,7 @@ func (c *innerClient) dispatchTSORequestWithRetry(ctx context.Context) tso.TSFut
 			req = tsoClient.GetTSORequest(ctx)
 		}
 		retryable, err = tsoClient.DispatchRequest(req)
+		failpoint.InjectCall("afterDispatchTSORequest", ctx)
 		if !retryable {
 			break
 		}

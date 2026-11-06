@@ -414,6 +414,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			}
 		}
 		lastReceivedResponseTime = time.Now()
+		failpoint.InjectCall("watchLeaderReady")
 		log.Info("watch channel is created", zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 
 	watchChanLoop:

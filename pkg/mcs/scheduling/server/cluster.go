@@ -884,7 +884,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		return err
 	}
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
-	cluster.HandleStatsAsync(c, region)
+	cluster.HandleStatsWithOriginAsync(c, region, origin)
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.

@@ -22,16 +22,21 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -46,6 +51,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -64,6 +70,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -75,143 +82,313 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Pooled timers cannot cross synctest bubble boundaries.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestStoreHeartbeat(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	_, opt, err := newTestScheduleConfig()
-	opt.GetScheduleConfig().StoreLimitVersion = "v2"
-	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-
-	n, np := uint64(3), uint64(3)
-	stores := newTestStores(n, "2.0.0")
-	storeMetasAfterHeartbeat := make([]*metapb.Store, 0, n)
-	regions := newTestRegions(n, n, np)
-
-	for _, region := range regions {
-		re.NoError(cluster.putRegion(region))
-	}
-	re.Equal(int(n), cluster.GetTotalRegionCount())
-
-	for i, store := range stores {
-		req := &pdpb.StoreHeartbeatRequest{}
-		resp := &pdpb.StoreHeartbeatResponse{}
-		req.Stats = &pdpb.StoreStats{
-			StoreId:     store.GetID(),
-			Capacity:    100,
-			Available:   50,
-			RegionCount: 1,
-		}
-		re.Error(cluster.HandleStoreHeartbeat(req, resp))
-
-		re.NoError(cluster.setStore(store))
-		re.Equal(i+1, cluster.GetStoreCount())
-
-		re.Equal(int64(0), store.GetLastHeartbeatTS().UnixNano())
-
-		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
-
-		s := cluster.GetStore(store.GetID())
-		re.NotEqual(int64(0), s.GetLastHeartbeatTS().UnixNano())
-		re.Equal(req.GetStats(), s.GetStoreStats())
-		re.Equal("v2", cluster.GetStore(1).GetStoreLimit().Version())
-		re.Equal(s.GetMeta().GetNodeState(), resp.GetState())
-
-		storeMetasAfterHeartbeat = append(storeMetasAfterHeartbeat, s.GetMeta())
-	}
-
-	re.Equal(int(n), cluster.GetStoreCount())
-
-	for i, store := range stores {
-		tmp := &metapb.Store{}
-		ok, err := cluster.storage.LoadStoreMeta(store.GetID(), tmp)
-		re.True(ok)
+		_, opt, err := newTestScheduleConfig()
+		opt.GetScheduleConfig().StoreLimitVersion = "v2"
 		re.NoError(err)
-		re.Equal(storeMetasAfterHeartbeat[i], tmp)
-	}
-	hotReq := &pdpb.StoreHeartbeatRequest{}
-	hotResp := &pdpb.StoreHeartbeatResponse{}
-	hotReq.Stats = &pdpb.StoreStats{
-		StoreId:     1,
-		RegionCount: 1,
-		Interval: &pdpb.TimeInterval{
-			StartTimestamp: 0,
-			EndTimestamp:   10,
-		},
-		PeerStats: []*pdpb.PeerStat{
-			{
-				RegionId:  1,
-				ReadKeys:  9999999,
-				ReadBytes: 9999998,
-				QueryStats: &pdpb.QueryStats{
-					Get: 9999997,
+		cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+
+		n, np := uint64(3), uint64(3)
+		stores := newTestStores(n, "2.0.0")
+		storeMetasAfterHeartbeat := make([]*metapb.Store, 0, n)
+		regions := newTestRegions(n, n, np)
+
+		for _, region := range regions {
+			re.NoError(cluster.putRegion(region))
+		}
+		re.Equal(int(n), cluster.GetTotalRegionCount())
+
+		for i, store := range stores {
+			req := &pdpb.StoreHeartbeatRequest{}
+			resp := &pdpb.StoreHeartbeatResponse{}
+			req.Stats = &pdpb.StoreStats{
+				StoreId:     store.GetID(),
+				Capacity:    100,
+				Available:   50,
+				RegionCount: 1,
+			}
+			re.Error(cluster.HandleStoreHeartbeat(req, resp))
+
+			re.NoError(cluster.setStore(store))
+			re.Equal(i+1, cluster.GetStoreCount())
+
+			re.Equal(int64(0), store.GetLastHeartbeatTS().UnixNano())
+
+			re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+
+			s := cluster.GetStore(store.GetID())
+			re.NotEqual(int64(0), s.GetLastHeartbeatTS().UnixNano())
+			re.Equal(req.GetStats(), s.GetStoreStats())
+			re.Equal("v2", cluster.GetStore(1).GetStoreLimit().Version())
+			re.Equal(s.GetMeta().GetNodeState(), resp.GetState())
+
+			storeMetasAfterHeartbeat = append(storeMetasAfterHeartbeat, s.GetMeta())
+		}
+
+		re.Equal(int(n), cluster.GetStoreCount())
+
+		for i, store := range stores {
+			tmp := &metapb.Store{}
+			ok, err := cluster.storage.LoadStoreMeta(store.GetID(), tmp)
+			re.True(ok)
+			re.NoError(err)
+			re.Equal(storeMetasAfterHeartbeat[i], tmp)
+		}
+		hotReq := &pdpb.StoreHeartbeatRequest{}
+		hotResp := &pdpb.StoreHeartbeatResponse{}
+		hotReq.Stats = &pdpb.StoreStats{
+			StoreId:     1,
+			RegionCount: 1,
+			Interval: &pdpb.TimeInterval{
+				StartTimestamp: 0,
+				EndTimestamp:   10,
+			},
+			PeerStats: []*pdpb.PeerStat{
+				{
+					RegionId:  1,
+					ReadKeys:  9999999,
+					ReadBytes: 9999998,
+					QueryStats: &pdpb.QueryStats{
+						Get: 9999997,
+					},
 				},
 			},
-		},
+		}
+		hotHeartBeat := hotReq.GetStats()
+		coldReq := &pdpb.StoreHeartbeatRequest{}
+		coldResp := &pdpb.StoreHeartbeatResponse{}
+		coldReq.Stats = &pdpb.StoreStats{
+			StoreId:     1,
+			RegionCount: 1,
+			Interval: &pdpb.TimeInterval{
+				StartTimestamp: 0,
+				EndTimestamp:   10,
+			},
+			PeerStats: []*pdpb.PeerStat{},
+		}
+		scheCfg := cluster.opt.GetScheduleConfig().Clone()
+		scheCfg.StoreLimitVersion = "v1"
+		cluster.opt.SetScheduleConfig(scheCfg)
+		re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+		re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+		re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+		re.Equal("v1", cluster.GetStore(1).GetStoreLimit().Version())
+		synctest.Sleep(20 * time.Millisecond)
+		storeStats := cluster.hotStat.GetHotPeerStats(utils.Read, 3)
+		re.Len(storeStats[1], 1)
+		re.Equal(uint64(1), storeStats[1][0].RegionID)
+		interval := float64(hotHeartBeat.Interval.EndTimestamp - hotHeartBeat.Interval.StartTimestamp)
+		re.Len(storeStats[1][0].Loads, utils.DimLen)
+		re.Equal(float64(hotHeartBeat.PeerStats[0].ReadBytes)/interval, storeStats[1][0].Loads[utils.ByteDim])
+		re.Equal(float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval, storeStats[1][0].Loads[utils.KeyDim])
+		re.Equal(float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval, storeStats[1][0].Loads[utils.QueryDim])
+		// After cold heartbeat, we won't find region 1 peer in HotPeerStats
+		re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
+		synctest.Sleep(20 * time.Millisecond)
+		storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 1)
+		re.Empty(storeStats[1])
+		// After hot heartbeat, we can find region 1 peer again
+		re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+		synctest.Sleep(20 * time.Millisecond)
+		storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
+		re.Len(storeStats[1], 1)
+		re.Equal(uint64(1), storeStats[1][0].RegionID)
+		//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
+		re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
+		re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
+		re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
+		synctest.Sleep(20 * time.Millisecond)
+		storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 0)
+		re.Empty(storeStats[1])
+		re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+		synctest.Sleep(20 * time.Millisecond)
+		storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 1)
+		re.Empty(storeStats[1])
+		storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
+		re.Empty(storeStats[1])
+		// after 2 hot heartbeats, wo can find region 1 peer again
+		re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+		re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+		synctest.Sleep(20 * time.Millisecond)
+		storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
+		re.Len(storeStats[1], 1)
+		re.Equal(uint64(1), storeStats[1][0].RegionID)
+	})
+}
+
+func TestStoreHeartbeatPreserveConcurrentTxnProtocolVersionRange(t *testing.T) {
+	for _, versionRange := range []struct {
+		name  string
+		value *metapb.TxnProtocolVersionRange
+	}{
+		{name: "lower", value: &metapb.TxnProtocolVersionRange{Max: 1}},
+		{name: "clear"},
+		{name: "empty", value: &metapb.TxnProtocolVersionRange{}},
+	} {
+		t.Run(versionRange.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer clean()
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithEtcdBackend(client))
+			stores := newTestStores(2, "2.0.0")
+			meta := stores[0].GetMeta()
+			meta.TxnProtocolVersionRange = &metapb.TxnProtocolVersionRange{Max: 2}
+			re.NoError(cluster.PutMetaStore(meta))
+			stores[1].GetMeta().NodeState = metapb.NodeState_Preparing
+			re.NoError(cluster.PutMetaStore(stores[1].GetMeta()))
+
+			// Stop the heartbeat after its transaction reads the persisted record.
+			// Registration, resolved-TS reports and the entire store scan must
+			// complete while persistence is still blocked.
+			reached := make(chan struct{})
+			resume := make(chan struct{})
+			resumeHeartbeat := sync.OnceFunc(func() { close(resume) })
+			const name = "github.com/tikv/pd/server/cluster/beforePersistStoreHeartbeat"
+			re.NoError(failpoint.EnableCall(name, func() {
+				close(reached)
+				select {
+				case <-resume:
+				case <-ctx.Done():
+				}
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(name)) })
+
+			wg := &sync.WaitGroup{}
+			defer wg.Wait()
+			defer resumeHeartbeat()
+			wait := func(done <-chan error) {
+				t.Helper()
+				select {
+				case err := <-done:
+					re.NoError(err)
+				case <-ctx.Done():
+					t.Fatal("store operation blocked on heartbeat persistence")
+				}
+				re.NoError(ctx.Err())
+			}
+			heartbeat := func() error {
+				return cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+					Stats: &pdpb.StoreStats{StoreId: 1, Capacity: 100, Available: 50},
+				}, &pdpb.StoreHeartbeatResponse{})
+			}
+			heartbeatDone := make(chan error, 1)
+			wg.Go(func() { heartbeatDone <- heartbeat() })
+			select {
+			case <-reached:
+			case <-ctx.Done():
+				t.Fatal("heartbeat did not reach persistence")
+			}
+
+			progressDone := make(chan error, 1)
+			wg.Go(func() {
+				if err := cluster.SetMinResolvedTS(1, 123); err != nil {
+					progressDone <- err
+					return
+				}
+				cluster.checkStores()
+				registration := typeutil.DeepClone(meta, core.StoreFactory)
+				registration.TxnProtocolVersionRange = versionRange.value
+				progressDone <- cluster.PutMetaStore(registration)
+			})
+			wait(progressDone)
+			re.Equal(uint64(123), cluster.GetStore(1).GetMinResolvedTS())
+			re.True(cluster.GetStore(2).IsServing())
+
+			resumeHeartbeat()
+			wait(heartbeatDone)
+
+			persisted := &metapb.Store{}
+			ok, err := cluster.storage.LoadStoreMeta(1, persisted)
+			re.NoError(err)
+			re.True(ok)
+			for _, store := range []*metapb.Store{cluster.GetStore(1).GetMeta(), persisted} {
+				re.Equal(versionRange.value, store.GetTxnProtocolVersionRange())
+				re.Positive(store.GetLastHeartbeat())
+			}
+		})
 	}
-	hotHeartBeat := hotReq.GetStats()
-	coldReq := &pdpb.StoreHeartbeatRequest{}
-	coldResp := &pdpb.StoreHeartbeatResponse{}
-	coldReq.Stats = &pdpb.StoreStats{
-		StoreId:     1,
-		RegionCount: 1,
-		Interval: &pdpb.TimeInterval{
-			StartTimestamp: 0,
-			EndTimestamp:   10,
-		},
-		PeerStats: []*pdpb.PeerStat{},
-	}
-	scheCfg := cluster.opt.GetScheduleConfig().Clone()
-	scheCfg.StoreLimitVersion = "v1"
-	cluster.opt.SetScheduleConfig(scheCfg)
-	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
-	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
-	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
-	re.Equal("v1", cluster.GetStore(1).GetStoreLimit().Version())
-	time.Sleep(20 * time.Millisecond)
-	storeStats := cluster.hotStat.GetHotPeerStats(utils.Read, 3)
-	re.Len(storeStats[1], 1)
-	re.Equal(uint64(1), storeStats[1][0].RegionID)
-	interval := float64(hotHeartBeat.Interval.EndTimestamp - hotHeartBeat.Interval.StartTimestamp)
-	re.Len(storeStats[1][0].Loads, utils.DimLen)
-	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadBytes)/interval, storeStats[1][0].Loads[utils.ByteDim])
-	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval, storeStats[1][0].Loads[utils.KeyDim])
-	re.Equal(float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval, storeStats[1][0].Loads[utils.QueryDim])
-	// After cold heartbeat, we won't find region 1 peer in HotPeerStats
-	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
-	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 1)
-	re.Empty(storeStats[1])
-	// After hot heartbeat, we can find region 1 peer again
-	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
-	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
-	re.Len(storeStats[1], 1)
-	re.Equal(uint64(1), storeStats[1][0].RegionID)
-	//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
-	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
-	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
-	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
-	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 0)
-	re.Empty(storeStats[1])
-	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
-	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 1)
-	re.Empty(storeStats[1])
-	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
-	re.Empty(storeStats[1])
-	// after 2 hot heartbeats, wo can find region 1 peer again
-	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
-	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
-	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
-	re.Len(storeStats[1], 1)
-	re.Equal(uint64(1), storeStats[1][0].RegionID)
+}
+
+func TestStoreHeartbeatPersistenceProgress(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithEtcdBackend(client))
+	re.NoError(cluster.PutMetaStore(newTestStores(1, "2.0.0")[0].GetMeta()))
+
+	var firstHeartbeat, newerHeartbeat time.Time
+	const name = "github.com/tikv/pd/server/cluster/beforePersistStoreHeartbeat"
+	re.NoError(failpoint.EnableCall(name, sync.OnceFunc(func() {
+		// Simulate a newer heartbeat reaching the cache before the first
+		// heartbeat's transaction commits, without changing the stored record.
+		cluster.storeStateLock.Lock(1)
+		defer cluster.storeStateLock.Unlock(1)
+		store := cluster.GetStore(1)
+		firstHeartbeat = store.GetLastHeartbeatTS()
+		newerHeartbeat = firstHeartbeat.Add(time.Second)
+		cluster.PutStore(store, core.SetLastHeartbeatTS(newerHeartbeat))
+	})))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(name)) })
+	re.NoError(cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+		Stats: &pdpb.StoreStats{StoreId: 1, Capacity: 100, Available: 50},
+	}, &pdpb.StoreHeartbeatResponse{}))
+
+	persisted := &metapb.Store{}
+	ok, err := cluster.storage.LoadStoreMeta(1, persisted)
+	re.NoError(err)
+	re.True(ok)
+	re.Equal(firstHeartbeat.UnixNano(), persisted.GetLastHeartbeat())
+	store := cluster.GetStore(1)
+	re.Equal(newerHeartbeat, store.GetLastHeartbeatTS())
+	re.False(store.NeedPersist(), "a successful commit must advance the persistence interval")
+	// Only the first heartbeat was persisted, so the interval starts there.
+	re.True(store.Clone(core.SetLastHeartbeatTS(firstHeartbeat.Add(5*time.Minute + time.Nanosecond))).NeedPersist())
+
+	// A successful older attempt must not undo a newer attempt's progress.
+	cluster.persistStoreHeartbeat(1, newerHeartbeat)
+	cluster.persistStoreHeartbeat(1, firstHeartbeat)
+	store = cluster.GetStore(1)
+	re.False(store.Clone(core.SetLastHeartbeatTS(newerHeartbeat.Add(5 * time.Minute))).NeedPersist())
+	re.True(store.Clone(core.SetLastHeartbeatTS(newerHeartbeat.Add(5*time.Minute + time.Nanosecond))).NeedPersist())
+}
+
+func TestStoreHeartbeatDoesNotRestoreDeletedStore(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithEtcdBackend(client))
+	re.NoError(cluster.PutMetaStore(newTestStores(1, "2.0.0")[0].GetMeta()))
+	const name = "github.com/tikv/pd/server/cluster/beforePersistStoreHeartbeat"
+	re.NoError(failpoint.EnableCall(name, func() {
+		re.NoError(cluster.RemoveStore(1, true))
+		re.NoError(cluster.BuryStore(1, false))
+		re.NoError(cluster.RemoveTombStoneRecords())
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(name)) })
+	re.NoError(cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+		Stats: &pdpb.StoreStats{StoreId: 1, Capacity: 100, Available: 50},
+	}, &pdpb.StoreHeartbeatResponse{}))
+	re.Nil(cluster.GetStore(1))
+	ok, err := cluster.storage.LoadStoreMeta(1, &metapb.Store{})
+	re.NoError(err)
+	re.False(ok)
 }
 
 func TestStoreMutationsRejectTombstoneStore(t *testing.T) {
@@ -501,6 +678,178 @@ func TestForceBuryStore(t *testing.T) {
 	re.NoError(cluster.BuryStore(uint64(1), true))
 	re.Error(cluster.BuryStore(uint64(2), true))
 	re.True(errors.ErrorEqual(cluster.BuryStore(uint64(3), true), errs.ErrStoreNotFound.FastGenByArgs(uint64(3))))
+}
+
+func TestPutMetaStoreInvalidStore(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	for _, store := range []*metapb.Store{nil, {}} {
+		re.ErrorContains(cluster.PutMetaStore(store), "invalid put store")
+	}
+	re.Zero(cluster.GetStoreCount())
+}
+
+func TestStoreLabelsPreserveConcurrentTxnProtocolVersionRange(t *testing.T) {
+	for _, operation := range []struct {
+		name   string
+		update func(*RaftCluster) error
+		labels []*metapb.StoreLabel
+	}{
+		{
+			name: "merge",
+			update: func(c *RaftCluster) error {
+				return c.UpdateStoreLabels(1, []*metapb.StoreLabel{{Key: "zone", Value: "z2"}}, false)
+			},
+			labels: []*metapb.StoreLabel{{Key: "zone", Value: "z2"}, {Key: "host", Value: "h1"}},
+		},
+		{
+			name: "replace",
+			update: func(c *RaftCluster) error {
+				return c.UpdateStoreLabels(1, []*metapb.StoreLabel{{Key: "zone", Value: "z2"}}, true)
+			},
+			labels: []*metapb.StoreLabel{{Key: "zone", Value: "z2"}},
+		},
+		{
+			name: "delete",
+			update: func(c *RaftCluster) error {
+				return c.DeleteStoreLabel(1, "zone")
+			},
+			labels: []*metapb.StoreLabel{{Key: "host", Value: "h1"}},
+		},
+	} {
+		for _, versionRange := range []struct {
+			name  string
+			value *metapb.TxnProtocolVersionRange
+		}{
+			{name: "lower", value: &metapb.TxnProtocolVersionRange{Max: 1}},
+			{name: "clear"},
+			{name: "empty", value: &metapb.TxnProtocolVersionRange{}},
+		} {
+			t.Run(operation.name+"/"+versionRange.name, func(t *testing.T) {
+				re := require.New(t)
+				ctx := t.Context()
+				_, opt, err := newTestScheduleConfig()
+				re.NoError(err)
+				cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+				meta := newTestStores(1, "2.0.0")[0].GetMeta()
+				meta.Labels = []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}
+				meta.TxnProtocolVersionRange = &metapb.TxnProtocolVersionRange{Max: 2}
+				re.NoError(cluster.PutMetaStore(meta))
+
+				// Complete a registration while the label operation is pending,
+				// before it takes the store lock. The label snapshot must be read
+				// under that lock so it includes the latest reported range.
+				injected := false
+				const name = "github.com/tikv/pd/server/cluster/beforeStoreLabelsUpdate"
+				re.NoError(failpoint.EnableCall(name, func() {
+					injected = true
+					registration := typeutil.DeepClone(meta, core.StoreFactory)
+					registration.TxnProtocolVersionRange = versionRange.value
+					re.NoError(cluster.PutMetaStore(registration))
+				}))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(name)) })
+				re.NoError(operation.update(cluster))
+				re.True(injected, "the test must exercise the registration interleaving")
+
+				persisted := &metapb.Store{}
+				ok, err := cluster.storage.LoadStoreMeta(1, persisted)
+				re.NoError(err)
+				re.True(ok)
+				for _, store := range []*metapb.Store{cluster.GetStore(1).GetMeta(), persisted} {
+					re.Equal(versionRange.value, store.GetTxnProtocolVersionRange())
+					re.Equal(operation.labels, store.GetLabels())
+				}
+			})
+		}
+	}
+}
+
+func TestStoreLabelsSerializeRegistration(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	meta := newTestStores(1, "2.0.0")[0].GetMeta()
+	meta.TxnProtocolVersionRange = &metapb.TxnProtocolVersionRange{Max: 2}
+	re.NoError(cluster.PutMetaStore(meta))
+
+	// Pause the label update after it has read the current range, but before
+	// persistence. A registration must wait until both storage and cache have
+	// been updated; otherwise the label update could persist the old range.
+	reached := make(chan struct{})
+	resume := make(chan struct{})
+	var pauseOnce, resumeOnce sync.Once
+	resumeLabelUpdate := func() { resumeOnce.Do(func() { close(resume) }) }
+	const persistName = "github.com/tikv/pd/server/cluster/beforePersistStore"
+	re.NoError(failpoint.EnableCall(persistName, func() {
+		pause := false
+		pauseOnce.Do(func() { pause = true })
+		if pause {
+			close(reached)
+			select {
+			case <-resume:
+			case <-ctx.Done():
+			}
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(persistName)) })
+
+	wg := &sync.WaitGroup{}
+	defer wg.Wait()
+	defer resumeLabelUpdate()
+	labelDone := make(chan error, 1)
+	wg.Go(func() {
+		labelDone <- cluster.UpdateStoreLabels(1, []*metapb.StoreLabel{{Key: "zone", Value: "z2"}}, false)
+	})
+	select {
+	case <-reached:
+	case <-ctx.Done():
+		t.Fatal("label update did not reach persistence")
+	}
+
+	started := make(chan struct{})
+	const putName = "github.com/tikv/pd/server/cluster/beforePutStore"
+	re.NoError(failpoint.EnableCall(putName, func() { close(started) }))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(putName)) })
+	registrationDone := make(chan error, 1)
+	wg.Go(func() {
+		registration := typeutil.DeepClone(meta, core.StoreFactory)
+		registration.TxnProtocolVersionRange = nil
+		registrationDone <- cluster.PutMetaStore(registration)
+	})
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("registration did not start")
+	}
+	select {
+	case err := <-registrationDone:
+		t.Fatalf("registration completed before the label update was released: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	resumeLabelUpdate()
+	for _, done := range []<-chan error{labelDone, registrationDone} {
+		select {
+		case err := <-done:
+			re.NoError(err)
+		case <-ctx.Done():
+			t.Fatal("store update did not finish")
+		}
+	}
+
+	persisted := &metapb.Store{}
+	ok, err := cluster.storage.LoadStoreMeta(1, persisted)
+	re.NoError(err)
+	re.True(ok)
+	for _, store := range []*metapb.Store{cluster.GetStore(1).GetMeta(), persisted} {
+		re.Nil(store.GetTxnProtocolVersionRange())
+		re.Equal([]*metapb.StoreLabel{{Key: "zone", Value: "z2"}}, store.GetLabels())
+	}
 }
 
 func TestReuseAddress(t *testing.T) {
@@ -952,67 +1301,69 @@ func TestStaleBucketMeta(t *testing.T) {
 }
 
 func TestRegionHeartbeatHotStat(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	stores := newTestStores(4, "2.0.0")
-	for _, store := range stores {
-		cluster.PutStore(store)
-	}
-	peers := []*metapb.Peer{
-		{
+		_, opt, err := newTestScheduleConfig()
+		re.NoError(err)
+		cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+		cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+		stores := newTestStores(4, "2.0.0")
+		for _, store := range stores {
+			cluster.PutStore(store)
+		}
+		peers := []*metapb.Peer{
+			{
+				Id:      1,
+				StoreId: 1,
+			},
+			{
+				Id:      2,
+				StoreId: 2,
+			},
+			{
+				Id:      3,
+				StoreId: 3,
+			},
+		}
+		leader := &metapb.Peer{
 			Id:      1,
 			StoreId: 1,
-		},
-		{
-			Id:      2,
-			StoreId: 2,
-		},
-		{
-			Id:      3,
-			StoreId: 3,
-		},
-	}
-	leader := &metapb.Peer{
-		Id:      1,
-		StoreId: 1,
-	}
-	regionMeta := &metapb.Region{
-		Id:          1,
-		Peers:       peers,
-		StartKey:    []byte{byte(1)},
-		EndKey:      []byte{byte(1 + 1)},
-		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
-	}
-	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: utils.RegionHeartBeatReportInterval}),
-		core.SetWrittenBytes(30000*10),
-		core.SetWrittenKeys(300000*10))
-	err = cluster.processRegionHeartbeat(core.ContextTODO(), region)
-	re.NoError(err)
-	// wait HotStat to update items
-	time.Sleep(time.Second)
-	stats := cluster.hotStat.GetHotPeerStats(utils.Write, 0)
-	re.Len(stats[1], 1)
-	re.Len(stats[2], 1)
-	re.Len(stats[3], 1)
-	newPeer := &metapb.Peer{
-		Id:      4,
-		StoreId: 4,
-	}
-	region = region.Clone(core.WithRemoveStorePeer(2), core.WithAddPeer(newPeer))
-	err = cluster.processRegionHeartbeat(core.ContextTODO(), region)
-	re.NoError(err)
-	// wait HotStat to update items
-	time.Sleep(time.Second)
-	stats = cluster.hotStat.GetHotPeerStats(utils.Write, 0)
-	re.Len(stats[1], 1)
-	re.Empty(stats[2])
-	re.Len(stats[3], 1)
-	re.Len(stats[4], 1)
+		}
+		regionMeta := &metapb.Region{
+			Id:          1,
+			Peers:       peers,
+			StartKey:    []byte{byte(1)},
+			EndKey:      []byte{byte(1 + 1)},
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+		}
+		region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: utils.RegionHeartBeatReportInterval}),
+			core.SetWrittenBytes(30000*10),
+			core.SetWrittenKeys(300000*10))
+		err = cluster.processRegionHeartbeat(core.ContextTODO(), region)
+		re.NoError(err)
+		// wait HotStat to update items
+		synctest.Sleep(time.Second)
+		stats := cluster.hotStat.GetHotPeerStats(utils.Write, 0)
+		re.Len(stats[1], 1)
+		re.Len(stats[2], 1)
+		re.Len(stats[3], 1)
+		newPeer := &metapb.Peer{
+			Id:      4,
+			StoreId: 4,
+		}
+		region = region.Clone(core.WithRemoveStorePeer(2), core.WithAddPeer(newPeer))
+		err = cluster.processRegionHeartbeat(core.ContextTODO(), region)
+		re.NoError(err)
+		// wait HotStat to update items
+		synctest.Sleep(time.Second)
+		stats = cluster.hotStat.GetHotPeerStats(utils.Write, 0)
+		re.Len(stats[1], 1)
+		re.Empty(stats[2])
+		re.Len(stats[3], 1)
+		re.Len(stats[4], 1)
+	})
 }
 
 func TestBucketHeartbeat(t *testing.T) {
@@ -1076,259 +1427,261 @@ func TestBucketHeartbeat(t *testing.T) {
 }
 
 func TestRegionHeartbeat(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	n, np := uint64(3), uint64(3)
-	cluster.wg.Add(1)
-	go cluster.runUpdateStoreStats()
-	stores := newTestStores(3, "2.0.0")
-	regions := newTestRegions(n, n, np)
+		_, opt, err := newTestScheduleConfig()
+		re.NoError(err)
+		cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+		cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+		n, np := uint64(3), uint64(3)
+		cluster.wg.Add(1)
+		go cluster.runUpdateStoreStats()
+		stores := newTestStores(3, "2.0.0")
+		regions := newTestRegions(n, n, np)
 
-	for _, store := range stores {
-		re.NoError(cluster.setStore(store))
-	}
-
-	for i, region := range regions {
-		// region does not exist.
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-		checkRegionsKV(re, cluster.storage, regions[:i+1])
-
-		// region is the same, not updated.
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-		checkRegionsKV(re, cluster.storage, regions[:i+1])
-		origin := region
-		// region is updated.
-		region = origin.Clone(core.WithIncVersion())
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-		checkRegionsKV(re, cluster.storage, regions[:i+1])
-
-		// region is stale (Version).
-		stale := origin.Clone(core.WithIncConfVer())
-		re.Error(cluster.processRegionHeartbeat(core.ContextTODO(), stale))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-		checkRegionsKV(re, cluster.storage, regions[:i+1])
-
-		// region is updated
-		region = origin.Clone(
-			core.WithIncVersion(),
-			core.WithIncConfVer(),
-		)
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-		checkRegionsKV(re, cluster.storage, regions[:i+1])
-
-		// region is stale (ConfVer).
-		stale = origin.Clone(core.WithIncConfVer())
-		re.Error(cluster.processRegionHeartbeat(core.ContextTODO(), stale))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-		checkRegionsKV(re, cluster.storage, regions[:i+1])
-
-		// Add a down peer.
-		region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
-			{
-				Peer:        region.GetPeers()[rand.IntN(len(region.GetPeers()))],
-				DownSeconds: 42,
-			},
-		}))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Add a pending peer.
-		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.IntN(len(region.GetPeers()))]}))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Clear down peers.
-		region = region.Clone(core.WithDownPeers(nil))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Clear pending peers.
-		region = region.Clone(core.WithPendingPeers(nil))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Remove peers.
-		origin = region
-		region = origin.Clone(core.SetPeers(region.GetPeers()[:1]))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-		checkRegionsKV(re, cluster.storage, regions[:i+1])
-		// Add peers.
-		region = origin
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-		checkRegionsKV(re, cluster.storage, regions[:i+1])
-
-		// Change one peer to witness
-		region = region.Clone(
-			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.IntN(len(region.GetPeers()))]}),
-			core.WithIncConfVer(),
-		)
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Change leader.
-		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Change ApproximateSize.
-		region = region.Clone(core.SetApproximateSize(144))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Change ApproximateKeys.
-		region = region.Clone(core.SetApproximateKeys(144000))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Change only the IA row-based logical storage size.
-		region = region.Clone(core.SetApproximateIAKvSize(40))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		re.Equal(int64(40), cluster.GetRegion(region.GetID()).GetApproximateIAKvSize())
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Change bytes written.
-		region = region.Clone(core.SetWrittenBytes(24000))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Change bytes read.
-		region = region.Clone(core.SetReadBytes(1080000))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-
-		// Flashback
-		region = region.Clone(core.WithFlashback(true, 1))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-		region = region.Clone(core.WithFlashback(false, 0))
-		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.BasicCluster, regions[:i+1])
-	}
-
-	regionCounts := make(map[uint64]int)
-	for _, region := range regions {
-		for _, peer := range region.GetPeers() {
-			regionCounts[peer.GetStoreId()]++
+		for _, store := range stores {
+			re.NoError(cluster.setStore(store))
 		}
-	}
-	for id, count := range regionCounts {
-		re.Equal(count, cluster.GetStoreRegionCount(id))
-	}
 
-	for _, region := range cluster.GetRegions() {
-		checkRegion(re, region, regions[region.GetID()])
-	}
-	for _, region := range cluster.GetMetaRegions() {
-		re.Equal(regions[region.GetId()].GetMeta(), region)
-	}
+		for i, region := range regions {
+			// region does not exist.
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+			checkRegionsKV(re, cluster.storage, regions[:i+1])
 
-	for _, region := range regions {
-		for _, store := range cluster.GetRegionStores(region) {
-			re.NotNil(region.GetStorePeer(store.GetID()))
+			// region is the same, not updated.
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+			checkRegionsKV(re, cluster.storage, regions[:i+1])
+			origin := region
+			// region is updated.
+			region = origin.Clone(core.WithIncVersion())
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+			checkRegionsKV(re, cluster.storage, regions[:i+1])
+
+			// region is stale (Version).
+			stale := origin.Clone(core.WithIncConfVer())
+			re.Error(cluster.processRegionHeartbeat(core.ContextTODO(), stale))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+			checkRegionsKV(re, cluster.storage, regions[:i+1])
+
+			// region is updated
+			region = origin.Clone(
+				core.WithIncVersion(),
+				core.WithIncConfVer(),
+			)
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+			checkRegionsKV(re, cluster.storage, regions[:i+1])
+
+			// region is stale (ConfVer).
+			stale = origin.Clone(core.WithIncConfVer())
+			re.Error(cluster.processRegionHeartbeat(core.ContextTODO(), stale))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+			checkRegionsKV(re, cluster.storage, regions[:i+1])
+
+			// Add a down peer.
+			region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+				{
+					Peer:        region.GetPeers()[rand.IntN(len(region.GetPeers()))],
+					DownSeconds: 42,
+				},
+			}))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Add a pending peer.
+			region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.IntN(len(region.GetPeers()))]}))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Clear down peers.
+			region = region.Clone(core.WithDownPeers(nil))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Clear pending peers.
+			region = region.Clone(core.WithPendingPeers(nil))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Remove peers.
+			origin = region
+			region = origin.Clone(core.SetPeers(region.GetPeers()[:1]))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+			checkRegionsKV(re, cluster.storage, regions[:i+1])
+			// Add peers.
+			region = origin
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+			checkRegionsKV(re, cluster.storage, regions[:i+1])
+
+			// Change one peer to witness
+			region = region.Clone(
+				core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.IntN(len(region.GetPeers()))]}),
+				core.WithIncConfVer(),
+			)
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Change leader.
+			region = region.Clone(core.WithLeader(region.GetPeers()[1]))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Change ApproximateSize.
+			region = region.Clone(core.SetApproximateSize(144))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Change ApproximateKeys.
+			region = region.Clone(core.SetApproximateKeys(144000))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Change only the IA row-based logical storage size.
+			region = region.Clone(core.SetApproximateIAKvSize(40))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			re.Equal(int64(40), cluster.GetRegion(region.GetID()).GetApproximateIAKvSize())
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Change bytes written.
+			region = region.Clone(core.SetWrittenBytes(24000))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Change bytes read.
+			region = region.Clone(core.SetReadBytes(1080000))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+
+			// Flashback
+			region = region.Clone(core.WithFlashback(true, 1))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
+			region = region.Clone(core.WithFlashback(false, 0))
+			regions[i] = region
+			re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+			checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		}
-		for _, store := range cluster.GetFollowerStores(region) {
-			peer := region.GetStorePeer(store.GetID())
-			re.NotEqual(region.GetLeader().GetId(), peer.GetId())
-		}
-	}
 
-	time.Sleep(50 * time.Millisecond)
-	for _, store := range cluster.GetStores() {
-		re.Equal(cluster.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
-		re.Equal(cluster.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
-		re.Equal(cluster.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
-		re.Equal(cluster.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
-	}
-
-	// Test with storage.
-	if storage := cluster.storage; storage != nil {
+		regionCounts := make(map[uint64]int)
 		for _, region := range regions {
-			tmp := &metapb.Region{}
-			ok, err := storage.LoadRegion(region.GetID(), tmp)
+			for _, peer := range region.GetPeers() {
+				regionCounts[peer.GetStoreId()]++
+			}
+		}
+		for id, count := range regionCounts {
+			re.Equal(count, cluster.GetStoreRegionCount(id))
+		}
+
+		for _, region := range cluster.GetRegions() {
+			checkRegion(re, region, regions[region.GetID()])
+		}
+		for _, region := range cluster.GetMetaRegions() {
+			re.Equal(regions[region.GetId()].GetMeta(), region)
+		}
+
+		for _, region := range regions {
+			for _, store := range cluster.GetRegionStores(region) {
+				re.NotNil(region.GetStorePeer(store.GetID()))
+			}
+			for _, store := range cluster.GetFollowerStores(region) {
+				peer := region.GetStorePeer(store.GetID())
+				re.NotEqual(region.GetLeader().GetId(), peer.GetId())
+			}
+		}
+
+		synctest.Sleep(50 * time.Millisecond)
+		for _, store := range cluster.GetStores() {
+			re.Equal(cluster.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
+			re.Equal(cluster.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
+			re.Equal(cluster.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
+			re.Equal(cluster.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
+		}
+
+		// Test with storage.
+		if storage := cluster.storage; storage != nil {
+			for _, region := range regions {
+				tmp := &metapb.Region{}
+				ok, err := storage.LoadRegion(region.GetID(), tmp)
+				re.True(ok)
+				re.NoError(err)
+				re.Equal(region.GetMeta(), tmp)
+			}
+
+			// Check overlap with stale version
+			overlapRegion := regions[n-1].Clone(
+				core.WithStartKey([]byte("")),
+				core.WithEndKey([]byte("")),
+				core.WithNewRegionID(10000),
+				core.WithDecVersion(),
+			)
+			re.Error(cluster.processRegionHeartbeat(core.ContextTODO(), overlapRegion))
+			region := &metapb.Region{}
+			ok, err := storage.LoadRegion(regions[n-1].GetID(), region)
 			re.True(ok)
 			re.NoError(err)
-			re.Equal(region.GetMeta(), tmp)
+			re.Equal(regions[n-1].GetMeta(), region)
+			ok, err = storage.LoadRegion(regions[n-2].GetID(), region)
+			re.True(ok)
+			re.NoError(err)
+			re.Equal(regions[n-2].GetMeta(), region)
+			ok, err = storage.LoadRegion(overlapRegion.GetID(), region)
+			re.False(ok)
+			re.NoError(err)
+
+			// Check overlap
+			rm := cluster.GetRuleManager()
+			rm.SetPlaceholderRegionFitCache(regions[n-1])
+			rm.SetPlaceholderRegionFitCache(regions[n-2])
+			re.True(rm.CheckIsCachedDirectly(regions[n-1].GetID()))
+			re.True(rm.CheckIsCachedDirectly(regions[n-2].GetID()))
+			overlapRegion = regions[n-1].Clone(
+				core.WithStartKey(regions[n-2].GetStartKey()),
+				core.WithNewRegionID(regions[n-1].GetID()+1),
+			)
+			tracer := core.NewHeartbeatProcessTracer()
+			tracer.Begin()
+			ctx := core.ContextTODO()
+			ctx.Tracer = tracer
+			re.NoError(cluster.processRegionHeartbeat(ctx, overlapRegion))
+			tracer.OnAllStageFinished()
+			region = &metapb.Region{}
+			ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
+			re.False(ok)
+			re.NoError(err)
+			re.False(rm.CheckIsCachedDirectly(regions[n-1].GetID()))
+			ok, err = storage.LoadRegion(regions[n-2].GetID(), region)
+			re.False(ok)
+			re.NoError(err)
+			re.False(rm.CheckIsCachedDirectly(regions[n-2].GetID()))
+			ok, err = storage.LoadRegion(overlapRegion.GetID(), region)
+			re.True(ok)
+			re.NoError(err)
+			re.Equal(overlapRegion.GetMeta(), region)
 		}
-
-		// Check overlap with stale version
-		overlapRegion := regions[n-1].Clone(
-			core.WithStartKey([]byte("")),
-			core.WithEndKey([]byte("")),
-			core.WithNewRegionID(10000),
-			core.WithDecVersion(),
-		)
-		re.Error(cluster.processRegionHeartbeat(core.ContextTODO(), overlapRegion))
-		region := &metapb.Region{}
-		ok, err := storage.LoadRegion(regions[n-1].GetID(), region)
-		re.True(ok)
-		re.NoError(err)
-		re.Equal(regions[n-1].GetMeta(), region)
-		ok, err = storage.LoadRegion(regions[n-2].GetID(), region)
-		re.True(ok)
-		re.NoError(err)
-		re.Equal(regions[n-2].GetMeta(), region)
-		ok, err = storage.LoadRegion(overlapRegion.GetID(), region)
-		re.False(ok)
-		re.NoError(err)
-
-		// Check overlap
-		rm := cluster.GetRuleManager()
-		rm.SetPlaceholderRegionFitCache(regions[n-1])
-		rm.SetPlaceholderRegionFitCache(regions[n-2])
-		re.True(rm.CheckIsCachedDirectly(regions[n-1].GetID()))
-		re.True(rm.CheckIsCachedDirectly(regions[n-2].GetID()))
-		overlapRegion = regions[n-1].Clone(
-			core.WithStartKey(regions[n-2].GetStartKey()),
-			core.WithNewRegionID(regions[n-1].GetID()+1),
-		)
-		tracer := core.NewHeartbeatProcessTracer()
-		tracer.Begin()
-		ctx := core.ContextTODO()
-		ctx.Tracer = tracer
-		re.NoError(cluster.processRegionHeartbeat(ctx, overlapRegion))
-		tracer.OnAllStageFinished()
-		region = &metapb.Region{}
-		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
-		re.False(ok)
-		re.NoError(err)
-		re.False(rm.CheckIsCachedDirectly(regions[n-1].GetID()))
-		ok, err = storage.LoadRegion(regions[n-2].GetID(), region)
-		re.False(ok)
-		re.NoError(err)
-		re.False(rm.CheckIsCachedDirectly(regions[n-2].GetID()))
-		ok, err = storage.LoadRegion(overlapRegion.GetID(), region)
-		re.True(ok)
-		re.NoError(err)
-		re.Equal(overlapRegion.GetMeta(), region)
-	}
+	})
 }
 
 func TestRegionFlowChanged(t *testing.T) {
@@ -1424,16 +1777,34 @@ func TestConcurrentReportBucket(t *testing.T) {
 	bucket2 := &metapb.Buckets{RegionId: 1, Version: 2}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat", "return(true)"))
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	release := sync.OnceFunc(func() { close(unblock) })
+	var blocked atomic.Bool
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat", func() {
+		if blocked.CompareAndSwap(false, true) {
+			close(entered)
+			<-unblock
+		}
+	}))
 	go func() {
 		defer wg.Done()
 		_, err := cluster.processRegionBuckets(bucket1)
 		assert.NoError(t, err)
 	}()
-	time.Sleep(100 * time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
+	t.Cleanup(func() {
+		release()
+		wg.Wait()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
+	})
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat did not reach the concurrent update hook")
+	}
 	_, err = cluster.processRegionBuckets(bucket2)
 	re.NoError(err)
+	release()
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }
@@ -1451,8 +1822,8 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	regions = core.SplitRegions(regions)
 	heartbeatRegions(re, cluster, regions)
 
-	// Merge regions manually
-	source, target := regions[0], regions[1]
+	// Clone incoming updates so changing their epochs does not also change the cache.
+	source, target := regions[0].Clone(), regions[1].Clone()
 	target.GetMeta().StartKey = []byte{}
 	target.GetMeta().EndKey = []byte{}
 	source.GetMeta().GetRegionEpoch().Version++
@@ -1463,15 +1834,34 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat", "return(true)"))
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	release := sync.OnceFunc(func() { close(unblock) })
+	var blocked atomic.Bool
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat", func() {
+		if blocked.CompareAndSwap(false, true) {
+			close(entered)
+			<-unblock
+		}
+	}))
 	go func() {
 		defer wg.Done()
 		err := cluster.processRegionHeartbeat(core.ContextTODO(), source)
-		assert.NoError(t, err)
+		// The newer overlapping heartbeat wins before this update resumes.
+		assert.ErrorContains(t, err, "region is stale")
 	}()
-	time.Sleep(100 * time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat"))
+	t.Cleanup(func() {
+		release()
+		wg.Wait()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat"))
+	})
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat did not reach the concurrent update hook")
+	}
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), target))
+	release()
 	wg.Wait()
 	checkRegion(re, cluster.GetRegionByKey([]byte{}), target)
 }
@@ -1936,45 +2326,47 @@ func TestStoreConfigSync(t *testing.T) {
 }
 
 func TestUpdateStorePendingPeerCount(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	tc := newTestCluster(ctx, re, opt)
-	tc.coordinator = schedule.NewCoordinator(ctx, tc.RaftCluster, nil)
-	stores := newTestStores(5, "2.0.0")
-	for _, s := range stores {
-		re.NoError(tc.setStore(s))
-	}
-	tc.wg.Add(1)
-	go tc.runUpdateStoreStats()
-	peers := []*metapb.Peer{
-		{
-			Id:      2,
-			StoreId: 1,
-		},
-		{
-			Id:      3,
-			StoreId: 2,
-		},
-		{
-			Id:      3,
-			StoreId: 3,
-		},
-		{
-			Id:      4,
-			StoreId: 4,
-		},
-	}
-	origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3]}, peers[0], core.WithPendingPeers(peers[1:3]))
-	re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), origin))
-	time.Sleep(50 * time.Millisecond)
-	checkPendingPeerCount([]int{0, 1, 1, 0}, tc.RaftCluster, re)
-	newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:]}, peers[1], core.WithPendingPeers(peers[3:4]))
-	re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	time.Sleep(50 * time.Millisecond)
-	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.RaftCluster, re)
+		_, opt, err := newTestScheduleConfig()
+		re.NoError(err)
+		tc := newTestCluster(ctx, re, opt)
+		tc.coordinator = schedule.NewCoordinator(ctx, tc.RaftCluster, nil)
+		stores := newTestStores(5, "2.0.0")
+		for _, s := range stores {
+			re.NoError(tc.setStore(s))
+		}
+		tc.wg.Add(1)
+		go tc.runUpdateStoreStats()
+		peers := []*metapb.Peer{
+			{
+				Id:      2,
+				StoreId: 1,
+			},
+			{
+				Id:      3,
+				StoreId: 2,
+			},
+			{
+				Id:      3,
+				StoreId: 3,
+			},
+			{
+				Id:      4,
+				StoreId: 4,
+			},
+		}
+		origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3]}, peers[0], core.WithPendingPeers(peers[1:3]))
+		re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), origin))
+		synctest.Sleep(50 * time.Millisecond)
+		checkPendingPeerCount([]int{0, 1, 1, 0}, tc.RaftCluster, re)
+		newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:]}, peers[1], core.WithPendingPeers(peers[3:4]))
+		re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
+		synctest.Sleep(50 * time.Millisecond)
+		checkPendingPeerCount([]int{0, 0, 0, 1}, tc.RaftCluster, re)
+	})
 }
 
 func TestCalculateStoreSize1(t *testing.T) {
@@ -2124,6 +2516,64 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 	nextRoundRegionSizes := newRegionSizeCache(loader)
 	re.Equal(threshold1, cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes))
 	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
+}
+
+func TestCalculateRangeLogRedact(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			manager := placement.NewRuleManager(context.Background(), storage.NewStorageWithMemoryBackend(), nil, mockconfig.NewTestOptions())
+			re.NoError(manager.Initialize(1, nil, "", false))
+			rule := &placement.Rule{
+				GroupID: placement.DefaultGroupID, ID: "range", Index: 1, Override: true,
+				StartKeyHex: "6161", EndKeyHex: "7a7a", Role: placement.Voter, Count: 1,
+			}
+			re.NoError(manager.SetRule(rule))
+			cluster := &RaftCluster{ruleManager: manager}
+			store := core.NewStoreInfo(&metapb.Store{Id: 1})
+			regionSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
+				re.Equal([]byte("ab"), startKey)
+				re.Equal([]byte("zy"), endKey)
+				return 100
+			})
+
+			fname := testutil.InitTempFileLogger(t, "debug")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+			// Use a subrange so unredacted rule boundaries cannot hide behind range fields.
+			re.Equal(100.0, cluster.calculateRange([]*core.StoreInfo{store}, store, []byte("ab"), []byte("zy"), regionSizes))
+
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.Contains(string(output), "calculate range result")
+			if mode.typ == logutil.RedactInfoLogON {
+				re.Contains(string(output), "[rule=?]")
+				re.NotContains(string(output), rule.StartKeyHex)
+				re.NotContains(string(output), rule.EndKeyHex)
+			} else {
+				re.Contains(string(output), rule.StartKeyHex)
+				re.Contains(string(output), rule.EndKeyHex)
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Contains(string(output), `[rule="‹{`)
+				}
+			}
+			re.Equal("6161", rule.StartKeyHex)
+			re.Equal("7a7a", rule.EndKeyHex)
+		})
+	}
 }
 
 func TestStatsRegions(t *testing.T) {
@@ -2381,56 +2831,58 @@ func TestCheckStaleRegion(t *testing.T) {
 }
 
 func TestAwakenStore(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-	n := uint64(3)
-	stores := newTestStores(n, "6.5.0")
-	re.True(stores[0].NeedAwakenStore())
-	for _, store := range stores {
-		re.NoError(cluster.PutMetaStore(store.GetMeta()))
-	}
-	for i := uint64(1); i <= n; i++ {
-		re.False(cluster.slowStat.ExistsSlowStores())
-		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(i)
-		re.False(needAwaken)
-	}
+		_, opt, err := newTestScheduleConfig()
+		re.NoError(err)
+		cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+		n := uint64(3)
+		stores := newTestStores(n, "6.5.0")
+		re.True(stores[0].NeedAwakenStore())
+		for _, store := range stores {
+			re.NoError(cluster.PutMetaStore(store.GetMeta()))
+		}
+		for i := uint64(1); i <= n; i++ {
+			re.False(cluster.slowStat.ExistsSlowStores())
+			needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(i)
+			re.False(needAwaken)
+		}
 
-	now := time.Now()
-	store4 := stores[0].Clone(core.SetLastHeartbeatTS(now), core.SetLastAwakenTime(now.Add(-11*time.Minute)))
-	re.NoError(cluster.setStore(store4))
-	store1 := cluster.GetStore(1)
-	re.True(store1.NeedAwakenStore())
+		now := time.Now()
+		store4 := stores[0].Clone(core.SetLastHeartbeatTS(now), core.SetLastAwakenTime(now.Add(-11*time.Minute)))
+		re.NoError(cluster.setStore(store4))
+		store1 := cluster.GetStore(1)
+		re.True(store1.NeedAwakenStore())
 
-	// Test slowStore heartbeat by marking Store-1 already slow.
-	slowStoreReq := &pdpb.StoreHeartbeatRequest{}
-	slowStoreResp := &pdpb.StoreHeartbeatResponse{}
-	slowStoreReq.Stats = &pdpb.StoreStats{
-		StoreId:     1,
-		RegionCount: 1,
-		Interval: &pdpb.TimeInterval{
-			StartTimestamp: 0,
-			EndTimestamp:   10,
-		},
-		PeerStats: []*pdpb.PeerStat{},
-		SlowScore: 80,
-	}
-	re.NoError(cluster.HandleStoreHeartbeat(slowStoreReq, slowStoreResp))
-	time.Sleep(20 * time.Millisecond)
-	re.True(cluster.slowStat.ExistsSlowStores())
-	{
-		// Store 1 cannot be awaken.
-		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(1)
-		re.False(needAwaken)
-	}
-	{
-		// Other stores can be awaken.
-		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(2)
-		re.True(needAwaken)
-	}
+		// Test slowStore heartbeat by marking Store-1 already slow.
+		slowStoreReq := &pdpb.StoreHeartbeatRequest{}
+		slowStoreResp := &pdpb.StoreHeartbeatResponse{}
+		slowStoreReq.Stats = &pdpb.StoreStats{
+			StoreId:     1,
+			RegionCount: 1,
+			Interval: &pdpb.TimeInterval{
+				StartTimestamp: 0,
+				EndTimestamp:   10,
+			},
+			PeerStats: []*pdpb.PeerStat{},
+			SlowScore: 80,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(slowStoreReq, slowStoreResp))
+		synctest.Sleep(20 * time.Millisecond)
+		re.True(cluster.slowStat.ExistsSlowStores())
+		{
+			// Store 1 cannot be awaken.
+			needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(1)
+			re.False(needAwaken)
+		}
+		{
+			// Other stores can be awaken.
+			needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(2)
+			re.True(needAwaken)
+		}
+	})
 }
 
 func TestUpdateAndDeleteLabel(t *testing.T) {
@@ -2822,6 +3274,26 @@ func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 	}
 	err = c.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	if err != nil {
+		return err
+	}
+	c.Lock()
+	defer c.Unlock()
+	return c.setStore(newStore)
+}
+
+func (c *testCluster) addLabelsStore(storeID uint64, labels map[string]string) error {
+	storeLabels := make([]*metapb.StoreLabel, 0, len(labels))
+	for k, v := range labels {
+		storeLabels = append(storeLabels, &metapb.StoreLabel{Key: k, Value: v})
+	}
+	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID, Labels: storeLabels, NodeState: metapb.NodeState_Serving},
+		core.SetStoreStats(&pdpb.StoreStats{}),
+		core.SetLastHeartbeatTS(time.Now()),
+	)
+	if err := c.SetStoreLimit(storeID, storelimit.AddPeer, 60); err != nil {
+		return err
+	}
+	if err := c.SetStoreLimit(storeID, storelimit.RemovePeer, 60); err != nil {
 		return err
 	}
 	c.Lock()
@@ -3296,61 +3768,63 @@ func TestReplica(t *testing.T) {
 }
 
 func TestCheckCache(t *testing.T) {
-	re := require.New(t)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
 
-	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
-		// Turn off replica scheduling.
-		cfg.ReplicaScheduleLimit = 0
-	}, nil, nil, re)
-	defer cleanup()
-	oc := co.GetOperatorController()
-	checker := co.GetCheckerController()
+		tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
+			// Turn off replica scheduling.
+			cfg.ReplicaScheduleLimit = 0
+		}, nil, nil, re)
+		defer cleanup()
+		oc := co.GetOperatorController()
+		checker := co.GetCheckerController()
 
-	re.NoError(tc.addRegionStore(1, 0))
-	re.NoError(tc.addRegionStore(2, 0))
-	re.NoError(tc.addRegionStore(3, 0))
+		re.NoError(tc.addRegionStore(1, 0))
+		re.NoError(tc.addRegionStore(2, 0))
+		re.NoError(tc.addRegionStore(3, 0))
 
-	// Add a peer with two replicas.
-	re.NoError(tc.addLeaderRegion(1, 2, 3))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
+		// Add a peer with two replicas.
+		re.NoError(tc.addLeaderRegion(1, 2, 3))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
 
-	// case 1: operator cannot be created due to replica-schedule-limit restriction
-	checker.PatrolRegions()
-	re.Empty(oc.GetOperators())
-	re.Len(checker.GetPendingProcessedRegions(), 1)
+		// case 1: operator cannot be created due to replica-schedule-limit restriction
+		checker.PatrolRegions()
+		re.Empty(oc.GetOperators())
+		re.Len(checker.GetPendingProcessedRegions(), 1)
 
-	// cancel the replica-schedule-limit restriction
-	cfg := tc.GetScheduleConfig()
-	cfg.ReplicaScheduleLimit = 10
-	tc.SetScheduleConfig(cfg)
-	checker.PatrolRegions()
-	re.Len(oc.GetOperators(), 1)
-	re.Empty(checker.GetPendingProcessedRegions())
+		// cancel the replica-schedule-limit restriction
+		cfg := tc.GetScheduleConfig()
+		cfg.ReplicaScheduleLimit = 10
+		tc.SetScheduleConfig(cfg)
+		checker.PatrolRegions()
+		re.Len(oc.GetOperators(), 1)
+		re.Empty(checker.GetPendingProcessedRegions())
 
-	// case 2: operator cannot be created due to store limit restriction
-	oc.RemoveOperator(oc.GetOperator(1))
-	err := tc.SetStoreLimit(1, storelimit.AddPeer, 0.0001)
-	re.NoError(err)
-	// StoreRateLimit treats rate=0 as unlimited. To simulate a throttled store,
-	// we set a small positive rate and exhaust the initial tokens.
-	store := tc.GetStore(1)
-	re.NotNil(store)
-	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Low))
-	re.False(store.IsAvailable(storelimit.AddPeer, constant.Low))
-	checker.PatrolRegions()
-	re.Len(checker.GetPendingProcessedRegions(), 1)
+		// case 2: operator cannot be created due to store limit restriction
+		oc.RemoveOperator(oc.GetOperator(1))
+		err := tc.SetStoreLimit(1, storelimit.AddPeer, 0.0001)
+		re.NoError(err)
+		// StoreRateLimit treats rate=0 as unlimited. To simulate a throttled store,
+		// we set a small positive rate and exhaust the initial tokens.
+		store := tc.GetStore(1)
+		re.NotNil(store)
+		re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Low))
+		re.False(store.IsAvailable(storelimit.AddPeer, constant.Low))
+		checker.PatrolRegions()
+		re.Len(checker.GetPendingProcessedRegions(), 1)
 
-	// cancel the store limit restriction
-	err = tc.SetStoreLimit(1, storelimit.AddPeer, 10)
-	re.NoError(err)
-	time.Sleep(time.Second)
-	checker.PatrolRegions()
-	re.Len(oc.GetOperators(), 1)
-	re.Empty(checker.GetPendingProcessedRegions())
+		// cancel the store limit restriction
+		err = tc.SetStoreLimit(1, storelimit.AddPeer, 10)
+		re.NoError(err)
+		synctest.Sleep(time.Second)
+		checker.PatrolRegions()
+		re.Len(oc.GetOperators(), 1)
+		re.Empty(checker.GetPendingProcessedRegions())
 
-	co.GetSchedulersController().Wait()
-	co.GetWaitGroup().Wait()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
+		co.GetSchedulersController().Wait()
+		co.GetWaitGroup().Wait()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
+	})
 }
 
 func TestStoreLimitChangeRefreshLimiter(t *testing.T) {
@@ -4384,6 +4858,120 @@ func TestAddScheduler(t *testing.T) {
 	waitNoResponse(re, stream)
 }
 
+// updateSchedulerConfig reconfigures a running scheduler in place through its HTTP config
+// handler — the same path pd-ctl and the API use — and asserts the update was accepted.
+func updateSchedulerConfig(re *require.Assertions, controller *schedulers.Controller, name, config string) {
+	handler := controller.GetSchedulerHandlers()[name]
+	re.NotNil(handler)
+	req := httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(config))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	re.Equal(http.StatusOK, recorder.Code)
+}
+
+// TestEvictSlowStoreGroupEviction is an end-to-end test driving the real coordinator:
+// when several stores in the same isolation domain (zone) report a high disk slow score and
+// the placement rules uniformly enforce zone isolation, the scheduler evicts leaders from all
+// of them, leaves other zones untouched, and releases the whole group on recovery.
+func TestEvictSlowStoreGroupEviction(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, func(co *schedule.Coordinator) { co.Run() }, re)
+	defer cleanup()
+	controller := co.GetSchedulersController()
+
+	// Reconfigure the already-running evict-slow-store scheduler in place with instant
+	// recovery (recovery-duration:0) so the test need not wait out the window. Group
+	// eviction stays at its disabled default, so the single-store behavior comes first.
+	updateSchedulerConfig(re, controller, types.EvictSlowStoreScheduler.String(),
+		`{"recovery-duration":0}`)
+
+	// Every rule enforces zone isolation, so a whole zone is a drainable domain.
+	re.NoError(tc.GetRuleManager().SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+		IsolationLevel: "zone",
+	}))
+
+	// Topology: zone z1 = {1,2,3}, z2 = {4,5}, z3 = {6}. Leaders on the z1 stores.
+	re.NoError(tc.addLabelsStore(1, map[string]string{"zone": "z1"}))
+	re.NoError(tc.addLabelsStore(2, map[string]string{"zone": "z1"}))
+	re.NoError(tc.addLabelsStore(3, map[string]string{"zone": "z1"}))
+	re.NoError(tc.addLabelsStore(10, map[string]string{"zone": "z2"}))
+	re.NoError(tc.addLabelsStore(20, map[string]string{"zone": "z2"}))
+	re.NoError(tc.addLabelsStore(100, map[string]string{"zone": "z3"}))
+
+	// markSlow feeds a disk slow score through the real store-heartbeat path.
+	var interval uint64
+	markSlow := func(storeID, score uint64) {
+		interval += 10
+		req := &pdpb.StoreHeartbeatRequest{Stats: &pdpb.StoreStats{
+			StoreId:     storeID,
+			Capacity:    100 * units.GiB,
+			Available:   50 * units.GiB,
+			RegionCount: 1,
+			PeerStats:   []*pdpb.PeerStat{},
+			Interval:    &pdpb.TimeInterval{StartTimestamp: interval - 10, EndTimestamp: interval},
+			SlowScore:   score,
+		}}
+		re.NoError(tc.HandleStoreHeartbeat(req, &pdpb.StoreHeartbeatResponse{}))
+	}
+
+	// one node in zone 1 becomes slow
+	markSlow(1, 100)
+	testutil.Eventually(re, func() bool {
+		return tc.GetStore(1).EvictedAsSlowStore()
+	})
+	// second node in zone 1 becomes slow
+	markSlow(2, 100)
+	re.Never(func() bool { // group eviction is disabled by default
+		return tc.GetStore(2).EvictedAsSlowStore()
+	}, time.Second, time.Millisecond*100)
+
+	// enabling group eviction
+	updateSchedulerConfig(re, controller, types.EvictSlowStoreScheduler.String(),
+		`{"enable-group-eviction":true, "recovery-duration":0}`)
+	// now second store gets evicted as well
+	testutil.Eventually(re, func() bool {
+		return tc.GetStore(1).EvictedAsSlowStore() && tc.GetStore(2).EvictedAsSlowStore()
+	})
+
+	// a node outside the first zone becomes slow
+	markSlow(10, 100)
+	// then node in the first zone becomes slow
+	markSlow(3, 100)
+	re.Never(func() bool { // default behavior
+		return tc.GetStore(10).EvictedAsSlowStore() || tc.GetStore(3).EvictedAsSlowStore()
+	}, time.Second, time.Millisecond*100)
+
+	// a node outside the first zone recovers
+	markSlow(10, 0)
+	// third node in the first zone is evicted
+	testutil.Eventually(re, func() bool {
+		return tc.GetStore(1).EvictedAsSlowStore() && tc.GetStore(2).EvictedAsSlowStore() && tc.GetStore(3).EvictedAsSlowStore()
+	})
+
+	// Stores in other zones are never evicted.
+	re.False(tc.GetStore(10).EvictedAsSlowStore())
+	re.False(tc.GetStore(20).EvictedAsSlowStore())
+	re.False(tc.GetStore(100).EvictedAsSlowStore())
+
+	// A full groups should recover before leaders are back
+	markSlow(1, 0)
+	re.Never(func() bool { // default behavior
+		return !tc.GetStore(1).EvictedAsSlowStore()
+	}, time.Second, time.Millisecond*100)
+	// the rest is recovered
+	markSlow(2, 0)
+	markSlow(3, 0)
+	testutil.Eventually(re, func() bool {
+		return !tc.GetStore(1).EvictedAsSlowStore() && !tc.GetStore(2).EvictedAsSlowStore() && !tc.GetStore(3).EvictedAsSlowStore()
+	})
+}
+
 func TestPersistScheduler(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -4698,58 +5286,62 @@ func TestOperatorCount(t *testing.T) {
 }
 
 func TestStoreOverloaded(t *testing.T) {
-	re := require.New(t)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
 
-	tc, co, cleanup := prepare(nil, nil, nil, re)
-	defer cleanup()
-	oc := co.GetOperatorController()
-	lb, err := schedulers.CreateScheduler(types.BalanceRegionScheduler, oc, tc.storage, schedulers.ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
-	re.NoError(err)
-	opt := tc.GetOpts()
-	re.NoError(tc.addRegionStore(4, 100))
-	re.NoError(tc.addRegionStore(3, 100))
-	re.NoError(tc.addRegionStore(2, 100))
-	re.NoError(tc.addRegionStore(1, 10))
-	re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
-	region := tc.GetRegion(1).Clone(core.SetApproximateSize(60))
-	err = tc.putRegion(region)
-	re.NoError(err)
-	start := time.Now()
-	{
-		ops, _ := lb.Schedule(tc, false /* dryRun */)
-		re.Len(ops, 1)
-		op1 := ops[0]
-		re.NotNil(op1)
-		re.True(oc.AddOperator(op1))
-		re.True(oc.RemoveOperator(op1))
-	}
-	for {
-		time.Sleep(time.Millisecond * 10)
-		ops, _ := lb.Schedule(tc, false /* dryRun */)
-		if time.Since(start) > time.Second {
-			break
+		tc, co, cleanup := prepare(nil, nil, nil, re)
+		defer cleanup()
+		oc := co.GetOperatorController()
+		lb, err := schedulers.CreateScheduler(types.BalanceRegionScheduler, oc, tc.storage, schedulers.ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+		re.NoError(err)
+		opt := tc.GetOpts()
+		re.NoError(tc.addRegionStore(4, 100))
+		re.NoError(tc.addRegionStore(3, 100))
+		re.NoError(tc.addRegionStore(2, 100))
+		re.NoError(tc.addRegionStore(1, 10))
+		re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
+		region := tc.GetRegion(1).Clone(core.SetApproximateSize(60))
+		err = tc.putRegion(region)
+		re.NoError(err)
+		start := time.Now()
+		{
+			ops, _ := lb.Schedule(tc, false /* dryRun */)
+			re.Len(ops, 1)
+			op1 := ops[0]
+			re.NotNil(op1)
+			re.True(oc.AddOperator(op1))
+			re.True(oc.RemoveOperator(op1))
 		}
-		re.Empty(ops)
-	}
+		// Sample just beyond each interval so the final sample is past the refill deadline.
+		synctest.Sleep(time.Nanosecond)
+		for {
+			synctest.Sleep(time.Millisecond * 10)
+			ops, _ := lb.Schedule(tc, false /* dryRun */)
+			if time.Since(start) > time.Second {
+				break
+			}
+			re.Empty(ops)
+		}
 
-	// reset all stores' limit
-	// scheduling one time needs 1/10 seconds
-	opt.SetAllStoresLimit(storelimit.AddPeer, 600)
-	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
-	time.Sleep(time.Second)
-	for range 10 {
-		ops, _ := lb.Schedule(tc, false /* dryRun */)
-		re.Len(ops, 1)
-		op := ops[0]
-		re.True(oc.AddOperator(op))
-		re.True(oc.RemoveOperator(op))
-	}
-	// sleep 1 seconds to make sure that the token is filled up
-	time.Sleep(time.Second)
-	for range 100 {
-		ops, _ := lb.Schedule(tc, false /* dryRun */)
-		re.NotEmpty(ops)
-	}
+		// reset all stores' limit
+		// scheduling one time needs 1/10 seconds
+		opt.SetAllStoresLimit(storelimit.AddPeer, 600)
+		opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
+		synctest.Sleep(time.Second)
+		for range 10 {
+			ops, _ := lb.Schedule(tc, false /* dryRun */)
+			re.Len(ops, 1)
+			op := ops[0]
+			re.True(oc.AddOperator(op))
+			re.True(oc.RemoveOperator(op))
+		}
+		// sleep 1 seconds to make sure that the token is filled up
+		synctest.Sleep(time.Second)
+		for range 100 {
+			ops, _ := lb.Schedule(tc, false /* dryRun */)
+			re.NotEmpty(ops)
+		}
+	})
 }
 
 func TestStoreOverloadedWithReplace(t *testing.T) {

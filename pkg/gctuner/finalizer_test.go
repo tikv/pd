@@ -37,20 +37,35 @@ type testState struct {
 func TestFinalizer(t *testing.T) {
 	maxCount := int32(8)
 	state := &testState{}
+	completed := make(chan struct{}, 1)
 	f := newFinalizer(func() {
-		n := state.count.Add(1)
-		if n > maxCount {
-			t.Fatalf("cannot exec finalizer callback after f has been gc")
+		state.count.Add(1)
+		select {
+		case completed <- struct{}{}:
+		default:
 		}
 	})
+	defer f.stop()
 	for i := int32(1); i <= maxCount; i++ {
-		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+		require.Eventually(t, func() bool {
+			// Prevent a late callback from racing an extra GC after the completion check.
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			select {
+			case <-completed:
+				return true
+			default:
+				// The runtime may still hold the previous finalizer argument.
+				runtime.GC()
+				return false
+			}
+		}, 5*time.Second, time.Millisecond, "finalizer callback did not finish")
 		require.Equal(t, i, state.count.Load())
 	}
 	require.Nil(t, f.ref)
 
 	f.stop()
+	finalizerHandler(&finalizerRef{parent: f})
 	require.Equal(t, maxCount, state.count.Load())
 	runtime.GC()
 	require.Equal(t, maxCount, state.count.Load())

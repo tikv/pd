@@ -17,7 +17,6 @@ package discovery
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -49,8 +48,10 @@ func TestDiscover(t *testing.T) {
 
 	sr1.cancel()
 	sr2.cancel()
-	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
-	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
+	testutil.Eventually(re, func() bool {
+		entries, err := Discover(client, "test_service")
+		return err == nil && len(entries) == 0
+	})
 	endpoints, err = Discover(client, "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)
@@ -87,8 +88,10 @@ func TestServiceRegistryEntry(t *testing.T) {
 
 	sr1.cancel()
 	sr2.cancel()
-	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
-	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
+	testutil.Eventually(re, func() bool {
+		entries, err := Discover(client, "test_service")
+		return err == nil && len(entries) == 0
+	})
 	endpoints, err = Discover(client, "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)

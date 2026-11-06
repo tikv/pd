@@ -20,7 +20,9 @@ import (
 	"math/rand/v2"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/docker/go-units"
@@ -140,105 +142,109 @@ func TestSplitBucketsBySize(t *testing.T) {
 }
 
 func TestSplitBucketsByLoad(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest()
-	tc.SetRegionBucketEnabled(true)
-	defer cancel()
-	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	// Explicitly use byte/key here so this test only verifies split-key selection
-	// instead of depending on the cluster-version-specific default priorities.
-	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
-	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
-	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
-	testdata := []struct {
-		hotBuckets [][]byte
-		splitKeys  [][]byte
-	}{
-		{
-			[][]byte{[]byte(""), []byte("b"), []byte("")},
-			[][]byte{[]byte("b")},
-		},
-		{
-			[][]byte{[]byte(""), []byte("a"), []byte("")},
-			nil,
-		},
-		{
-			[][]byte{[]byte("b"), []byte("c"), []byte("")},
-			[][]byte{[]byte("c")},
-		},
-	}
-	for _, data := range testdata {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		cancel, _, tc, oc := prepareSchedulersTest()
+		tc.SetRegionBucketEnabled(true)
+		defer cancel()
+		hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+		re.NoError(err)
+		// Explicitly use byte/key here so this test only verifies split-key selection
+		// instead of depending on the cluster-version-specific default priorities.
+		hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+		solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
+		solve.cur = &solution{}
+		region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+		testdata := []struct {
+			hotBuckets [][]byte
+			splitKeys  [][]byte
+		}{
+			{
+				[][]byte{[]byte(""), []byte("b"), []byte("")},
+				[][]byte{[]byte("b")},
+			},
+			{
+				[][]byte{[]byte(""), []byte("a"), []byte("")},
+				nil,
+			},
+			{
+				[][]byte{[]byte("b"), []byte("c"), []byte("")},
+				[][]byte{[]byte("c")},
+			},
+		}
+		for _, data := range testdata {
+			b := &metapb.Buckets{
+				RegionId:   1,
+				PeriodInMs: 1000,
+				Keys:       data.hotBuckets,
+				Stats: &metapb.BucketStats{
+					ReadBytes:  []uint64{10 * units.KiB, 10 * units.MiB},
+					ReadKeys:   []uint64{256, 256},
+					ReadQps:    []uint64{0, 0},
+					WriteBytes: []uint64{0, 0},
+					WriteQps:   []uint64{0, 0},
+					WriteKeys:  []uint64{0, 0},
+				},
+			}
+			task := buckets.NewCheckPeerTask(b)
+			re.True(tc.CheckAsync(task))
+			synctest.Sleep(time.Millisecond * 10)
+			ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
+			if data.splitKeys == nil {
+				re.Empty(ops)
+				continue
+			}
+			re.Len(ops, 1)
+			op := ops[0]
+			re.Equal(splitHotReadBuckets, op.Desc())
+
+			expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+			re.NoError(err)
+			re.Equal(expectOp.Brief(), op.Brief())
+		}
+	})
+}
+
+func TestSplitBucketsByLoadWithCPUFallback(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		cancel, _, tc, oc := prepareSchedulersTest()
+		tc.SetRegionBucketEnabled(true)
+		tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+		defer cancel()
+		hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+		re.NoError(err)
+		hb.(*hotScheduler).conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+		solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
+		solve.cur = &solution{}
+		region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+
 		b := &metapb.Buckets{
 			RegionId:   1,
 			PeriodInMs: 1000,
-			Keys:       data.hotBuckets,
+			Keys:       [][]byte{[]byte(""), []byte("b"), []byte("d"), []byte("")},
 			Stats: &metapb.BucketStats{
-				ReadBytes:  []uint64{10 * units.KiB, 10 * units.MiB},
-				ReadKeys:   []uint64{256, 256},
-				ReadQps:    []uint64{0, 0},
-				WriteBytes: []uint64{0, 0},
-				WriteQps:   []uint64{0, 0},
-				WriteKeys:  []uint64{0, 0},
+				ReadBytes:  []uint64{2 * units.MiB, 2 * units.MiB, 20 * units.MiB},
+				ReadKeys:   []uint64{256, 256, 256},
+				ReadQps:    []uint64{1000, 1, 1},
+				WriteBytes: []uint64{0, 0, 0},
+				WriteQps:   []uint64{0, 0, 0},
+				WriteKeys:  []uint64{0, 0, 0},
 			},
 		}
 		task := buckets.NewCheckPeerTask(b)
 		re.True(tc.CheckAsync(task))
-		time.Sleep(time.Millisecond * 10)
+		synctest.Sleep(time.Millisecond * 10)
+
 		ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
-		if data.splitKeys == nil {
-			re.Empty(ops)
-			continue
-		}
 		re.Len(ops, 1)
 		op := ops[0]
 		re.Equal(splitHotReadBuckets, op.Desc())
 
-		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, [][]byte{[]byte("d")})
 		re.NoError(err)
 		re.Equal(expectOp.Brief(), op.Brief())
-	}
-}
-
-func TestSplitBucketsByLoadWithCPUFallback(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest()
-	tc.SetRegionBucketEnabled(true)
-	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
-	defer cancel()
-	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
-	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
-	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
-
-	b := &metapb.Buckets{
-		RegionId:   1,
-		PeriodInMs: 1000,
-		Keys:       [][]byte{[]byte(""), []byte("b"), []byte("d"), []byte("")},
-		Stats: &metapb.BucketStats{
-			ReadBytes:  []uint64{2 * units.MiB, 2 * units.MiB, 20 * units.MiB},
-			ReadKeys:   []uint64{256, 256, 256},
-			ReadQps:    []uint64{1000, 1, 1},
-			WriteBytes: []uint64{0, 0, 0},
-			WriteQps:   []uint64{0, 0, 0},
-			WriteKeys:  []uint64{0, 0, 0},
-		},
-	}
-	task := buckets.NewCheckPeerTask(b)
-	re.True(tc.CheckAsync(task))
-	time.Sleep(time.Millisecond * 10)
-
-	ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
-	re.Len(ops, 1)
-	op := ops[0]
-	re.Equal(splitHotReadBuckets, op.Desc())
-
-	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, [][]byte{[]byte("d")})
-	re.NoError(err)
-	re.Equal(expectOp.Brief(), op.Brief())
+	})
 }
 
 func TestHotCacheSortHotPeer(t *testing.T) {
@@ -1039,7 +1045,163 @@ func TestRevertRegionPlacementSafeguard(t *testing.T) {
 		srcStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(1)}},
 		dstStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(2)}},
 	}
-	re.False(bs.isRevertRegionValid(region, fit))
+	re.False(bs.isRevertRegionValid(region, fit, nil))
+	// Placement Rules must still be checked if enabled during a source scan.
+	cache := map[revertLocationKey]bool{{region: region, sourceStoreID: 2}: true}
+	re.False(bs.isRevertRegionValid(region, fit, cache))
+}
+
+func prepareRevertLocationSolver(tb testing.TB, labels []string) (*balanceSolver, []*core.RegionInfo) {
+	tb.Helper()
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tb.Cleanup(cancel)
+	tc.SetEnablePlacementRules(false)
+	tc.SetLocationLabels(labels)
+	for id, location := range map[uint64]string{1: "a", 2: "b", 3: "a", 4: "c", 5: "d"} {
+		tc.AddLabelsStore(id, 1, map[string]string{"zone": location, "rack": location, "host": location})
+	}
+	scheduler, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	require.NoError(tb, err)
+	bs := newBalanceSolver(scheduler.(*hotScheduler), tc, utils.Write, movePeer)
+	bs.cur = &solution{
+		srcStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(1)}},
+		dstStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(2)}},
+	}
+	return bs, []*core.RegionInfo{
+		tc.AddLeaderRegion(1, 2, 4, 5),
+		tc.AddLeaderRegion(2, 2, 3, 4),
+	}
+}
+
+func TestRevertRegionLocationCache(t *testing.T) {
+	re := require.New(t)
+	bs, regions := prepareRevertLocationSolver(t, []string{"host"})
+	cache := make(map[revertLocationKey]bool)
+	for range 2 {
+		re.True(bs.isRevertRegionValid(regions[0], nil, cache))
+		re.False(bs.isRevertRegionValid(regions[1], nil, cache))
+	}
+	re.Len(cache, 2)
+
+	// The same Region ID can acquire a different layout during the scan.
+	updated := regions[0].Clone(core.SetPeers(regions[1].GetPeers()))
+	re.False(bs.isRevertRegionValid(updated, nil, cache))
+
+	// Replacing another peer in the same Region needs an independent result.
+	bs.cur.dstStore.StoreInfo = bs.GetStore(3)
+	re.True(bs.isRevertRegionValid(regions[1], nil, cache))
+	re.Len(cache, 4)
+
+	// A new main source store starts a new cache for its reverse target.
+	bs.cur.srcStore.StoreInfo = bs.GetStore(5)
+	bs.cur.dstStore.StoreInfo = bs.GetStore(2)
+	cache = make(map[revertLocationKey]bool)
+	re.True(bs.isRevertRegionValid(regions[1], nil, cache))
+	re.Len(cache, 1)
+}
+
+func TestRevertRegionLocationWithoutLabels(t *testing.T) {
+	re := require.New(t)
+	bs, regions := prepareRevertLocationSolver(t, nil)
+	cache := make(map[revertLocationKey]bool)
+	for _, region := range regions {
+		re.True(bs.isRevertRegionValid(region, nil, cache))
+	}
+	re.Empty(cache)
+}
+
+func BenchmarkHotReadFilterDstStores(b *testing.B) {
+	for _, labels := range [][]string{nil, {"host"}} {
+		name := "no-labels"
+		if len(labels) > 0 {
+			name = "host"
+		}
+		b.Run(name, func(b *testing.B) {
+			cancel, _, tc, oc := prepareSchedulersTest()
+			b.Cleanup(cancel)
+			tc.SetEnablePlacementRules(false)
+			tc.SetLocationLabels(labels)
+			for id := uint64(1); id <= 16; id++ {
+				tc.AddLabelsStore(id, 1, map[string]string{"host": fmt.Sprintf("h%d", id)})
+			}
+			peers := tc.AddRegionWithReadInfo(1, 1, units.MiB*utils.StoreHeartBeatReportInterval, 0, 0,
+				utils.StoreHeartBeatReportInterval, []uint64{2, 3})
+			scheduler, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+			require.NoError(b, err)
+			hot := scheduler.(*hotScheduler)
+			hot.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+			bs := newBalanceSolver(hot, tc, utils.Read, transferLeader)
+			for id := uint64(1); id <= 16; id++ {
+				detail := &statistics.StoreLoadDetail{
+					StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(id)},
+					LoadPred:         (statistics.StoreLoad{}).ToLoadPred(utils.Read, nil),
+				}
+				detail.LoadPred.Expect.Loads = statistics.Loads{1, 1}
+				bs.stLoadDetail[id] = detail
+			}
+			bs.cur = &solution{srcStore: bs.stLoadDetail[1], region: tc.GetRegion(1)}
+			for _, peer := range peers {
+				if peer.IsLeader() {
+					bs.cur.mainPeerStat = peer
+				}
+			}
+			require.NotNil(b, bs.cur.mainPeerStat)
+			require.Len(b, bs.filterDstStores(), 15)
+			b.ReportAllocs()
+			for b.Loop() {
+				if candidates := bs.filterDstStores(); len(candidates) != 15 {
+					b.Fatalf("expected 15 candidate stores, got %d", len(candidates))
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkRevertRegionLocationSafeguard(b *testing.B) {
+	for _, labels := range [][]string{nil, {"host"}, {"zone", "rack", "host"}} {
+		name := strings.Join(labels, ",")
+		if len(labels) == 0 {
+			name = "no-labels"
+		}
+		b.Run(name, func(b *testing.B) {
+			bs, templates := prepareRevertLocationSolver(b, labels)
+			regions := make([]*core.RegionInfo, 1000)
+			for i := range regions {
+				regions[i] = templates[i%len(templates)].Clone(core.WithNewRegionID(uint64(i + 1)))
+			}
+			for _, cached := range []bool{false, true} {
+				mode := "uncached"
+				if cached {
+					mode = "cached"
+				}
+				b.Run(mode, func(b *testing.B) {
+					b.ReportAllocs()
+					// One iteration scans 1000 reverse Regions for 1000 main Regions.
+					for b.Loop() {
+						var cache map[revertLocationKey]bool
+						if cached && len(labels) > 0 {
+							cache = make(map[revertLocationKey]bool)
+						}
+						allowed := 0
+						for range 1000 {
+							for _, region := range regions {
+								if bs.isRevertRegionValid(region, nil, cache) {
+									allowed++
+								}
+							}
+						}
+						expected := 500000
+						if len(labels) == 0 {
+							expected = 1000000
+						}
+						if allowed != expected {
+							b.Fatalf("expected %d allowed candidates, got %d", expected, allowed)
+						}
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestBucketFirstStat(t *testing.T) {

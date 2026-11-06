@@ -223,6 +223,9 @@ type tsoStream struct {
 	// For syncing between sender and receiver to guarantee all requests are finished when closing.
 	state          atomic.Int32
 	stoppedWithErr atomic.Pointer[error]
+	// evicted is set before the connection manager cancels the stream for evicting it, so
+	// that its pending requests fail with a retryable error instead of context.Canceled.
+	evicted atomic.Bool
 
 	estimatedLatencyMicros atomic.Uint64
 
@@ -404,7 +407,7 @@ recvLoop:
 	for {
 		select {
 		case <-ctx.Done():
-			finishWithErr = context.Canceled
+			finishWithErr = s.canceledErr()
 			break recvLoop
 		default:
 		}
@@ -430,7 +433,7 @@ recvLoop:
 			if hasReq {
 				metrics.RequestFailedDurationTSO.Observe(latencySeconds)
 			}
-			if err == io.EOF {
+			if err == io.EOF || (ctx.Err() != nil && s.evicted.Load()) {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
 			} else {
 				finishWithErr = errors.WithStack(err)
@@ -457,6 +460,20 @@ recvLoop:
 
 		s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(-1)))
 	}
+}
+
+// markEvicted marks the stream as evicted by the connection manager. Call it before canceling the stream.
+func (s *tsoStream) markEvicted() {
+	s.evicted.Store(true)
+}
+
+// canceledErr returns the error to finish the pending requests with after the stream is canceled.
+// An evicted stream fails them with ErrClientTSOStreamClosed, which callers retry as a leader change.
+func (s *tsoStream) canceledErr() error {
+	if s.evicted.Load() {
+		return errors.WithStack(errs.ErrClientTSOStreamClosed)
+	}
+	return context.Canceled
 }
 
 // EstimatedRPCLatency returns an estimation of the duration of each TSO RPC. If the stream has never handled any RPC,

@@ -22,6 +22,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/docker/go-units"
@@ -601,6 +602,122 @@ func testMetrics(ctx context.Context, re *require.Assertions, interval, byteRate
 	}
 }
 
+func TestCheckColdPeerLoadDimensions(t *testing.T) {
+	for _, kind := range []utils.RWType{utils.Read, utils.Write} {
+		t.Run(kind.String(), func(t *testing.T) {
+			re := require.New(t)
+			cluster := core.NewBasicCluster()
+			cache := NewHotPeerCache(t.Context(), cluster, kind)
+			interval := uint64(kind.ReportInterval())
+			region, err := buildRegion(cluster, kind, 3, interval)
+			re.NoError(err)
+			cluster.PutRegion(region)
+			checkAndUpdate(re, cache, region, 3)
+			storeID := region.GetLeader().GetStoreId()
+			old := cache.getHotPeerStat(region.GetID(), storeID)
+			thresholds := cache.calcHotThresholds(storeID)
+
+			// A partial report retains each synthetic threshold sample until the window fills.
+			stats := cache.CheckColdPeer(storeID, nil, interval/2)
+			re.Len(stats, 1)
+			cold := stats[0]
+			re.True(cold.inCold)
+			re.Equal(old.HotDegree, cold.HotDegree)
+			re.Equal(old.AntiCount, cold.AntiCount)
+			re.Equal(make([]float64, utils.DimLen), cold.Loads)
+			for dim, threshold := range thresholds {
+				re.Equal(threshold*float64(interval/2), cold.rollingLoads[dim].lastDelta)
+				re.Equal(threshold, cold.rollingLoads[dim].rolling.GetInstantaneous())
+			}
+		})
+	}
+}
+
+func TestCheckColdPeerCPULifecycle(t *testing.T) {
+	for _, useRegionIDs := range []bool{false, true} {
+		t.Run(fmt.Sprintf("region-ids=%t", useRegionIDs), func(t *testing.T) {
+			re := require.New(t)
+			cluster := core.NewBasicCluster()
+			cache := NewHotPeerCache(t.Context(), cluster, utils.Read)
+			interval := uint64(utils.Read.ReportInterval())
+			region, err := buildRegion(cluster, utils.Read, 3, interval)
+			re.NoError(err)
+			cluster.PutRegion(region)
+			storeID := region.GetLeader().GetStoreId()
+			regionID := region.GetID()
+			cpuThreshold := cache.calcHotThresholds(storeID)[utils.CPUDim]
+			reportCPU := func(rate float64) *HotPeerStat {
+				loads := make([]float64, utils.RegionStatCount)
+				loads[utils.RegionReadCPU] = rate * float64(interval)
+				stats := cache.CheckPeerFlow(region, []*metapb.Peer{region.GetLeader()}, loads, interval)
+				re.Len(stats, 1)
+				cache.UpdateStat(stats[0])
+				return stats[0]
+			}
+			omitPeer := func() *HotPeerStat {
+				var stats []*HotPeerStat
+				if useRegionIDs {
+					stats = cache.checkColdPeerByRegionIDs(storeID, nil, interval)
+				} else {
+					stats = cache.CheckColdPeer(storeID, nil, interval)
+				}
+				re.Len(stats, 1)
+				cache.UpdateStat(stats[0])
+				return stats[0]
+			}
+
+			for range rollingWindowsSize {
+				reportCPU(10 * cpuThreshold)
+			}
+			re.Len(cache.GetHotPeerStats(0)[storeID], 1)
+			re.Empty(cache.CheckColdPeer(storeID, map[uint64]*core.RegionInfo{regionID: region}, interval))
+
+			cold := omitPeer()
+			re.True(cold.inCold)
+			re.Equal(utils.Read.DefaultAntiCount()-1, cold.AntiCount)
+			re.Equal(cpuThreshold, cold.rollingLoads[utils.CPUDim].rolling.GetInstantaneous())
+			re.Empty(cache.GetHotPeerStats(0)[storeID])
+
+			// A CPU-only report can restore the peer before it leaves the cache.
+			recovered := reportCPU(2 * cpuThreshold)
+			re.False(recovered.inCold)
+			re.Equal(utils.Update, recovered.actionType)
+			re.Equal(utils.Read.DefaultAntiCount(), recovered.AntiCount)
+			re.Len(cache.GetHotPeerStats(0)[storeID], 1)
+			re.NotContains(cache.coldPeersOfStore[storeID], regionID)
+
+			// Continued omissions cool the rolling CPU load and eventually evict the peer.
+			for remaining := utils.Read.DefaultAntiCount() - 1; remaining >= 0; remaining-- {
+				cold = omitPeer()
+				re.True(cold.inCold)
+				re.Equal(remaining, cold.AntiCount)
+				if remaining == 0 {
+					re.Equal(utils.Remove, cold.actionType)
+				} else {
+					re.Equal(utils.Update, cold.actionType)
+				}
+				if remaining <= utils.Read.DefaultAntiCount()-rollingWindowsSize {
+					re.Equal(cpuThreshold, cold.GetLoad(utils.CPUDim))
+				}
+			}
+			re.Nil(cache.getHotPeerStat(regionID, storeID))
+			re.NotContains(cache.storesOfRegion[regionID], storeID)
+			re.NotContains(cache.regionsOfStore[storeID], regionID)
+			re.NotContains(cache.coldPeersOfStore[storeID], regionID)
+			re.Zero(cache.coldPeerSweepQueue.Len())
+
+			// Reappearance after eviction starts with fresh CPU statistics and hotness.
+			reappeared := reportCPU(2 * cpuThreshold)
+			re.Equal(utils.Add, reappeared.actionType)
+			re.Equal(1, reappeared.HotDegree)
+			re.Equal(utils.Read.DefaultAntiCount(), reappeared.AntiCount)
+			re.Equal(2*cpuThreshold, reappeared.GetLoad(utils.CPUDim))
+			re.NotSame(cold.rollingLoads[utils.CPUDim], reappeared.rollingLoads[utils.CPUDim])
+			re.Len(cache.GetHotPeerStats(0)[storeID], 1)
+		})
+	}
+}
+
 func TestRemoveFromCache(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -635,6 +752,323 @@ func TestRemoveFromCache(t *testing.T) {
 		}
 		re.True(isClear)
 	}
+}
+
+// TestGcClearsColdItemsOfRemovedRegion: when a region is removed from the
+// cluster (merged or split away), its cold peers must be reclaimed by gc()
+// from all stores, with reverse indexes kept consistent.
+func TestGcClearsColdItemsOfRemovedRegion(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
+	region, err := buildRegion(cluster, utils.Read, 3, uint64(utils.StoreHeartBeatReportInterval))
+	re.NoError(err)
+	cluster.PutRegion(region)
+	// Make the region hot so its peers enter peersOfStore.
+	checkAndUpdate(re, cache, region, 3)
+
+	// Simulate the region being merged away: the old region never heartbeats
+	// again, so it is removed from the cluster.
+	cluster.RemoveRegion(region)
+
+	// Mark the retained peers as cold through the same helper used by store
+	// heartbeats after the region stopped being reported.
+	reportedRegions := map[uint64]struct{}{}
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		stats := cache.checkColdPeerByRegionIDs(storeID, reportedRegions, uint64(utils.StoreHeartBeatReportInterval))
+		re.Len(stats, 1)
+		updateFlow(cache, stats)
+		item := cache.getOldHotPeerStat(region.GetID(), storeID)
+		re.NotNil(item)
+		re.True(item.inCold)
+	}
+
+	// gc() is throttled by topNTTL; force it to run.
+	cache.lastGCTime = time.Time{}
+	cache.gc()
+
+	// The cold items of the removed region must be reclaimed from every store,
+	// and the reverse indexes must be consistent.
+	re.NotContains(cache.storesOfRegion, region.GetID())
+	re.Zero(cache.coldPeerSweepQueue.Len())
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		peers := cache.peersOfStore[storeID]
+		re.NotNil(peers)
+		re.Nil(peers.Get(region.GetID()), "store %d still holds removed region %d", storeID, region.GetID())
+		re.NotContains(cache.regionsOfStore[storeID], region.GetID())
+	}
+}
+
+// TestGcClearsOrphanedColdItemsOfRemovedStore covers a cold candidate whose
+// reverse index was cleared by another store's TTL cleanup before this store
+// was removed from the cluster.
+func TestGcClearsOrphanedColdItemsOfRemovedStore(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
+	const storeID, regionID uint64 = 1001, 2001
+	peer := &metapb.Peer{Id: 3001, StoreId: storeID}
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Id:          regionID,
+			Peers:       []*metapb.Peer{peer},
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
+		},
+		peer,
+		core.SetReportInterval(0, uint64(utils.StoreHeartBeatReportInterval)),
+		core.SetReadBytes(10*units.MiB*uint64(utils.StoreHeartBeatReportInterval)),
+		core.SetReadKeys(10*units.MiB*uint64(utils.StoreHeartBeatReportInterval)),
+		core.SetReadQuery(1024*uint64(utils.StoreHeartBeatReportInterval)),
+	)
+	cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now())))
+	cluster.PutRegion(region)
+	checkAndUpdate(re, cache, region, 1)
+	reported := map[uint64]struct{}{}
+	stats := cache.checkColdPeerByRegionIDs(storeID, reported, uint64(utils.StoreHeartBeatReportInterval))
+	re.Len(stats, 1)
+	updateFlow(cache, stats)
+	re.Contains(cache.coldPeersOfStore[storeID], regionID)
+
+	// A peer expiring from another store removes the region from both reverse
+	// indexes, but does not remove this store's still-present cold peer.
+	delete(cache.regionsOfStore[storeID], regionID)
+	delete(cache.storesOfRegion, regionID)
+	cluster.DeleteStore(cluster.GetStore(storeID))
+
+	cache.lastGCTime = time.Time{}
+	cache.gc()
+
+	re.NotContains(cache.peersOfStore, storeID)
+	re.NotContains(cache.coldPeersOfStore, storeID)
+	re.Zero(cache.coldPeerSweepQueue.Len())
+}
+
+// TestGcKeepsColdItemsOfLiveRegion: a cold item whose region is still present
+// in the cluster's region table must never be evicted by gc().
+func TestGcKeepsColdItemsOfLiveRegion(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
+	region, err := buildRegion(cluster, utils.Read, 3, uint64(utils.StoreHeartBeatReportInterval))
+	re.NoError(err)
+	// Keep the region registered in the cluster so GetRegion still hits.
+	cluster.PutRegion(region)
+	checkAndUpdate(re, cache, region, 3)
+	reportedRegions := map[uint64]struct{}{}
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		stats := cache.checkColdPeerByRegionIDs(storeID, reportedRegions, uint64(utils.StoreHeartBeatReportInterval))
+		re.Len(stats, 1)
+		updateFlow(cache, stats)
+		item := cache.getOldHotPeerStat(region.GetID(), storeID)
+		re.NotNil(item)
+		re.True(item.inCold)
+	}
+
+	// Two gc() cycles; because the region is live, every store's copy must
+	// survive.
+	cache.lastGCTime = time.Time{}
+	cache.gc()
+	cache.lastGCTime = time.Time{}
+	cache.gc()
+	re.Equal(len(region.GetPeers()), cache.coldPeerSweepQueue.Len())
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		peers := cache.peersOfStore[storeID]
+		re.NotNil(peers)
+		re.NotNil(peers.Get(region.GetID()), "live region's cold item was wrongly evicted")
+		re.Contains(cache.storesOfRegion[region.GetID()], storeID)
+		re.Contains(cache.regionsOfStore[storeID], region.GetID())
+	}
+}
+
+// TestGcColdSweepWithStoreChurn verifies that unprocessed cold candidates stay
+// queued and are reclaimed after stores are removed and added.
+func TestGcColdSweepWithStoreChurn(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
+
+	const storeCount = 40 // many stores, including a gap in IDs
+	storeIDs := make([]uint64, 0, storeCount)
+	regionIDs := make([]uint64, 0, storeCount)
+	// makeCold adds a store+region to the cluster, makes its peer hot and
+	// cold, then removes the region so the cold peer is a GC candidate.
+	makeCold := func(storeID, regionID uint64) {
+		peer := &metapb.Peer{Id: 3000 + regionID, StoreId: storeID}
+		region := core.NewRegionInfo(
+			&metapb.Region{
+				Id:          regionID,
+				Peers:       []*metapb.Peer{peer},
+				RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
+			},
+			peer,
+			core.SetReportInterval(0, uint64(utils.StoreHeartBeatReportInterval)),
+			core.SetReadBytes(10*units.MiB*uint64(utils.StoreHeartBeatReportInterval)),
+			core.SetReadKeys(10*units.MiB*uint64(utils.StoreHeartBeatReportInterval)),
+			core.SetReadQuery(1024*uint64(utils.StoreHeartBeatReportInterval)),
+		)
+		cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now())))
+		cluster.PutRegion(region)
+		checkAndUpdate(re, cache, region, 1)
+		cluster.RemoveRegion(region)
+		reported := map[uint64]struct{}{}
+		stats := cache.checkColdPeerByRegionIDs(storeID, reported, uint64(utils.StoreHeartBeatReportInterval))
+		re.Len(stats, 1)
+		updateFlow(cache, stats)
+	}
+	gc := func() {
+		cache.lastGCTime = time.Time{}
+		cache.gc()
+	}
+	// Keep automatic UpdateStat GC calls throttled while setting up the cold
+	// candidates; the test explicitly controls the partial sweep below.
+	cache.lastGCTime = time.Now().Add(time.Hour)
+
+	for i := range storeCount {
+		storeID := uint64(1000 + i)
+		regionID := uint64(2000 + i)
+		makeCold(storeID, regionID)
+		storeIDs = append(storeIDs, storeID)
+		regionIDs = append(regionIDs, regionID)
+	}
+	// Process only one candidate so cold peers remain queued across the store
+	// changes below. This exercises the same bounded sweep used by gc().
+	cache.sweepColdPeers(1)
+	re.Equal(storeCount-1, cache.coldPeerSweepQueue.Len())
+	re.Contains(cache.coldPeersOfStore[storeIDs[storeCount-1]], regionIDs[storeCount-1])
+
+	// Remove half the stores from the cluster to simulate store churn.
+	// gc() will detect them as "removed" (absent from GetStores()) and clean
+	// their cache entries.
+	for i := range storeCount / 2 {
+		if store := cluster.GetStore(storeIDs[i]); store != nil {
+			cluster.DeleteStore(store)
+		}
+	}
+	// While stores are missing, a new store with an interleaved ID joins.
+	const newStoreID uint64 = 1500
+	const newRegionID uint64 = 3000
+	makeCold(newStoreID, newRegionID)
+	// The survivor's candidate was not consumed by the initial one-item
+	// sweep, and both it and the newcomer are still queued before GC.
+	re.Contains(cache.coldPeersOfStore[storeIDs[storeCount-1]], regionIDs[storeCount-1])
+	re.Contains(cache.coldPeersOfStore[newStoreID], newRegionID)
+	gc()
+	re.Empty(cache.coldPeersOfStore, "one bounded batch should reclaim these candidates")
+	re.Zero(cache.coldPeerSweepQueue.Len())
+
+	// A second pass should be a no-op after the first batch drained the queue.
+	gc()
+	re.Empty(cache.coldPeersOfStore, "all cold entries should be reclaimed")
+	re.Zero(cache.coldPeerSweepQueue.Len(), "all candidates should leave the sweep queue")
+	for i := range storeCount {
+		storeID := storeIDs[i]
+		regionID := regionIDs[i]
+		if i < storeCount/2 {
+			// Removed store: the region should have been cleaned regardless.
+			_, inColdIdx := cache.coldPeersOfStore[storeID]
+			re.False(inColdIdx, "removed store %d should have no cold index entry", storeID)
+			_, inRegions := cache.regionsOfStore[storeID]
+			re.False(inRegions, "removed store %d should have no regionsOfStore entry", storeID)
+		} else {
+			// Surviving store: the cold peer must be gone from the TopN and
+			// from the cold index.
+			peers := cache.peersOfStore[storeID]
+			re.NotNil(peers, "surviving store %d missing from peersOfStore", storeID)
+			re.Nil(peers.Get(regionID),
+				"store %d should have reclaimed cold region %d", storeID, regionID)
+			_, inColdIdx := cache.coldPeersOfStore[storeID]
+			re.False(inColdIdx, "store %d should have no residual cold index entry", storeID)
+		}
+	}
+	// The store added during churn must have its cold peer reclaimed too.
+	re.NotNil(cache.peersOfStore[newStoreID])
+	re.Nil(cache.peersOfStore[newStoreID].Get(newRegionID),
+		"store %d added during churn should have reclaimed cold region %d", newStoreID, newRegionID)
+}
+
+// TestGcColdSweepUsesBoundedIndex: a single store holding many non-cold peers
+// must not make gc() copy or scan that store's entire TopN heap.
+func TestGcColdSweepUsesBoundedIndex(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
+
+	const storeID uint64 = 1
+	const hotPeers = 100
+	const coldRegionID uint64 = 5000
+
+	newRegion := func(regionID uint64) *core.RegionInfo {
+		peer := &metapb.Peer{Id: regionID + 10000, StoreId: storeID}
+		return core.NewRegionInfo(
+			&metapb.Region{
+				Id:          regionID,
+				Peers:       []*metapb.Peer{peer},
+				RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
+			},
+			peer,
+			core.SetReportInterval(0, uint64(utils.StoreHeartBeatReportInterval)),
+			core.SetReadBytes(10*units.MiB*uint64(utils.StoreHeartBeatReportInterval)),
+			core.SetReadKeys(10*units.MiB*uint64(utils.StoreHeartBeatReportInterval)),
+			core.SetReadQuery(1024*uint64(utils.StoreHeartBeatReportInterval)),
+		)
+	}
+	cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now())))
+
+	// Fill the TopN with hotPeers non-cold hot regions; keep them live.
+	for r := range hotPeers {
+		region := newRegion(uint64(4000 + r))
+		cluster.PutRegion(region)
+		checkAndUpdate(re, cache, region, 1)
+	}
+
+	// Add one region that will become the cold peer, then remove it so it is
+	// a GC candidate.
+	coldRegion := newRegion(coldRegionID)
+	cluster.PutRegion(coldRegion)
+	checkAndUpdate(re, cache, coldRegion, 1)
+	cluster.RemoveRegion(coldRegion)
+
+	// Mark the peer cold via the same path a store heartbeat would. The
+	// reported set holds the 100 live "hot" regions, so only coldRegionID
+	// (which was removed from the cluster and is not reported) gets marked
+	// cold, and the cold index should hold exactly that one region.
+	reported := make(map[uint64]struct{}, hotPeers)
+	for r := range hotPeers {
+		reported[uint64(4000+r)] = struct{}{}
+	}
+	stats := cache.checkColdPeerByRegionIDs(storeID, reported, uint64(utils.StoreHeartBeatReportInterval))
+	re.NotEmpty(stats)
+	updateFlow(cache, stats)
+
+	// The cold index for this store should hold only the one cold region,
+	// not all hotPeers+1 entries.
+	re.Contains(cache.coldPeersOfStore[storeID], coldRegionID)
+	re.LessOrEqual(len(cache.coldPeersOfStore[storeID]), 1,
+		"cold index should only contain cold peers, not hot ones")
+
+	// gc() must evict the cold region while leaving the hot ones intact.
+	cache.lastGCTime = time.Time{}
+	cache.gc()
+	re.Zero(cache.coldPeerSweepQueue.Len())
+	re.Nil(cache.peersOfStore[storeID].Get(coldRegionID),
+		"cold region %d should be evicted by gc()", coldRegionID)
+	// Hot peers remain.
+	hotPeersRemaining := 0
+	for _, v := range cache.peersOfStore[storeID].GetAll() {
+		if v.(*HotPeerStat).RegionID != coldRegionID {
+			hotPeersRemaining++
+		}
+	}
+	re.Equal(hotPeers, hotPeersRemaining, "hot peers should not be evicted by gc()")
 }
 
 func TestRemoveFromCacheRandom(t *testing.T) {
@@ -895,46 +1329,48 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 }
 
 func TestRemoveExpireItems(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-	cluster := core.NewBasicCluster()
-	cache := NewHotPeerCache(ctx, cluster, utils.Write)
-	cache.topNTTL = 100 * time.Millisecond
-	// case1: remove expired items
-	region1, err := buildRegion(cluster, utils.Write, 3, 10)
-	re.NoError(err)
-	checkAndUpdate(re, cache, region1)
-	re.NotEmpty(cache.storesOfRegion[region1.GetID()])
-	time.Sleep(cache.topNTTL)
-	region2, err := buildRegion(cluster, utils.Write, 3, 10)
-	re.NoError(err)
-	checkAndUpdate(re, cache, region2)
-	re.Empty(cache.storesOfRegion[region1.GetID()])
-	re.NotEmpty(cache.storesOfRegion[region2.GetID()])
-	time.Sleep(cache.topNTTL)
-	// case2: remove items when the store is not exist
-	store1ID := region1.GetLeader().GetStoreId()
-	store2ID := region2.GetLeader().GetStoreId()
-	re.NotNil(cache.peersOfStore[store1ID])
-	re.NotNil(cache.peersOfStore[store2ID])
-	// the hotcache status gauge should be populated for the removed stores before gc.
-	re.NotZero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store1ID), cache.kind.String())))
-	re.NotZero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store2ID), cache.kind.String())))
-	cluster.ResetStores()
-	re.Empty(cluster.GetStores())
-	region3, err := buildRegion(cluster, utils.Write, 3, 10)
-	re.NoError(err)
-	checkAndUpdate(re, cache, region3)
-	re.Nil(cache.peersOfStore[store1ID])
-	re.Nil(cache.peersOfStore[store2ID])
-	re.NotEmpty(cache.regionsOfStore[region3.GetLeader().GetStoreId()])
-	// gc should also delete the hotcache status gauge series of the removed stores, not
-	// just the in-memory map entries. DeletePartialMatch returns how many series it
-	// found and removed, so a zero return proves nothing is left -- unlike checking
-	// WithLabelValues' value, which would recreate a fresh (zero-valued) series on
-	// every call regardless of whether gc() actually deleted the old one.
-	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store1ID), "type": cache.kind.String()}))
-	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store2ID), "type": cache.kind.String()}))
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
+		cluster := core.NewBasicCluster()
+		cache := NewHotPeerCache(ctx, cluster, utils.Write)
+		cache.topNTTL = 100 * time.Millisecond
+		// case1: remove expired items
+		region1, err := buildRegion(cluster, utils.Write, 3, 10)
+		re.NoError(err)
+		checkAndUpdate(re, cache, region1)
+		re.NotEmpty(cache.storesOfRegion[region1.GetID()])
+		synctest.Sleep(cache.topNTTL)
+		region2, err := buildRegion(cluster, utils.Write, 3, 10)
+		re.NoError(err)
+		checkAndUpdate(re, cache, region2)
+		re.Empty(cache.storesOfRegion[region1.GetID()])
+		re.NotEmpty(cache.storesOfRegion[region2.GetID()])
+		synctest.Sleep(cache.topNTTL)
+		// case2: remove items when the store is not exist
+		store1ID := region1.GetLeader().GetStoreId()
+		store2ID := region2.GetLeader().GetStoreId()
+		re.NotNil(cache.peersOfStore[store1ID])
+		re.NotNil(cache.peersOfStore[store2ID])
+		// the hotcache status gauge should be populated for the removed stores before gc.
+		re.NotZero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store1ID), cache.kind.String())))
+		re.NotZero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store2ID), cache.kind.String())))
+		cluster.ResetStores()
+		re.Empty(cluster.GetStores())
+		region3, err := buildRegion(cluster, utils.Write, 3, 10)
+		re.NoError(err)
+		checkAndUpdate(re, cache, region3)
+		re.Nil(cache.peersOfStore[store1ID])
+		re.Nil(cache.peersOfStore[store2ID])
+		re.NotEmpty(cache.regionsOfStore[region3.GetLeader().GetStoreId()])
+		// gc should also delete the hotcache status gauge series of the removed stores, not
+		// just the in-memory map entries. DeletePartialMatch returns how many series it
+		// found and removed, so a zero return proves nothing is left -- unlike checking
+		// WithLabelValues' value, which would recreate a fresh (zero-valued) series on
+		// every call regardless of whether gc() actually deleted the old one.
+		re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store1ID), "type": cache.kind.String()}))
+		re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store2ID), "type": cache.kind.String()}))
+	})
 }
 
 func TestRemoveExpiredPeerPreservesOtherStores(t *testing.T) {

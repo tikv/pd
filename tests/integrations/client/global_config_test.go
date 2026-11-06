@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -34,6 +33,7 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 )
@@ -41,17 +41,19 @@ import (
 const globalConfigPath = "/global/config/"
 
 type testReceiver struct {
-	re  *require.Assertions
-	ctx context.Context
+	ctx     context.Context
+	changes chan []*pdpb.GlobalConfigItem
 	grpc.ServerStream
 }
 
 func (s testReceiver) Send(m *pdpb.WatchGlobalConfigResponse) error {
 	log.Info("received", zap.Any("received", m.GetChanges()))
-	for _, change := range m.GetChanges() {
-		s.re.Contains(change.Name, globalConfigPath+string(change.Payload))
+	select {
+	case s.changes <- m.GetChanges():
+		return nil
+	case <-s.ctx.Done():
+		return s.ctx.Err()
 	}
-	return nil
 }
 
 func (s testReceiver) Context() context.Context {
@@ -174,7 +176,7 @@ func (suite *globalConfigTestSuite) TestRejectInvalidConfigPath() {
 
 		err = suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
 			ConfigPath: configPath,
-		}, testReceiver{re: re, ctx: suite.server.Context()})
+		}, testReceiver{ctx: suite.server.Context()})
 		re.Equal(codes.InvalidArgument, status.Code(err), configPath)
 	}
 }
@@ -265,7 +267,7 @@ func (suite *globalConfigTestSuite) TestResourceGroupControllerPrefixLoadCompati
 
 	err = suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
 		ConfigPath: controllerPath,
-	}, testReceiver{re: re, ctx: suite.server.Context()})
+	}, testReceiver{ctx: suite.server.Context()})
 	re.Equal(codes.InvalidArgument, status.Code(err))
 }
 
@@ -456,27 +458,52 @@ func (suite *globalConfigTestSuite) TestWatch() {
 	}()
 	ctx, cancel := context.WithCancel(suite.server.Context())
 	defer cancel()
-	server := testReceiver{re: suite.Require(), ctx: ctx}
+	res, err := suite.server.LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{ConfigPath: globalConfigPath})
+	re.NoError(err)
+	// Replay every write even if the watch goroutine starts after the writes.
+	startRevision := res.Revision + 1
+	receiver := testReceiver{ctx: ctx, changes: make(chan []*pdpb.GlobalConfigItem, 9)}
+	done := make(chan error, 1)
 	go func() {
-		err := suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
+		done <- suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
 			ConfigPath: globalConfigPath,
-			Revision:   0,
-		}, server)
-		re.NoError(err)
+			Revision:   startRevision,
+		}, receiver)
 	}()
+	defer func() {
+		cancel()
+		re.NoError(<-done)
+	}()
+	expected := make([]*pdpb.GlobalConfigItem, 0, 9)
 	for i := range 6 {
-		_, err := suite.server.GetClient().Put(suite.server.Context(), getEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
+		name := strconv.Itoa(i)
+		_, err := suite.server.GetClient().Put(ctx, getEtcdPath(name), name)
 		re.NoError(err)
+		expected = append(expected, &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: getEtcdPath(name), Payload: []byte(name)})
 	}
 	for i := 3; i < 6; i++ {
-		_, err := suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath(strconv.Itoa(i)))
+		name := strconv.Itoa(i)
+		_, err := suite.server.GetClient().Delete(ctx, getEtcdPath(name))
 		re.NoError(err)
+		expected = append(expected, &pdpb.GlobalConfigItem{Kind: pdpb.EventType_DELETE, Name: getEtcdPath(name), Payload: []byte(name)})
 	}
-	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+	var changes []*pdpb.GlobalConfigItem
+	testutil.Eventually(re, func() bool {
+		for {
+			select {
+			case batch := <-receiver.changes:
+				changes = append(changes, batch...)
+			default:
+				return len(changes) >= len(expected)
+			}
+		}
+	})
+	re.Equal(expected, changes)
+	res, err = suite.server.LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{
 		ConfigPath: globalConfigPath,
 	})
-	re.Len(res.Items, 3)
 	re.NoError(err)
+	re.Len(res.Items, 3)
 }
 
 func (suite *globalConfigTestSuite) TestClientLoadWithoutNames() {

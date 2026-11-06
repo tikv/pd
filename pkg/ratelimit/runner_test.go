@@ -18,6 +18,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -27,100 +28,106 @@ import (
 
 func TestConcurrentRunner(t *testing.T) {
 	t.Run("RunTask", func(t *testing.T) {
-		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Second)
-		ctx := t.Context()
-		runner.Start(ctx)
-		defer runner.Stop()
+		synctest.Test(t, func(t *testing.T) {
+			runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Second)
+			ctx := t.Context()
+			runner.Start(ctx)
+			defer runner.Stop()
 
-		var wg sync.WaitGroup
-		for i := range 10 {
-			time.Sleep(50 * time.Millisecond)
-			wg.Add(1)
-			err := runner.RunTask(
-				uint64(i),
-				"test1",
-				func(context.Context) {
-					defer wg.Done()
-					time.Sleep(100 * time.Millisecond)
-				},
-			)
-			require.NoError(t, err)
-		}
-		wg.Wait()
+			var wg sync.WaitGroup
+			for i := range 10 {
+				synctest.Sleep(50 * time.Millisecond)
+				wg.Add(1)
+				err := runner.RunTask(
+					uint64(i),
+					"test1",
+					func(context.Context) {
+						defer wg.Done()
+						time.Sleep(100 * time.Millisecond)
+					},
+				)
+				require.NoError(t, err)
+			}
+			wg.Wait()
+		})
 	})
 
 	t.Run("MaxPendingDuration", func(t *testing.T) {
-		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), 2*time.Millisecond)
-		ctx := t.Context()
-		runner.Start(ctx)
-		defer runner.Stop()
-		var wg sync.WaitGroup
-		for i := range 10 {
-			wg.Add(1)
-			err := runner.RunTask(
-				uint64(i),
-				"test2",
-				func(context.Context) {
-					defer wg.Done()
-					time.Sleep(100 * time.Millisecond)
-				},
-			)
-			if err != nil {
-				wg.Done()
-				// task 0 running
-				// task 1 after recv by runner, blocked by task 1, wait on Acquire.
-				// task 2 enqueue pendingTasks
-				// task 3 enqueue pendingTasks
-				// task 4 enqueue pendingTasks, check pendingTasks[0] timeout, report error
-				require.GreaterOrEqual(t, i, 4)
+		synctest.Test(t, func(t *testing.T) {
+			runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), 2*time.Millisecond)
+			ctx := t.Context()
+			runner.Start(ctx)
+			defer runner.Stop()
+			var wg sync.WaitGroup
+			for i := range 10 {
+				wg.Add(1)
+				err := runner.RunTask(
+					uint64(i),
+					"test2",
+					func(context.Context) {
+						defer wg.Done()
+						time.Sleep(100 * time.Millisecond)
+					},
+				)
+				if err != nil {
+					wg.Done()
+					// task 0 running
+					// task 1 after recv by runner, blocked by task 1, wait on Acquire.
+					// task 2 enqueue pendingTasks
+					// task 3 enqueue pendingTasks
+					// task 4 enqueue pendingTasks, check pendingTasks[0] timeout, report error
+					require.GreaterOrEqual(t, i, 4)
+				}
+				synctest.Sleep(1 * time.Millisecond)
 			}
-			time.Sleep(1 * time.Millisecond)
-		}
-		wg.Wait()
+			wg.Wait()
+		})
 	})
 
 	t.Run("DuplicatedTask", func(t *testing.T) {
-		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
-		ctx := t.Context()
-		runner.Start(ctx)
-		defer runner.Stop()
+		synctest.Test(t, func(t *testing.T) {
+			runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+			ctx := t.Context()
+			runner.Start(ctx)
+			defer runner.Stop()
 
-		for i := 1; i < 11; i++ {
-			regionID := uint64(i)
-			if i == 10 {
-				regionID = 6
-			}
-			err := runner.RunTask(
-				regionID,
-				"test3",
-				func(ctx context.Context) {
-					select {
-					case <-time.After(time.Second):
-						// Normal completion
-					case <-ctx.Done():
-						// Context cancelled, return immediately
-						return
-					}
-				},
-			)
-			require.NoError(t, err)
-			time.Sleep(1 * time.Millisecond)
-		}
-
-		originalSubmitted, lastSubmitted := func() (time.Time, time.Time) {
-			runner.pendingMu.Lock()
-			defer runner.pendingMu.Unlock()
-			var originalSubmitted time.Time
-			for i := range runner.pendingTaskNum() {
-				task := runner.pendingTaskAt(i)
-				if task.id == 6 {
-					originalSubmitted = task.submittedAt
+			for i := 1; i < 11; i++ {
+				regionID := uint64(i)
+				if i == 10 {
+					regionID = 6
 				}
+				err := runner.RunTask(
+					regionID,
+					"test3",
+					func(ctx context.Context) {
+						select {
+						case <-time.After(time.Second):
+							// Normal completion
+						case <-ctx.Done():
+							// Context cancelled, return immediately
+							return
+						}
+					},
+				)
+				require.NoError(t, err)
+				synctest.Sleep(1 * time.Millisecond)
 			}
-			lastSubmitted := runner.pendingTaskAt(runner.pendingTaskNum() - 1).submittedAt
-			return originalSubmitted, lastSubmitted
-		}()
-		require.Less(t, originalSubmitted, lastSubmitted)
+
+			originalSubmitted, lastSubmitted := func() (time.Time, time.Time) {
+				runner.pendingMu.Lock()
+				defer runner.pendingMu.Unlock()
+				var originalSubmitted time.Time
+				for i := range runner.pendingTaskNum() {
+					task := runner.pendingTaskAt(i)
+					if task.id == 6 {
+						originalSubmitted = task.submittedAt
+					}
+				}
+				lastSubmitted := runner.pendingTaskAt(runner.pendingTaskNum() - 1).submittedAt
+				return originalSubmitted, lastSubmitted
+			}()
+			require.Less(t, originalSubmitted, lastSubmitted)
+		})
 	})
 
 	t.Run("DuplicatedTaskBeforeDispatch", func(t *testing.T) {

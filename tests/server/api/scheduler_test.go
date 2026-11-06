@@ -24,7 +24,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -729,7 +728,18 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		for _, testCase := range testCases {
+			createdName := testCase.createdName
+			if createdName == "" {
+				createdName = testCase.name
+			}
+			if isSchedulerPaused(re, urlPrefix, createdName) {
+				return false
+			}
+		}
+		return true
+	})
 	for _, testCase := range testCases {
 		createdName := testCase.createdName
 		if createdName == "" {
@@ -873,7 +883,9 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/"+createdName, pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-	time.Sleep(time.Second * 2)
+	testutil.Eventually(re, func() bool {
+		return !isSchedulerPaused(re, urlPrefix, createdName)
+	})
 	isPaused = isSchedulerPaused(re, urlPrefix, createdName)
 	re.False(isPaused)
 
