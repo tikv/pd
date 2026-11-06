@@ -1049,19 +1049,87 @@ func (m *GroupManager) loadKeyspaceGroupForRemoval(
 	return kg, nil
 }
 
+// runKeyspaceGroupRemovalTxn runs runTxn inside a (possibly conditional)
+// transaction and reports, alongside the result, whether runTxn itself ran to
+// completion without error (callbackSucceeded). The underlying kv.Txn only
+// sends anything to etcd in its own commit step, after runTxn has already
+// returned nil - so an error from runTxn itself always means nothing was even
+// attempted on the wire, while an error surfacing after callbackSucceeded is
+// true can only have come from that commit step. Callers must use
+// callbackSucceeded to gate commitResultIsAmbiguous: it is only meaningful,
+// and only safe to call, when callbackSucceeded is true.
 func (m *GroupManager) runKeyspaceGroupRemovalTxn(
 	ctx context.Context,
 	leadershipConditions []clientv3.Cmp,
 	runTxn func(kv.Txn) error,
-) error {
+) (callbackSucceeded bool, err error) {
+	wrapped := func(txn kv.Txn) error {
+		if err := runTxn(txn); err != nil {
+			return err
+		}
+		callbackSucceeded = true
+		return nil
+	}
 	if len(leadershipConditions) == 0 {
-		return m.store.RunInTxn(ctx, runTxn)
+		err = m.store.RunInTxn(ctx, wrapped)
+		return callbackSucceeded, err
 	}
 	conditionalStore, ok := m.store.(kv.ConditionalTxnRunner)
 	if !ok {
-		return errors.New("keyspace group storage does not support conditional transactions")
+		return false, errors.New("keyspace group storage does not support conditional transactions")
 	}
-	return conditionalStore.RunInTxnWithConditions(ctx, leadershipConditions, runTxn)
+	err = conditionalStore.RunInTxnWithConditions(ctx, leadershipConditions, wrapped)
+	return callbackSucceeded, err
+}
+
+// commitResultIsAmbiguous reports whether err means the caller genuinely
+// cannot tell if runKeyspaceGroupRemovalTxn's transaction committed - the
+// client gave up waiting, was canceled, or lost its connection to etcd
+// before learning the outcome - as opposed to a definite rejection where the
+// transaction is known not to have committed (e.g. a precondition failure,
+// or an explicit auth/throttling rejection that etcd answers without ever
+// attempting the transaction). The removal call sites only evict staged
+// removals from Manager.cache in the confirmed-success and ambiguous cases;
+// a definite failure must leave the cache untouched, since nothing was
+// actually removed.
+//
+// This function only classifies the shape of err; it says nothing about
+// *where* err came from. A transport-shaped error (e.g. codes.Unavailable)
+// can just as easily come from a read inside runTxn's own callback body
+// (e.g. decrementMetaServiceGroupAssignmentsTxn's read-modify-write of a
+// group's assignment count) as from the final commit. Only the latter is a
+// genuine commit-result ambiguity: runKeyspaceGroupRemovalTxn's callback
+// accumulates all its writes in memory and etcd is never contacted for the
+// actual commit until the callback has already returned nil, so an error
+// from inside the callback always means nothing was sent to etcd at all -
+// zero ambiguity, regardless of how transport-error-shaped it looks. Callers
+// must therefore only treat this function's result as meaningful when
+// runKeyspaceGroupRemovalTxn's callbackSucceeded is true.
+//
+// A context error alone is not enough: m.store.RunInTxn ultimately calls
+// etcd's own client, whose errors surface as grpc/etcd status codes, not as
+// the bare context sentinels. codes.PermissionDenied/ResourceExhausted/
+// Unauthenticated are deliberately excluded even though
+// shouldAbortKeyspaceGroupReconcile treats them as abort-worthy for its own,
+// different purpose (whether to keep retrying a reconcile loop): etcd
+// rejects those at admission, before ever attempting the commit, so they are
+// definite failures here, not ambiguous ones.
+func commitResultIsAmbiguous(err error) bool {
+	if goerrors.Is(err, context.DeadlineExceeded) || goerrors.Is(err, context.Canceled) {
+		return true
+	}
+	if etcdErr, ok := goerrors.AsType[rpctypes.EtcdError](err); ok {
+		switch etcdErr.Code() {
+		case codes.Canceled, codes.DeadlineExceeded, codes.Unavailable, codes.DataLoss, codes.Internal:
+			return true
+		}
+		return false
+	}
+	switch status.Code(err) {
+	case codes.Canceled, codes.DeadlineExceeded, codes.Unavailable, codes.DataLoss, codes.Internal:
+		return true
+	}
+	return false
 }
 
 // refreshKeyspaceGroupCacheAfterRemovalErrorLocked reloads the authoritative
@@ -1185,11 +1253,23 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
 
-	err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
-	// The commit result can be ambiguous (for example, a client-side timeout
-	// after etcd has committed), so conservatively invalidate every cache entry
-	// whose deletion was staged. If the transaction did not commit, the next
-	// lookup simply reloads the still-existing metadata from storage.
+	var callbackSucceeded bool
+	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
+	// A definite failure means the transaction is known not to have
+	// committed, so the staged removals never actually happened - leave
+	// Manager.cache untouched and return without evicting. An error from
+	// inside runTxn itself (callbackSucceeded false) is always definite,
+	// regardless of how transport-error-shaped it looks - see
+	// commitResultIsAmbiguous.
+	if err != nil && (!callbackSucceeded || !commitResultIsAmbiguous(err)) {
+		if len(removedIDs) > 0 {
+			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
+		}
+		return nil, err
+	}
+	// The commit result is either confirmed or genuinely ambiguous (for
+	// example a client-side timeout after etcd has committed), so
+	// conservatively invalidate every cache entry whose deletion was staged.
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
 		if len(removedIDs) > 0 {
@@ -1288,8 +1368,18 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
 
-	err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
-	// Invalidate staged removals even when the commit result is ambiguous.
+	var callbackSucceeded bool
+	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
+	// See removeKeyspacesFromGroupSingleTxn: a definite failure means the
+	// staged removals never actually happened, so skip eviction entirely.
+	if err != nil && (!callbackSucceeded || !commitResultIsAmbiguous(err)) {
+		if len(removedIDs) > 0 {
+			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
+		}
+		return nil, nil, false, err
+	}
+	// Invalidate staged removals on a confirmed commit or a genuinely
+	// ambiguous one.
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
 		if len(removedIDs) > 0 {
@@ -1392,8 +1482,18 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
-	err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runBatch)
-	// Invalidate staged removals even when the commit result is ambiguous.
+	var callbackSucceeded bool
+	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runBatch)
+	// See removeKeyspacesFromGroupSingleTxn: a definite failure means the
+	// staged removals never actually happened, so skip eviction entirely.
+	if err != nil && (!callbackSucceeded || !commitResultIsAmbiguous(err)) {
+		if len(removedIDs) > 0 {
+			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
+		}
+		return nil, nil, false, err
+	}
+	// Invalidate staged removals on a confirmed commit or a genuinely
+	// ambiguous one.
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
 		if len(removedIDs) > 0 {
