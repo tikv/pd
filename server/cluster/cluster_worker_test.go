@@ -19,6 +19,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -60,8 +61,14 @@ func TestReportBatchSplit(t *testing.T) {
 	re.NoError(err)
 }
 
-func TestHandleRegionHeartbeatEnablesSplitAfterAffinityDenial(t *testing.T) {
+func TestHandleRegionHeartbeatAfterAffinitySplitDenial(t *testing.T) {
 	re := require.New(t)
+	// Track the denial as if its renewal were due.
+	fname := "github.com/tikv/pd/pkg/schedule/affinity/shortenSplitDenialTracking"
+	re.NoError(failpoint.Enable(fname, "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable(fname))
+	}()
 	cluster, _ := newSplitScatterTestCluster(t)
 	cluster.opt.SetAffinityScheduleLimit(4)
 	var err error
@@ -83,6 +90,9 @@ func TestHandleRegionHeartbeatEnablesSplitAfterAffinityDenial(t *testing.T) {
 	})
 	re.ErrorContains(err, "cannot split affinity region")
 	re.Equal(1, cluster.hbstreams.MsgLength(), "ChangeSplit(false)")
+	re.NoError(cluster.hbstreams.Drain(1))
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	re.Equal(1, cluster.hbstreams.MsgLength(), "renewed ChangeSplit(false)")
 	re.NoError(cluster.hbstreams.Drain(1))
 	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
 	re.Zero(cluster.hbstreams.MsgLength(), "still denied")

@@ -197,7 +197,7 @@ func TestSplitRecoveryOnlyForDeniedRegions(t *testing.T) {
 	re.True(ok)
 	m.MaybeEnableSplit(region, streams)
 	unchanged, _ := m.splitDeniedRegions.Peek(region.GetID())
-	re.Equal(deadline, unchanged, "heartbeats must not extend the TTL")
+	re.Equal(deadline, unchanged, "heartbeats far from the deadline do not extend the TTL")
 	m.splitDeniedRegions.Put(expired.GetID(), time.Now().Add(-time.Second))
 
 	conf.SetAffinityScheduleLimit(0)
@@ -208,6 +208,36 @@ func TestSplitRecoveryOnlyForDeniedRegions(t *testing.T) {
 	}
 	re.Zero(streams.MsgLength())
 	m.MaybeEnableSplit(region, streams)
+	re.Equal(1, streams.MsgLength())
+	re.Zero(m.splitDeniedRegions.Len())
+}
+
+func TestRenewSplitDenialBeforeStorageTTL(t *testing.T) {
+	re := require.New(t)
+	m, _, region, streams := newSplitRecoveryTestManager(t)
+	re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
+	re.NoError(streams.Drain(1))
+
+	// Near the deadline, concurrent heartbeats of a Region that is still denied
+	// renew ChangeSplit(false) once. Only that message keeps the tracking entry,
+	// and it restarts the deadline.
+	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() { m.MaybeEnableSplit(region, streams) })
+	}
+	wg.Wait()
+	re.Equal(1, streams.MsgLength(), "concurrent heartbeats renew the denial once")
+	re.NoError(streams.Drain(1))
+	deadline, ok := m.splitDeniedRegions.Peek(region.GetID())
+	re.True(ok)
+	re.Greater(time.Until(deadline.(time.Time)), splitDeniedRegionTTL-time.Minute)
+	m.MaybeEnableSplit(region, streams)
+	re.Zero(streams.MsgLength(), "the renewal restarts the tracking")
+
+	// Near the deadline, a Region that may split again gets ChangeSplit(true) instead.
+	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
+	m.MaybeEnableSplit(region.Clone(core.SetApproximateSize(80)), streams)
 	re.Equal(1, streams.MsgLength())
 	re.Zero(m.splitDeniedRegions.Len())
 }
