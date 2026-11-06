@@ -117,21 +117,49 @@ func newTSODispatcher(
 	return td
 }
 
-func (td *tsoDispatcher) revokePendingRequests(err error) {
-	for range len(td.tsoRequestCh) {
-		req := <-td.tsoRequestCh
-		req.TryDone(err)
+func (td *tsoDispatcher) revokePendingRequests() {
+	// Use the context error on shutdown, including TSO client replacement.
+	err := td.ctx.Err()
+	if err == nil {
+		err = errs.ErrClosing
+	}
+	err = errors.WithStack(err)
+	for {
+		select {
+		case req := <-td.tsoRequestCh:
+			req.TryDone(err)
+		default:
+			return
+		}
 	}
 }
 
 func (td *tsoDispatcher) close() {
 	td.cancel()
-	tsoErr := errors.WithStack(errs.ErrClosing)
-	td.revokePendingRequests(tsoErr)
+	td.revokePendingRequests()
 }
 
+// push takes ownership of completing the request, even if it cannot be enqueued.
 func (td *tsoDispatcher) push(request *Request) {
-	td.tsoRequestCh <- request
+	select {
+	case <-request.requestCtx.Done():
+		request.TryDone(request.requestCtx.Err())
+		return
+	case <-request.clientCtx.Done():
+		request.TryDone(request.clientCtx.Err())
+		return
+	case <-td.ctx.Done():
+		request.TryDone(errors.WithStack(td.ctx.Err()))
+		return
+	case td.tsoRequestCh <- request:
+	}
+	failpoint.InjectCall("afterPushTSORequest")
+	// The dispatcher may have exited and drained the queue before this send.
+	// Drain again after cancellation so that a late enqueue is also completed.
+	// Do not access request here: the consumer may already have recycled it.
+	if td.ctx.Err() != nil {
+		td.revokePendingRequests()
+	}
 }
 
 func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
@@ -154,8 +182,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 			// If you encounter this failure, please check the stack in the logs to see if it's a panic.
 			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
 		}
-		tsoErr := errors.WithStack(errs.ErrClosing)
-		td.revokePendingRequests(tsoErr)
+		td.revokePendingRequests()
 		wg.Done()
 	}()
 
