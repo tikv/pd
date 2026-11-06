@@ -352,8 +352,11 @@ func TestAffinityGroupWatcherReloadsAfterCompaction(t *testing.T) {
 
 	keepGroup := makeTestGroup("group-compaction-keep", 1, []uint64{1})
 	deleteGroup := makeTestGroup("group-compaction-delete", 2, []uint64{2})
+	recreatedGroup := makeTestGroup("group-compaction-recreated", 1, []uint64{1})
+	recreatedGroup.CreateTimestamp = 1
 	re.NoError(putGroup(ctx, client, keepGroup))
 	re.NoError(putGroup(ctx, client, deleteGroup))
+	re.NoError(putGroup(ctx, client, recreatedGroup))
 
 	manager, watcher, err := setupAffinityManager(ctx, client)
 	re.NoError(err)
@@ -367,11 +370,16 @@ func TestAffinityGroupWatcherReloadsAfterCompaction(t *testing.T) {
 
 	re.NotNil(manager.GetAffinityGroupState(keepGroup.ID))
 	re.NotNil(manager.GetAffinityGroupState(deleteGroup.ID))
+	re.Equal(uint64(1), manager.GetAffinityGroupState(recreatedGroup.ID).CreateTimestamp)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
 	failpointEnabled = true
 
 	keepGroup.LeaderStoreID = 3
 	re.NoError(putGroup(ctx, client, keepGroup))
+	_, err = client.Delete(ctx, keypath.AffinityGroupPath(recreatedGroup.ID))
+	re.NoError(err)
+	recreatedGroup.CreateTimestamp = 2
+	re.NoError(putGroup(ctx, client, recreatedGroup))
 	deleteResp, err := client.Delete(ctx, keypath.AffinityGroupPath(deleteGroup.ID))
 	re.NoError(err)
 	_, err = client.Compact(ctx, deleteResp.Header.Revision)
@@ -383,6 +391,7 @@ func TestAffinityGroupWatcherReloadsAfterCompaction(t *testing.T) {
 		return keepState != nil && keepState.LeaderStoreID == keepGroup.LeaderStoreID &&
 			!manager.IsGroupExist(deleteGroup.ID)
 	})
+	re.Equal(recreatedGroup.CreateTimestamp, manager.GetAffinityGroupState(recreatedGroup.ID).CreateTimestamp)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
 	failpointEnabled = false
 }

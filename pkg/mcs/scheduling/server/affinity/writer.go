@@ -1,0 +1,95 @@
+// Copyright 2026 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package affinity
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/pingcap/errors"
+
+	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+)
+
+const (
+	// groupTargetsPath is the PD API that writes group targets.
+	groupTargetsPath = "/pd/api/v2/affinity-groups/targets"
+	writeTimeout     = 3 * time.Second
+)
+
+// TargetWriter sends the targets decided by the scheduling service to PD, which
+// stores them like every other affinity write. The watcher then delivers the
+// stored groups back to the scheduling service.
+type TargetWriter struct {
+	httpClient   *http.Client
+	getLeaderURL func() (string, error)
+	onFailure    func()
+	timeout      time.Duration
+}
+
+var _ affinity.TargetWriter = (*TargetWriter)(nil)
+
+// NewTargetWriter creates a TargetWriter that sends requests to the tracked PD
+// leader and calls onFailure to refresh membership after a failed write.
+func NewTargetWriter(httpClient *http.Client, getLeaderURL func() (string, error), onFailure func()) *TargetWriter {
+	return &TargetWriter{httpClient: httpClient, getLeaderURL: getLeaderURL, onFailure: onFailure, timeout: writeTimeout}
+}
+
+// WriteGroupTargets implements affinity.TargetWriter.
+func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	written, err := w.writeTargets(ctx, targets)
+	if err != nil {
+		w.onFailure()
+	}
+	return written, err
+}
+
+// writeTargets sends one request to the tracked PD leader. If it has become a
+// follower, the v2 API Redirector forwards the request to the leader, adding one hop.
+func (w *TargetWriter) writeTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	leaderURL, err := w.getLeaderURL()
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(&affinity.GroupTargetsRequest{Targets: targets})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, w.timeout)
+	defer cancel()
+	resp, err := apiutil.PostJSONWithContext(reqCtx, w.httpClient, strings.TrimSuffix(leaderURL, "/")+groupTargetsPath, body)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return nil, errors.Errorf("write affinity group targets to %s: %s %s", leaderURL, resp.Status, bytes.TrimSpace(data))
+	}
+	var result affinity.GroupTargetsResponse
+	if err := apiutil.ReadJSON(resp.Body, &result); err != nil {
+		return nil, errors.Annotate(err, "decode affinity group targets response")
+	}
+	return result.WrittenGroupIDs, nil
+}

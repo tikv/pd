@@ -212,7 +212,7 @@ func (s *Server) updatePDMemberLoop() {
 					return true
 				}
 				cluster := s.GetCluster()
-				if cluster == nil || !cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
+				if cluster == nil || !cluster.SwitchPDLeader(pdpb.NewPDClient(cc), ep.ClientURLs[0]) {
 					return false
 				}
 				if status.Leader != curLeader {
