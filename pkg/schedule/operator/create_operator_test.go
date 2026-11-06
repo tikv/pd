@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1388,4 +1389,85 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 			}
 		}
 	}
+}
+
+func TestTransferLeaderIsolationTargets(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	for i, host := range []string{"a", "b", "a"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+	}
+	rm := tc.GetRuleManager()
+	leader := rm.GetRule("pd", "default").Clone()
+	leader.Role, leader.Count = placement.Leader, 1
+	require.NoError(t, rm.SetRule(leader))
+	voters := leader.Clone()
+	voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+	voters.LocationLabels, voters.IsolationLevel = []string{"host"}, "host"
+	require.NoError(t, rm.SetRule(voters))
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+	for _, tt := range []struct {
+		name        string
+		preferred   uint64
+		targets     []uint64
+		wantLeader  uint64
+		wantTargets []uint64
+	}{
+		{"invalid single", 2, nil, 0, nil},
+		{"valid single", 3, nil, 3, nil},
+		{"fallback", 2, []uint64{2, 3}, 3, []uint64{3}},
+		{"preferred absent", 2, []uint64{3}, 3, []uint64{3}},
+		{"valid preferred absent", 3, []uint64{2}, 3, nil},
+		{"valid preferred present", 3, []uint64{2, 3}, 3, []uint64{3}},
+		{"all rejected", 2, []uint64{2, 99}, 0, nil},
+		{"duplicate rejected", 2, []uint64{2, 3, 2}, 3, []uint64{3}},
+		{"duplicate valid", 3, []uint64{3, 2, 3}, 3, []uint64{3, 3}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			input := slices.Clone(tt.targets)
+			op, err := CreateTransferLeaderOperator("test", tc, region, tt.preferred, input, OpLeader)
+			require.Equal(t, tt.targets, input)
+			if tt.wantLeader == 0 {
+				require.Error(t, err)
+				require.Nil(t, op)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, op)
+			step := op.Step(0).(TransferLeader)
+			require.Equal(t, tt.wantLeader, step.ToStore)
+			require.Equal(t, tt.wantTargets, step.ToStores)
+		})
+	}
+}
+
+func TestTransferLeaderIgnoresWeightedScoreWithoutIsolationLevel(t *testing.T) {
+	tc := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	for i, zone := range []string{"z1", "z1", "z2"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone, "host": strconv.Itoa(i + 1)})
+	}
+	rm := tc.GetRuleManager()
+	leader := rm.GetRule("pd", "default").Clone()
+	leader.Role, leader.Count = placement.Leader, 1
+	leader.LocationLabels = []string{"zone", "host"}
+	require.NoError(t, rm.SetRule(leader))
+	voters := leader.Clone()
+	voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+	require.NoError(t, rm.SetRule(voters))
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+
+	// Moving the leader to store 3 lowers the voter rule's weighted score, but
+	// no peer moves and no IsolationLevel is configured.
+	op, err := CreateTransferLeaderOperator("test", tc, region, 3, []uint64{3}, OpLeader)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), op.Step(0).(TransferLeader).ToStore)
+
+	// A configured level still rejects new conflicts: voters 1 and 2 share z1.
+	voters.IsolationLevel = "zone"
+	require.NoError(t, rm.SetRule(voters))
+	_, err = CreateTransferLeaderOperator("test", tc, region, 3, []uint64{3}, OpLeader)
+	require.Error(t, err)
 }

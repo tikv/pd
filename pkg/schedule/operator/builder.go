@@ -48,6 +48,8 @@ type Builder struct {
 	regionID        uint64
 	regionEpoch     *metapb.RegionEpoch
 	rules           []*placement.Rule
+	originRegion    *core.RegionInfo
+	originFit       *placement.RegionFit
 	expectedRoles   map[uint64]placement.PeerRoleType
 	approximateSize int64
 
@@ -77,6 +79,9 @@ type Builder struct {
 	toWitness, toNonWitness, toPromoteNonWitness peersMap
 	steps                                        []OpStep       // generated steps.
 	peerAddStep                                  map[uint64]int // record at which step a peer is created.
+	// isolationLeader reports whether the final layout with the given leader
+	// preserves configured isolation. It is nil when the check does not apply.
+	isolationLeader func(uint64) bool
 
 	// comparison function
 	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
@@ -141,6 +146,7 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 	var rules []*placement.Rule
 	if err == nil && !b.skipPlacementRulesCheck && b.GetSharedConfig().IsPlacementRulesEnabled() {
 		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
+		b.originRegion, b.originFit = region, fit
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
 		}
@@ -525,11 +531,15 @@ func (b *Builder) prepareBuild() (string, error) {
 	}
 
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
+	b.isolationLeader = b.newIsolationLeaderCheck()
 
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
 		if !b.allowLeader(targetLeader, b.forceTargetLeader) {
 			return "", errors.New("cannot create operator: target leader is not allowed")
+		}
+		if b.isolationLeader != nil && !b.isolationLeader(b.targetLeaderStoreID) {
+			return "", errors.New("cannot create operator: target layout breaks placement isolation")
 		}
 	}
 
@@ -680,6 +690,9 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 		}
 		// if role info is given, store having role follower should not be target leader.
 		if role, ok := b.expectedRoles[candidateStoreID]; ok && role == placement.Follower {
+			continue
+		}
+		if b.isolationLeader != nil && !b.isolationLeader(candidateStoreID) {
 			continue
 		}
 		if b.targetLeaderStoreID == 0 {
@@ -924,6 +937,48 @@ func (b *Builder) execBatchSwitchWitnesses() {
 }
 
 // check if the peer is allowed to become the leader.
+// newIsolationLeaderCheck covers peer changes whose final leader changes rule
+// assignment, such as moving the leader peer. Leader-only transfers are checked
+// by their factory, and force, skip and repairs keep their existing behavior.
+func (b *Builder) newIsolationLeaderCheck() func(uint64) bool {
+	if b.originFit == nil || b.originRegion == nil || b.forceTargetLeader || b.skipPlacementRulesCheck {
+		return nil
+	}
+	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toDemote)+
+		len(b.toWitness)+len(b.toNonWitness)+len(b.toPromoteNonWitness) == 0 {
+		return nil
+	}
+	for storeID := range b.toRemove {
+		if _, ok := b.targetPeers[storeID]; ok {
+			continue // A role change, not a removal.
+		}
+		store := b.GetBasicCluster().GetStore(storeID)
+		if b.unhealthyPeers[storeID] != nil || store == nil || store.IsRemoving() || store.IsRemoved() {
+			return nil
+		}
+	}
+	peers := make([]*metapb.Peer, 0, len(b.targetPeers))
+	for _, storeID := range b.targetPeers.IDs() {
+		peer := b.targetPeers[storeID]
+		if added, ok := b.toAdd[storeID]; ok {
+			peer = added
+		} else if origin, ok := b.originPeers[storeID]; ok && origin.GetId() != peer.GetId() {
+			peer = &metapb.Peer{Id: origin.GetId(), StoreId: storeID, Role: peer.GetRole(), IsWitness: peer.GetIsWitness()}
+		}
+		peers = append(peers, peer)
+	}
+	stores, witness := b.GetBasicCluster(), b.GetSharedConfig().IsWitnessAllowed()
+	return func(leaderStoreID uint64) bool {
+		for _, peer := range peers {
+			if peer.GetStoreId() == leaderStoreID {
+				target := b.originRegion.Clone(core.SetPeers(peers), core.WithLeader(peer))
+				return b.originFit.IsFinalIsolationPreserved(stores, target, witness)
+			}
+		}
+		return false
+	}
+}
+
 func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	// these peer roles are not allowed to become leader.
 	switch peer.GetRole() {

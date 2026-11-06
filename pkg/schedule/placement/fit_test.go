@@ -294,3 +294,73 @@ func TestPickPeersFromBinaryInt(t *testing.T) {
 		}
 	}
 }
+
+func TestRuleFitConfiguredIsolation(t *testing.T) {
+	tests := []struct {
+		name, level string
+		paths       [][]string
+		want        bool
+	}{
+		{"unset", "", [][]string{{"A", "a"}, {"A", "a"}}, true},
+		{"host-separated", "host", [][]string{{"A", "a"}, {"A", "b"}}, true},
+		{"zone-not-separated", "zone", [][]string{{"A", "a"}, {"A", "b"}}, false},
+		{"host-collision", "host", [][]string{{"B", "d"}, {"B", "d"}}, false},
+		{"case-insensitive", "host", [][]string{{"B", "d"}, {"b", "D"}}, false},
+		{"host-local-to-zone", "host", [][]string{{"A", "a"}, {"B", "a"}}, true},
+		{"missing-host", "host", [][]string{{"A", ""}, {"A", "b"}}, false},
+		{"separated-above-missing-host", "host", [][]string{{"A", ""}, {"B", ""}}, true},
+		{"single-peer", "host", [][]string{{"", ""}}, true},
+		{"level-not-in-labels", "rack", [][]string{{"B", "d"}, {"B", "d"}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rf := &RuleFit{Rule: &Rule{LocationLabels: []string{"zone", "host"}, IsolationLevel: tt.level}}
+			for i, path := range tt.paths {
+				rf.Stores = append(rf.Stores, core.NewStoreInfoWithLabel(uint64(i+1), map[string]string{"zone": path[0], "host": path[1]}))
+			}
+			require.Equal(t, tt.want, rf.IsIsolationSatisfied())
+		})
+	}
+}
+
+func TestConfiguredIsolationNonRegression(t *testing.T) {
+	makeFit := func(hosts ...string) *RuleFit {
+		fit := &RuleFit{Rule: &Rule{LocationLabels: []string{"host"}, IsolationLevel: "host"}}
+		for i, host := range hosts {
+			fit.Stores = append(fit.Stores, core.NewStoreInfoWithLabel(uint64(i+1), map[string]string{"host": host}))
+		}
+		return fit
+	}
+	before := makeFit("a", "a", "a", "b", "b", "b")
+	// Equal pair count does not permit a larger concentration on one host.
+	require.False(t, before.IsIsolationPreserved(makeFit("a", "a", "a", "a", "b", "c")))
+	require.True(t, before.IsIsolationPreserved(makeFit("a", "a", "a", "b", "b", "c")))
+	require.True(t, before.IsIsolationPreserved(makeFit("a", "a", "a", "b", "b", "b")))
+	require.False(t, makeFit("a", "a", "b", "c", "d").IsIsolationPreserved(makeFit("a", "a", "b", "d", "d")))
+	require.False(t, before.IsIsolationPreserved(makeFit("a", "b")), "replica-count changes need their repair contract")
+	require.True(t, makeFit("a", "", "b").IsIsolationPreserved(makeFit("a", "c", "b")))
+	require.False(t, makeFit("a", "c", "b").IsIsolationPreserved(makeFit("a", "", "b")))
+	require.False(t, makeFit("a", "b").IsIsolationPreserved(makeFit("A", "a")))
+	invalid := makeFit("a")
+	invalid.Stores[0] = nil
+	require.False(t, invalid.IsIsolationPreserved(makeFit("b")))
+}
+
+func TestIsolationLevelNotInLabelsIsUnset(t *testing.T) {
+	// Rule validation accepts this combination. Peer moves keep only the
+	// weighted score check instead of rejecting every target.
+	rule := &Rule{Role: Voter, Count: 2, LocationLabels: []string{"host"}, IsolationLevel: "zone"}
+	rf := &RuleFit{Rule: rule, IsolationScore: 1}
+	for i, host := range []string{"a", "b"} {
+		id := uint64(i + 1)
+		rf.Peers = append(rf.Peers, &metapb.Peer{Id: id, StoreId: id})
+		rf.Stores = append(rf.Stores, core.NewStoreInfoWithLabel(id, map[string]string{"host": host}))
+	}
+	fit := &RegionFit{RuleFits: []*RuleFit{rf}}
+	separated := core.NewStoreInfoWithLabel(3, map[string]string{"host": "c"})
+	require.True(t, fit.Replace(1, separated))
+	require.True(t, fit.NewReplacementChecker(1)(separated))
+	colocated := core.NewStoreInfoWithLabel(4, map[string]string{"host": "b"})
+	require.False(t, fit.Replace(1, colocated), "the weighted score check still applies")
+	require.True(t, rf.IsIsolationPreserved(rf))
+}
