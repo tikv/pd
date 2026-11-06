@@ -62,6 +62,11 @@ type mergeCheckerTestSuite struct {
 }
 
 func TestMergeCheckerTestSuite(t *testing.T) {
+	// These fixtures use arbitrary Classic keys that cross APIv2 mode boundaries.
+	// NextGen keyspace constraints are covered by TestAllowMergeKeyspace tests.
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	require.NoError(t, failpoint.Enable(modeFlag, "return(false)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
 	suite.Run(t, new(mergeCheckerTestSuite))
 }
 
