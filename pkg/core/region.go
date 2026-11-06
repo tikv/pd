@@ -96,6 +96,11 @@ type RegionInfo struct {
 	reportBuckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
+	// approximateSizeUnknown is set while the store has reported no size for the
+	// Region since PD added it or since its epoch version changed. Its
+	// approximateSize is EmptyRegionApproximateSize or the size from before the
+	// change meanwhile.
+	approximateSizeUnknown bool
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
 	ref atomic.Int32
 	// bucketMeta is used to store the bucket meta reported by tikv.
@@ -310,8 +315,13 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 		if origin != nil {
 			r.approximateSize = origin.approximateSize
 			r.approximateKeys = origin.approximateKeys
+			// A split or merge changes the range, so the size of the origin is not the
+			// size of this Region.
+			r.approximateSizeUnknown = origin.approximateSizeUnknown ||
+				r.GetRegionEpoch().GetVersion() != origin.GetRegionEpoch().GetVersion()
 		} else {
 			r.approximateSize = EmptyRegionApproximateSize
+			r.approximateSizeUnknown = true
 		}
 	}
 	if bucketEnable && origin != nil && atomic.LoadPointer(&r.reportBuckets) == nil {
@@ -348,6 +358,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		approximateIAKvSize:       r.approximateIAKvSize,
 		approximateColumnarKvSize: r.approximateColumnarKvSize,
 		approximateKeys:           r.approximateKeys,
+		approximateSizeUnknown:    r.approximateSizeUnknown,
 		interval:                  typeutil.DeepClone(r.interval, TimeIntervalFactory),
 		replicationStatus:         r.replicationStatus,
 		reportBuckets:             atomic.LoadPointer(&r.reportBuckets),
@@ -714,6 +725,13 @@ func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
 }
 
+// IsApproximateSizeUnknown returns whether the store has reported no size for the
+// Region since PD added it or since its epoch version changed. GetApproximateSize
+// returns EmptyRegionApproximateSize or the size from before the change meanwhile.
+func (r *RegionInfo) IsApproximateSizeUnknown() bool {
+	return r.approximateSizeUnknown
+}
+
 // GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.
 func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
 	peer := r.GetStorePeer(storeID)
@@ -1005,7 +1023,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveCache, needSync = true, true
 				return
 			}
+			// An empty Region reports the same size and keys as a Region whose size is unknown.
 			if region.GetApproximateSize() != origin.GetApproximateSize() ||
+				region.approximateSizeUnknown != origin.approximateSizeUnknown ||
 				region.GetApproximateKeys() != origin.GetApproximateKeys() ||
 				region.GetApproximateKvSize() != origin.GetApproximateKvSize() ||
 				region.GetApproximateIAKvSize() != origin.GetApproximateIAKvSize() ||
