@@ -164,6 +164,8 @@ func TestRegionHeartbeatDuringCleanupDoesNotPanic(t *testing.T) {
 	re.Nil(s.GetCluster().GetHeartbeatStreams())
 }
 
+// TestHandleRegionHeartbeatAfterClusterStopDoesNotPanic covers split recovery
+// from a heartbeat that retained the cluster before primary cleanup began.
 func TestHandleRegionHeartbeatAfterClusterStopDoesNotPanic(t *testing.T) {
 	re := require.New(t)
 
