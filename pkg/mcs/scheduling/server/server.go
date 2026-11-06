@@ -623,7 +623,7 @@ func (s *Server) startMetaConfWatcher(
 	if err != nil {
 		return nil, nil, err
 	}
-	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, storage)
+	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, basicCluster, storage)
 	if err != nil {
 		metaWatcher.Close()
 		return nil, nil, err
