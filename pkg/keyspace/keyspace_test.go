@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
@@ -1293,4 +1294,29 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
+}
+
+func TestLoadKeyspaceByIDWithRevision(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	groups := NewMetaServiceGroupManager(store, map[string]string{"group1": "http://127.0.0.1:2379"}, nil)
+	defer func() { re.NoError(groups.Close()) }()
+	manager := &Manager{store: store, mgm: groups}
+	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 1}, Name: "revision-keyspace", Config: map[string]string{MetaServiceGroupIDKey: "group1"}}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error { return store.SaveKeyspaceMeta(txn, meta) }))
+	stored, err := client.Get(ctx, keypath.KeyspaceMetaPath(1))
+	re.NoError(err)
+	loaded, revision, err := manager.LoadKeyspaceByIDWithRevision(ctx, 1)
+	re.NoError(err)
+	re.Equal(meta.GetId(), loaded.GetId())
+	re.Equal(meta.Name, loaded.Name)
+	re.Equal("group1", loaded.Config[MetaServiceGroupIDKey])
+	re.Equal("http://127.0.0.1:2379", loaded.Config[MetaServiceGroupAddressesKey])
+	re.Equal(stored.Kvs[0].ModRevision, revision)
+	loaded, _, err = manager.LoadKeyspaceByIDWithRevision(ctx, 2)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	re.Nil(loaded)
 }

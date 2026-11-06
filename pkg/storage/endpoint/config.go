@@ -15,6 +15,7 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -49,6 +50,19 @@ func (se *StorageEndpoint) LoadConfig(cfg any) (bool, error) {
 		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return true, nil
+}
+
+// LoadConfigWithRevision loads config and its modification revision in one linearizable read.
+// A zero revision means the config key is absent; an existing empty or invalid value is an error.
+func (se *StorageEndpoint) LoadConfigWithRevision(ctx context.Context, cfg any) (int64, error) {
+	value, revision, err := se.loadValueWithRevision(ctx, keypath.ConfigPath())
+	if err != nil || revision == 0 {
+		return 0, err
+	}
+	if err := json.Unmarshal([]byte(value), cfg); err != nil {
+		return 0, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return revision, nil
 }
 
 // SaveConfig stores marshallable cfg to the keypath.Config.
