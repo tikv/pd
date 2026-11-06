@@ -18,11 +18,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -976,6 +978,164 @@ func isSchedulerPaused(re *require.Assertions, urlPrefix, name string) bool {
 	return slices.Contains(schedulers, name)
 }
 
+func (suite *scheduleTestSuite) TestConcurrentBalanceRangeCreation() {
+	suite.te.RunTest(suite.checkConcurrentBalanceRangeCreation)
+}
+
+func (suite *scheduleTestSuite) checkConcurrentBalanceRangeCreation(cluster *tests.TestCluster) {
+	re := suite.Require()
+	urlPrefix := cluster.GetLeaderServer().GetAddr() + "/pd/api/v1"
+	input := map[string]any{
+		"name":      types.BalanceRangeScheduler.String(),
+		"alias":     "db.t+1",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+	}
+	data, err := json.Marshal(input)
+	re.NoError(err)
+
+	// Hold both requests after the absence check, so both take the create path.
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	const fp = "github.com/tikv/pd/server/api/beforeCreateBalanceRangeScheduler"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		entered <- struct{}{}
+		<-release
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	type result struct {
+		status int
+		body   string
+		err    error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			var res result
+			res.err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data,
+				func(body []byte, status int, _ http.Header) {
+					res.status = status
+					res.body = string(body)
+				})
+			results <- res
+		}()
+	}
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(10 * time.Second):
+			re.FailNow("both requests must observe the scheduler as absent")
+		}
+	}
+	releaseOnce.Do(func() { close(release) })
+	for range 2 {
+		select {
+		case res := <-results:
+			re.NoError(res.err)
+			re.Equal(http.StatusOK, res.status, res.body)
+			re.JSONEq(`"0"`, res.body)
+		case <-time.After(10 * time.Second):
+			re.FailNow("concurrent scheduler creation did not finish")
+		}
+	}
+
+	// Check the scheduling service as well in microservice mode.
+	testutil.Eventually(re, func() bool {
+		resp, err := apiutil.GetJSON(tests.TestDialClient,
+			urlPrefix+"/scheduler-config/balance-range-scheduler/list", nil)
+		re.NoError(err)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		var jobs []map[string]any
+		re.NoError(json.NewDecoder(resp.Body).Decode(&jobs))
+		re.Len(jobs, 1)
+		re.Equal(float64(0), jobs[0]["job-id"])
+		re.Equal(input["alias"], jobs[0]["alias"])
+		return true
+	})
+	re.NoError(testutil.CheckDelete(tests.TestDialClient,
+		urlPrefix+"/schedulers/balance-range-scheduler", testutil.StatusOK(re)))
+}
+
+func (suite *scheduleTestSuite) TestBalanceRangePutRecovery() {
+	suite.te.RunTest(suite.checkBalanceRangePutRecovery)
+}
+
+func (suite *scheduleTestSuite) checkBalanceRangePutRecovery(cluster *tests.TestCluster) {
+	re := suite.Require()
+	svr := cluster.GetLeaderServer().GetServer()
+	urlPrefix := cluster.GetLeaderServer().GetAddr() + "/pd/api/v1"
+	input := map[string]any{
+		"name":      types.BalanceRangeScheduler.String(),
+		"alias":     "test.put-recovery",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+	}
+	data, err := json.Marshal(input)
+	re.NoError(err)
+	const fp = "github.com/tikv/pd/server/config/persistFail"
+	re.NoError(failpoint.Enable(fp, "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable(fp))
+		re.NoError(testutil.CheckDelete(tests.TestDialClient,
+			urlPrefix+"/schedulers/balance-range-scheduler", testutil.StatusOK(re)))
+	}()
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data,
+		testutil.Status(re, http.StatusBadRequest)))
+	storage := svr.GetStorage()
+	originalJobs, err := storage.LoadSchedulerConfig(types.BalanceRangeScheduler.String())
+	re.NoError(err)
+	re.NotEmpty(originalJobs)
+
+	jobURL := urlPrefix + "/scheduler-config/balance-range-scheduler/job"
+	// Neither matching an existing job nor adding a new job may report success
+	// while the scheduler list still cannot be persisted.
+	re.NoError(testutil.CheckPutJSON(tests.TestDialClient, jobURL, data,
+		testutil.Status(re, http.StatusInternalServerError)))
+	newInput := maps.Clone(input)
+	newInput["alias"] = "test.put-recovery-new"
+	newData, err := json.Marshal(newInput)
+	re.NoError(err)
+	re.NoError(testutil.CheckPutJSON(tests.TestDialClient, jobURL, newData,
+		testutil.Status(re, http.StatusInternalServerError)))
+	jobs, err := storage.LoadSchedulerConfig(types.BalanceRangeScheduler.String())
+	re.NoError(err)
+	// The monolithic scheduler may update job status concurrently, but neither
+	// failed PUT may append another job or replace the existing one.
+	var persistedJobs []map[string]any
+	re.NoError(json.Unmarshal([]byte(jobs), &persistedJobs))
+	re.Len(persistedJobs, 1)
+	re.Equal(float64(0), persistedJobs[0]["job-id"])
+	re.Equal(input["alias"], persistedJobs[0]["alias"])
+
+	re.NoError(failpoint.Disable(fp))
+	re.NoError(testutil.CheckPutJSON(tests.TestDialClient, jobURL, data, func(body []byte, status int, _ http.Header) {
+		re.Equal(http.StatusOK, status)
+		re.JSONEq(`"0"`, string(body))
+	}))
+	// In microservice mode this checks that the scheduling service actually
+	// loads the scheduler after PUT repairs the missing scheduler-list entry.
+	suite.assertSchedulerExists(urlPrefix+"/schedulers", types.BalanceRangeScheduler.String())
+	var cfg struct {
+		Schedule sc.ScheduleConfig `json:"schedule"`
+	}
+	exists, err := storage.LoadConfig(&cfg)
+	re.NoError(err)
+	re.True(exists)
+	re.True(slices.ContainsFunc(cfg.Schedule.Schedulers, func(c sc.SchedulerConfig) bool {
+		return c.Type == types.SchedulerTypeCompatibleMap[types.BalanceRangeScheduler]
+	}))
+}
+
 func (suite *scheduleTestSuite) TestBalanceRangeAPI() {
 	suite.te.RunTest(suite.checkBalanceRangeAPI)
 }
@@ -995,9 +1155,22 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", leaderAddr)
 	// add balance-range-scheduler
-	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
 		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"0"`, string(body))
 	}))
+	// retrying the same request returns the existing job id
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"0"`, string(body))
+	}))
+	// the same alias with different parameters is rejected
+	conflictInput := maps.Clone(input)
+	conflictInput["rule"] = "peer-scatter"
+	conflictData, err := json.Marshal(conflictInput)
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", conflictData,
+		testutil.Status(re, http.StatusBadRequest), testutil.StringContain(re, "job already exists")))
 
 	// check
 	testutil.Eventually(re, func() bool {
@@ -1022,8 +1195,13 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	input["alias"] = "test-sysbench-partition(p2)"
 	data, err = json.Marshal(input)
 	re.NoError(err)
-	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
 		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"1"`, string(body))
+	}))
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"1"`, string(body))
 	}))
 	testutil.Eventually(re, func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
@@ -1078,5 +1256,48 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	})
 	// delete scheduler
 	deleteURL := fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceRangeScheduler.String())
+	re.NoError(testutil.CheckDelete(tests.TestDialClient, deleteURL, testutil.StatusOK(re)))
+	assertNoScheduler(re, urlPrefix+"/schedulers", types.BalanceRangeScheduler.String())
+
+	// the alias is kept as is on create, so retrying an alias with escape
+	// characters still returns the existing job id
+	input["alias"] = "db.t+1"
+	data, err = json.Marshal(input)
+	re.NoError(err)
+	for range 2 {
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
+			re.Equal(http.StatusOK, i)
+			re.JSONEq(`"0"`, string(body))
+		}))
+	}
+	testutil.Eventually(re, func() bool {
+		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
+		re.NoError(err)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		b, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		var scheduler []map[string]any
+		re.NoError(json.Unmarshal(b, &scheduler))
+		re.Len(scheduler, 1)
+		re.Equal("db.t+1", scheduler[0]["alias"])
+		return true
+	})
+	re.NoError(testutil.CheckDelete(tests.TestDialClient, deleteURL, testutil.StatusOK(re)))
+	assertNoScheduler(re, urlPrefix+"/schedulers", types.BalanceRangeScheduler.String())
+
+	// retrying after the scheduler list failed to persist persists it again
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistFail", "return(true)"))
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+		re.NotEqual(http.StatusOK, i)
+	}))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistFail"))
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(body []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
+		re.JSONEq(`"0"`, string(body))
+	}))
+	suite.assertSchedulerExists(urlPrefix+"/schedulers", types.BalanceRangeScheduler.String())
 	re.NoError(testutil.CheckDelete(tests.TestDialClient, deleteURL, testutil.StatusOK(re)))
 }

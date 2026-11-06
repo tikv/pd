@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -730,7 +731,9 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	input := map[string]any{
 		"store_id": 1,
 	}
-	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName, input))
+	resp, err := client.CreateSchedulerWithInput(ctx, schedulerName, input)
+	re.NoError(err)
+	re.Equal("The scheduler is created.", resp)
 	checkScheduler()
 	re.NoError(client.DeleteScheduler(ctx, schedulerName))
 	const schedulerName2 = "balance-range-scheduler"
@@ -741,7 +744,10 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 		"end-key":   "200",
 		"alias":     "test",
 	}
-	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName2, input))
+	resp, err = client.CreateSchedulerWithInput(ctx, schedulerName2, input)
+	re.NoError(err)
+	// The first job created along with the scheduler gets job id 0.
+	re.Equal("0", resp)
 	checkFn := func() map[string]any {
 		config, err := client.GetSchedulerConfig(ctx, schedulerName2)
 		re.NoError(err)
@@ -758,8 +764,15 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	job := checkFn()
 	jobID := uint64(job["job-id"].(float64))
 	re.Equal(uint64(0), jobID)
+	re.Equal(strconv.FormatUint(jobID, 10), resp)
 	_, ok := job["start"].(*time.Time)
 	re.False(ok, job)
+
+	// add another job to the existing scheduler, it should return the new job id
+	input["alias"] = "test2"
+	resp, err = client.CreateSchedulerWithInput(ctx, schedulerName2, input)
+	re.NoError(err)
+	re.Equal("1", resp)
 
 	// cancel one job
 	re.NoError(client.CancelSchedulerJob(ctx, schedulerName2, jobID))
