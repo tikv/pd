@@ -222,7 +222,12 @@ func NewAccessPath(path, method string) AccessPath {
 
 // PostJSON is used to send the POST request to a specific URL
 func PostJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
+	return PostJSONWithContext(context.Background(), client, url, data)
+}
+
+// PostJSONWithContext is used to send the POST request to a specific URL with the given context.
+func PostJSONWithContext(ctx context.Context, client *http.Client, url string, data []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
 		return nil, err
 	}

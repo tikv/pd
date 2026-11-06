@@ -63,6 +63,28 @@ func TestGetClusterBeforeStoredDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestPDLeaderClientAndURL(t *testing.T) {
+	re := require.New(t)
+	cluster := &Cluster{checkMembershipCh: make(chan struct{}, 1)}
+	_, err := cluster.getPDLeaderURL()
+	re.ErrorContains(err, "PD leader is not found")
+	// The target writer requests a membership refresh through its failure callback.
+	re.Empty(cluster.checkMembershipCh)
+	_, err = cluster.getPDLeaderClient()
+	re.ErrorContains(err, "PD leader is not found")
+	re.Len(cluster.checkMembershipCh, 1)
+	for _, url := range []string{"http://pd-1", "http://pd-2"} {
+		client := &splitScatterPDClient{}
+		re.True(cluster.SwitchPDLeader(client, url))
+		gotClient, err := cluster.getPDLeaderClient()
+		re.NoError(err)
+		re.Same(client, gotClient)
+		gotURL, err := cluster.getPDLeaderURL()
+		re.NoError(err)
+		re.Equal(url, gotURL)
+	}
+}
+
 // TestMultipleLeaderTermsNoHbStreamGoroutineLeak is a regression test for the
 // production memory leak where each leader→follower transition left behind a
 // leaked hbstream.run() goroutine. The leaked goroutines held a strong GC root
