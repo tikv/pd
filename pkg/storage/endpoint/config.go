@@ -29,7 +29,6 @@ import (
 type ConfigStorage interface {
 	// Persisted config will be stored in the storage.
 	LoadConfig(cfg any) (bool, error)
-	LoadConfigWithRevision(ctx context.Context, cfg any) (int64, error)
 	SaveConfig(cfg any) error
 	// Each scheduler has its own customized config, so we need to store them separately.
 	LoadAllSchedulerConfigs() ([]string, []string, error)

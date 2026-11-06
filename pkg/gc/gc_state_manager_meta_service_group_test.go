@@ -26,7 +26,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	pingcaperrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -243,40 +245,184 @@ func TestMetaServiceGroupReportReadDoesNotBlockOtherScopes(t *testing.T) {
 	}
 }
 
-func TestTxnSafePointRejectsStalePreparedReport(t *testing.T) {
+func TestLocalTxnSafePointSerializesReportReads(t *testing.T) {
 	for _, tc := range []struct {
 		name                  string
 		legacy, unified, noOp bool
-		initial               uint64
+		null                  bool
 	}{
-		{name: "modern-after-legacy-advance", initial: 50},
-		{name: "legacy-after-modern-advance", legacy: true, initial: 50},
-		{name: "modern-after-legacy-no-op", noOp: true, initial: 50},
-		{name: "legacy-after-modern-no-op", legacy: true, noOp: true, initial: 50},
-		{name: "unified-after-modern-advance", legacy: true, unified: true, initial: 50},
-		{name: "unified-after-modern-no-op", legacy: true, unified: true, noOp: true, initial: 50},
-		{name: "missing-safe-point"},
+		{name: "modern-null", null: true},
+		{name: "legacy-null", legacy: true, null: true},
+		{name: "modern-unassigned"},
+		{name: "legacy-unassigned", legacy: true},
+		{name: "legacy-unified", legacy: true, unified: true},
+		{name: "legacy-unified-no-op", legacy: true, unified: true, noOp: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
-			ctx := context.Background()
-			opt := newGCStateManagerForTestOptions{}
-			opt.generateKeyspacesByCount(1)
-			scope := uint32(1)
-			if tc.unified {
-				opt.specifyInitialKeyspaces[0].Config[keyspace.GCManagementType] = "unified"
+			scope, source := uint32(1), uint32(1)
+			if tc.null || tc.unified {
 				scope = constant.NullKeyspaceID
+			}
+			if tc.null {
+				source = scope
+			}
+			var rejectPreparation atomic.Bool
+			opt := newGCStateManagerForTestOptions{
+				etcdClientCfgModifier: func(cfg *clientv3.Config) {
+					cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+						// Ordinary local GC reads remain available while the extra standalone
+						// revision read used for preparing external reports is unavailable.
+						if txn, ok := req.(*etcdserverpb.TxnRequest); ok && rejectPreparation.Load() && len(txn.Compare) == 0 && len(txn.Success) == 1 {
+							if read := txn.Success[0].GetRequestRange(); read != nil && string(read.Key) == keypath.TxnSafePointPath(scope) {
+								return errors.New("scope revision preparation unavailable")
+							}
+						}
+						return invoke(ctx, method, req, reply, cc, opts...)
+					}))
+				},
+			}
+			opt.generateKeyspacesByCount(1)
+			if tc.unified {
+				opt.specifyInitialKeyspaces[0].Config[keyspace.GCManagementType] = keyspace.UnifiedGC
 			}
 			storage, provider, manager, clean, cancel := newGCStateManagerForTest(t, opt)
 			t.Cleanup(clean)
 			t.Cleanup(cancel)
 			now := time.Now()
+			_, err := manager.AdvanceTxnSafePoint(scope, 50, now)
+			re.NoError(err)
+			reportKey := keypath.CompatibleTiDBMinStartTSPrefix(scope) + "tidb-local"
+			re.NoError(storage.Save(reportKey, "100"))
+			if tc.unified {
+				re.NoError(storage.Save(keypath.CompatibleTiDBMinStartTSPrefix(source)+"wrong-scope", "20"))
+			}
+			watcher, err := manager.WatchGCStates(context.Background(), true)
+			re.NoError(err)
+			t.Cleanup(watcher.Close)
+
+			reached, queued, resume := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			release := sync.OnceFunc(func() { close(resume) })
+			var metadataReads, reportReads atomic.Int32
+			const metadataHook = "github.com/tikv/pd/pkg/gc/txnSafePointKeyspaceLoaded"
+			const reportHook = "github.com/tikv/pd/pkg/gc/txnSafePointMinStartTSLoaded"
+			re.NoError(failpoint.EnableCall(metadataHook, func() {
+				if metadataReads.Add(1) == 2 {
+					close(queued)
+				}
+			}))
+			re.NoError(failpoint.EnableCall(reportHook, func() {
+				if reportReads.Add(1) == 1 {
+					close(reached)
+					<-resume
+				}
+			}))
+			t.Cleanup(func() {
+				re.NoError(failpoint.Disable(metadataHook))
+				re.NoError(failpoint.Disable(reportHook))
+			})
+			advance := func(id uint32, legacy bool, target uint64) (uint64, error) {
+				if legacy {
+					minimum, _, err := manager.CompatibleUpdateServiceGCSafePoint(id, keypath.GCWorkerServiceSafePointID, target, math.MaxInt64, now)
+					if err != nil {
+						return 0, err
+					}
+					return minimum.SafePoint, nil
+				}
+				result, err := manager.AdvanceTxnSafePoint(id, target, now)
+				return result.NewTxnSafePoint, err
+			}
+			firstDone, secondDone := make(chan struct{}), make(chan struct{})
+			var first, second uint64
+			var firstErr, secondErr error
+			go func() {
+				defer close(firstDone)
+				first, firstErr = advance(source, tc.legacy, 200)
+			}()
+			t.Cleanup(func() {
+				release()
+				<-firstDone
+			})
+			select {
+			case <-reached:
+			case <-time.After(5 * time.Second):
+				t.Fatal("first local report did not reach the pause")
+			}
+			rejectPreparation.Store(true)
+			secondTarget := uint64(200)
+			wantSecond := uint64(150)
+			if tc.noOp {
+				secondTarget, wantSecond = 100, 100
+			}
+			go func() {
+				defer close(secondDone)
+				second, secondErr = advance(scope, !tc.legacy, secondTarget)
+			}()
+			t.Cleanup(func() {
+				release()
+				<-secondDone
+			})
+			select {
+			case <-queued:
+			case <-time.After(5 * time.Second):
+				t.Fatal("overlapping local advancement did not load its routing")
+			}
+			// The queued request must read this report after the first advancement,
+			// and must not acquire an extra prepared-report revision dependency.
+			re.NoError(storage.Save(reportKey, "150"))
+			release()
+			<-firstDone
+			<-secondDone
+			re.NoError(firstErr)
+			re.NoError(secondErr)
+			re.Equal(uint64(100), first)
+			re.Equal(wantSecond, second)
+			persisted, err := provider.LoadTxnSafePoint(scope)
+			re.NoError(err)
+			re.Equal(wantSecond, persisted)
+			for _, expected := range []uint64{100, wantSecond} {
+				change, published, err := watcher.receiveOne(false)
+				re.NoError(err)
+				re.True(published, "both local calls must publish, including a successful no-op")
+				state, upsert := change.Upsert()
+				re.True(upsert)
+				re.Equal(expected, state.TxnSafePoint)
+			}
+			if tc.unified {
+				persisted, err = provider.LoadTxnSafePoint(source)
+				re.NoError(err)
+				re.Zero(persisted, "the redirected request must only write unified GC state")
+			}
+		})
+	}
+}
+
+func TestTxnSafePointRejectsStalePreparedReport(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		legacy, noOp bool
+		initial      uint64
+	}{
+		{name: "modern-after-legacy-advance", initial: 50},
+		{name: "legacy-after-modern-advance", legacy: true, initial: 50},
+		{name: "modern-after-legacy-no-op", noOp: true, initial: 50},
+		{name: "legacy-after-modern-no-op", legacy: true, noOp: true, initial: 50},
+		{name: "missing-safe-point"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := context.Background()
+			scope := uint32(1)
+			storage, manager, groupClient, _ := newMetaServiceGroupGCFixture(t)
+			provider := storage.GetGCStateProvider()
+			now := time.Now()
 			if tc.initial != 0 {
 				_, err := manager.AdvanceTxnSafePoint(scope, tc.initial, now)
 				re.NoError(err)
 			}
-			reportKey := keypath.CompatibleTiDBMinStartTSPrefix(scope) + "tidb-local"
-			re.NoError(storage.Save(reportKey, "200"))
+			reportKey := keypath.CompatibleTiDBMinStartTSPrefix(scope) + "tidb-group"
+			_, err := groupClient.Put(ctx, reportKey, "200")
+			re.NoError(err)
 			watcher, err := manager.WatchGCStates(ctx, true)
 			re.NoError(err)
 			t.Cleanup(watcher.Close)
@@ -313,7 +459,8 @@ func TestTxnSafePointRejectsStalePreparedReport(t *testing.T) {
 
 			// A newer report and a successful advancement invalidate the pending report,
 			// even if the advancement writes the same txn safe point.
-			re.NoError(storage.Save(reportKey, "100"))
+			_, err = groupClient.Put(ctx, reportKey, "100")
+			re.NoError(err)
 			current := uint64(100)
 			if tc.noOp {
 				current = tc.initial
@@ -376,11 +523,6 @@ func TestTxnSafePointRejectsStalePreparedReport(t *testing.T) {
 			_, published, err = watcher.receiveOne(false)
 			re.NoError(err)
 			re.False(published, "a stale report must not publish a GC state")
-			if tc.unified {
-				persisted, err = provider.LoadTxnSafePoint(1)
-				re.NoError(err)
-				re.Zero(persisted, "the source keyspace must remain untouched")
-			}
 		})
 	}
 }
