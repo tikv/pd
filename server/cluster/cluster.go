@@ -201,6 +201,7 @@ type RaftCluster struct {
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
 	tsoAllocator             *tso.Allocator
+	onTSOReady               func(bool)
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
@@ -225,6 +226,12 @@ type RaftCluster struct {
 // SetOnStoreBuried sets the callback invoked when a store is buried.
 func (c *RaftCluster) SetOnStoreBuried(fn func(storeID string)) {
 	c.onStoreBuried.Store(&fn)
+}
+
+// SetTSOReadyCallback installs the embedded TSO readiness callback before the
+// cluster starts. It is called after initialization succeeds and before reset.
+func (c *RaftCluster) SetTSOReadyCallback(fn func(bool)) {
+	c.onTSOReady = fn
 }
 
 // Status saves some state information.
@@ -386,6 +393,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836
 	if !bootstrap {
+		failpoint.InjectCall("beforeTSOInitialized", c.member.ID())
 		checkTSOStart := time.Now()
 		c.checkTSOService()
 		checkTSODuration := time.Since(checkTSOStart)
@@ -393,9 +401,15 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	defer func() {
 		if !bootstrap && err != nil {
+			// Embedded TSO may already be serving. Release the leadership before
+			// resetting it or entering cleanup that can block.
+			c.member.Resign()
 			c.stopTSOJobsIfNeeded()
 		}
 	}()
+	if !bootstrap && c.tsoAllocator.IsInitialize() {
+		failpoint.InjectCall("afterTSOInitialized", c.member.ID())
+	}
 	failpoint.Inject("raftClusterReturn", func(val failpoint.Value) {
 		if val, ok := val.(bool); (ok && val) || !ok {
 			err = errors.New("raftClusterReturn")
@@ -623,10 +637,16 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 		// it means there maybe unexpected error happened before.
 		log.Warn("the TSO allocator is already initialized before, but the cluster is not running")
 	}
+	if c.onTSOReady != nil {
+		c.onTSOReady(true)
+	}
 	return nil
 }
 
 func (c *RaftCluster) stopTSOJobsIfNeeded() {
+	if c.onTSOReady != nil {
+		c.onTSOReady(false)
+	}
 	if c.tsoAllocator == nil || !c.tsoAllocator.IsInitialize() {
 		return
 	}
