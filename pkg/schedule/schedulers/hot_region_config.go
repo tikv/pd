@@ -534,6 +534,12 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.SchedulerCluster) bool {
 	version := cluster.GetSchedulerConfig().GetClusterVersion()
 	querySupport := versioninfo.IsFeatureSupported(version, versioninfo.HotScheduleWithQuery)
+	conf.RLock()
+	if querySupport == conf.lastQuerySupported {
+		conf.RUnlock()
+		return querySupport
+	}
+	conf.RUnlock()
 	conf.Lock()
 	defer conf.Unlock()
 	if querySupport != conf.lastQuerySupported {
@@ -550,6 +556,12 @@ func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.SchedulerCl
 func (conf *hotRegionSchedulerConfig) checkCPUSupport(cluster sche.SchedulerCluster) bool {
 	version := cluster.GetSchedulerConfig().GetClusterVersion()
 	cpuSupport := versioninfo.IsHotScheduleWithCPUSupported(version)
+	conf.RLock()
+	if cpuSupport == conf.lastCPUSupported {
+		conf.RUnlock()
+		return cpuSupport
+	}
+	conf.RUnlock()
 	conf.Lock()
 	defer conf.Unlock()
 	if cpuSupport != conf.lastCPUSupported {

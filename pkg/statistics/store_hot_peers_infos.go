@@ -33,38 +33,53 @@ type StoreHotPeersStat map[uint64]*HotPeersStat
 
 // CollectHotPeerInfos only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,TotalCPURate,Count
 func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*HotPeerStat) *StoreHotPeersInfos {
-	peerLoadSum := make([]float64, utils.DimLen)
-	collect := func(kind constant.ResourceKind) StoreHotPeersStat {
-		ret := make(StoreHotPeersStat, len(stores))
-		for _, store := range stores {
-			id := store.GetID()
-			hotPeers, ok := regionStats[id]
-			if !ok {
-				continue
+	return CollectHotPeerInfosWithObserver(stores, regionStats, nil)
+}
+
+// CollectHotPeerInfosWithObserver sums peer and leader loads in one pass.
+// observe is called once per Store with statistics. Its optional returned
+// function receives each peer and the smoothed loads already read for the sums,
+// allowing other metrics to reuse them without another scan or load reads.
+// Both callbacks run synchronously and do not hold hot-cache locks.
+func CollectHotPeerInfosWithObserver(stores []*core.StoreInfo, regionStats map[uint64][]*HotPeerStat, observe func(*core.StoreInfo) func(*HotPeerStat, Loads)) *StoreHotPeersInfos {
+	result := &StoreHotPeersInfos{
+		AsPeer:   make(StoreHotPeersStat, len(stores)),
+		AsLeader: make(StoreHotPeersStat, len(stores)),
+	}
+	for _, store := range stores {
+		id := store.GetID()
+		hotPeers, ok := regionStats[id]
+		if !ok {
+			continue
+		}
+		var onPeer func(*HotPeerStat, Loads)
+		if observe != nil {
+			onPeer = observe(store)
+		}
+		peers, leaders := &HotPeersStat{Count: len(hotPeers)}, &HotPeersStat{}
+		for _, peer := range hotPeers {
+			var loads Loads
+			for dim := range loads {
+				loads[dim] = peer.GetLoad(dim)
 			}
-			for i := range peerLoadSum {
-				peerLoadSum[i] = 0
+			peers.TotalBytesRate += loads[utils.ByteDim]
+			peers.TotalKeysRate += loads[utils.KeyDim]
+			peers.TotalQueryRate += loads[utils.QueryDim]
+			peers.TotalCPURate += loads[utils.CPUDim]
+			if peer.IsLeader() {
+				leaders.Count++
+				leaders.TotalBytesRate += loads[utils.ByteDim]
+				leaders.TotalKeysRate += loads[utils.KeyDim]
+				leaders.TotalQueryRate += loads[utils.QueryDim]
+				leaders.TotalCPURate += loads[utils.CPUDim]
 			}
-			peers := filterHotPeers(kind, hotPeers)
-			for _, peer := range peers {
-				for j := range peerLoadSum {
-					peerLoadSum[j] += peer.GetLoad(j)
-				}
-			}
-			ret[id] = &HotPeersStat{
-				TotalBytesRate: peerLoadSum[utils.ByteDim],
-				TotalKeysRate:  peerLoadSum[utils.KeyDim],
-				TotalQueryRate: peerLoadSum[utils.QueryDim],
-				TotalCPURate:   peerLoadSum[utils.CPUDim],
-				Count:          len(peers),
+			if onPeer != nil {
+				onPeer(peer, loads)
 			}
 		}
-		return ret
+		result.AsPeer[id], result.AsLeader[id] = peers, leaders
 	}
-	return &StoreHotPeersInfos{
-		AsPeer:   collect(constant.RegionKind),
-		AsLeader: collect(constant.LeaderKind),
-	}
+	return result
 }
 
 // GetHotStatus returns the hot status for a given type.
