@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/url"
 	"runtime/trace"
 	"slices"
@@ -842,6 +843,14 @@ func (c *Cli) processRequestsInner(
 	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
 	start := time.Now()
 	if err := send(queryReq); err != nil {
+		// If the stream is aborted by the server, e.g., the server does not
+		// implement QueryRegion, send returns io.EOF and the actual status can
+		// only be discovered by recv.
+		if errors.Is(err, io.EOF) {
+			if _, recvErr := recv(); recvErr != nil {
+				err = recvErr
+			}
+		}
 		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return nil, err
 	}
