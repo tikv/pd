@@ -369,7 +369,10 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 	}
 	m.RUnlock()
 	for groupID, addresses := range groups {
-		endpoints := splitMetaServiceGroupEndpoints(addresses)
+		endpoints, err := parseMetaServiceGroupEndpoints(addresses)
+		if err != nil {
+			return fmt.Errorf("%w: group %s: %v", errs.ErrMetaServiceGroupUnhealthy, groupID, err)
+		}
 		for _, endpoint := range endpoints {
 			client, err := m.newEtcdClient([]string{endpoint})
 			if err != nil {
@@ -390,7 +393,10 @@ func splitMetaServiceGroupEndpoints(addresses string) []string {
 	rawEndpoints := strings.Split(addresses, ",")
 	endpoints := make([]string, 0, len(rawEndpoints))
 	for _, endpoint := range rawEndpoints {
-		endpoints = append(endpoints, strings.TrimSpace(endpoint))
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint != "" {
+			endpoints = append(endpoints, endpoint)
+		}
 	}
 	return endpoints
 }

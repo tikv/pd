@@ -122,13 +122,16 @@ func (m *MetaServiceGroupManager) newEtcdClient(endpoints []string) (*clientv3.C
 
 func parseMetaServiceGroupEndpoints(addresses string) ([]string, error) {
 	endpoints := splitMetaServiceGroupEndpoints(addresses)
+	if len(endpoints) == 0 {
+		return nil, errors.New("etcd endpoints cannot be empty")
+	}
 	for _, address := range endpoints {
 		value := address
 		if !strings.Contains(value, "://") {
 			value = "http://" + value
 		}
 		u, err := url.Parse(value)
-		if err != nil || address == "" || strings.ContainsAny(address, " \t\r\n") ||
+		if err != nil || strings.ContainsAny(address, " \t\r\n") ||
 			u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") ||
 			u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 			return nil, fmt.Errorf("invalid etcd endpoint %q", address)

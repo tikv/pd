@@ -111,6 +111,36 @@ func TestMetaServiceGroupMinStartTS(t *testing.T) {
 	re.Equal(uint64(200), result.NewTxnSafePoint)
 }
 
+func TestMetaServiceGroupMinStartTSWithTrailingComma(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, groupClient, cleanGroup := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(cleanGroup)
+	opt := newGCStateManagerForTestOptions{
+		metaServiceGroups: map[string]string{"group1": strings.Join(groupClient.Endpoints(), ",") + ","},
+	}
+	opt.generateKeyspacesByCount(1)
+	storage, provider, manager, clean, cancel := newGCStateManagerForTest(t, opt)
+	t.Cleanup(clean)
+	t.Cleanup(cancel)
+	lease, err := groupClient.Grant(ctx, 60)
+	re.NoError(err)
+	_, err = groupClient.Put(ctx, keypath.CompatibleTiDBMinStartTSPrefix(1)+"tidb-group", "100", clientv3.WithLease(lease.ID))
+	re.NoError(err)
+	for _, legacy := range []bool{false, true} {
+		safePoint, err := advanceRoutingTestSafePoint(t, manager, legacy, time.Now())
+		re.NoError(err)
+		re.Equal(uint64(100), safePoint)
+		persisted, err := provider.LoadTxnSafePoint(1)
+		re.NoError(err)
+		re.Equal(uint64(100), persisted)
+	}
+	// The initial file configuration remains usable without a persisted config key.
+	cfg, err := storage.Load(keypath.ConfigPath())
+	re.NoError(err)
+	re.Empty(cfg)
+}
+
 func TestMetaServiceGroupMinStartTSIsolation(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()

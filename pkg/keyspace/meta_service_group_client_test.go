@@ -177,7 +177,7 @@ func TestMetaServiceGroupClientLifecycle(t *testing.T) {
 }
 
 func TestMetaServiceGroupClientInvalidConfig(t *testing.T) {
-	for _, addresses := range []string{"", ",", "http://127.0.0.1:2379,", "http://", "http://host:bad", "http://host/path", "ftp://host:2379"} {
+	for _, addresses := range []string{"", ",", ", , ", "http://", "http://host:bad", "http://host/path", "ftp://host:2379"} {
 		t.Run(addresses, func(t *testing.T) {
 			re := require.New(t)
 			manager := NewMetaServiceGroupManager(nil, map[string]string{"g": addresses}, nil)

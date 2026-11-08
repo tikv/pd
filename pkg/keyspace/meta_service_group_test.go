@@ -342,6 +342,31 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 	re.Equal(endpoint, suite.manager.GetGroups()["healthy"])
 }
 
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelySkipsEmptyEndpoints() {
+	re := suite.Require()
+	_, client, cleanup := etcdutil.NewTestEtcdCluster(suite.T(), 1, nil)
+	defer cleanup()
+	defer func() { re.NoError(suite.manager.Close()) }()
+	address := client.Endpoints()[0]
+	for _, addresses := range []string{address + ",", ", " + address + ", , ", " , , "} {
+		persisted := false
+		err := suite.manager.UpdateGroupsSafely(suite.ctx, map[string]string{"healthy": addresses}, nil, func() error {
+			persisted = true
+			return nil
+		}, nil)
+		if addresses == " , , " {
+			re.ErrorIs(err, errs.ErrMetaServiceGroupUnhealthy)
+			re.False(persisted)
+			continue
+		}
+		re.NoError(err)
+		re.True(persisted)
+		selected, err := suite.manager.getEtcdClient("healthy")
+		re.NoError(err)
+		re.Equal([]string{address}, selected.Endpoints())
+	}
+}
+
 func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyRefreshesTLSConfig() {
 	re := suite.Require()
 	servers, _, cleanup := etcdutil.NewTestEtcdCluster(suite.T(), 1, nil)
