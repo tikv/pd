@@ -878,9 +878,81 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 	// reject the empty regions if the cluster has more regions.
 	for i := uint64(10); i < 111; i++ {
 		tc.PutRegionStores(i, 1, 3, 4)
+		tc.PutRegion(tc.GetRegion(i).Clone(core.SetApproximateSize(1)))
 	}
 	operators, _ = sb.Schedule(tc, false)
 	re.Empty(operators)
+
+	// A small region with keys can still move to a store with fewer regions.
+	tc.UpdateStoreRegionSize(1, 104)
+	tc.UpdateStoreRegionSize(2, 101)
+	tc.UpdateStoreRegionSize(3, 103)
+	tc.UpdateStoreRegionSize(4, 103)
+	region = region.Clone(core.SetApproximateKeys(2000))
+	tc.PutRegion(region)
+	operators, _ = sb.Schedule(tc, false)
+	re.Len(operators, 1)
+	re.Equal(region.GetID(), operators[0].RegionID())
+	operatorutil.CheckTransferPeer(re, operators[0], operator.OpKind(0), 1, 2)
+
+	// Once the move finishes, the remaining size difference is within tolerance.
+	region = region.Clone(core.WithRemoveStorePeer(1), core.WithAddPeer(&metapb.Peer{Id: 9, StoreId: 2}))
+	tc.PutRegion(region)
+	tc.UpdateStoreRegionSize(1, 103)
+	tc.UpdateStoreRegionSize(2, 102)
+	operators, _ = sb.Schedule(tc, false)
+	re.Empty(operators)
+}
+
+func TestBalanceSmallRegionsAfterScaleOut(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest(false)
+	defer cancel()
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(false)
+	tc.SetMaxReplicasWithLabel(false, 3)
+
+	const regionCount = 500
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddRegionStore(id, 0)
+	}
+	for id := uint64(1); id <= regionCount; id++ {
+		region := tc.AddLeaderRegion(id, 1, 2, 3)
+		tc.PutRegion(region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2000)))
+	}
+	for id := uint64(1); id <= 3; id++ {
+		tc.UpdateStoreStatus(id)
+	}
+	// Scale out only after every small region has peers on the original stores.
+	tc.AddRegionStore(4, 0)
+	tc.AddRegionStore(5, 0)
+	scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+	re.NoError(err)
+
+	var idle, moves int
+	for range regionCount * 4 {
+		ops, _ := scheduler.Schedule(tc, false)
+		if len(ops) == 0 {
+			idle++
+			if idle == 10 {
+				break
+			}
+			continue
+		}
+		idle = 0
+		operator.ApplyOperator(tc, ops[0])
+		moves++
+	}
+	re.Equal(10, idle, "balancing should converge instead of moving peers indefinitely")
+	var counts []int
+	for id := uint64(1); id <= 5; id++ {
+		count := tc.GetStoreRegionCount(id)
+		counts = append(counts, count)
+	}
+	t.Logf("peer counts after 3-to-5 scale-out: %v; completed moves: %d", counts, moves)
+	for _, count := range counts {
+		re.InDelta(regionCount*3/5, count, 5)
+	}
 }
 
 func TestConcurrencyUpdateConfig(t *testing.T) {
