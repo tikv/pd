@@ -13,14 +13,13 @@
 // limitations under the License.
 
 // Package balanceplan plans balanced leader/voter targets for the affinity
-// groups of one table. It is a pure computation over an abstract input: it
-// never reads the cluster, takes metadata locks or writes storage, and it
-// does not modify its input.
+// groups of one table. It computes over an abstract input without modifying
+// it or writing storage. Callers may supply an additional placement check.
 //
 // It targets tables whose partitions share their placement rules, the usual
 // case for affinity partition tables. When partitions may use different
-// stores, the plan is still legal and never worse than the input, but its
-// voters may stop at a local optimum that only several coordinated moves
+// stores, the plan still satisfies its abstract rules and is never worse than
+// the input, but its voters may stop at a local optimum that only coordinated moves
 // would leave. Unless the search is cut off, the leaders are optimal for the
 // planned voters and their rule assignment.
 package balanceplan
@@ -76,6 +75,10 @@ type Group struct {
 	// Exclude lists stores this group must not use, such as stores that hold
 	// one of its learners.
 	Exclude []int
+	// CheckTarget applies placement checks not expressed by the abstract rules,
+	// such as isolation across rules with the same role. Nil skips this check.
+	// The current target must already pass; the callback must not modify voters.
+	CheckTarget func(voters []int, leader int) bool
 }
 
 // Input describes one table.
@@ -571,6 +574,9 @@ func (p *planner) visit(g *groupState) bool {
 	}
 	p.l[g.lead]--
 	t, r, leader, ok := p.choose(g)
+	if ok && !g.checkTarget(t, leader) {
+		ok = false
+	}
 	changed := false
 	if ok {
 		changed = leader != g.lead || !sameSet(t, g.cur)
@@ -614,13 +620,17 @@ func (p *planner) visitLeader(g *groupState) bool {
 		if !slices.Contains(hosts, ri) || !p.leaderCapable(g, g.Rules[ri], s) {
 			continue
 		}
-		if a, b := key(s), key(best); slices.Compare(a[:], b[:]) < 0 {
+		if a, b := key(s), key(best); slices.Compare(a[:], b[:]) < 0 && g.checkTarget(g.cur, s) {
 			best = s
 		}
 	}
 	g.lead = best
 	p.l[best]++
 	return best != old
+}
+
+func (g *groupState) checkTarget(voters []int, leader int) bool {
+	return g.CheckTarget == nil || g.CheckTarget(voters, leader)
 }
 
 // revert restores the original target of every changed group whose change is
@@ -721,7 +731,7 @@ func (p *planner) chainLeaders(leaders []int) int64 {
 		}
 		hosts := p.leaderHosts(g)
 		for k, s := range g.cur {
-			if ri := g.curRule[k]; slices.Contains(hosts, ri) && p.leaderCapable(g, g.Rules[ri], s) {
+			if ri := g.curRule[k]; slices.Contains(hosts, ri) && p.leaderCapable(g, g.Rules[ri], s) && g.checkTarget(g.cur, s) {
 				alt = append(alt, s)
 			}
 		}

@@ -190,6 +190,9 @@ func TestLeaderChains(t *testing.T) {
 		{"chain", func(*Group) {}, Score{27, 3}, StopGreedy, 2},
 		{"cannot lead", func(g *Group) { g.CanLead = []bool{true, true, false} }, Score{27, 5}, StopGreedy, 0},
 		{"pinned", func(g *Group) { g.LeaderPinned = true }, Score{27, 5}, StopGreedy, 0},
+		{"placement check", func(g *Group) {
+			g.CheckTarget = func(_ []int, leader int) bool { return leader != 2 }
+		}, Score{27, 5}, StopGreedy, 0},
 		{"follower", func(g *Group) {
 			g.Rules = []*Rule{{Count: 1, Stores: []int{1}}, {Role: RoleFollower, Count: 1, Stores: []int{2}}}
 			g.RuleOf = []int{0, 1}
