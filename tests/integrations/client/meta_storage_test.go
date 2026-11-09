@@ -27,8 +27,10 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -104,6 +106,57 @@ func TestMetaStorageRejectOutOfScope(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp.Kvs, 1)
 	require.Equal(t, "allowed", string(resp.Kvs[0].Value))
+}
+
+func TestMetaStorageProtectTSOTimestamps(t *testing.T) {
+	cli, etcd := newMetaStorageTestClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	key := keypath.TimestampPath(1)
+	expected := time.Now().Round(0)
+	value := typeutil.Uint64ToBytes(uint64(expected.UnixNano()))
+	seed, err := etcd.Put(ctx, key, string(value))
+	require.NoError(t, err)
+	tsoStorage := storage.NewStorageWithEtcdBackend(etcd)
+
+	for _, operation := range []string{"Put", "Delete", "DeleteWithRangeEnd"} {
+		t.Run(operation, func(t *testing.T) {
+			var err error
+			switch operation {
+			case "Put":
+				_, err = cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(key), Value: []byte("invalid"), PrevKv: true})
+			case "Delete":
+				_, err = cli.Delete(ctx, &meta_storagepb.DeleteRequest{Key: []byte(key), PrevKv: true})
+			case "DeleteWithRangeEnd":
+				_, err = cli.Delete(ctx, &meta_storagepb.DeleteRequest{
+					Key: []byte(key), RangeEnd: []byte(clientv3.GetPrefixRangeEnd("/ms/")), PrevKv: true,
+				})
+			}
+			require.Equal(t, codes.PermissionDenied, status.Code(err))
+			stored, err := etcd.Get(ctx, key)
+			require.NoError(t, err)
+			require.Len(t, stored.Kvs, 1)
+			require.Equal(t, value, stored.Kvs[0].Value)
+			loaded, err := tsoStorage.LoadTimestamp(1)
+			require.NoError(t, err)
+			require.Equal(t, expected, loaded)
+		})
+	}
+
+	// Reading and watching an existing timestamp remain compatible.
+	read, err := cli.Get(ctx, &meta_storagepb.GetRequest{Key: []byte(key)})
+	require.NoError(t, err)
+	require.Nil(t, read.GetHeader().GetError())
+	require.Len(t, read.Kvs, 1)
+	require.Equal(t, value, read.Kvs[0].Value)
+	watch, err := cli.Watch(ctx, &meta_storagepb.WatchRequest{Key: []byte(key), StartRevision: seed.Header.Revision})
+	require.NoError(t, err)
+	event, err := watch.Recv()
+	require.NoError(t, err)
+	require.Nil(t, event.GetHeader().GetError())
+	require.Len(t, event.Events, 1)
+	require.Equal(t, key, string(event.Events[0].GetKv().GetKey()))
+	require.Equal(t, value, event.Events[0].GetKv().GetValue())
 }
 
 func TestMetaStorageNamespaceCompatibility(t *testing.T) {

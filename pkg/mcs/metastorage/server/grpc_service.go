@@ -127,6 +127,21 @@ func validateMetaStorageAccess(key, rangeEnd []byte) error {
 	return status.Error(codes.PermissionDenied, "meta storage access is outside the allowed key prefixes")
 }
 
+// validateMetaStorageWriteAccess keeps persisted TSO windows under the control of
+// TSO storage while preserving the existing discovery reads and watches.
+func validateMetaStorageWriteAccess(key, rangeEnd []byte) error {
+	if err := validateMetaStorageAccess(key, rangeEnd); err != nil {
+		return err
+	}
+	if start := string(key); strings.HasPrefix(start, "/ms/") {
+		parts := strings.SplitN(start, "/", 8)
+		if len(parts) == 7 && parts[3] == "tso" && parts[5] == "gta" && parts[6] == "timestamp" {
+			return status.Error(codes.PermissionDenied, "meta storage cannot modify persisted TSO timestamps")
+		}
+	}
+	return nil
+}
+
 // Watch watches the key with a given prefix and revision.
 func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.MetaStorage_WatchServer) error {
 	if err := s.checkServing(); err != nil {
@@ -263,7 +278,7 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	if err := validateMetaStorageAccess(req.GetKey(), nil); err != nil {
+	if err := validateMetaStorageWriteAccess(req.GetKey(), nil); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -302,7 +317,7 @@ func (s *Service) Delete(ctx context.Context, req *meta_storagepb.DeleteRequest)
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	if err := validateMetaStorageAccess(req.GetKey(), req.GetRangeEnd()); err != nil {
+	if err := validateMetaStorageWriteAccess(req.GetKey(), req.GetRangeEnd()); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
