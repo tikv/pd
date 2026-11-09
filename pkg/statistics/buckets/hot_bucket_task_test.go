@@ -16,6 +16,7 @@ package buckets
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -106,6 +107,89 @@ func TestCheckBucketsTask(t *testing.T) {
 		re.Len(item, 1)
 		re.Equal(-2, item[0].HotDegree)
 	})
+}
+
+func TestCheckBucketsTaskIgnoresIncompleteStats(t *testing.T) {
+	testCases := []struct {
+		name   string
+		mutate func(*metapb.Buckets)
+	}{
+		{name: "missing-stats", mutate: func(b *metapb.Buckets) { b.Stats = nil }},
+		{name: "empty-stats", mutate: func(b *metapb.Buckets) { b.Stats = &metapb.BucketStats{} }},
+		{name: "short-read-bytes", mutate: func(b *metapb.Buckets) { b.Stats.ReadBytes = b.Stats.ReadBytes[:1] }},
+		{name: "short-read-keys", mutate: func(b *metapb.Buckets) { b.Stats.ReadKeys = b.Stats.ReadKeys[:1] }},
+		{name: "short-read-qps", mutate: func(b *metapb.Buckets) { b.Stats.ReadQps = b.Stats.ReadQps[:1] }},
+		{name: "short-write-bytes", mutate: func(b *metapb.Buckets) { b.Stats.WriteBytes = b.Stats.WriteBytes[:1] }},
+		{name: "short-write-keys", mutate: func(b *metapb.Buckets) { b.Stats.WriteKeys = b.Stats.WriteKeys[:1] }},
+		{name: "short-write-qps", mutate: func(b *metapb.Buckets) { b.Stats.WriteQps = b.Stats.WriteQps[:1] }},
+		{name: "missing-keys", mutate: func(b *metapb.Buckets) { b.Keys = nil }},
+		{name: "single-key", mutate: func(b *metapb.Buckets) { b.Keys = b.Keys[:1] }},
+		{name: "nil-buckets"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				cache := NewBucketsCache(t.Context())
+				keys := [][]byte{[]byte("10"), []byte("20"), []byte("30")}
+				initial := newTestBuckets(1, 1, keys, 0)
+				re.True(cache.CheckAsync(NewCheckPeerTask(initial)))
+				before := getAllBucketStats(t.Context(), cache)
+				re.Len(before[1], 2)
+
+				var report *metapb.Buckets
+				if testCase.mutate != nil {
+					report = newTestBuckets(1, 2, [][]byte{[]byte("10"), []byte("15"), []byte("30")}, 1000)
+					testCase.mutate(report)
+				}
+				re.True(cache.CheckAsync(NewCheckPeerTask(report)))
+				re.Equal(before, getAllBucketStats(t.Context(), cache))
+
+				valid := newTestBuckets(1, 3, keys, 1000)
+				re.True(cache.CheckAsync(NewCheckPeerTask(valid)))
+				after := getAllBucketStats(t.Context(), cache)
+				re.Len(after[1], 2)
+				for _, stat := range after[1] {
+					re.Equal([]uint64{1000, 1000, 1000, 1000, 1000, 1000}, stat.Loads)
+				}
+			})
+		})
+	}
+}
+
+func TestCheckBucketsTaskAcceptsCompleteStats(t *testing.T) {
+	for _, period := range []uint64{0, 1000} {
+		for _, extraStats := range []bool{false, true} {
+			t.Run(fmt.Sprintf("period-%d/extra-stats-%t", period, extraStats), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					re := require.New(t)
+					cache := NewBucketsCache(t.Context())
+					keys := [][]byte{[]byte("10"), []byte("20"), []byte("30")}
+					if extraStats {
+						keys = append(keys, []byte("40"))
+					}
+					report := newTestBuckets(1, 1, keys, 1000)
+					report.Keys = report.Keys[:3]
+					report.PeriodInMs = period
+					re.True(cache.CheckAsync(NewCheckPeerTask(report)))
+					stats := getAllBucketStats(t.Context(), cache)
+					re.Len(stats[1], 2)
+
+					interval := period
+					if interval == 0 {
+						interval = 10000
+					}
+					load := 1000 * 1000 / interval
+					for i, stat := range stats[1] {
+						re.Equal(report.Keys[i], stat.StartKey)
+						re.Equal(report.Keys[i+1], stat.EndKey)
+						re.Equal(interval, stat.Interval)
+						re.Equal([]uint64{load, load, load, load, load, load}, stat.Loads)
+					}
+				})
+			})
+		}
+	}
 }
 
 func TestCollectBucketStatsTask(t *testing.T) {

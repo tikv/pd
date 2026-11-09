@@ -21,11 +21,13 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -189,11 +191,19 @@ func TestHandleAskBatchSplitSkipsSplitScatterForSizeReason(t *testing.T) {
 		newSplitScatterRegion(splitRegionID, []byte("m"), []byte(""), splitScatterReportedCPUUsage),
 	))
 
+	dispatched := make(chan struct{})
+	notifyDispatched := sync.OnceFunc(func() { close(dispatched) })
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/schedule/checker/afterSplitScatterDispatch", notifyDispatched))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/afterSplitScatterDispatch"))
+	})
 	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
-		// PatrolRegions uses a ticker; wait for at least one tick interval
-		// so the dispatch phase is guaranteed to have executed.
-		time.Sleep(100 * time.Millisecond)
-		return true
+		select {
+		case <-dispatched:
+			return true
+		default:
+			return false
+		}
 	})
 
 	re.Nil(cluster.GetOperatorController().GetOperator(splitRegionID))

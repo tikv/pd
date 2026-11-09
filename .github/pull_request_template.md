@@ -63,6 +63,55 @@ Related changes
 - PR to update [`pingcap/tiup`](https://github.com/pingcap/tiup):
 - Need to cherry-pick to the release branch
 
+### Design trade-offs
+
+<!--
+
+Alternatives a reviewer is likely to ask about, and why they do not work.
+The reason for the final approach goes in the commit message above. Write `None` if there is no real alternative.
+
+-->
+
+### Verification
+
+<!--
+
+What the tests show, beyond the test types listed above. One row per claim, meaning something this PR must make true,
+with the test or command that shows it, its result,
+and any condition it needs (for example, failpoints enabled or `NEXT_GEN=1`). Put manual test steps here.
+For a bug fix, show that the new test fails without the fix, or explain why it cannot.
+Commit is the commit the evidence was collected on; append `(on <commit>)` to a row that used a different one.
+
+-->
+
+Commit:
+
+| Claim | Evidence |
+| --- | --- |
+|  |  |
+
+Not verified:
+
+### Risks and rollback
+
+<!--
+
+Explain the items kept under Code changes and Side effects, plus any other failure mode.
+Say whether the change can be rolled back, and whether downgrading PD is still safe.
+Write `None` if there is nothing beyond the check list.
+
+-->
+
+### Questions for reviewers
+
+<!--
+
+Decisions a reviewer needs to make, such as a changed contract, a compatibility trade-off, or a residual risk to accept,
+and the places the author is least sure about. This is where to start reviewing, not a limit on what to review.
+Write `None` if there is nothing to decide.
+
+-->
+
 ### Release note
 
 <!--

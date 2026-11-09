@@ -137,7 +137,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	c.adjustLog(configMetaData.Child("log"))
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 

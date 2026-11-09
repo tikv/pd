@@ -358,7 +358,12 @@ func (c *Config) Validate() error {
 
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
-	configMetaData := configutil.NewConfigMetadata(meta)
+	return c.AdjustWithMetadata(configutil.NewConfigMetadata(meta), reloading)
+}
+
+// AdjustWithMetadata is used to adjust the PD configurations whose metadata may
+// be nested in a larger configuration file.
+func (c *Config) AdjustWithMetadata(configMetaData *configutil.ConfigMetaData, reloading bool) error {
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
 	}
@@ -475,7 +480,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.Microservice.adjust(configMetaData.Child("micro-service"))
 
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 

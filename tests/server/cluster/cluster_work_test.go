@@ -187,8 +187,7 @@ func (s *raftClusterTestSuite) checkAskSplit(cluster *tests.TestCluster) {
 	_, err = rc.HandleAskBatchSplit(req1)
 	re.ErrorIs(err, errs.ErrSchedulerTiKVSplitDisabled)
 	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]any{"schedule.enable-tikv-split-region": 0}, 0))
-	// wait ttl config takes effect
-	time.Sleep(time.Second)
+	testutil.Eventually(re, leaderServer.GetPersistOptions().IsTikvRegionSplitEnabled)
 
 	_, err = rc.HandleAskSplit(req)
 	re.NoError(err)

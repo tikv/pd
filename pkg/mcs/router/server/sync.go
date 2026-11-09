@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -106,6 +107,7 @@ const (
 	msgSize              = 8 * units.MiB
 	retryInterval        = time.Second
 	memberUpdateInterval = time.Minute
+	requestTimeout       = 3 * time.Second
 )
 
 func (s *RegionSyncer) getClient() *clientv3.Client {
@@ -127,33 +129,23 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
 		} else {
-			for _, ep := range members.Members {
-				if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
-					log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
-					continue
-				}
-				status, err := s.getClient().Status(s.serverCtx, ep.ClientURLs[0])
-				if err != nil {
-					log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
-					continue
-				}
-				if status.Leader != ep.ID {
-					continue
-				}
-				leaderAddr := ep.ClientURLs[0]
-				if s.pdLeaderAddr.CompareAndSwap(s.pdLeaderAddr.Load(), leaderAddr) {
+			etcdutil.ScanEtcdLeader(s.serverCtx, s.getClient(), members.Members, requestTimeout,
+				func(ep *etcdserverpb.Member, status *clientv3.StatusResponse) bool {
+					leaderAddr := ep.ClientURLs[0]
+					if !s.pdLeaderAddr.CompareAndSwap(s.pdLeaderAddr.Load(), leaderAddr) {
+						return false
+					}
 					if status.Leader != curLeader {
-						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", leaderAddr))
 						select {
 						case <-s.serverCtx.Done():
-							return
+							return true
 						case s.reconnectCh <- true:
 						}
 					}
 					curLeader = ep.ID
-					break
-				}
-			}
+					return true
+				})
 		}
 
 		select {
