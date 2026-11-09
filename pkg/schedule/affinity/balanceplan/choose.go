@@ -126,8 +126,8 @@ func (rs *ruleSearch) done() bool {
 // is then given to each claimant in turn and forbidden to the others. A
 // forced voter must stay but may fit any rule that accepts it, so each such
 // assignment is tried, the current one first. The cost is a sum over rules,
-// so a search that ends within its bounds is exact. One that is cut off
-// returns the best target found; it is never worse than the current target,
+// so without CheckTarget a search that ends within its bounds is exact. One
+// that is cut off returns the best target found; it is never worse than the current target,
 // because the current leader's rule is searched first and its search starts
 // with the current assignment.
 func (p *planner) choose(g *groupState) (voters, rules []int, leader int, ok bool) {
@@ -143,7 +143,7 @@ func (p *planner) choose(g *groupState) (voters, rules []int, leader int, ok boo
 			return nil, nil, 0, false
 		}
 		c, ok := p.pickRule(g, 0, forced, nil, true)
-		if !ok || c.leader < 0 {
+		if !ok || c.leader < 0 || !g.checkTarget(c.sel, c.leader) {
 			return nil, nil, 0, false
 		}
 		return c.sel, make([]int, len(c.sel)), c.leader, true
@@ -277,6 +277,27 @@ func (p *planner) searchRules(g *groupState, host int, must, forbid [][]int, rs 
 		}
 	}
 	sol.ok = sol.leader >= 0
+	if sol.ok && !g.checkTarget(sol.voters, sol.leader) {
+		var best solution
+		// Any different voter set omits at least one selected store. Reuse
+		// the bounded conflict search to try those alternatives.
+		for ri, c := range sels {
+			for _, s := range c.sel {
+				if rs.done() {
+					return best
+				}
+				if slices.Contains(must[ri], s) {
+					continue
+				}
+				next := slices.Clone(forbid)
+				next[ri] = append(slices.Clone(forbid[ri]), s)
+				if alt := p.searchRules(g, host, must, next, rs); alt.ok && (!best.ok || alt.c.cmp(best.c) < 0) {
+					best = alt
+				}
+			}
+		}
+		return best
+	}
 	return sol
 }
 

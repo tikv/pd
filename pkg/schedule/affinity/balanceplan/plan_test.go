@@ -459,6 +459,35 @@ func TestUnforcedSearchRespectsStop(t *testing.T) {
 	}
 }
 
+func TestRejectedTargetsRespectStop(t *testing.T) {
+	for _, stop := range []StopReason{StopCanceled, StopBudget} {
+		t.Run(string(stop), func(t *testing.T) {
+			re := require.New(t)
+			in := general(1, 300, 2, 1)
+			g := &in.Groups[0]
+			g.Rules = []*Rule{{Count: 1, Stores: []int{0}}, {Count: 1, Stores: g.Rules[0].Stores[1:]}}
+			g.RuleOf, g.Forced = []int{0, 1}, []int{0}
+			in.BaseVoters[1] = 5
+			rejected := false
+			g.CheckTarget = func(voters []int, leader int) bool {
+				ok := sameSet(voters, g.Voters) && leader == g.Leader
+				rejected = rejected || !ok
+				return ok
+			}
+			opt := Options{Cancel: func() bool { return stop == StopCanceled && rejected }}
+			if stop == StopBudget {
+				opt.WorkBudget = 1000
+			}
+			r := Plan(in, opt)
+			re.True(rejected)
+			re.Equal(stop, r.Stop)
+			re.Equal(r.Baseline, r.Score)
+			re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score)
+			re.LessOrEqual(r.Work, int64(1600))
+		})
+	}
+}
+
 // initialize places groups in input order using only the preceding groups' loads.
 func initialize(in *Input) {
 	placed := &Input{Stores: in.Stores, BaseVoters: slices.Clone(in.BaseVoters), BaseLeaders: slices.Clone(in.BaseLeaders)}

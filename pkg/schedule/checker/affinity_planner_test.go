@@ -73,4 +73,23 @@ func TestAffinityPlannerSameRoleIsolation(t *testing.T) {
 		re.ElementsMatch([]int{0, 2}, voters)
 		re.True(in.Groups[i].CheckTarget(voters, checked.Leaders[i]))
 	}
+	// Rejecting the cheapest choice must still leave the new zone-b store usable.
+	tc.AddRegionStore(4, 10)
+	tc.SetStoreLabel(4, map[string]string{"zone": "b", "id": "4"})
+	second := c.ruleManager.GetRule(placement.DefaultGroupID, "1")
+	second.LabelConstraints[0].Values = []string{"2", "3", "4"}
+	re.NoError(c.ruleManager.SetRule(second))
+	in.Stores = 4
+	for _, rule := range rules {
+		rule.Location = append(rule.Location, []int32{1})
+	}
+	rules[1].Stores = append(rules[1].Stores, 3)
+	for i := range in.Groups {
+		in.Groups[i].CanLead = append(in.Groups[i].CanLead, true)
+	}
+	expanded := balanceplan.Plan(in, balanceplan.Options{Seed: 7})
+	re.Equal(balanceplan.Score{Voter: 6, Leader: 2}, expanded.Score)
+	for i, voters := range expanded.Voters {
+		re.True(in.Groups[i].CheckTarget(voters, expanded.Leaders[i]))
+	}
 }

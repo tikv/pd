@@ -574,9 +574,6 @@ func (p *planner) visit(g *groupState) bool {
 	}
 	p.l[g.lead]--
 	t, r, leader, ok := p.choose(g)
-	if ok && !g.checkTarget(t, leader) {
-		ok = false
-	}
 	changed := false
 	if ok {
 		changed = leader != g.lead || !sameSet(t, g.cur)
