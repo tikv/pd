@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"net/http"
 	"strings"
@@ -221,16 +220,13 @@ func (s *Server) newEtcdGatewayHandler(cfg *embed.Config) (*etcdGateway, error) 
 					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 					w.Header().Set("X-Content-Type-Options", "nosniff")
 					w.WriteHeader(http.StatusBadRequest)
-					if _, err := fmt.Fprintln(w, "CommonName of client sending a request against gateway will be ignored and not used as expected"); err != nil {
-						log.Warn("failed to write etcd gateway error", zap.Error(err))
-					}
+					w.Write([]byte("CommonName of client sending a request against gateway will be ignored and not used as expected\n"))
 					return
 				}
 			}
 		}
 		handler, err := gateway()
 		if err != nil {
-			log.Error("failed to initialize etcd gateway", zap.Error(err))
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
