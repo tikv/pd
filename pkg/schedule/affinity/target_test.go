@@ -155,6 +155,46 @@ func TestSyncRecreatedAffinityGroup(t *testing.T) {
 	}
 }
 
+func TestRecreatedGroupKeepsRangeConflict(t *testing.T) {
+	for _, path := range []string{"watcher", "policy"} {
+		t.Run(path, func(t *testing.T) {
+			re := require.New(t)
+			m, store := newTargetTestManager(t)
+			re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}, {GroupID: "h"}}))
+			for _, id := range []string{"g", "h"} {
+				data, err := json.Marshal(MakeLabelRule(GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}))
+				re.NoError(err)
+				rule, err := labeler.NewLabelRuleFromJSON(data)
+				re.NoError(err)
+				re.NoError(m.SyncKeyRangesFromEtcd(rule))
+			}
+			m.ReconcileRangeConflicts()
+			before := m.GetAffinityGroupState("g")
+			re.True(before.rangeConflict)
+			recreated := before.Group
+			recreated.CreateTimestamp++
+			if path == "watcher" {
+				m.SyncGroupFromEtcd(&recreated)
+			} else {
+				re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+					return store.SaveAffinityGroup(txn, "g", &recreated)
+				}))
+				_, err := m.UpdateAffinityGroupPolicy("g", BalancePolicyAuto)
+				re.NoError(err)
+			}
+			after := m.GetAffinityGroupState("g")
+			re.NotSame(before.groupInfoPtr, after.groupInfoPtr)
+			re.True(after.rangeConflict)
+			re.Equal(1, after.RangeCount)
+			re.True(after.RegularSchedulingAllowed)
+			re.False(after.AffinitySchedulingAllowed)
+			m.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID("h"))
+			m.ReconcileRangeConflicts()
+			re.False(m.GetAffinityGroupState("g").rangeConflict)
+		})
+	}
+}
+
 func TestTargetAvailability(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()

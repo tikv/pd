@@ -633,6 +633,9 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		m.initGroupLocked(group)
 		// The label watcher will not resend an unchanged rule for the new instance.
 		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
+		// The ranges are unchanged, so keep their conflict state until the
+		// watcher's next batch reconciliation, including any pending changes.
+		m.groups[group.ID].rangeConflict = groupInfo.rangeConflict
 		return true
 	}
 	policyChanged := groupInfo.BalancePolicy != group.BalancePolicy
