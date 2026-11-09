@@ -49,15 +49,15 @@ type affinitySplitAttempt struct {
 	expiresAt     time.Time
 	// split is the last split operator of the attempt. The operator controller
 	// starts an operator when it admits it, and then sends the split request.
-	// startedAt is the start time of the first split that started, and zero
-	// until then.
+	// startedAt is the first split start time, or the time the checker starts
+	// waiting for an unknown size. It is zero until either wait starts.
 	split *operator.Operator
 }
 
 // isRegionSizeUnknown returns whether PD has no reported size for the current
 // range of the Region. PD then shows 0, the size of an empty Region or the size
-// from before a split or merge, so the affinity checker neither moves nor merges
-// the Region.
+// from before a split or merge. Affinity merge waits for a reported size;
+// affinity moves wait up to affinitySplitWaitTimeout.
 func isRegionSizeUnknown(region *core.RegionInfo) bool {
 	return region.GetApproximateSize() <= 0 || region.IsApproximateSizeUnknown()
 }
@@ -65,9 +65,9 @@ func isRegionSizeUnknown(region *core.RegionInfo) bool {
 // prepareAffinityPeerMove requests a SCAN split before adding a voter when size
 // or keys exceed TiKV's ordinary split thresholds. It only looks at this Region:
 // each child is checked on a later patrol after its heartbeat reports it, and an
-// unchanged epoch can move after the split wait timeout. An attempt belongs to
-// one move: other target voters start a new one, and Check removes it once the
-// Region is at the target.
+// unchanged epoch can move after the size or split wait timeout. Attempts belong
+// to one move: other target voters start a new one, and Check removes an attempt
+// once the Region is at the target.
 func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState) (*operator.Operator, bool) {
 	if !slices.ContainsFunc(group.VoterStoreIDs, func(id uint64) bool { return region.GetStorePeer(id) == nil }) {
 		return nil, true
@@ -78,15 +78,13 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			zap.String("group-id", group.ID), zap.String("reason", reason))
 		return nil, false
 	}
-	if isRegionSizeUnknown(region) {
-		return wait("unknown-size")
-	}
+	sizeUnknown := isRegionSizeUnknown(region)
 	storeConfig := c.cluster.GetStoreConfig()
 	var (
 		attempt   affinitySplitAttempt
 		splitWait time.Duration
 	)
-	if uint64(region.GetApproximateSize()) > storeConfig.GetRegionSplitSize() ||
+	if sizeUnknown || uint64(region.GetApproximateSize()) > storeConfig.GetRegionSplitSize() ||
 		uint64(region.GetApproximateKeys()) > storeConfig.GetRegionSplitKeys() {
 		now := time.Now()
 		attempt = affinitySplitAttempt{
@@ -101,17 +99,28 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 				attempt = previous
 			}
 		}
+		// A newly reported size must not reuse the wait for an unknown size.
+		if !sizeUnknown && attempt.split == nil {
+			attempt.startedAt = time.Time{}
+		}
 		// A split that the controller rejects or cancels before it starts, for
 		// example because the waiting queue is full, sends no request, so the
 		// wait does not start and the next patrol requests the split again.
 		if attempt.startedAt.IsZero() && attempt.split != nil {
 			attempt.startedAt = attempt.split.GetStartTime()
 		}
+		if sizeUnknown && attempt.startedAt.IsZero() {
+			attempt.startedAt = now
+		}
 		attempt.expiresAt = now.Add(affinitySplitCacheTTL)
 		if !attempt.startedAt.IsZero() {
 			splitWait = now.Sub(attempt.startedAt)
 		}
 		if splitWait <= affinitySplitWaitTimeout {
+			if sizeUnknown {
+				c.splitAttempts.Put(region.GetID(), attempt)
+				return wait("unknown-size")
+			}
 			op, err := operator.CreateSplitRegionOperator("affinity-split-region", region,
 				operator.OpAffinity|operator.OpSplit, pdpb.CheckPolicy_SCAN, nil)
 			if err != nil {
@@ -133,8 +142,8 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if time.Since(c.startTime) < recentMergeTTL || c.recentMergeCache.Exists(region.GetID()) {
 		return wait("recent-merge-or-startup")
 	}
-	// The engine may have no split key at all, so a timed-out attempt moves
-	// without a preliminary split and accepts the large snapshot.
+	// The engine may have no split key or reported size, so a timed-out attempt
+	// moves without a preliminary split and accepts a potentially large snapshot.
 	if splitWait > affinitySplitWaitTimeout {
 		log.Debug("allow affinity peer move after split wait timeout", zap.Uint64("region-id", region.GetID()),
 			zap.String("group-id", group.ID), zap.Int64("size", region.GetApproximateSize()),
