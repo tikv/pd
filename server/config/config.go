@@ -360,9 +360,7 @@ func (c *Config) Validate() error {
 		if c.Security.CAPath == "" || c.Security.CertPath == "" || c.Security.KeyPath == "" {
 			return errors.New("security.client-cert-allowed-cn requires cacert-path, cert-path and key-path")
 		}
-		clientURLs := c.ClientUrls
-		configutil.AdjustString(&clientURLs, defaultClientUrls)
-		urls, err := parseUrls(clientURLs)
+		urls, err := parseUrls(c.ClientUrls)
 		if err != nil {
 			return err
 		}
