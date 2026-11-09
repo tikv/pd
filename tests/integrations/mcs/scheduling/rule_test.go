@@ -79,7 +79,7 @@ func (suite *ruleTestSuite) TearDownSuite() {
 
 // TestAffinityOverlapStartup checks that PD and the scheduling service start with
 // persisted overlapping affinity ranges and resume the remaining group once the
-// conflict is repaired.
+// conflict is repaired. Nonconflicting pairs cover initial load and live writes.
 func (suite *ruleTestSuite) TestAffinityOverlapStartup() {
 	re := suite.Require()
 	raftCluster := suite.pdLeaderServer.GetRaftCluster()
@@ -105,11 +105,28 @@ func (suite *ruleTestSuite) TestAffinityOverlapStartup() {
 	re.NoError(raftCluster.Start(suite.pdLeaderServer.GetServer(), false))
 	re.True(raftCluster.IsRunning())
 	pdManager := raftCluster.GetAffinityManager()
-	defer func() { re.NoError(pdManager.DeleteAffinityGroups([]string{"overlap-a", "overlap-b"}, true)) }()
+	ids := []string{"overlap-a", "overlap-b", "paired-snapshot", "paired-watch"}
+	defer func() { re.NoError(pdManager.DeleteAffinityGroups(ids, true)) }()
+	changes := []affinity.GroupKeyRanges{
+		{GroupID: "paired-snapshot", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("x"), EndKey: []byte("y")}}},
+		{GroupID: "paired-watch", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("y"), EndKey: []byte("z")}}},
+	}
+	re.NoError(pdManager.CreateAffinityGroups(changes[:1]))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
-	manager := tc.WaitForPrimaryServing(re).GetCluster().GetAffinityManager()
+	cluster := tc.WaitForPrimaryServing(re).GetCluster()
+	manager, regionLabeler := cluster.GetAffinityManager(), cluster.GetRegionLabeler()
+	re.NoError(pdManager.CreateAffinityGroups(changes[1:]))
+	testutil.Eventually(re, func() bool {
+		for _, change := range changes {
+			state := manager.GetAffinityGroupState(change.GroupID)
+			if state == nil || state.RangeCount != 1 || regionLabeler.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)) == nil {
+				return false
+			}
+		}
+		return true
+	})
 	region := core.NewRegionInfo(&metapb.Region{Id: 10, StartKey: []byte("b"), EndKey: []byte("c")}, nil)
 	for _, m := range []*affinity.Manager{pdManager, manager} {
 		for _, groupRanges := range ranges {
@@ -128,6 +145,15 @@ func (suite *ruleTestSuite) TestAffinityOverlapStartup() {
 	testutil.Eventually(re, func() bool {
 		group, _ := manager.GetRegionAffinityGroupState(region)
 		return group != nil && group.ID == "overlap-b"
+	})
+	re.NoError(pdManager.DeleteAffinityGroups(ids, true))
+	testutil.Eventually(re, func() bool {
+		for _, id := range ids {
+			if manager.IsGroupExist(id) || regionLabeler.GetLabelRule(affinity.GetLabelRuleID(id)) != nil {
+				return false
+			}
+		}
+		return true
 	})
 }
 
@@ -270,43 +296,6 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.Equal(labelRule.ID, labelRules[1].ID)
 	re.Equal(labelRule.Labels, labelRules[1].Labels)
 	re.Equal(labelRule.RuleType, labelRules[1].RuleType)
-}
-
-// TestAffinityGroupRuleTransactions checks that the scheduling service loads and
-// watches the groups and label rules that PD writes in pairs.
-func (suite *ruleTestSuite) TestAffinityGroupRuleTransactions() {
-	re := suite.Require()
-	apiManager := suite.pdLeaderServer.GetRaftCluster().GetAffinityManager()
-	changes := []affinity.GroupKeyRanges{
-		{GroupID: "paired-snapshot", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
-		{GroupID: "paired-watch", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
-	}
-	// The first pair exists before the scheduling service starts.
-	re.NoError(apiManager.CreateAffinityGroups(changes[:1]))
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
-	re.NoError(err)
-	defer tc.Destroy()
-	cluster := tc.WaitForPrimaryServing(re).GetCluster()
-	manager, regionLabeler := cluster.GetAffinityManager(), cluster.GetRegionLabeler()
-	re.NoError(apiManager.CreateAffinityGroups(changes[1:]))
-	testutil.Eventually(re, func() bool {
-		for _, change := range changes {
-			state := manager.GetAffinityGroupState(change.GroupID)
-			if state == nil || state.RangeCount != 1 || regionLabeler.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)) == nil {
-				return false
-			}
-		}
-		return true
-	})
-	re.NoError(apiManager.DeleteAffinityGroups([]string{changes[0].GroupID, changes[1].GroupID}, true))
-	testutil.Eventually(re, func() bool {
-		for _, change := range changes {
-			if manager.IsGroupExist(change.GroupID) || regionLabeler.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)) != nil {
-				return false
-			}
-		}
-		return true
-	})
 }
 
 func (suite *ruleTestSuite) TestSchedulingSwitch() {
