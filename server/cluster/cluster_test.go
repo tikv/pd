@@ -602,6 +602,113 @@ func TestStoreClusterVersion(t *testing.T) {
 	re.Equal(s1.Version, cluster.GetClusterVersion())
 }
 
+<<<<<<< HEAD
+=======
+func TestBucketCompatibility(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	opt.SetRegionBucketEnabled(true)
+	defer func() {
+		opt.SetRegionBucketEnabled(false)
+	}()
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+
+	// tikv carry bucket meta first, pd update region's bucket by region heartbeat
+	region := core.NewTestRegionInfo(1, 1, []byte{'a'}, []byte{'d'})
+	bucket1 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  2,
+		Keys:     [][]byte{{'a'}, {'d'}},
+	}
+	region1 := region.Clone()
+	re.True(region1.UpdateBuckets(bucket1, nil))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region1))
+	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
+
+	// tikv downgrade, send region heartbeat without bucket meta, pd should keep region's bucket with report buckets.
+	region2 := region.Clone(core.WithIncVersion())
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region2))
+	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
+	bucket2 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  3,
+		Keys:     [][]byte{{'a'}, {'d'}},
+	}
+	_, err = cluster.processRegionBuckets(bucket2)
+	re.NoError(err)
+	re.Equal(bucket2, cluster.GetRegion(1).GetBuckets())
+
+	region3 := region2.Clone(core.WithIncVersion())
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region3))
+	re.Equal(bucket2, cluster.GetRegion(1).GetBuckets())
+
+	// tikv upgrade, send region heartbeat with bucket meta and report bucket stream enabled
+	bucket3 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  4,
+		Keys:     [][]byte{{'a'}, {'e'}},
+	}
+	region4 := region3.Clone(core.WithIncVersion(), core.SetBuckets(bucket3))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region4))
+	re.Equal(bucket3, cluster.GetRegion(1).GetBuckets())
+	bucket4 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  5,
+		Keys:     [][]byte{{'a'}, {'e'}},
+	}
+	_, err = cluster.processRegionBuckets(bucket4)
+	re.NoError(err)
+	re.Equal(bucket3, cluster.GetRegion(1).GetBuckets())
+	re.Equal(bucket4, cluster.GetRegion(1).GetReportBuckets())
+}
+
+func TestStaleBucketMeta(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	opt.SetRegionBucketEnabled(true)
+	defer func() {
+		opt.SetRegionBucketEnabled(false)
+	}()
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+
+	region := core.NewTestRegionInfo(1, 1, []byte{'a'}, []byte{'d'})
+	bucket1 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  2,
+		Keys:     [][]byte{{'a'}, {'d'}},
+	}
+	re.True(region.UpdateBuckets(bucket1, nil))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
+	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
+
+	// region split
+	newRegion := region.Clone(core.WithIncVersion(), core.WithStartKey([]byte{'c'}), core.WithEndKey([]byte{'d'}))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newRegion))
+	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
+
+	// region heartbeat with bucket meta
+	bucket2 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  3,
+		Keys:     [][]byte{{'c'}, {'d'}},
+	}
+	region2 := newRegion.Clone(core.WithIncVersion(), core.SetBuckets(bucket2))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region2))
+	region1 := cluster.GetRegion(1)
+	re.Equal(bucket2, region1.GetBuckets())
+}
+
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 func TestRegionHeartbeatHotStat(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -683,7 +790,12 @@ func TestBucketHeartbeat(t *testing.T) {
 		Version:  1,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
+<<<<<<< HEAD
 	re.Error(cluster.processReportBuckets(buckets))
+=======
+	_, err = cluster.processRegionBuckets(buckets)
+	re.Error(err)
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
@@ -696,18 +808,33 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0]))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[1]))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
+<<<<<<< HEAD
 	re.NoError(cluster.processReportBuckets(buckets))
 	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case3: the bucket version is same.
 	re.NoError(cluster.processReportBuckets(buckets))
+=======
+	_, err = cluster.processRegionBuckets(buckets)
+	re.NoError(err)
+	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
+
+	// case3: the bucket version is same.
+	_, err = cluster.processRegionBuckets(buckets)
+	re.NoError(err)
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	// case4: the bucket version is changed.
 	newBuckets := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
+<<<<<<< HEAD
 	re.NoError(cluster.processReportBuckets(newBuckets))
+=======
+	_, err = cluster.processRegionBuckets(newBuckets)
+	re.NoError(err)
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	re.Equal(newBuckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case5: region update should inherit buckets.
@@ -1068,11 +1195,21 @@ func TestConcurrentReportBucket(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
 	go func() {
 		defer wg.Done()
+<<<<<<< HEAD
 		cluster.processReportBuckets(bucket1)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
 	re.NoError(cluster.processReportBuckets(bucket2))
+=======
+		_, err := cluster.processRegionBuckets(bucket1)
+		re.NoError(err)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
+	_, err = cluster.processRegionBuckets(bucket2)
+	re.NoError(err)
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }

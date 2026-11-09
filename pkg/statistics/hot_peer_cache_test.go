@@ -23,6 +23,13 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+<<<<<<< HEAD
+=======
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/require"
+
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -783,15 +790,27 @@ func TestRemoveExpireItems(t *testing.T) {
 	re.NotEmpty(cache.storesOfRegion[region2.GetID()])
 	time.Sleep(cache.topNTTL)
 	// case2: remove items when the store is not exist
-	re.NotNil(cache.peersOfStore[region1.GetLeader().GetStoreId()])
-	re.NotNil(cache.peersOfStore[region2.GetLeader().GetStoreId()])
+	store1ID := region1.GetLeader().GetStoreId()
+	store2ID := region2.GetLeader().GetStoreId()
+	re.NotNil(cache.peersOfStore[store1ID])
+	re.NotNil(cache.peersOfStore[store2ID])
+	// the hotcache status gauge should be populated for the removed stores before gc.
+	re.NotZero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store1ID), cache.kind.String())))
+	re.NotZero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store2ID), cache.kind.String())))
 	cluster.ResetStores()
 	re.Empty(cluster.GetStores())
 	region3 := buildRegion(cluster, utils.Write, 3, 10)
 	checkAndUpdate(re, cache, region3)
-	re.Nil(cache.peersOfStore[region1.GetLeader().GetStoreId()])
-	re.Nil(cache.peersOfStore[region2.GetLeader().GetStoreId()])
+	re.Nil(cache.peersOfStore[store1ID])
+	re.Nil(cache.peersOfStore[store2ID])
 	re.NotEmpty(cache.regionsOfStore[region3.GetLeader().GetStoreId()])
+	// gc should also delete the hotcache status gauge series of the removed stores, not
+	// just the in-memory map entries. DeletePartialMatch returns how many series it
+	// found and removed, so a zero return proves nothing is left -- unlike checking
+	// WithLabelValues' value, which would recreate a fresh (zero-valued) series on
+	// every call regardless of whether gc() actually deleted the old one.
+	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store1ID), "type": cache.kind.String()}))
+	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store2ID), "type": cache.kind.String()}))
 }
 
 func TestDifferentReportInterval(t *testing.T) {
