@@ -435,9 +435,8 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 }
 
 // TestGetTSAfterTSOPrimaryChanged checks that a client discovering TSO servers directly
-// resumes soon after the primary changes. The old primary rejects requests or closes its
-// streams before the new one is elected, so the client must not wait a full retry interval
-// after its first attempt misses the new primary.
+// resumes after primary transfers and shutdowns. Retry timing is covered with a fake clock
+// in TestExecWithBackoffRetriesBeforeMaxInterval, independently of server election latency.
 func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -456,12 +455,9 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 	defer client.Close()
 	utils.WaitForTSOServiceAvailable(ctx, re, client)
 
-	// Measure the longest gap between two successful GetTS calls across the primary change.
-	checkMaxGap := func(changePrimary func()) {
+	checkRecovery := func(changePrimary func()) {
 		var (
-			maxGap      time.Duration
-			lastSuccess time.Time
-			stoppedAt   time.Time
+			successes atomic.Uint64
 			// Stop between calls instead of canceling an in-flight GetTS, whose request
 			// may be put back to the pool while the dispatcher still holds it.
 			stopped atomic.Bool
@@ -474,15 +470,10 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 				if _, _, err := client.GetTS(ctx); err != nil {
 					continue
 				}
-				now := time.Now()
-				if lastSuccess.IsZero() {
+				if successes.Add(1) == 1 {
 					close(started)
-				} else {
-					maxGap = max(maxGap, now.Sub(lastSuccess))
 				}
-				lastSuccess = now
 			}
-			stoppedAt = time.Now()
 		}()
 		defer func() {
 			stopped.Store(true)
@@ -493,24 +484,20 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			re.FailNow("GetTS does not succeed before the primary change")
 		}
-		changedAt := time.Now()
 		changePrimary()
 		tc.WaitForDefaultPrimaryServing(re)
-		time.Sleep(time.Second)
-		stopped.Store(true)
-		<-done
-		// End the open gap in the worker so observer scheduling after it exits is excluded.
-		re.True(lastSuccess.After(changedAt))
-		re.Less(max(maxGap, stoppedAt.Sub(lastSuccess)), 400*time.Millisecond)
+		// Require a new successful call after the primary is serving, using the same client.
+		before := successes.Load()
+		testutil.Eventually(re, func() bool { return successes.Load() > before })
 	}
 	for range 3 {
-		checkMaxGap(func() {
+		checkRecovery(func() {
 			re.NoError(tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID))
 		})
 	}
 	// Shut down the primary as a rolling upgrade does, leaving the last server as the primary.
 	for range 2 {
-		checkMaxGap(func() {
+		checkRecovery(func() {
 			tc.DestroyServer(tc.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID).GetAddr())
 		})
 	}

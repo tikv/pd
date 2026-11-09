@@ -465,3 +465,26 @@ func TestExecWithBackoffLimitsCalls(t *testing.T) {
 		re.Equal(max(maxRetryTimes, 1), calls)
 	}
 }
+
+func TestExecWithBackoffRetriesBeforeMaxInterval(t *testing.T) {
+	for _, maxInterval := range []time.Duration{checkMemberMaxRetryInterval, initRetryInterval} {
+		t.Run(maxInterval.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				start := time.Now()
+				calls := 0
+				err := execWithBackoff(t.Context(), maxInterval, checkMemberMaxRetryTimes, func() error {
+					calls++
+					// The first query misses the new primary, which becomes ready shortly after.
+					if time.Since(start) < 50*time.Millisecond {
+						return errors.New("primary not ready")
+					}
+					return nil
+				})
+				re.NoError(err)
+				re.Greater(calls, 1)
+				re.Less(time.Since(start), 400*time.Millisecond)
+			})
+		})
+	}
+}
