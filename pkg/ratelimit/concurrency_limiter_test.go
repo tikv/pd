@@ -20,14 +20,18 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
+	// Pooled timers cannot cross synctest bubble boundaries.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(m)
 }
 
@@ -64,70 +68,73 @@ func TestConcurrencyLimiter(t *testing.T) {
 }
 
 func TestConcurrencyLimiter2(t *testing.T) {
-	limit := uint64(2)
-	limiter := NewConcurrencyLimiter(limit)
+	synctest.Test(t, func(t *testing.T) {
+		limit := uint64(2)
+		limiter := NewConcurrencyLimiter(limit)
 
-	require.Equal(t, uint64(0), limiter.GetRunningTasksNum(), "Expected running tasks to be 0")
-	require.Equal(t, uint64(0), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 0")
+		require.Equal(t, uint64(0), limiter.GetRunningTasksNum(), "Expected running tasks to be 0")
+		require.Equal(t, uint64(0), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 0")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+		ctx := t.Context()
 
-	// Acquire two tokens
-	token1, err := limiter.AcquireToken(ctx)
-	require.NoError(t, err, "Failed to acquire token")
+		// Acquire two tokens
+		token1, err := limiter.AcquireToken(ctx)
+		require.NoError(t, err, "Failed to acquire token")
 
-	token2, err := limiter.AcquireToken(ctx)
-	require.NoError(t, err, "Failed to acquire token")
+		token2, err := limiter.AcquireToken(ctx)
+		require.NoError(t, err, "Failed to acquire token")
 
-	require.Equal(t, limit, limiter.GetRunningTasksNum(), "Expected running tasks to be 2")
+		require.Equal(t, limit, limiter.GetRunningTasksNum(), "Expected running tasks to be 2")
 
-	// Try to acquire third token, it should not be able to acquire immediately due to limit
-	go func() {
-		_, err := limiter.AcquireToken(ctx)
-		assert.NoError(t, err, "Failed to acquire token")
-	}()
+		// Try to acquire third token, it should not be able to acquire immediately due to limit
+		go func() {
+			_, err := limiter.AcquireToken(ctx)
+			assert.NoError(t, err, "Failed to acquire token")
+		}()
 
-	time.Sleep(100 * time.Millisecond) // Give some time for the goroutine to run
-	require.Equal(t, uint64(1), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 1")
+		synctest.Wait()
+		require.Equal(t, uint64(1), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 1")
 
-	// Release a token
-	limiter.ReleaseToken(token1)
-	time.Sleep(100 * time.Millisecond) // Give some time for the goroutine to run
-	require.Equal(t, uint64(2), limiter.GetRunningTasksNum(), "Expected running tasks to be 2")
-	require.Equal(t, uint64(0), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 0")
+		// Release a token
+		limiter.ReleaseToken(token1)
+		synctest.Wait()
+		require.Equal(t, uint64(2), limiter.GetRunningTasksNum(), "Expected running tasks to be 2")
+		require.Equal(t, uint64(0), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 0")
 
-	// Release the second token
-	limiter.ReleaseToken(token2)
-	time.Sleep(100 * time.Millisecond) // Give some time for the goroutine to run
-	require.Equal(t, uint64(1), limiter.GetRunningTasksNum(), "Expected running tasks to be 1")
+		// Release the second token
+		limiter.ReleaseToken(token2)
+		synctest.Wait()
+		require.Equal(t, uint64(1), limiter.GetRunningTasksNum(), "Expected running tasks to be 1")
+	})
 }
 
 func TestConcurrencyLimiterAcquire(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 
-	limiter := NewConcurrencyLimiter(20)
-	sum := int64(0)
-	start := time.Now()
-	wg := &sync.WaitGroup{}
-	wg.Add(100)
-	for i := range 100 {
-		go func(i int) {
-			defer wg.Done()
-			token, err := limiter.AcquireToken(ctx)
-			if err != nil {
-				fmt.Printf("Task %d failed to acquire: %v\n", i, err)
-				return
-			}
-			defer limiter.ReleaseToken(token)
-			// simulate takes some time
-			time.Sleep(10 * time.Millisecond)
-			atomic.AddInt64(&sum, 1)
-		}(i)
-	}
-	wg.Wait()
-	// We should have 20 tasks running concurrently, so it should take at least 50ms to complete
-	require.GreaterOrEqual(t, time.Since(start).Milliseconds(), int64(50))
-	require.Equal(t, int64(100), sum)
+		limiter := NewConcurrencyLimiter(20)
+		sum := int64(0)
+		start := time.Now()
+		wg := &sync.WaitGroup{}
+		wg.Add(100)
+		for i := range 100 {
+			go func(i int) {
+				defer wg.Done()
+				token, err := limiter.AcquireToken(ctx)
+				if err != nil {
+					fmt.Printf("Task %d failed to acquire: %v\n", i, err)
+					return
+				}
+				defer limiter.ReleaseToken(token)
+				// simulate takes some time
+				time.Sleep(10 * time.Millisecond)
+				atomic.AddInt64(&sum, 1)
+			}(i)
+		}
+		wg.Wait()
+		// We should have 20 tasks running concurrently, so it should take at least 50ms to complete
+		require.GreaterOrEqual(t, time.Since(start).Milliseconds(), int64(50))
+		require.Equal(t, int64(100), sum)
+	})
 }

@@ -37,8 +37,7 @@ import (
 
 func TestStopCluster(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, core.NewBasicCluster())
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
@@ -80,8 +79,7 @@ func TestGetClusterBeforeStoredDoesNotPanic(t *testing.T) {
 // detected as a leak.
 func TestMultipleLeaderTermsNoHbStreamGoroutineLeak(t *testing.T) {
 	// Simulate the server-level root context shared across all leadership terms.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // executes LAST (registered first)
+	ctx := t.Context() // executes LAST (registered first)
 	// goleak executes FIRST (registered second, LIFO), before cancel().
 	// Goroutines that have not yet exited via Close() are still blocked on
 	// ctx.Done() at this point and will be detected as leaks.

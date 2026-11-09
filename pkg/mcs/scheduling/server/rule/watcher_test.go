@@ -29,8 +29,10 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -43,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -136,9 +139,9 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 	defer clean()
 	fixture := newRuleWatcherTestFixture(ctx, b)
 
-	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
+	// Resets the timer to ignore initialization time in the benchmark
 
-	for range b.N {
+	for b.Loop() {
 		runWatcherLoadLabelRule(ctx, re, client, fixture.checkerController)
 	}
 }
@@ -267,7 +270,7 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 	rw := &Watcher{etcdClient: client}
 	runPaged := func(b *testing.B, rangeEnds []string) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			scanned := 0
 			revision, err := rw.scanRuleSnapshotKeys(
 				ctx, prefix, rangeEnds, snapshotRevision,
@@ -290,7 +293,7 @@ func BenchmarkRuleSnapshotKeyScan(b *testing.B) {
 	})
 	b.Run("one-shot", func(b *testing.B) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			resp, err := etcdutil.EtcdKVGetWithContext(
 				ctx,
 				client,
@@ -386,6 +389,113 @@ func TestRuleWatcherAllowsEmptyInitialSnapshot(t *testing.T) {
 
 	re.NoError(rw.initializeRuleWatcher())
 	re.Zero(ruleManager.GetRulesCount())
+}
+
+func TestWatcherLogRedact(t *testing.T) {
+	const startKey, endKey = "7365637265742d7374617274", "7365637265742d7a"
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			_, err := client.Delete(ctx, keypath.RuleCommonPathPrefix(), clientv3.WithPrefix())
+			re.NoError(err)
+			_, err = client.Delete(ctx, keypath.RegionLabelPathPrefix(), clientv3.WithPrefix())
+			re.NoError(err)
+
+			fname := testutil.InitTempFileLogger(t, "debug")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+			readLog := func() string {
+				output, err := os.ReadFile(fname)
+				re.NoError(err)
+				return string(output)
+			}
+
+			watchCtx, cancel := context.WithCancel(ctx)
+			t.Cleanup(cancel)
+			fixture := newRuleWatcherTestFixture(watchCtx, t)
+			regionLabeler, err := labeler.NewRegionLabeler(watchCtx, fixture.storage, time.Hour)
+			re.NoError(err)
+			rule := &placement.Rule{
+				GroupID: "redact", ID: "placement", Role: placement.Learner, Count: 1,
+				StartKeyHex: startKey, EndKeyHex: endKey,
+			}
+			labelRule := &labeler.LabelRule{
+				ID: "redact-label", Labels: []labeler.RegionLabel{{Key: "k", Value: "v"}},
+				RuleType: labeler.KeyRange, Data: labeler.MakeKeyRanges(startKey, endKey),
+			}
+			labelJSON, err := json.Marshal(labelRule)
+			re.NoError(err)
+			defaultRule := fixture.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+			_, err = client.Txn(ctx).Then(
+				clientv3.OpPut(keypath.RuleKeyPath(defaultRule.StoreKey()), defaultRule.String()),
+				clientv3.OpPut(keypath.RuleKeyPath(rule.StoreKey()), rule.String()),
+				clientv3.OpPut(keypath.RegionLabelKeyPath(labelRule.ID), string(labelJSON)),
+			).Commit()
+			re.NoError(err)
+			watcher, err := NewWatcher(watchCtx, client, fixture.storage, fixture.checkerController, fixture.ruleManager, regionLabeler)
+			re.NoError(err)
+			closeWatcher := sync.OnceFunc(watcher.Close)
+			t.Cleanup(closeWatcher)
+			re.Equal(startKey, fixture.ruleManager.GetRule(rule.GroupID, rule.ID).StartKeyHex)
+			re.Equal(endKey, regionLabeler.GetLabelRule(labelRule.ID).GetKeyRanges()[0].EndKeyHex)
+
+			// Exercise live updates as well as the initial snapshot logs.
+			rule.Count, labelRule.Index = 2, 1
+			labelJSON, err = json.Marshal(labelRule)
+			re.NoError(err)
+			_, err = client.Txn(ctx).Then(
+				clientv3.OpPut(keypath.RuleKeyPath(rule.StoreKey()), rule.String()),
+				clientv3.OpPut(keypath.RegionLabelKeyPath(labelRule.ID), string(labelJSON)),
+			).Commit()
+			re.NoError(err)
+			testutil.Eventually(re, func() bool {
+				return fixture.ruleManager.GetRule(rule.GroupID, rule.ID).Count == 2 &&
+					regionLabeler.GetLabelRule(labelRule.ID).Index == 1
+			})
+
+			closeWatcher()
+
+			output := readLog()
+			for _, msg := range []string{"update placement rule", "update region label rule", "put successfully in watch loop when loading", "put successfully in watch loop"} {
+				re.Contains(output, msg)
+			}
+			for _, key := range []string{startKey, endKey} {
+				if mode.typ == logutil.RedactInfoLogON {
+					re.NotContains(output, key)
+				} else {
+					re.Contains(output, key)
+				}
+			}
+			switch mode.typ {
+			case logutil.RedactInfoLogON:
+				re.Contains(output, "[value=?]")
+			case logutil.RedactInfoLogMarker:
+				re.Contains(output, `[value="‹{`)
+			}
+			re.Equal(startKey, fixture.ruleManager.GetRule(rule.GroupID, rule.ID).StartKeyHex)
+			re.Equal(endKey, regionLabeler.GetLabelRule(labelRule.ID).GetKeyRanges()[0].EndKeyHex)
+			stored, err := client.Get(ctx, keypath.RegionLabelKeyPath(labelRule.ID))
+			re.NoError(err)
+			re.Len(stored.Kvs, 1)
+			re.JSONEq(string(labelJSON), string(stored.Kvs[0].Value))
+		})
+	}
 }
 
 func TestRuleWatcherReconcilesInitialLoadRetry(t *testing.T) {

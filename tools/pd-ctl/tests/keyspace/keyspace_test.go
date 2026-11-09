@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -48,8 +49,7 @@ import (
 // So we need another cluster to run this test.
 func TestKeyspace(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
@@ -586,8 +586,8 @@ func (suite *keyspaceTestSuite) TestSetPlacementWithTiFlash() {
 	meta := suite.mustCreateKeyspace(api.CreateKeyspaceParams{Name: "tiflash_test"})
 	keyspaceID := meta.GetId()
 	bound := keyspace.MakeRegionBound(keyspaceID)
-	regionStartKey := append([]byte(nil), bound.TxnLeftBound...)
-	regionEndKey := append([]byte(nil), bound.TxnRightBound...)
+	regionStartKey := slices.Clone(bound.TxnLeftBound)
+	regionEndKey := slices.Clone(bound.TxnRightBound)
 	regionStartKeyHex := hex.EncodeToString(regionStartKey)
 	regionEndKeyHex := hex.EncodeToString(regionEndKey)
 
@@ -660,8 +660,8 @@ func (suite *keyspaceTestSuite) TestSetPlacementWithTiFlash() {
 	region := core.NewRegionInfo(
 		&metapb.Region{
 			Id:       uint64(1000),
-			StartKey: append([]byte(nil), regionStartKey...),
-			EndKey:   append([]byte(nil), regionEndKey...),
+			StartKey: slices.Clone(regionStartKey),
+			EndKey:   slices.Clone(regionEndKey),
 			Peers:    peers,
 		},
 		peers[0],

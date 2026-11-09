@@ -81,6 +81,7 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 		previous.waitRuntime()
 	}
 	m.mu.Lock()
+	m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
 	ctx, cancel := context.WithCancel(context.Background())
 	generation := &gcStateGeneration{
 		done:    make(chan struct{}),
@@ -92,6 +93,7 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 		generation.workDone = make(chan struct{})
 		generation.index = newEnabledKeyspaceIndex(m.etcdClient, keypath.KeyspaceMetaPrefix())
 		generation.index.getLoadConcurrency = func() int { return m.getConfig().GCKeyspaceIndexLoadConcurrency }
+		generation.index.onRemoved = func(ids []uint32) { m.publishGCStateRemovals(generation, ids) }
 		generation.warmup = newGCStateWarmup(m, generation, generation.index)
 	}
 	failpoint.InjectCall("beforeLeaderGCStateCacheReset")
@@ -130,6 +132,7 @@ func (m *GCStateManager) stopGCStateGeneration(generation *gcStateGeneration) {
 	m.lifecycleMu.Lock()
 	m.mu.Lock()
 	if m.generation == generation {
+		m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
 		m.generation = nil
 		m.gcStateCache.clearAll()
 		m.barrierMetrics.clearMetrics()

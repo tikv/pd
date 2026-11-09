@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -232,7 +233,7 @@ func TestGCStateWarmupAcrossPages(t *testing.T) {
 	w.onInitialSnapshot(entries)
 	gcWarmupWait(t, w.done)
 	mu.Lock()
-	observed := append([]int(nil), sizes...)
+	observed := slices.Clone(sizes)
 	mu.Unlock()
 	require.ElementsMatch(t, []int{60, 60, 60, 60, 60, 60, 60, 60, 32}, observed)
 	for _, entry := range entries {

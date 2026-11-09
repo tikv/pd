@@ -76,7 +76,7 @@ func TestNonEndTrans(t *testing.T) {
 func TestEndStatusTrans(t *testing.T) {
 	re := require.New(t)
 	allStatus := make([]OpStatus, 0, statusCount)
-	for st := OpStatus(0); st < statusCount; st++ {
+	for st := range statusCount {
 		allStatus = append(allStatus, st)
 	}
 	for from := firstEndStatus; from < statusCount; from++ {

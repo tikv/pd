@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"context"
 	goerrors "errors"
+	"maps"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -35,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -951,16 +952,14 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 			return errs.ErrKeyspaceNotFound
 		}
 		// Only keyspace with state listed in allowChangeConfig are allowed to change their config.
-		if !slice.Contains(allowChangeConfig, meta.GetState()) {
+		if !slices.Contains(allowChangeConfig, meta.GetState()) {
 			return errors.Errorf("cannot change config for keyspace with state %s", meta.GetState().String())
 		}
 		// Initialize meta's config map if it's nil.
 		if meta.GetConfig() == nil {
 			meta.Config = map[string]string{}
 		}
-		for k, v := range meta.GetConfig() {
-			oldConfig[k] = v
-		}
+		maps.Copy(oldConfig, meta.GetConfig())
 		// Update keyspace config.
 		if err := update(meta); err != nil {
 			return err
@@ -1257,7 +1256,7 @@ func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.Keys
 		return nil
 	}
 	// Consult state transition table to check if the operation is legal.
-	if !slice.Contains(stateTransitionTable[meta.GetState()], newState) {
+	if !slices.Contains(stateTransitionTable[meta.GetState()], newState) {
 		return errors.Errorf("cannot change keyspace state from %s to %s", meta.GetState().String(), newState.String())
 	}
 	if newState == keyspacepb.KeyspaceState_TOMBSTONE {
@@ -1550,7 +1549,7 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 				// Unlock the keyspace meta lock after the whole txn.
 				keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, ks.GetId())
 				// If the keyspace doesn't have a group ID, assign it to the default keyspace group.
-				if !slice.Contains(defaultKeyspaceGroup.Keyspaces, ks.GetId()) {
+				if !slices.Contains(defaultKeyspaceGroup.Keyspaces, ks.GetId()) {
 					defaultKeyspaceGroup.Keyspaces = append(defaultKeyspaceGroup.Keyspaces, ks.GetId())
 					// Only save the keyspace group meta if any keyspace is assigned to it.
 					assigned = true

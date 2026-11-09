@@ -15,7 +15,6 @@
 package mockhbstream
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,8 +36,7 @@ func TestMain(m *testing.M) {
 
 func TestActivity(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.AddRegionStore(1, 1)

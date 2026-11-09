@@ -18,8 +18,10 @@ import (
 	"container/list"
 	"math/rand/v2"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -27,6 +29,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Pooled timers cannot cross synctest bubble boundaries.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(m)
 }
 
@@ -55,10 +59,7 @@ func TestSlidingWindow(t *testing.T) {
 	re.Len(s.windows, int(constant.PriorityLevelLen))
 	// capacity:[10, 10, 10, 10]
 	for i, v := range s.windows {
-		cap := capacity >> i
-		if cap < minSnapSize {
-			cap = minSnapSize
-		}
+		cap := max(capacity>>i, minSnapSize)
 		re.Equal(v.capacity, cap)
 	}
 	// case 0: test core.Low level
@@ -122,68 +123,67 @@ func TestWindow(t *testing.T) {
 }
 
 func TestFeedback(t *testing.T) {
-	re := require.New(t)
-	s := NewSlidingWindows()
-	type SnapshotStats struct {
-		expectCost int64
-		remaining  int64
-		size       int64
-		start      int64
-	}
-	// region size is 10GB, snapshot write limit is 100MB/s and the snapshot concurrency is 3.
-	// the best strategy is that the tikv executing queue equals the wait.
-	const regionSize, limit, wait = int64(10000), int64(100), int64(4)
-	iter := 100
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		s := NewSlidingWindows()
+		type SnapshotStats struct {
+			expectCost int64
+			remaining  int64
+			size       int64
+			start      int64
+		}
+		// region size is 10GB, snapshot write limit is 100MB/s and the snapshot concurrency is 3.
+		// the best strategy is that the tikv executing queue equals the wait.
+		const regionSize, limit, wait = int64(10000), int64(100), int64(4)
+		iter := 100
 
-	// receive the operator
-	queue := list.List{}
-	interval := time.Microsecond * 100
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+		// receive the operator
+		queue := list.List{}
+		interval := time.Microsecond * 100
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 
-	// create one region operator
-	generateOp := func(tick int64) {
-		if s.Available(regionSize, SendSnapshot, constant.Low) && iter > 0 {
-			iter--
-			size := regionSize - rand.Int64N(regionSize/10)
-			stats := &SnapshotStats{
-				expectCost: size / limit,
-				remaining:  size,
-				size:       size,
-				start:      tick,
+		// create one region operator
+		generateOp := func(tick int64) {
+			if s.Available(regionSize, SendSnapshot, constant.Low) && iter > 0 {
+				iter--
+				size := regionSize - rand.Int64N(regionSize/10)
+				stats := &SnapshotStats{
+					expectCost: size / limit,
+					remaining:  size,
+					size:       size,
+					start:      tick,
+				}
+				s.Take(size, SendSnapshot, constant.Low)
+				queue.PushBack(stats)
 			}
-			s.Take(size, SendSnapshot, constant.Low)
-			queue.PushBack(stats)
 		}
-	}
 
-	// tick is the time that the snapshot has been executed.
-	tick := int64(0)
-	for range ticker.C {
-		tick++
-		generateOp(tick)
-		first := queue.Front()
-		if first == nil {
-			continue
+		// tick is the time that the snapshot has been executed.
+		tick := int64(0)
+		for range ticker.C {
+			tick++
+			generateOp(tick)
+			first := queue.Front()
+			if first == nil {
+				continue
+			}
+			stats := first.Value.(*SnapshotStats)
+			if stats.remaining > 0 {
+				stats.remaining -= limit
+				continue
+			}
+			cost := tick - stats.start
+			exec := max(stats.expectCost, 5)
+			err := exec*wait - cost
+			queue.Remove(first)
+			s.Feedback(float64(err))
+			if iter <= 0 {
+				re.Greater(float64(s.GetCap()), float64(regionSize*(wait-2)))
+				re.Less(float64(s.GetCap()), float64(regionSize*wait))
+				return
+			}
+			s.Ack(stats.size, SendSnapshot)
 		}
-		stats := first.Value.(*SnapshotStats)
-		if stats.remaining > 0 {
-			stats.remaining -= limit
-			continue
-		}
-		cost := tick - stats.start
-		exec := stats.expectCost
-		if exec < 5 {
-			exec = 5
-		}
-		err := exec*wait - cost
-		queue.Remove(first)
-		s.Feedback(float64(err))
-		if iter <= 0 {
-			re.Greater(float64(s.GetCap()), float64(regionSize*(wait-2)))
-			re.Less(float64(s.GetCap()), float64(regionSize*wait))
-			return
-		}
-		s.Ack(stats.size, SendSnapshot)
-	}
+	})
 }

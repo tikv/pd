@@ -237,7 +237,7 @@ func (c *cluster) collectPids() error {
 		return fmt.Errorf("failed to collect pids: %v", err)
 	}
 
-	for _, pidStr := range strings.Split(strings.TrimSpace(output), "\n") {
+	for pidStr := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
 		if pid, err := strconv.Atoi(pidStr); err == nil {
 			c.pids = append(c.pids, pid)
 		}

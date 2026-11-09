@@ -22,7 +22,7 @@ import (
 
 func BenchmarkMemTotal(b *testing.B) {
 	re := require.New(b)
-	for range b.N {
+	for b.Loop() {
 		_, err := MemTotal()
 		re.NoError(err)
 	}
@@ -30,7 +30,7 @@ func BenchmarkMemTotal(b *testing.B) {
 
 func BenchmarkMemUsed(b *testing.B) {
 	re := require.New(b)
-	for range b.N {
+	for b.Loop() {
 		_, err := MemUsed()
 		re.NoError(err)
 	}

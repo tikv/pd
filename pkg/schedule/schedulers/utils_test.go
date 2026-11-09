@@ -15,17 +15,76 @@
 package schedulers
 
 import (
+	"os"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestCalculateRangeCountLogRedact(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, cluster, _ := prepareSchedulersTest()
+			defer cancel()
+			cluster.AddRegionStore(1, 1)
+			rule := &placement.Rule{
+				GroupID: placement.DefaultGroupID, ID: "range", Index: 1, Override: true,
+				StartKeyHex: "6161", EndKeyHex: "7a7a", Role: placement.Voter, Count: 1,
+			}
+			re.NoError(cluster.SetRule(rule))
+			// Use a subrange so unredacted rule boundaries cannot hide behind range fields.
+			cluster.AddLeaderRegionWithRange(1, "ab", "zy", 1)
+
+			fname := testutil.InitTempFileLogger(t, "debug")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+			store := cluster.GetStore(1)
+			re.Equal(1.0, calculateRangeCount(cluster, []*core.StoreInfo{store}, store, []byte("ab"), []byte("zy"), core.PeerScatter))
+
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.Contains(string(output), "calculate range result")
+			if mode.typ == logutil.RedactInfoLogON {
+				re.Contains(string(output), "[rule=?]")
+				re.NotContains(string(output), rule.StartKeyHex)
+				re.NotContains(string(output), rule.EndKeyHex)
+			} else {
+				re.Contains(string(output), rule.StartKeyHex)
+				re.Contains(string(output), rule.EndKeyHex)
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Contains(string(output), `[rule="‹{`)
+				}
+			}
+			re.Equal("6161", rule.StartKeyHex)
+			re.Equal("7a7a", rule.EndKeyHex)
+		})
+	}
+}
 
 func TestRetryQuota(t *testing.T) {
 	re := require.New(t)

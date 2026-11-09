@@ -44,14 +44,14 @@ func AddrsToURLs(addrs []string, tlsCfg *tls.Config) []string {
 // ModifyURLScheme modifies the scheme of the URL based on the TLS config.
 func ModifyURLScheme(url string, tlsCfg *tls.Config) string {
 	if tlsCfg == nil {
-		if strings.HasPrefix(url, httpsSchemePrefix) {
-			url = httpSchemePrefix + strings.TrimPrefix(url, httpsSchemePrefix)
+		if after, ok := strings.CutPrefix(url, httpsSchemePrefix); ok {
+			url = httpSchemePrefix + after
 		} else if !strings.HasPrefix(url, httpSchemePrefix) {
 			url = httpSchemePrefix + url
 		}
 	} else {
-		if strings.HasPrefix(url, httpSchemePrefix) {
-			url = httpsSchemePrefix + strings.TrimPrefix(url, httpSchemePrefix)
+		if after, ok := strings.CutPrefix(url, httpSchemePrefix); ok {
+			url = httpsSchemePrefix + after
 		} else if !strings.HasPrefix(url, httpsSchemePrefix) {
 			url = httpsSchemePrefix + url
 		}

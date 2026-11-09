@@ -15,6 +15,7 @@
 package cluster_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -61,10 +62,10 @@ func TestCrossTableMergeWithKeyspace(t *testing.T) {
 	// Keyspace 42, txn mode.
 	keyspacePrefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 42)
 	tableKey := func(tableID int64) []byte {
-		return codec.EncodeBytes(append(append([]byte{}, keyspacePrefix...), codec.GenerateTableKey(tableID)...))
+		return codec.EncodeBytes(slices.Concat(keyspacePrefix, codec.GenerateTableKey(tableID)))
 	}
 	rowKey := func(tableID, rowID int64) []byte {
-		return codec.EncodeBytes(append(append([]byte{}, keyspacePrefix...), codec.GenerateRowKey(tableID, rowID)...))
+		return codec.EncodeBytes(slices.Concat(keyspacePrefix, codec.GenerateRowKey(tableID, rowID)))
 	}
 
 	// Five contiguous regions inside keyspace 42: three empty single-table

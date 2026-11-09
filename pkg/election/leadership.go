@@ -16,6 +16,7 @@ package election
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -205,8 +206,8 @@ func (ls *Leadership) AddCampaignTimes() {
 	if ls == nil {
 		return
 	}
-	for i := len(ls.campaignTimes) - 1; i >= 0; i-- {
-		if time.Since(ls.campaignTimes[i]) > campaignTimesRecordTimeout {
+	for i, v := range slices.Backward(ls.campaignTimes) {
+		if time.Since(v) > campaignTimesRecordTimeout {
 			// remove the time which is more than `campaignTimesRecordTimeout`
 			// array is sorted by time
 			ls.campaignTimes = ls.campaignTimes[i+1:]
@@ -413,6 +414,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			}
 		}
 		lastReceivedResponseTime = time.Now()
+		failpoint.InjectCall("watchLeaderReady")
 		log.Info("watch channel is created", zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 
 	watchChanLoop:

@@ -37,6 +37,7 @@ import (
 
 	pdClient "github.com/tikv/pd/client"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -82,6 +83,8 @@ func TestHTTPClientTestSuiteWithServiceDiscovery(t *testing.T) {
 
 func (suite *httpClientTestSuite) SetupSuite() {
 	re := suite.Require()
+	// Initialize client metrics before background discovery can observe them.
+	metrics.InitAndRegisterMetrics(nil)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
@@ -1157,9 +1160,7 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		bo := retry.InitialBackoffer(100*time.Millisecond, time.Second, 0)
 		client := suite.client.WithBackoffer(bo)
 		for {
@@ -1167,7 +1168,11 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 			if err != nil && strings.Contains(err.Error(), "context canceled") {
 				return
 			}
-			if !as.NoError(err) || !as.Len(healths, 2) {
+			if err != nil {
+				suite.T().Errorf("get health status: %v", err)
+				return
+			}
+			if !as.Len(healths, 2) {
 				return
 			}
 			select {
@@ -1176,7 +1181,7 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 			default:
 			}
 		}
-	}()
+	})
 
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)

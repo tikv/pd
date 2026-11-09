@@ -15,7 +15,6 @@
 package filter
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -71,8 +70,7 @@ func TestDistinctScoreFilter(t *testing.T) {
 
 func TestLabelConstraintsFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -102,8 +100,7 @@ func TestLabelConstraintsFilter(t *testing.T) {
 
 func TestRuleFitFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
@@ -155,8 +152,7 @@ func TestRuleFitFilter(t *testing.T) {
 
 func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -398,8 +394,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 
 func TestIsolationFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -469,8 +464,7 @@ func TestIsolationFilter(t *testing.T) {
 
 func TestIsolationFilterCaseInsensitive(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -495,8 +489,7 @@ func TestIsolationFilterCaseInsensitive(t *testing.T) {
 
 func TestPlacementGuard(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
@@ -523,8 +516,7 @@ func TestPlacementGuard(t *testing.T) {
 
 func TestSpecialUseFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -580,8 +572,8 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 		core.SetApproximateSize(50),
 		core.SetApproximateKeys(20),
 	)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		_ = createRegionForRuleFit(region.GetStartKey(), region.GetEndKey(), region.GetPeers(), region.GetLeader())
 	}
 }

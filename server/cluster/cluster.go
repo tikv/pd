@@ -23,6 +23,7 @@ import (
 	"math"
 	"net/http"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,6 +69,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/unsaferecovery"
@@ -230,7 +232,7 @@ func (c *RaftCluster) SetOnStoreBuried(fn func(storeID string)) {
 // - This type is exported by HTTP API. Please pay more attention when modifying it.
 // - Need to sync with client/http/types.go#ClusterStatus
 type Status struct {
-	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	RaftBootstrapTime time.Time `json:"raft_bootstrap_time"`
 	IsInitialized     bool      `json:"is_initialized"`
 	ReplicationStatus string    `json:"replication_status"`
 }
@@ -764,7 +766,7 @@ func (c *RaftCluster) runStoreConfigSync() {
 //   - `switchRaftV2` is true if the config of tikv engine is change to raft-kv2.
 func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, switchRaftV2 bool, needPersist bool) {
 	var err error
-	for index := 0; index < len(stores); index++ {
+	for _, store := range stores {
 		select {
 		case <-c.ctx.Done():
 			log.Info("stop sync store config job due to server shutdown")
@@ -772,7 +774,6 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		default:
 		}
 		// filter out the stores that are tiflash
-		store := stores[index]
 		if !store.IsTiKV() {
 			continue
 		}
@@ -782,12 +783,10 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 			continue
 		}
 		// it will try next store if the current store is failed.
-		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
+		address := netutil.ResolveLoopBackAddr(store.GetStatusAddress(), store.GetAddress())
 		switchRaftV2, needPersist, err = c.observeStoreConfig(c.ctx, address)
 		if err != nil {
-			// delete the store if it is failed and retry next store.
-			stores = append(stores[:index], stores[index+1:]...)
-			index--
+			// Keep the caller's cached store list intact while trying the next store.
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
@@ -965,6 +964,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 			// Update related stores.
 			start := time.Now()
 			c.UpdateAllStoreStatus()
+			failpoint.InjectCall("afterUpdateStoreStats", c)
 			updateStoreStatsGauge.Set(time.Since(start).Seconds())
 		}
 	}
@@ -1160,19 +1160,12 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
 	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
-	// storeStateLock only needs to cover this initial read: it makes the
-	// IsRemoved() check atomic with checkStore/BuryStore's own state
-	// transitions for this store, and putStoreLocked (below, via PutStore)
-	// tolerates a store that's since been fully removed by skipping the
-	// write instead of dereferencing a missing entry -- so there's no need
-	// to hold the lock through the rest of this handler (in particular,
-	// SaveStoreMeta's etcd round trip, which would otherwise make
-	// checkStore/BuryStore for this store wait out a write this path
-	// already paid for before the lock existed). The tradeoff: a
-	// concurrent full removal landing after this unlock and before
-	// SaveStoreMeta runs can still let a stale heartbeat re-persist this
-	// store's metadata, with nothing left to clean it up afterward -- a
-	// narrow, known residual of the same shape as SetStoreLimit's.
+	// Hold storeStateLock from the removed-store check through cache publication
+	// to serialize that update with registration and state changes. Release it
+	// before etcd I/O so resolved-TS reports and store scans do not wait on
+	// heartbeat persistence. persistStoreHeartbeat conditionally patches the
+	// stored record and skips missing/tombstoned stores, preventing this heartbeat
+	// from restoring deleted metadata or an outdated protocol range.
 	c.storeStateLock.Lock(uint32(storeID))
 	store := c.GetStore(storeID)
 	if store == nil {
@@ -1194,8 +1187,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		}
 		return nil
 	}
-	c.storeStateLock.Unlock(uint32(storeID))
-
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
 	opts := make([]core.StoreCreateOption, 0)
@@ -1229,18 +1220,16 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
-	if newStore.NeedPersist() && c.storage != nil {
-		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
-			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
-		} else {
-			opts = append(opts, core.SetLastPersistTime(nowTime))
-		}
-	}
+	persist := newStore.NeedPersist() && c.storage != nil
 	// Supply NodeState in the response to help the store handle special cases
 	// more conveniently, such as avoiding calling `remove_peer` redundantly under
 	// NodeState_Removing.
 	resp.State = store.GetNodeState()
 	c.PutStore(newStore, opts...)
+	c.storeStateLock.Unlock(uint32(storeID))
+	if persist {
+		c.persistStoreHeartbeat(storeID, nowTime)
+	}
 	var (
 		reportedRegions map[uint64]struct{}
 		interval        uint64
@@ -1288,10 +1277,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	for _, stat := range stats.GetSnapshotStats() {
 		// the duration of snapshot is the sum between to send and generate snapshot.
 		// notice: to enlarge the limit in time, we reset the executing duration when it less than the minSnapshotDurationSec.
-		dur := stat.GetSendDurationSec() + stat.GetGenerateDurationSec()
-		if dur < minSnapshotDurationSec {
-			dur = minSnapshotDurationSec
-		}
+		dur := max(stat.GetSendDurationSec()+stat.GetGenerateDurationSec(), minSnapshotDurationSec)
 		// This error is the diff between the executing duration and the waiting duration.
 		// The waiting duration is the total duration minus the executing duration.
 		// so e=executing_duration-waiting_duration=executing_duration-(total_duration-executing_duration)=2*executing_duration-total_duration
@@ -1309,6 +1295,64 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	c.adjustNetworkSlowStore(storeID)
 	return nil
+}
+
+func (c *RaftCluster) persistStoreHeartbeat(storeID uint64, heartbeatTime time.Time) {
+	ctx, cancel := context.WithTimeout(c.ctx, etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	persisted := false
+	err := c.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		key := keypath.StorePath(storeID)
+		var value string
+		var err error
+		if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+			value, err = revisionTxn.LoadWithRevision(key)
+		} else {
+			value, err = txn.Load(key)
+		}
+		if err != nil || value == "" {
+			return err
+		}
+		store := &metapb.Store{}
+		if err := store.Unmarshal([]byte(value)); err != nil {
+			return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+		}
+		if store.GetState() == metapb.StoreState_Tombstone || store.GetNodeState() == metapb.NodeState_Removed {
+			return nil
+		}
+		// Patch the persisted record, keeping registrations and state changes
+		// intact. The transaction rejects a concurrent write or deletion.
+		store.LastHeartbeat = max(store.GetLastHeartbeat(), heartbeatTime.UnixNano())
+		data, err := store.Marshal()
+		if err != nil {
+			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
+		}
+		if err := txn.Save(key, string(data)); err != nil {
+			return err
+		}
+		persisted = true
+		failpoint.InjectCall("beforePersistStoreHeartbeat")
+		return nil
+	})
+	if err != nil {
+		if !errorspkg.Is(err, errs.ErrEtcdTxnConflict) {
+			log.Error("failed to persist store heartbeat", zap.Uint64("store-id", storeID), errs.ZapError(err))
+		}
+		return
+	}
+	if !persisted {
+		return
+	}
+
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+	store := c.GetStore(storeID)
+	if store == nil || store.IsRemoved() {
+		return
+	}
+	// Record successful persistence even if a newer heartbeat has arrived.
+	// SetLastPersistTime prevents out-of-order completions from moving it backwards.
+	c.PutStore(store, core.SetLastPersistTime(heartbeatTime))
 }
 
 // processRegionBuckets updates the bucket information. The first return value
@@ -1353,7 +1397,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-		cluster.HandleStatsAsync(c, region)
+		cluster.HandleStatsWithOriginAsync(c, region, origin)
 	}
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
@@ -1390,9 +1434,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		}
 		return nil
 	}
-	failpoint.Inject("concurrentRegionHeartbeat", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("concurrentRegionHeartbeat")
 	tracer.OnSaveCacheBegin()
 	var overlaps []*core.RegionInfo
 	if saveCache {
@@ -1508,6 +1550,7 @@ func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
 // UpdateStoreLabels updates a store's location labels
 // If 'force' is true, the origin labels will be overwritten with the new one forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
+	failpoint.InjectCall("beforeStoreLabelsUpdate")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -1525,6 +1568,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 
 // DeleteStoreLabel updates a store's location labels
 func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
+	failpoint.InjectCall("beforeStoreLabelsUpdate")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -1555,6 +1599,7 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 
 // PutMetaStore puts a store.
 func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
+	failpoint.InjectCall("beforePutStore")
 	storeID := store.GetId()
 	// wasKnown alone isn't enough to decide whether to guard
 	// addStoreLimitInternal against resurrecting a removed entry: a plain
@@ -1599,6 +1644,7 @@ func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 // putStoreImpl puts a store.
 // If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
 // If 'force' is false, the store's labels will merge into those labels which already existed in the store.
+// The caller must hold storeStateLock through the metadata read, persistence and cache update.
 func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
@@ -1632,7 +1678,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		}
 	}
 
-	opts := make([]core.StoreCreateOption, 0)
+	var opts []core.StoreCreateOption
 	s := c.GetStore(store.GetId())
 	if s == nil {
 		// Add a new store.
@@ -1646,6 +1692,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		opts = append(opts,
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
+			core.SetStoreTxnProtocolVersionRange(store.GetTxnProtocolVersionRange()),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
 			core.SetStoreDeployPath(store.DeployPath))
@@ -1655,6 +1702,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	if err := c.checkStoreLabels(s); err != nil {
 		return err
 	}
+	failpoint.InjectCall("beforePersistStore")
 	return c.setStore(s, opts...)
 }
 
@@ -2231,7 +2279,7 @@ func (c *RaftCluster) calculateRange(
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
 			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
 			zap.Uint64("store-id", store.GetID()),
-			zap.String("rule", rule.String()),
+			logutil.ZapRedactString("rule", rule.String()),
 			zap.Int64("region-size", ruleRegionSize),
 			zap.Float64("weight", weight),
 			zap.Float64("store-size", storeSize),
@@ -2374,9 +2422,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	failpoint.Inject("versionChangeConcurrency", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("versionChangeConcurrency")
 	if minVersion == nil || clusterVersion.Equal(*minVersion) {
 		return
 	}
@@ -2949,10 +2995,8 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 		return false
 	}
 	for _, member := range members {
-		for _, u := range member.GetClientUrls() {
-			if u == addr {
-				return true
-			}
+		if slices.Contains(member.GetClientUrls(), addr) {
+			return true
 		}
 	}
 	return false

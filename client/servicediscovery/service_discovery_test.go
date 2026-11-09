@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -158,25 +159,21 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 	suite.followerServer = newTestServer(false)
 	go suite.leaderServer.run()
 	go suite.followerServer.run()
-	for range 10 {
-		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))     //nolint:staticcheck
-		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
-		if err1 == nil && err2 == nil {
-			suite.followerClient = newPDServiceClient(
-				tlsutil.ModifyURLScheme(suite.followerServer.addr, nil),
-				tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
-				followerConn, false)
-			suite.leaderClient = newPDServiceClient(
-				tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
-				tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
-				leaderConn, true)
-			suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
-			suite.followerServer.server.leaderAddr = suite.leaderClient.GetURL()
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	suite.Require().NotNil(suite.leaderClient)
+	re := suite.Require()
+	leaderConn, err := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
+	re.NoError(err)
+	followerConn, err := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
+	re.NoError(err)
+	suite.followerClient = newPDServiceClient(
+		tlsutil.ModifyURLScheme(suite.followerServer.addr, nil),
+		tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
+		followerConn, false)
+	suite.leaderClient = newPDServiceClient(
+		tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
+		tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
+		leaderConn, true)
+	suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
+	suite.followerServer.server.leaderAddr = suite.leaderClient.GetURL()
 }
 
 func (suite *serviceClientTestSuite) TearDownTest() {
@@ -253,42 +250,45 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(grpcutil.IsFollowerHandleEnabled(ctx4, metadata.FromOutgoingContext))
 	re.Empty(grpcutil.GetForwardedHost(ctx4, metadata.FromOutgoingContext))
 
-	followerAPIClient := newPDServiceAPIClient(follower, regionAPIErrorFn)
-	leaderAPIClient := newPDServiceAPIClient(leader, regionAPIErrorFn)
+	synctest.Test(suite.T(), func(t *testing.T) {
+		re := require.New(t)
+		followerAPIClient := newPDServiceAPIClient(follower, regionAPIErrorFn)
+		leaderAPIClient := newPDServiceAPIClient(leader, regionAPIErrorFn)
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable", "return(true)"))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable", "return(true)"))
 
-	re.True(followerAPIClient.Available())
-	re.True(leaderAPIClient.Available())
-	pdErr1 := &pdpb.Error{
-		Type: pdpb.ErrorType_UNKNOWN,
-	}
-	pdErr2 := &pdpb.Error{
-		Type: pdpb.ErrorType_REGION_NOT_FOUND,
-	}
-	err = errors.New("error")
-	re.True(followerAPIClient.NeedRetry(pdErr1, nil))
-	re.False(leaderAPIClient.NeedRetry(pdErr1, nil))
-	re.True(followerAPIClient.Available())
-	re.True(leaderAPIClient.Available())
+		re.True(followerAPIClient.Available())
+		re.True(leaderAPIClient.Available())
+		pdErr1 := &pdpb.Error{
+			Type: pdpb.ErrorType_UNKNOWN,
+		}
+		pdErr2 := &pdpb.Error{
+			Type: pdpb.ErrorType_REGION_NOT_FOUND,
+		}
+		err := errors.New("error")
+		re.True(followerAPIClient.NeedRetry(pdErr1, nil))
+		re.False(leaderAPIClient.NeedRetry(pdErr1, nil))
+		re.True(followerAPIClient.Available())
+		re.True(leaderAPIClient.Available())
 
-	re.True(followerAPIClient.NeedRetry(pdErr2, nil))
-	re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
-	re.False(followerAPIClient.Available())
-	re.True(leaderAPIClient.Available())
-	followerAPIClient.(*serviceAPIClient).markAsAvailable()
-	leaderAPIClient.(*serviceAPIClient).markAsAvailable()
-	re.False(followerAPIClient.Available())
-	time.Sleep(time.Millisecond * 100)
-	followerAPIClient.(*serviceAPIClient).markAsAvailable()
-	re.True(followerAPIClient.Available())
+		re.True(followerAPIClient.NeedRetry(pdErr2, nil))
+		re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
+		re.False(followerAPIClient.Available())
+		re.True(leaderAPIClient.Available())
+		followerAPIClient.(*serviceAPIClient).markAsAvailable()
+		leaderAPIClient.(*serviceAPIClient).markAsAvailable()
+		re.False(followerAPIClient.Available())
+		synctest.Sleep(100*time.Millisecond + time.Nanosecond)
+		followerAPIClient.(*serviceAPIClient).markAsAvailable()
+		re.True(followerAPIClient.Available())
 
-	re.True(followerAPIClient.NeedRetry(nil, err))
-	re.False(leaderAPIClient.NeedRetry(nil, err))
-	re.True(followerAPIClient.Available())
-	re.True(leaderAPIClient.Available())
+		re.True(followerAPIClient.NeedRetry(nil, err))
+		re.False(leaderAPIClient.NeedRetry(nil, err))
+		re.True(followerAPIClient.Available())
+		re.True(leaderAPIClient.Available())
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable"))
+	})
 }
 
 func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
@@ -451,4 +451,17 @@ func TestGRPCDialOption(t *testing.T) {
 	err := cli.updateMember()
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)
+}
+
+func TestExecWithBackoffLimitsCalls(t *testing.T) {
+	re := require.New(t)
+	for _, maxRetryTimes := range []int{0, 1, 3} {
+		calls := 0
+		err := execWithBackoff(context.Background(), time.Millisecond, maxRetryTimes, func() error {
+			calls++
+			return errors.New("mock error")
+		})
+		re.Error(err)
+		re.Equal(max(maxRetryTimes, 1), calls)
+	}
 }

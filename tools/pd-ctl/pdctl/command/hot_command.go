@@ -233,8 +233,7 @@ func parseHotRegionsHistoryArgs(args []string) (map[string]any, error) {
 	}
 	stringToIntSlice := func(s string) ([]int64, error) {
 		results := make([]int64, 0)
-		args := strings.Split(s, ",")
-		for _, arg := range args {
+		for arg := range strings.SplitSeq(s, ",") {
 			result, err := strconv.ParseInt(arg, 10, 64)
 			if err != nil {
 				return nil, err

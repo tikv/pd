@@ -923,8 +923,7 @@ func setShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string
 		return
 	}
 	var roles []string
-	fields := strings.Split(strings.ToLower(args[0]), ",")
-	for _, f := range fields {
+	for f := range strings.SplitSeq(strings.ToLower(args[0]), ",") {
 		if f != "" {
 			roles = append(roles, f)
 		}

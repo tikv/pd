@@ -32,19 +32,30 @@ type deadline struct {
 	cancel context.CancelFunc
 }
 
+type timerPool interface {
+	Get(time.Duration) *time.Timer
+	Put(*time.Timer)
+}
+
 // Watcher is used to watch and manage the deadlines.
 type Watcher struct {
-	ctx    context.Context
-	source string
-	Ch     chan *deadline
+	ctx       context.Context
+	source    string
+	Ch        chan *deadline
+	timerPool timerPool
 }
 
 // NewWatcher is used to create a new deadline watcher.
 func NewWatcher(ctx context.Context, capacity int, source string) *Watcher {
+	return newWatcherWithTimerPool(ctx, capacity, source, &timerutil.GlobalTimerPool)
+}
+
+func newWatcherWithTimerPool(ctx context.Context, capacity int, source string, pool timerPool) *Watcher {
 	watcher := &Watcher{
-		ctx:    ctx,
-		source: source,
-		Ch:     make(chan *deadline, capacity),
+		ctx:       ctx,
+		source:    source,
+		Ch:        make(chan *deadline, capacity),
+		timerPool: pool,
 	}
 	go watcher.Watch()
 	return watcher
@@ -62,11 +73,11 @@ func (w *Watcher) Watch() {
 			case <-d.timer.C:
 				log.Error("[pd] the deadline is reached", zap.String("source", w.source))
 				d.cancel()
-				timerutil.GlobalTimerPool.Put(d.timer)
+				w.timerPool.Put(d.timer)
 			case <-d.done:
-				timerutil.GlobalTimerPool.Put(d.timer)
+				w.timerPool.Put(d.timer)
 			case <-w.ctx.Done():
-				timerutil.GlobalTimerPool.Put(d.timer)
+				w.timerPool.Put(d.timer)
 				return
 			}
 		case <-w.ctx.Done():
@@ -91,7 +102,7 @@ func (w *Watcher) Start(
 	default:
 	}
 	// Initialize the deadline.
-	timer := timerutil.GlobalTimerPool.Get(timeout)
+	timer := w.timerPool.Get(timeout)
 	d := &deadline{
 		timer:  timer,
 		done:   make(chan struct{}),
@@ -100,10 +111,10 @@ func (w *Watcher) Start(
 	// Send the deadline to the watcher.
 	select {
 	case <-w.ctx.Done():
-		timerutil.GlobalTimerPool.Put(timer)
+		w.timerPool.Put(timer)
 		return nil
 	case <-ctx.Done():
-		timerutil.GlobalTimerPool.Put(timer)
+		w.timerPool.Put(timer)
 		return nil
 	case w.Ch <- d:
 		return d.done

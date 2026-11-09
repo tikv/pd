@@ -148,8 +148,7 @@ func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	config := map[string]string{}
 	for _, flag := range configPairs {
-		kvs := strings.Split(flag, ",")
-		for _, kv := range kvs {
+		for kv := range strings.SplitSeq(flag, ",") {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
 				cmd.PrintErrf("Failed to create keyspace: invalid kv pair %s\n", kv)
@@ -208,8 +207,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	for _, flag := range removeFlags {
-		keys := strings.Split(flag, ",")
-		for _, key := range keys {
+		for key := range strings.SplitSeq(flag, ",") {
 			if _, exist := configPatch[key]; exist {
 				cmd.PrintErrf("Failed to update keyspace config: key %s is specified multiple times\n", key)
 				return
@@ -223,8 +221,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	for _, flag := range updateFlags {
-		kvs := strings.Split(flag, ",")
-		for _, kv := range kvs {
+		for kv := range strings.SplitSeq(flag, ",") {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
 				cmd.PrintErrf("Failed to update keyspace config: invalid kv pair %s\n", kv)
@@ -245,8 +242,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	for _, flag := range expectFlags {
-		kvs := strings.Split(flag, ",")
-		for _, kv := range kvs {
+		for kv := range strings.SplitSeq(flag, ",") {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
 				cmd.PrintErrf("Failed to update keyspace config: invalid kv pair %s\n", kv)
@@ -265,8 +261,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	for _, flag := range expectAbsentFlags {
-		keys := strings.Split(flag, ",")
-		for _, key := range keys {
+		for key := range strings.SplitSeq(flag, ",") {
 			if _, exist := preconditions[key]; exist {
 				cmd.PrintErrf("Failed to update keyspace config: precondition for key %s is specified multiple times\n", key)
 				return

@@ -341,8 +341,8 @@ func NewStoreHistoryLoads(sampleDuration time.Duration, sampleInterval time.Dura
 		sampleDuration: sampleDuration,
 		sampleInterval: sampleInterval,
 	}
-	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
-		for j := constant.ResourceKind(0); j < constant.ResourceKindLen; j++ {
+	for i := range utils.RWTypeLen {
+		for j := range constant.ResourceKindLen {
 			st.loads[i][j] = make(map[uint64]*storeHistoryLoad)
 		}
 	}
