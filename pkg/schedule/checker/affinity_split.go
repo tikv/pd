@@ -43,11 +43,10 @@ const (
 var affinitySplitWaitTimeout = defaultAffinitySplitWaitTimeout
 
 type affinitySplitAttempt struct {
-	version          uint64
-	voterStoreIDs    []uint64
-	startedAt        time.Time
-	expiresAt        time.Time
-	fallbackReported bool
+	version       uint64
+	voterStoreIDs []uint64
+	startedAt     time.Time
+	expiresAt     time.Time
 	// split is the last split operator of the attempt. The operator controller
 	// starts an operator when it admits it, and then sends the split request.
 	// startedAt is the start time of the first split that started, and zero
@@ -135,15 +134,12 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		return wait("recent-merge-or-startup")
 	}
 	// The engine may have no split key at all, so a timed-out attempt moves
-	// without a preliminary split and accepts the large snapshot. Report it once:
-	// later patrols evaluate the same attempt again until a move adds the voter.
-	if splitWait > affinitySplitWaitTimeout && !attempt.fallbackReported {
-		log.Info("allow affinity peer move after split wait timeout", zap.Uint64("region-id", region.GetID()),
+	// without a preliminary split and accepts the large snapshot.
+	if splitWait > affinitySplitWaitTimeout {
+		log.Debug("allow affinity peer move after split wait timeout", zap.Uint64("region-id", region.GetID()),
 			zap.String("group-id", group.ID), zap.Int64("size", region.GetApproximateSize()),
 			zap.Int64("keys", region.GetApproximateKeys()), zap.Duration("wait-duration", splitWait))
 		affinityCheckerSplitTimeoutCounter.Inc()
-		attempt.fallbackReported = true
-		c.splitAttempts.Put(region.GetID(), attempt)
 	}
 	return nil, true
 }
