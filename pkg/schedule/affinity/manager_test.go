@@ -175,46 +175,6 @@ func TestBasicGroupOperations(t *testing.T) {
 	re.False(manager.IsGroupExist("group1"))
 }
 
-// TestSyncLabelRuleBeforeGroup ensures label rules arriving before group sync are applied after group creation.
-func TestSyncLabelRuleBeforeGroup(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	store := storage.NewStorageWithMemoryBackend()
-	storeInfos := core.NewStoresInfo()
-	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
-	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
-	storeInfos.PutStore(store1)
-
-	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
-	re.NoError(err)
-
-	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	re.NoError(err)
-
-	gkr := GroupKeyRanges{
-		GroupID: "group-label-first",
-		KeyRanges: []keyutil.KeyRange{
-			{StartKey: []byte{0x01}, EndKey: []byte{0x02}},
-		},
-	}
-	labelRule := MakeLabelRule(gkr)
-	// Simulate watcher path (JSON roundtrip) to ensure Data types match real events.
-	b, err := json.Marshal(labelRule)
-	re.NoError(err)
-	parsedRule, err := labeler.NewLabelRuleFromJSON(b)
-	re.NoError(err)
-	re.NoError(manager.SyncKeyRangesFromEtcd(parsedRule))
-
-	// Group arrives after label rule.
-	manager.SyncGroupFromEtcd(&Group{ID: gkr.GroupID})
-
-	state := manager.GetAffinityGroupState(gkr.GroupID)
-	re.NotNil(state)
-	re.Equal(1, state.RangeCount)
-}
-
 // TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.
 func TestRegionCountStaleCache(t *testing.T) {
 	re := require.New(t)
@@ -889,30 +849,46 @@ func TestDegradedExpiration(t *testing.T) {
 // watcher syncs, still holds an older rule of the group.
 func TestSyncGroupPrefersBufferedLabelRule(t *testing.T) {
 	re := require.New(t)
-	const groupID = "g"
-	newer := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}
-	older := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}}
+	ranges := []GroupKeyRanges{
+		{GroupID: "a", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
+		{GroupID: "b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
+	}
 	store := storage.NewStorageWithMemoryBackend()
 	stores := core.NewStoresInfo()
-	stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}).Clone(core.SetLastHeartbeatTS(time.Now())))
 	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, time.Second*5)
 	re.NoError(err)
 	manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
 	re.NoError(err)
 
-	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(older)))
-	// The affinity watcher decodes its own copy of the newer rule.
-	data, err := json.Marshal(MakeLabelRule(newer))
-	re.NoError(err)
-	rule, err := labeler.NewLabelRuleFromJSON(data)
-	re.NoError(err)
-	re.NoError(manager.SyncKeyRangesFromEtcd(rule))
-	re.Contains(manager.labelRuleBuffer, groupID)
+	// The general labeler still has A's old rule after A gives [b,c) to B.
+	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(GroupKeyRanges{
+		GroupID: "a", KeyRanges: slices.Concat(ranges[0].KeyRanges, ranges[1].KeyRanges),
+	})))
+	for _, change := range ranges {
+		// The affinity watcher decodes its own copy of the newer rule.
+		data, err := json.Marshal(MakeLabelRule(change))
+		re.NoError(err)
+		rule, err := labeler.NewLabelRuleFromJSON(data)
+		re.NoError(err)
+		re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+		re.Contains(manager.labelRuleBuffer, change.GroupID)
+		manager.SyncGroupFromEtcd(&Group{ID: change.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+		re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(change)))
+	}
 
-	manager.SyncGroupFromEtcd(&Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
-	re.NotContains(manager.labelRuleBuffer, groupID)
-	re.Equal(newer, manager.keyRanges[groupID])
-	re.Equal(1, manager.GetAffinityGroupState(groupID).RangeCount)
+	// All watchers have caught up; ordinary Region lookups must use the new ranges.
+	manager.ReconcileRangeConflicts()
+	for _, change := range ranges {
+		re.Equal(change, manager.keyRanges[change.GroupID])
+		re.Equal(1, manager.GetAffinityGroupState(change.GroupID).RangeCount)
+		manager.RestoreAffinityGroup(change.GroupID)
+		group, isAffinity := manager.GetRegionAffinityGroupState(generateRegionForTest(1, []uint64{1}, change.KeyRanges[0]))
+		re.NotNil(group)
+		re.Equal(change.GroupID, group.ID)
+		re.True(isAffinity)
+	}
+	re.Empty(manager.labelRuleBuffer)
 }
 
 // TestSyncGroupAndLabelRuleInAnyOrder applies the events of the affinity group
