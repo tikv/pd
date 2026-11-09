@@ -164,29 +164,6 @@ func TestRegionHeartbeatDuringCleanupDoesNotPanic(t *testing.T) {
 	re.Nil(s.GetCluster().GetHeartbeatStreams())
 }
 
-// TestHandleRegionHeartbeatAfterClusterStopDoesNotPanic covers split recovery
-// from a heartbeat that retained the cluster before primary cleanup began.
-func TestHandleRegionHeartbeatAfterClusterStopDoesNotPanic(t *testing.T) {
-	re := require.New(t)
-
-	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
-	region := putAffinitySplitTestGroup(t, cluster)
-	resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
-		Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_LOAD,
-	})
-	re.NoError(err)
-	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
-	// With the group deleted, the next heartbeat tries to send ChangeSplit(true),
-	// also when it arrives after stopCluster clears the cluster's heartbeat streams.
-	re.NoError(cluster.GetAffinityManager().DeleteAffinityGroups([]string{"g1"}, true))
-	cluster.stopCluster()
-
-	re.NotPanics(func() {
-		err = cluster.HandleRegionHeartbeat(region)
-	})
-	re.NoError(err)
-}
-
 func TestStoreHeartbeatDuringCleanupDoesNotPanic(t *testing.T) {
 	re := require.New(t)
 

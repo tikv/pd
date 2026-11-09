@@ -165,28 +165,23 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re.Equal(float64(2), splitScatterPendingMetricValue(t))
 }
 
-// TestAskBatchSplitAfterClusterStopDoesNotPanic covers an in-flight denial after
-// primary cleanup clears the cluster's heartbeat streams.
-func TestAskBatchSplitAfterClusterStopDoesNotPanic(t *testing.T) {
+// TestSplitNotificationsAfterClusterStop covers requests that retained the cluster
+// before primary cleanup cleared its heartbeat streams.
+func TestSplitNotificationsAfterClusterStop(t *testing.T) {
 	re := require.New(t)
-
 	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
 	region := putAffinitySplitTestGroup(t, cluster)
-	// A request that got the cluster before the primary exited still runs
-	// after stopCluster clears the cluster's heartbeat streams.
+	request := &schedulingpb.AskBatchSplitRequest{Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_LOAD}
+	_, err := svc.AskBatchSplit(t.Context(), request)
+	re.NoError(err)
 	cluster.stopCluster()
-
-	var (
-		resp *schedulingpb.AskBatchSplitResponse
-		err  error
-	)
-	re.NotPanics(func() {
-		resp, err = svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
-			Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_LOAD,
-		})
-	})
+	resp, err := svc.AskBatchSplit(t.Context(), request)
 	re.NoError(err)
 	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
+	cfg := cluster.persistConfig.GetScheduleConfig().Clone()
+	cfg.AffinityScheduleLimit = 0
+	cluster.persistConfig.SetScheduleConfig(cfg)
+	re.NoError(cluster.HandleRegionHeartbeat(region))
 }
 
 func newTestSchedulingServiceForSplit(

@@ -186,9 +186,8 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 	}
 }
 
-// TestSplitRecoveryOnlyForDeniedRegions leaves administrative splits untracked
-// and relies on storage's TTL when PD has already expired its denial entry.
-func TestSplitRecoveryOnlyForDeniedRegions(t *testing.T) {
+// TestSplitTracking covers renewal, expiry and recovery using the same denial.
+func TestSplitTracking(t *testing.T) {
 	re := require.New(t)
 	m, conf, region, streams := newSplitRecoveryTestManager(t)
 	admin, expired := region.Clone(core.WithNewRegionID(2)), region.Clone(core.WithNewRegionID(3))
@@ -204,6 +203,22 @@ func TestSplitRecoveryOnlyForDeniedRegions(t *testing.T) {
 	m.MaybeEnableSplit(region, streams)
 	unchanged, _ := m.splitDeniedRegions.Peek(region.GetID())
 	re.Equal(deadline, unchanged, "heartbeats far from the deadline do not extend the TTL")
+	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
+	m.MaybeEnableSplit(region.Clone(core.WithLeader(nil)), streams)
+	re.Zero(streams.MsgLength())
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() { m.MaybeEnableSplit(region, streams) })
+	}
+	wg.Wait()
+	re.Equal(1, streams.MsgLength(), "concurrent heartbeats renew once")
+	re.NoError(streams.Drain(1))
+	deadline, ok = m.splitDeniedRegions.Peek(region.GetID())
+	re.True(ok)
+	re.Greater(time.Until(deadline.(time.Time)), splitDeniedRegionTTL-time.Minute)
+	m.MaybeEnableSplit(region, streams)
+	re.Zero(streams.MsgLength(), "renewal restarts the deadline")
+	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
 	m.splitDeniedRegions.Put(expired.GetID(), time.Now().Add(-time.Second))
 
 	conf.SetAffinityScheduleLimit(0)
@@ -218,34 +233,44 @@ func TestSplitRecoveryOnlyForDeniedRegions(t *testing.T) {
 	re.Zero(m.splitDeniedRegions.Len())
 }
 
-// TestRenewSplitDenialBeforeStorageTTL renews the storage-side denial once per
-// window, while a newly allowed Region receives recovery instead of renewal.
-func TestRenewSplitDenialBeforeStorageTTL(t *testing.T) {
-	re := require.New(t)
-	m, _, region, streams := newSplitRecoveryTestManager(t)
-	re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
-	re.NoError(streams.Drain(1))
-
-	// Near the deadline, concurrent heartbeats of a Region that is still denied
-	// renew ChangeSplit(false) once. Only that message keeps the tracking entry,
-	// and it restarts the deadline.
-	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Go(func() { m.MaybeEnableSplit(region, streams) })
+// TestSplitQueueFull leaves dropped notifications to the storage TTL fallback.
+func TestSplitQueueFull(t *testing.T) {
+	for _, path := range []string{"denial", "renewal", "recovery"} {
+		t.Run(path, func(t *testing.T) {
+			re := require.New(t)
+			m, _, region, streams := newSplitRecoveryTestManager(t)
+			if path != "denial" {
+				re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
+				re.NoError(streams.Drain(1))
+				m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
+			}
+			if path == "recovery" {
+				region = region.Clone(core.SetApproximateSize(80))
+			}
+			for range 1024 {
+				streams.SendMsg(region, &hbstream.Operation{})
+			}
+			send := func() {
+				if path == "denial" {
+					re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
+				} else {
+					m.MaybeEnableSplit(region, streams)
+				}
+			}
+			// A blocking send fails the test timeout instead of returning here.
+			send()
+			re.Equal(1024, streams.MsgLength())
+			re.True(m.CheckSplit(region.Clone(core.WithNewRegionID(2)), pdpb.SplitReason_ADMIN, streams))
+			re.NoError(streams.Drain(1024))
+			if path == "recovery" {
+				re.Zero(m.splitDeniedRegions.Len())
+			} else {
+				renewed, ok := m.splitDeniedRegions.Peek(region.GetID())
+				re.True(ok)
+				re.Greater(time.Until(renewed.(time.Time)), splitDeniedRegionTTL-time.Minute)
+			}
+			m.MaybeEnableSplit(region, streams)
+			re.Zero(streams.MsgLength(), "delivery loss relies on the storage TTL")
+		})
 	}
-	wg.Wait()
-	re.Equal(1, streams.MsgLength(), "concurrent heartbeats renew the denial once")
-	re.NoError(streams.Drain(1))
-	deadline, ok := m.splitDeniedRegions.Peek(region.GetID())
-	re.True(ok)
-	re.Greater(time.Until(deadline.(time.Time)), splitDeniedRegionTTL-time.Minute)
-	m.MaybeEnableSplit(region, streams)
-	re.Zero(streams.MsgLength(), "the renewal restarts the tracking")
-
-	// Near the deadline, a Region that may split again gets ChangeSplit(true) instead.
-	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
-	m.MaybeEnableSplit(region.Clone(core.SetApproximateSize(80)), streams)
-	re.Equal(1, streams.MsgLength())
-	re.Zero(m.splitDeniedRegions.Len())
 }

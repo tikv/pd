@@ -235,7 +235,8 @@ func (s *HeartbeatStreams) BindStream(storeID uint64, stream HeartbeatStream) {
 	}
 }
 
-// SendMsg sends a message to related store.
+// SendMsg sends a message to related store. ChangeSplit is best effort and may
+// be dropped when the queue is full.
 func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 	if region.GetLeader() == nil {
 		return
@@ -274,6 +275,13 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 		}
 	}
 
+	if op.ChangeSplit != nil {
+		select {
+		case s.msgCh <- resp:
+		default:
+		}
+		return
+	}
 	select {
 	case s.msgCh <- resp:
 	case <-s.hbStreamCtx.Done():
