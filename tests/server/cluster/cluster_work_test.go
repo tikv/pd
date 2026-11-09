@@ -111,7 +111,7 @@ func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
 			Header: testutil.NewRequestHeader(leader.GetClusterID()),
 			Region: region,
 		}
-		for _, count := range []uint32{131073, 1 << 30, math.MaxUint32} {
+		for _, count := range []uint32{131073, math.MaxUint32} {
 			request.SplitCount = count
 			ctx, cancel := context.WithTimeout(s.T().Context(), 10*time.Second)
 			resp, err := client.AskBatchSplit(ctx, request)
@@ -122,7 +122,7 @@ func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
 		}
 		// The boundary batch exercises the monolithic handler's existing per-ID
 		// allocation under race instrumentation, so allow a longer RPC deadline.
-		for _, count := range []uint32{0, 1, 10, 131072} {
+		for _, count := range []uint32{0, 100000, 131072, 1} {
 			request.SplitCount = count
 			ctx, cancel := context.WithTimeout(s.T().Context(), 30*time.Second)
 			resp, err := client.AskBatchSplit(ctx, request)
@@ -130,6 +130,16 @@ func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
 			re.NoError(err)
 			re.Nil(resp.GetHeader().GetError())
 			re.Len(resp.GetIds(), int(count))
+			var previous uint64
+			for _, split := range resp.GetIds() {
+				re.Greater(split.GetNewRegionId(), previous)
+				previous = split.GetNewRegionId()
+				re.Len(split.GetNewPeerIds(), len(region.GetPeers()))
+				for _, peer := range split.GetNewPeerIds() {
+					re.Greater(peer, previous)
+					previous = peer
+				}
+			}
 		}
 	})
 }

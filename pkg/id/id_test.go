@@ -107,7 +107,8 @@ func TestSetBaseRecovery(t *testing.T) {
 	require.NoError(t, err)
 	for _, label := range []label{DefaultLabel, KeyspaceLabel} {
 		t.Run(string(label), func(t *testing.T) {
-			alloc := NewAllocator(&AllocatorParams{Client: client, Member: memberVal, Label: label})
+			params := &AllocatorParams{Client: client, Member: memberVal, Label: label}
+			alloc := NewAllocator(params)
 			key := keypath.AllocIDPath()
 			if label == KeyspaceLabel {
 				key = keypath.KeyspaceAllocIDPath()
@@ -126,23 +127,6 @@ func TestSetBaseRecovery(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, base+DefaultAllocStep, end, "recovery must replace the persisted window")
 			}
-		})
-	}
-}
-
-func TestSetBaseAfterRestart(t *testing.T) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
-	_, err := client.Put(t.Context(), leaderPath, memberVal)
-	require.NoError(t, err)
-	for _, label := range []label{DefaultLabel, KeyspaceLabel} {
-		t.Run(string(label), func(t *testing.T) {
-			params := &AllocatorParams{Client: client, Member: memberVal, Label: label}
-			original := NewAllocator(params)
-			require.NoError(t, original.SetBase(5000))
-			_, _, err := original.Alloc(3)
-			require.NoError(t, err)
-
 			// The earlier allocator is no longer used after recovery starts.
 			recovered := NewAllocator(params)
 			require.NoError(t, recovered.SetBase(1000))

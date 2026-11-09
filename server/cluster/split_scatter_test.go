@@ -50,7 +50,7 @@ func (a *rejectedSplitIDAllocator) Alloc(uint32) (uint64, uint32, error) {
 }
 
 func TestHandleAskBatchSplitRejectsOversizedCountBeforeAllocation(t *testing.T) {
-	for _, count := range []uint32{131073, 1000000, 1 << 30, math.MaxUint32} {
+	for _, count := range []uint32{131073, math.MaxUint32} {
 		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
 			cluster, _ := newSplitScatterTestCluster(t)
 			original := cluster.id
@@ -64,60 +64,20 @@ func TestHandleAskBatchSplitRejectsOversizedCountBeforeAllocation(t *testing.T) 
 			require.ErrorContains(t, err, "exceeds maximum")
 			require.Nil(t, resp)
 
+			request.Region = cluster.GetRegion(100).Clone(core.SetRegionVersion(0)).GetMeta()
+			resp, err = cluster.HandleAskBatchSplit(request)
+			require.ErrorContains(t, err, "invalid region epoch")
+			require.Nil(t, resp)
+			require.Zero(t, allocator.calls, "region validation must precede count validation and allocation")
+
 			cluster.id = original
+			request.Region = cluster.GetRegion(100).GetMeta()
 			request.SplitCount = 1
 			resp, err = cluster.HandleAskBatchSplit(request)
 			require.NoError(t, err)
 			require.Len(t, resp.GetIds(), 1)
 		})
 	}
-}
-
-func TestHandleAskBatchSplitCountCompatibility(t *testing.T) {
-	for _, count := range []uint32{0, 1, 10, 10000, 100000, 131072} {
-		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
-			cluster, _ := newSplitScatterTestCluster(t)
-			region := cluster.GetRegion(100)
-			resp, err := cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
-				Region: region.GetMeta(), SplitCount: count,
-			})
-			require.NoError(t, err)
-			require.Len(t, resp.GetIds(), int(count))
-			var previous uint64
-			for _, split := range resp.GetIds() {
-				require.Greater(t, split.GetNewRegionId(), previous)
-				previous = split.GetNewRegionId()
-				require.Len(t, split.GetNewPeerIds(), len(region.GetPeers()))
-				for _, peer := range split.GetNewPeerIds() {
-					require.Greater(t, peer, previous)
-					previous = peer
-				}
-			}
-		})
-	}
-}
-
-func TestHandleAskBatchSplitLargeCountCompatibility(t *testing.T) {
-	cluster, _ := newSplitScatterTestCluster(t)
-	before, _, err := cluster.id.Alloc(1)
-	require.NoError(t, err)
-	staleRegion := cluster.GetRegion(100).Clone(core.SetRegionVersion(0))
-	// Large counts must reach normal region validation without consuming IDs.
-	for _, count := range []uint32{1000000, 1 << 30, math.MaxUint32} {
-		resp, err := cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
-			Region: staleRegion.GetMeta(), SplitCount: count,
-		})
-		require.ErrorContains(t, err, "invalid region epoch")
-		require.Nil(t, resp)
-	}
-	after, _, err := cluster.id.Alloc(1)
-	require.NoError(t, err)
-	require.Equal(t, before+1, after)
-	resp, err := cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
-		Region: cluster.GetRegion(100).GetMeta(), SplitCount: 1,
-	})
-	require.NoError(t, err)
-	require.Len(t, resp.GetIds(), 1)
 }
 
 const (

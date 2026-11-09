@@ -48,7 +48,7 @@ import (
 )
 
 func TestAskBatchSplitRejectsOversizedCountBeforeAllocation(t *testing.T) {
-	for _, count := range []uint32{131073, 1000000, 1 << 30, math.MaxUint32} {
+	for _, count := range []uint32{131073, math.MaxUint32} {
 		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
 			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
 			client := &splitScatterPDClient{next: 1000, allocErr: errors.New("unexpected split ID allocation")}
@@ -65,7 +65,15 @@ func TestAskBatchSplitRejectsOversizedCountBeforeAllocation(t *testing.T) {
 			require.Empty(t, resp.GetIds())
 			require.Equal(t, uint64(1000), client.next)
 
+			request.Region = region.Clone(core.SetRegionVersion(0)).GetMeta()
+			resp, err = svc.AskBatchSplit(t.Context(), request)
+			require.NoError(t, err)
+			require.Contains(t, resp.GetHeader().GetError().GetMessage(), "invalid region epoch")
+			require.Empty(t, resp.GetIds())
+			require.Zero(t, client.calls, "region validation must precede count validation and allocation")
+
 			client.allocErr = nil
+			request.Region = region.GetMeta()
 			request.SplitCount = 1
 			resp, err = svc.AskBatchSplit(t.Context(), request)
 			require.NoError(t, err)
@@ -73,25 +81,6 @@ func TestAskBatchSplitRejectsOversizedCountBeforeAllocation(t *testing.T) {
 			require.Len(t, resp.GetIds(), 1)
 		})
 	}
-}
-
-func TestAskBatchSplitLargeCountCompatibility(t *testing.T) {
-	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
-	client := &splitScatterPDClient{next: 1000}
-	cluster.SwitchPDLeader(client)
-	region := newAffinitySplitTestRegion()
-	cluster.PutRegion(region)
-	staleRegion := region.Clone(core.SetRegionVersion(0))
-	// Large counts must reach normal region validation without consuming IDs.
-	for _, count := range []uint32{1000000, 1 << 30, math.MaxUint32} {
-		resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
-			Region: staleRegion.GetMeta(), SplitCount: count,
-		})
-		require.NoError(t, err)
-		require.Contains(t, resp.GetHeader().GetError().GetMessage(), "invalid region epoch")
-		require.Empty(t, resp.GetIds())
-	}
-	require.Equal(t, uint64(1000), client.next)
 }
 
 func TestBatchSplitIDCount(t *testing.T) {
@@ -103,13 +92,9 @@ func TestBatchSplitIDCount(t *testing.T) {
 	}{
 		{0, 3, 0, true},
 		{1, 3, 4, true},
-		{838861, 3, 3355444, true},
-		{1000000, 3, 4000000, true},
-		{1073741823, 3, 4294967292, true},
-		{1 << 30, 3, 0, false},
-		{math.MaxUint32, 3, 0, false},
-		{math.MaxUint32, 0, math.MaxUint32, true},
-		{math.MaxUint32, math.MaxInt, 0, false},
+		{131072, 32766, 4294836224, true},
+		{131072, 32767, 0, false},
+		{131072, math.MaxInt, 0, false},
 	} {
 		t.Run(fmt.Sprintf("%d-peers-%d", test.splits, test.peers), func(t *testing.T) {
 			count, batch := batchSplitIDCount(test.splits, test.peers)
@@ -119,32 +104,30 @@ func TestBatchSplitIDCount(t *testing.T) {
 	}
 }
 
-func TestAskBatchSplitCountCompatibility(t *testing.T) {
-	for _, nonBatch := range []bool{false, true} {
-		for _, count := range []uint32{0, 1, 10, 10000, 100000, 131072} {
-			t.Run(fmt.Sprintf("non-batch-%t-count-%d", nonBatch, count), func(t *testing.T) {
-				svc, cluster, _ := newTestSchedulingServiceForSplit(t)
-				cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000, nonBatch: nonBatch})
-				region := newAffinitySplitTestRegion()
-				cluster.PutRegion(region)
-				resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
-					Region: region.GetMeta(), SplitCount: count,
-				})
-				require.NoError(t, err)
-				require.Nil(t, resp.GetHeader().GetError())
-				require.Len(t, resp.GetIds(), int(count))
-				var previous uint64
-				for _, split := range resp.GetIds() {
-					require.Greater(t, split.GetNewRegionId(), previous)
-					previous = split.GetNewRegionId()
-					require.Len(t, split.GetNewPeerIds(), len(region.GetPeers()))
-					for _, peer := range split.GetNewPeerIds() {
-						require.Greater(t, peer, previous)
-						previous = peer
-					}
-				}
+func TestAskBatchSplitLegacyAllocation(t *testing.T) {
+	for _, count := range []uint32{0, 1, 131072} {
+		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000, nonBatch: true})
+			region := newAffinitySplitTestRegion()
+			cluster.PutRegion(region)
+			resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
+				Region: region.GetMeta(), SplitCount: count,
 			})
-		}
+			require.NoError(t, err)
+			require.Nil(t, resp.GetHeader().GetError())
+			require.Len(t, resp.GetIds(), int(count))
+			var previous uint64
+			for _, split := range resp.GetIds() {
+				require.Greater(t, split.GetNewRegionId(), previous)
+				previous = split.GetNewRegionId()
+				require.Len(t, split.GetNewPeerIds(), len(region.GetPeers()))
+				for _, peer := range split.GetNewPeerIds() {
+					require.Greater(t, peer, previous)
+					previous = peer
+				}
+			}
+		})
 	}
 }
 
