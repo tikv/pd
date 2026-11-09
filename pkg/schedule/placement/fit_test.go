@@ -352,6 +352,198 @@ func TestFitRegionEquivalentPeersAcrossRules(t *testing.T) {
 	}
 }
 
+func TestFitRegionUnusedRuleSuffix(t *testing.T) {
+	for _, distinctLastPeer := range []bool{false, true} {
+		for _, cumulative := range []bool{false, true} {
+			t.Run(fmt.Sprintf("distinct-last-peer=%t/cumulative=%t", distinctLastPeer, cumulative), func(t *testing.T) {
+				stores, region, rules := makeUnusedRuleSuffix(20, 20, distinctLastPeer)
+				expected := [][]*metapb.Peer{region.GetPeers()[:1], region.GetPeers()[1:]}
+				if cumulative {
+					rules = append([]*Rule{
+						rules[0],
+						{Role: Voter, Count: 3},
+						{Role: Voter, Count: 4},
+					}, rules[2:]...)
+					expected = [][]*metapb.Peer{region.GetPeers()[:1], region.GetPeers()[1:4], region.GetPeers()[4:]}
+				}
+				w := newFitWorker(stores, region, rules, false)
+				w.run()
+				require.Len(t, w.bestFit.RuleFits, len(rules))
+				for i, peers := range expected {
+					require.Equal(t, peers, w.bestFit.RuleFits[i].Peers)
+					require.True(t, w.bestFit.RuleFits[i].IsSatisfied())
+				}
+				for _, rf := range w.bestFit.RuleFits[len(expected):] {
+					require.Empty(t, rf.Peers)
+				}
+				require.Empty(t, w.bestFit.OrphanPeers)
+				require.False(t, w.bestFit.IsSatisfied())
+				for _, peer := range w.peers {
+					require.False(t, peer.selected)
+				}
+			})
+		}
+	}
+}
+
+func TestEquivalentPeersRespectRemainingPeers(t *testing.T) {
+	region := mockRegion(9, 0)
+	stores := make([]*core.StoreInfo, 9)
+	for i := range stores {
+		pool, target := "x", "no"
+		if i == 8 {
+			pool = "y"
+		}
+		if i == 0 {
+			target = "yes"
+		}
+		stores[i] = core.NewStoreInfoWithLabel(uint64(i+1), map[string]string{"zone": "z1", "pool": pool, "target": target})
+	}
+	for _, tc := range []struct {
+		name      string
+		second    *Rule
+		secondIDs []uint64
+		orphanIDs []uint64
+	}{
+		{
+			name:      "peer-outside-current-candidates",
+			second:    &Rule{Role: Voter, Count: 4},
+			secondIDs: []uint64{6, 7, 8, 9},
+		},
+		{
+			name: "remaining-candidates-do-not-match",
+			second: &Rule{
+				Role: Voter, Count: 5,
+				LabelConstraints: []LabelConstraint{{Key: "pool", Op: In, Values: []string{"y"}}},
+			},
+			secondIDs: []uint64{9},
+			orphanIDs: []uint64{6, 7, 8},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rules := []*Rule{
+				{
+					Role: Voter, Count: 4, LocationLabels: []string{"zone"},
+					LabelConstraints: []LabelConstraint{{Key: "pool", Op: In, Values: []string{"x"}}},
+				},
+				tc.second,
+				{Role: Voter, Count: 1, LabelConstraints: []LabelConstraint{{Key: "target", Op: In, Values: []string{"yes"}}}},
+			}
+			w := newFitWorker(stores, region, rules, false)
+			w.run()
+			require.Equal(t, region.GetPeers()[1:5], w.bestFit.RuleFits[0].Peers)
+			require.Len(t, w.bestFit.RuleFits[1].Peers, len(tc.secondIDs))
+			for i, id := range tc.secondIDs {
+				require.Equal(t, region.GetPeer(id), w.bestFit.RuleFits[1].Peers[i])
+			}
+			require.Equal(t, region.GetPeers()[:1], w.bestFit.RuleFits[2].Peers)
+			require.Len(t, w.bestFit.OrphanPeers, len(tc.orphanIDs))
+			for i, id := range tc.orphanIDs {
+				require.Equal(t, region.GetPeer(id), w.bestFit.OrphanPeers[i])
+			}
+			for _, peer := range w.peers {
+				require.False(t, peer.selected)
+			}
+		})
+	}
+}
+
+func TestEquivalentPeersConsumedAcrossMatchingRules(t *testing.T) {
+	region := mockRegion(9, 0)
+	stores := make([]*core.StoreInfo, 9)
+	for i := range stores {
+		pool, extra := "x", "same"
+		if i == 7 {
+			extra = "different"
+		}
+		if i == 8 {
+			pool, extra = "y", "outside"
+		}
+		stores[i] = core.NewStoreInfoWithLabel(uint64(i+1), map[string]string{"zone": "z1", "pool": pool, "extra": extra})
+	}
+	constraints := []LabelConstraint{{Key: "pool", Op: In, Values: []string{"x"}}}
+	rules := []*Rule{
+		{Role: Voter, Count: 4, LocationLabels: []string{"zone"}, LabelConstraints: constraints},
+		{Role: Voter, Count: 3, LabelConstraints: constraints},
+		{Role: Voter, Count: 3, LabelConstraints: constraints},
+		{Role: Voter, Count: 1, LabelConstraints: []LabelConstraint{{Key: "extra", Op: In, Values: []string{"same"}}}},
+		{Role: Voter, Count: 1, LabelConstraints: []LabelConstraint{{Key: "pool", Op: In, Values: []string{"y"}}}},
+	}
+	// The two matching rules consume every x peer. The y peer remains available,
+	// but cannot make the later extra-label distinction between x peers relevant.
+	w := newFitWorker(stores, region, rules, false)
+	w.run()
+	require.Equal(t, region.GetPeers()[:4], w.bestFit.RuleFits[0].Peers)
+	require.Equal(t, region.GetPeers()[4:7], w.bestFit.RuleFits[1].Peers)
+	require.Equal(t, region.GetPeers()[7:8], w.bestFit.RuleFits[2].Peers)
+	require.Empty(t, w.bestFit.RuleFits[3].Peers)
+	require.Equal(t, region.GetPeers()[8:], w.bestFit.RuleFits[4].Peers)
+	require.Empty(t, w.bestFit.OrphanPeers)
+	require.False(t, w.bestFit.IsSatisfied())
+	for _, peer := range w.peers {
+		require.False(t, peer.selected)
+	}
+}
+
+func TestEquivalentPeersRespectConsumingRule(t *testing.T) {
+	t.Run("role", func(t *testing.T) {
+		region := mockRegion(8, 0)
+		stores := newMockStoresSet(8).GetStores()
+		rules := []*Rule{
+			{Role: Voter, Count: 7, LocationLabels: []string{"zone"}},
+			{Role: Leader, Count: 1},
+			{Role: Voter, Count: 1},
+		}
+		fit := fitRegion(stores, region, rules, false)
+		require.Equal(t, region.GetPeers()[1:], fit.RuleFits[0].Peers)
+		require.Equal(t, region.GetPeers()[:1], fit.RuleFits[1].Peers)
+		require.Empty(t, fit.RuleFits[1].PeersWithDifferentRole)
+		require.Empty(t, fit.RuleFits[2].Peers)
+	})
+	t.Run("isolation", func(t *testing.T) {
+		region := mockRegion(8, 0)
+		stores := make([]*core.StoreInfo, 8)
+		for i := range stores {
+			zone := "z1"
+			if i == 0 {
+				zone = "z2"
+			}
+			stores[i] = core.NewStoreInfoWithLabel(uint64(i+1), map[string]string{"zone": zone})
+		}
+		rules := []*Rule{
+			{Role: Voter, Count: 1},
+			{Role: Voter, Count: 7, LocationLabels: []string{"zone"}},
+			{Role: Voter, Count: 1},
+		}
+		fit := fitRegion(stores, region, rules, false)
+		require.Equal(t, region.GetPeers()[1:2], fit.RuleFits[0].Peers)
+		expected := append([]*metapb.Peer{region.GetPeer(1)}, region.GetPeers()[2:]...)
+		require.Equal(t, expected, fit.RuleFits[1].Peers)
+		require.Equal(t, float64(6), fit.RuleFits[1].IsolationScore)
+		require.Empty(t, fit.RuleFits[2].Peers)
+	})
+	t.Run("witness-eligibility-and-score", func(t *testing.T) {
+		region := mockRegion(10, 0)
+		stores := newMockStoresSet(10).GetStores()
+		for i := range stores {
+			if i != 1 && i != 2 {
+				stores[i] = stores[i].Clone(core.SetWitnessCount(10))
+			}
+		}
+		rules := []*Rule{
+			{Role: Voter, Count: 8, LocationLabels: []string{"zone"}},
+			{Role: Voter, Count: 2, IsWitness: true},
+			{Role: Voter, Count: 1},
+		}
+		fit := fitRegion(stores, region, rules, true)
+		expected := append([]*metapb.Peer{region.GetPeer(1)}, region.GetPeers()[3:]...)
+		require.Equal(t, expected, fit.RuleFits[0].Peers)
+		require.Equal(t, region.GetPeers()[1:3], fit.RuleFits[1].Peers)
+		require.Zero(t, fit.RuleFits[1].WitnessScore)
+		require.Empty(t, fit.RuleFits[2].Peers)
+	})
+}
+
 func TestEquivalentPeersRespectLaterRules(t *testing.T) {
 	region := mockRegion(8, 0)
 	stores := make([]*core.StoreInfo, 8)

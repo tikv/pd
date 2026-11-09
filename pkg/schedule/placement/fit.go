@@ -339,9 +339,16 @@ type peerClass struct {
 	previous int // Number of earlier candidates in this class.
 }
 
-// classifyCandidates groups peers that are interchangeable for every remaining
-// rule. Keep ordinary replica sets on the existing enumeration path.
+// classifyCandidates groups peers that are interchangeable for every rule they
+// can reach. Keep ordinary replica sets on the existing enumeration path.
 func (w *fitWorker) classifyCandidates(candidates []*fitPeer, index, count int) ([]peerClass, int) {
+	// Peers outside candidates can still occupy slots in later rules.
+	remaining := -count
+	for _, peer := range w.peers {
+		if !peer.selected {
+			remaining++
+		}
+	}
 	// Replacing equivalent peers can change the order of isolation additions.
 	// Only prune when all possible sums are exact integers in float64. Leave a
 	// conservative margin below 2^53, including for the bound's own rounding.
@@ -351,15 +358,15 @@ func (w *fitWorker) classifyCandidates(candidates []*fitPeer, index, count int) 
 			return nil, 0
 		}
 	}
-	// Bound the classification prepass and keep its representatives on the
-	// stack. If peers have too many distinct uses, fall back without allocating.
+	// Limit the class representatives and keep them on the stack. If peers have
+	// too many distinct uses, fall back without allocating.
 	var representatives [8]*fitPeer
 	limit := min(count, len(candidates)-count, len(representatives))
 	classCount := 0
 	for _, peer := range candidates {
 		class := 0
 		for ; class < classCount; class++ {
-			if w.equivalentPeers(peer, representatives[class], index) {
+			if w.equivalentPeers(peer, representatives[class], index, remaining) {
 				break
 			}
 		}
@@ -381,7 +388,7 @@ func (w *fitWorker) classifyCandidates(candidates []*fitPeer, index, count int) 
 	var sizes [8]int
 	for i, peer := range candidates {
 		for class := range classCount {
-			if w.equivalentPeers(peer, representatives[class], index) {
+			if w.equivalentPeers(peer, representatives[class], index, remaining) {
 				classes[i] = peerClass{id: class, previous: sizes[class]}
 				sizes[class]++
 				break
@@ -391,13 +398,16 @@ func (w *fitWorker) classifyCandidates(candidates []*fitPeer, index, count int) 
 	return classes, classCount
 }
 
-func (w *fitWorker) equivalentPeers(a, b *fitPeer, index int) bool {
+func (w *fitWorker) equivalentPeers(a, b *fitPeer, index, remaining int) bool {
 	if a.store == nil || b.store == nil || a.IsWitness != b.IsWitness {
 		return false
 	}
-	for _, rule := range w.rules[index:] {
-		if a.matchRoleStrict(rule.Role) != b.matchRoleStrict(rule.Role) ||
-			MatchLabelConstraints(a.store, rule.LabelConstraints) != MatchLabelConstraints(b.store, rule.LabelConstraints) {
+	for i, rule := range w.rules[index:] {
+		if a.matchRoleStrict(rule.Role) != b.matchRoleStrict(rule.Role) {
+			return false
+		}
+		matches := MatchLabelConstraints(a.store, rule.LabelConstraints)
+		if matches != MatchLabelConstraints(b.store, rule.LabelConstraints) {
 			return false
 		}
 		if w.supportWitness && rule.IsWitness && (a.isLeader != b.isLeader || a.store.GetWitnessCount() != b.store.GetWitnessCount()) {
@@ -407,6 +417,15 @@ func (w *fitWorker) equivalentPeers(a, b *fitPeer, index int) bool {
 			if a.store.GetLabelValue(label) != b.store.GetLabelValue(label) {
 				return false
 			}
+		}
+		if i > 0 && matches && (!a.isLeader || !w.supportWitness || !rule.IsWitness) {
+			// If the exchanged peer survives this rule, the rule must consume
+			// Count other peers. Once no peers could remain, neither exchanged
+			// peer can reach a later rule, so later distinctions are irrelevant.
+			if rule.Count >= remaining {
+				return true
+			}
+			remaining -= rule.Count
 		}
 	}
 	return true
