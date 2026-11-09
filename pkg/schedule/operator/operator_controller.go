@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -89,7 +90,10 @@ type Controller struct {
 	hbStreams *hbstream.HeartbeatStreams
 
 	// fast path, TTLUint64 is safe for concurrent.
+	// It is keyed by a unique sequence number rather than the region ID, so that
+	// several fast operators of the same region do not overwrite each other.
 	fastOperators *cache.TTLUint64
+	fastOpSeq     atomic.Uint64
 
 	// opNotifierQueue is a priority queue to notify the operator to be checked.
 	// safe for concurrent.
@@ -857,7 +861,7 @@ func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, 
 }
 
 func (oc *Controller) pushFastOperator(op *Operator) {
-	oc.fastOperators.Put(op.RegionID(), op)
+	oc.fastOperators.Put(oc.fastOpSeq.Add(1), op)
 }
 
 // GetRecords gets operators' records.
