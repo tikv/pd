@@ -564,8 +564,11 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		}
 	}
 
-	m.updateGroupLabelRules(newAddedLabelRules, false)
-	m.updateGroupLabelRules(newRemovedLabelRules, true)
+	m.Lock()
+	defer m.Unlock()
+	m.updateGroupLabelRulesLocked(newAddedLabelRules, false)
+	m.updateGroupLabelRulesLocked(newRemovedLabelRules, true)
+	m.reconcileRangeConflictsLocked()
 	return err
 }
 
