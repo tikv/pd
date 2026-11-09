@@ -254,13 +254,41 @@ func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
 }
 
 func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
-	for _, reason := range []string{"epoch", "expired", "evicted", "new target", "new move", "current target", "split succeeds"} {
+	for _, reason := range []string{"epoch", "expired", "evicted", "new target", "new move", "current target", "split succeeds", "unknown size"} {
 		t.Run(reason, func(t *testing.T) {
 			re := require.New(t)
 			cluster, checker := newAffinitySplitTest(t)
 			checker.splitAttempts = cache.NewCache(2, cache.LRUCache)
 			region := cluster.GetRegion(1)
 			manager := cluster.GetAffinityManager()
+			if reason == "unknown size" {
+				region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+					Region: region.GetMeta(), Leader: region.GetLeader(),
+				}, 0)
+				region.Inherit(nil, false)
+				cluster.PutRegion(region)
+				re.True(region.IsApproximateSizeUnknown())
+				re.Equal(int64(core.EmptyRegionApproximateSize), region.GetApproximateSize())
+				re.Empty(checker.Check(region))
+				re.Empty(checker.Check(region), "a retry must still wait before the timeout")
+				originalTimeout := affinitySplitWaitTimeout
+				affinitySplitWaitTimeout = 0
+				t.Cleanup(func() { affinitySplitWaitTimeout = originalTimeout })
+				fallbacks := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
+				for range 2 {
+					ops := checker.Check(region)
+					re.Len(ops, 1, "an unreported size must not block the move forever")
+					re.Equal("affinity-move-region", ops[0].Desc())
+				}
+				re.True(region.IsApproximateSizeUnknown())
+				re.Equal(fallbacks+2, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+				region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+					Region: region.GetMeta(), Leader: region.GetLeader(), ApproximateSize: 64 * units.MiB,
+				}, 0)
+				cluster.PutRegion(region)
+				requireAffinitySplit(t, checker.Check(region))
+				return
+			}
 			if reason == "split succeeds" {
 				region = region.Clone(core.SetApproximateSize(32))
 				cluster.PutRegion(region)
