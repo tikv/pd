@@ -26,9 +26,6 @@ func (r *Rule) depth() int {
 	return len(r.Location[0])
 }
 
-// leaf reports whether every store is its own isolation domain.
-func (r *Rule) leaf() bool { return r.level >= r.depth() }
-
 // cost orders store choices. Sums compare lexicographically, which is
 // compatible with addition. The fields are:
 //

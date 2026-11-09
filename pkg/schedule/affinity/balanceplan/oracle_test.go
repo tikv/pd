@@ -25,7 +25,7 @@ import (
 )
 
 // Use -args -oracle-cases=400 for the full check; regular runs use 100 per shape.
-var oracleCases = flag.Int("oracle-cases", 100, "random cases per rule shape in TestOracleBoundChooserAndLegality")
+var oracleCases = flag.Int("oracle-cases", 100, "random cases per rule shape in TestOracleChooserAndLegality")
 
 type shape struct {
 	name                string
@@ -272,10 +272,10 @@ func choiceCost(v, l []int, voters []int, leader int) Score {
 	return out
 }
 
-func TestOracleBoundChooserAndLegality(t *testing.T) {
+func TestOracleChooserAndLegality(t *testing.T) {
 	rng := rand.New(rand.NewPCG(20261027, 7))
 	for _, sh := range shapes {
-		cases, optimal, boundStops, chooserChecks := 0, 0, 0, 0
+		cases, optimal, chooserChecks := 0, 0, 0
 		gaps := make(map[Score]int)
 		for cases < *oracleCases {
 			in, ok := randomCase(rng, sh)
@@ -293,7 +293,6 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 				continue
 			}
 			cases++
-			minV, minL := int64(math.MaxInt64), int64(math.MaxInt64)
 			opt := Score{math.MaxInt64, math.MaxInt64}
 			var enumerate func(int, [][]int, []int)
 			enumerate = func(gi int, voters [][]int, leaders []int) {
@@ -304,7 +303,6 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 					return
 				}
 				s := scoreOf(in, voters, leaders)
-				minV, minL = min(minV, s.Voter), min(minL, s.Leader)
 				if s.Less(opt) {
 					opt = s
 				}
@@ -317,12 +315,6 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 			}
 			re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score, "%s case %d", sh.name, cases)
 			re.False(r.Baseline.Less(r.Score), "%s case %d", sh.name, cases)
-			re.LessOrEqual(r.Bound.Voter, minV, "%s case %d: voter bound above optimum", sh.name, cases)
-			re.LessOrEqual(r.Bound.Leader, minL, "%s case %d: leader bound above optimum", sh.name, cases)
-			if r.Stop == StopBound {
-				boundStops++
-				re.Equal(opt, r.Score, "%s case %d: stopped at bound but not optimal", sh.name, cases)
-			}
 			if r.Score == opt {
 				optimal++
 			} else {
@@ -360,7 +352,7 @@ func TestOracleBoundChooserAndLegality(t *testing.T) {
 				p.l[g.lead]++
 			}
 		}
-		t.Logf("%-18s cases=%d plan optimal=%d stopped at bound=%d single-group checks=%d", sh.name, cases, optimal, boundStops, chooserChecks)
+		t.Logf("%-18s cases=%d plan optimal=%d single-group checks=%d", sh.name, cases, optimal, chooserChecks)
 		t.Logf("%s non-optimal score gaps (voter, leader): %v", sh.name, gaps)
 	}
 }

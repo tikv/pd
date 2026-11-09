@@ -165,7 +165,7 @@ func TestOverlappingIsolationAllowsLeaderBalance(t *testing.T) {
 	re.Equal(1, changed)
 }
 
-// leaderChain has balanced voters, and its leaders reach the bound only by two
+// leaderChain has balanced voters, and its leaders reach the optimum only by two
 // transfers in a row: store 0 leads two groups with voters on stores 0 and 1,
 // store 1 leads one group with voters on stores 1 and 2. Either transfer alone
 // only ties.
@@ -187,7 +187,7 @@ func TestLeaderChains(t *testing.T) {
 		stop    StopReason
 		changed int
 	}{
-		{"chain", func(*Group) {}, Score{27, 3}, StopBound, 2},
+		{"chain", func(*Group) {}, Score{27, 3}, StopGreedy, 2},
 		{"cannot lead", func(g *Group) { g.CanLead = []bool{true, true, false} }, Score{27, 5}, StopGreedy, 0},
 		{"pinned", func(g *Group) { g.LeaderPinned = true }, Score{27, 5}, StopGreedy, 0},
 		{"follower", func(g *Group) {
@@ -241,7 +241,7 @@ func TestLeaderChainStops(t *testing.T) {
 				// Entry charges the 2 voters of each of the 5 groups; one round runs.
 				p.opt.WorkBudget = p.work + 11
 			}
-			d := p.chainLeaders(leaders, p.lowerBound().Leader)
+			d := p.chainLeaders(leaders)
 			re.Equal(c.reason, p.stop)
 			re.Equal(c.delta, d)
 			voters, working := p.layout()
@@ -292,10 +292,9 @@ func TestGeneralShapesAreBounded(t *testing.T) {
 	re := require.New(t)
 	for _, c := range []struct {
 		replicas, zones int
-		stop            StopReason
-	}{{3, 2, StopGreedy}, {5, 3, StopBound}} {
+	}{{3, 2}, {5, 3}} {
 		r := Plan(general(100, 300, c.replicas, c.zones), Options{})
-		re.Equal(c.stop, r.Stop, "%+v", c)
+		re.Equal(StopGreedy, r.Stop, "%+v", c)
 		re.LessOrEqual(r.Work, int64(DefaultWorkBudget), "%+v", c)
 		re.False(r.Baseline.Less(r.Score), "%+v", c)
 	}
@@ -472,7 +471,7 @@ func initialize(in *Input) {
 	}
 }
 
-// Whole-table balancing and initialization one group at a time must attain the bound.
+// Whole-table balancing and initialization one group at a time attain the optimum.
 func TestBroadLifecycle(t *testing.T) {
 	for _, c := range []struct {
 		n       int
@@ -486,11 +485,11 @@ func TestBroadLifecycle(t *testing.T) {
 		re := require.New(t)
 		in := broad(c.n, 4, c.leaders, true)
 		r := Plan(in, Options{})
-		re.Equal(StopBound, r.Stop)
+		re.Equal(StopGreedy, r.Stop)
 		re.Equal(c.want, r.Score)
 		initialize(in)
 		again := Plan(in, Options{Seed: 1})
-		re.Equal(StopBound, again.Stop)
+		re.Equal(StopGreedy, again.Stop)
 		re.Equal(c.want, again.Score)
 	}
 }

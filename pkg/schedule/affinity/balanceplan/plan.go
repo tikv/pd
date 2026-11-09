@@ -126,10 +126,9 @@ func (s Score) Less(o Score) bool {
 // StopReason explains why the search ended.
 type StopReason string
 
-// Stop reasons. Only StopBound proves that no better layout exists.
+// Stop reasons.
 const (
 	StopNoGroups StopReason = "no_groups"
-	StopBound    StopReason = "lower_bound"
 	StopGreedy   StopReason = "greedy"
 	StopBudget   StopReason = "budget"
 	StopCanceled StopReason = "canceled"
@@ -138,13 +137,13 @@ const (
 // Result is the planned layout in input group order. Groups the planner
 // cannot express keep their input target.
 type Result struct {
-	Voters                       [][]int
-	Leaders                      []int
-	Baseline, Fast, Score, Bound Score
-	Stop                         StopReason
-	Visits                       int
-	Work                         int64
-	Changed                      int
+	Voters                [][]int
+	Leaders               []int
+	Baseline, Fast, Score Score
+	Stop                  StopReason
+	Visits                int
+	Work                  int64
+	Changed               int
 }
 
 type groupState struct {
@@ -164,8 +163,6 @@ type planner struct {
 	n       int
 	gs      []groupState
 	v, l    []int
-	baseV   []int // counts of everything the plan keeps
-	baseL   []int
 	otherV  []int
 	otherL  []int
 	work    int64
@@ -189,26 +186,16 @@ func Plan(in *Input, opt Options) Result {
 	p := newPlanner(in, opt)
 	res := Result{Baseline: p.score()}
 	if len(p.gs) == 0 {
-		res.Fast, res.Score, res.Bound, res.Stop = res.Baseline, res.Baseline, res.Baseline, StopNoGroups
+		res.Fast, res.Score, res.Stop = res.Baseline, res.Baseline, StopNoGroups
 		res.Voters, res.Leaders = p.expand(nil, nil)
 		return res
 	}
 	origV, origL := p.layout()
-	res.Bound = p.lowerBound()
-	if res.Baseline == res.Bound {
-		// Both parts already attain their lower bounds: nothing can improve.
-		res.Fast, res.Score, res.Stop = res.Baseline, res.Baseline, StopBound
-		res.Voters, res.Leaders = p.expand(origV, origL)
-		return res
-	}
 	fastV, fastL, fast := p.greedy(opt.Seed)
 	res.Fast = fast
 	res.Stop = StopGreedy
 	res.Score = p.revert(origV, origL, fastV, fastL)
-	res.Score.Leader += p.chainLeaders(fastL, res.Bound.Leader)
-	if res.Score == res.Bound {
-		res.Stop = StopBound
-	}
+	res.Score.Leader += p.chainLeaders(fastL)
 	if p.stop != "" {
 		res.Stop = p.stop
 	}
@@ -329,7 +316,6 @@ func newPlanner(in *Input, opt Options) *planner {
 		}
 		p.gs = append(p.gs, groupState{Group: &gc, index: i})
 	}
-	p.baseV, p.baseL = slices.Clone(p.v), slices.Clone(p.l)
 	p.prepareRules()
 	for i := range p.gs {
 		s := &p.gs[i]
@@ -701,8 +687,8 @@ func (p *planner) move(g *groupState, voters []int, leader int) Score {
 }
 
 // chainLeaders keeps every group's voters and moves leaders along transfer
-// paths until no path lowers the leader score or the score reaches bound. A
-// path starts at a store a, moves the leader of a group led at a to another
+// paths until no path lowers the leader score. A path starts at a store a,
+// moves the leader of a group led at a to another
 // of its voters b, then the leader of a group led at b, and so on, up to a
 // store z with l[z] <= l[a]-2. Only a and z change counts, so the score drops
 // by at least 2. With the voters fixed, the leaders are optimal exactly when
@@ -719,9 +705,8 @@ func (p *planner) move(g *groupState, voters []int, leader int) Score {
 // for cancellation and charged to the work budget; a cutoff keeps the paths
 // already moved. It updates leaders and returns the change of the leader
 // score.
-func (p *planner) chainLeaders(leaders []int, bound int64) int64 {
-	score := p.score().Leader
-	if score <= bound || p.stopped() {
+func (p *planner) chainLeaders(leaders []int) int64 {
+	if p.stopped() {
 		return 0
 	}
 	// alt[at[i]:at[i+1]] lists the voters that may lead group i.
@@ -751,7 +736,7 @@ func (p *planner) chainLeaders(leaders []int, bound int64) int64 {
 	order := make([]int, p.n)
 	queue := make([]int, 0, p.n)
 	var delta int64
-	for score+delta > bound && !p.stopped() {
+	for !p.stopped() {
 		p.visits++
 		p.work += int64(len(p.gs) + p.n)
 		clear(start)
