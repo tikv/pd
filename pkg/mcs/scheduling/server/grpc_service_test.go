@@ -16,9 +16,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -44,6 +46,34 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestAskBatchSplitRejectsOversizedCountBeforeAllocation(t *testing.T) {
+	for _, count := range []uint32{131073, 1000000, 1 << 30, math.MaxUint32} {
+		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			client := &splitScatterPDClient{next: 1000, allocErr: errors.New("unexpected split ID allocation")}
+			cluster.SwitchPDLeader(client)
+			region := newAffinitySplitTestRegion()
+			cluster.PutRegion(region)
+			request := &schedulingpb.AskBatchSplitRequest{
+				Region: region.GetMeta(), SplitCount: count,
+			}
+			resp, err := svc.AskBatchSplit(t.Context(), request)
+			require.Zero(t, client.calls, "oversized requests must not reach the PD allocator")
+			require.NoError(t, err)
+			require.Contains(t, resp.GetHeader().GetError().GetMessage(), "exceeds maximum")
+			require.Empty(t, resp.GetIds())
+			require.Equal(t, uint64(1000), client.next)
+
+			client.allocErr = nil
+			request.SplitCount = 1
+			resp, err = svc.AskBatchSplit(t.Context(), request)
+			require.NoError(t, err)
+			require.Nil(t, resp.GetHeader().GetError())
+			require.Len(t, resp.GetIds(), 1)
+		})
+	}
+}
 
 func TestAskBatchSplitLargeCountCompatibility(t *testing.T) {
 	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
@@ -91,7 +121,7 @@ func TestBatchSplitIDCount(t *testing.T) {
 
 func TestAskBatchSplitCountCompatibility(t *testing.T) {
 	for _, nonBatch := range []bool{false, true} {
-		for _, count := range []uint32{0, 1, 10} {
+		for _, count := range []uint32{0, 1, 10, 10000, 100000, 131072} {
 			t.Run(fmt.Sprintf("non-batch-%t-count-%d", nonBatch, count), func(t *testing.T) {
 				svc, cluster, _ := newTestSchedulingServiceForSplit(t)
 				cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000, nonBatch: nonBatch})
@@ -131,9 +161,15 @@ type splitScatterPDClient struct {
 	pdpb.PDClient
 	next     uint64
 	nonBatch bool
+	allocErr error
+	calls    int
 }
 
 func (c *splitScatterPDClient) AllocID(_ context.Context, req *pdpb.AllocIDRequest, _ ...grpc.CallOption) (*pdpb.AllocIDResponse, error) {
+	c.calls++
+	if c.allocErr != nil {
+		return nil, c.allocErr
+	}
 	count := req.GetCount()
 	if count == 0 || c.nonBatch {
 		count = 1

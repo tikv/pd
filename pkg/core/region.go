@@ -55,7 +55,20 @@ const (
 	batchSearchSize = 128
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
+	// MaxBatchSplitCount rounds the maximum normal batch of 100,000 new regions
+	// up to the next power of two, leaving headroom without accepting unbounded
+	// response construction, split bookkeeping, or ID allocation work.
+	MaxBatchSplitCount = 1 << 17
 )
+
+// ValidateBatchSplitCount checks the supported batch size before allocating IDs
+// or response slices. Zero retains the existing empty-batch behavior.
+func ValidateBatchSplitCount(splitCount uint32) error {
+	if splitCount > MaxBatchSplitCount {
+		return errors.Errorf("split count %d exceeds maximum %d", splitCount, MaxBatchSplitCount)
+	}
+	return nil
+}
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {

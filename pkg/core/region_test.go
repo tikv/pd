@@ -40,6 +40,33 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
+func TestValidateBatchSplitCount(t *testing.T) {
+	for _, test := range []struct {
+		count uint32
+		valid bool
+	}{
+		{0, true},
+		{1, true},
+		{10, true},
+		{10000, true},
+		{100000, true},
+		{131072, true},
+		{131073, false},
+		{1000000, false},
+		{1 << 30, false},
+		{math.MaxUint32, false},
+	} {
+		t.Run(strconv.FormatUint(uint64(test.count), 10), func(t *testing.T) {
+			err := ValidateBatchSplitCount(test.count)
+			if test.valid {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "exceeds maximum")
+			}
+		})
+	}
+}
+
 func TestNeedMerge(t *testing.T) {
 	re := require.New(t)
 	mererSize, mergeKeys := int64(20), int64(200000)

@@ -409,6 +409,11 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "cannot split affinity region"),
 		}, nil
 	}
+	if err := core.ValidateBatchSplitCount(splitCount); err != nil {
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 

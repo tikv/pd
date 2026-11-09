@@ -15,6 +15,8 @@
 package cluster_test
 
 import (
+	"context"
+	"math"
 	"slices"
 	"testing"
 	"time"
@@ -27,6 +29,8 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
 )
 
@@ -86,6 +90,48 @@ func (s *raftClusterTestSuite) checkValidRequestRegion(cluster *tests.TestCluste
 
 func (s *raftClusterTestSuite) TestAskSplit() {
 	s.env.RunTestInNonMicroserviceEnv(s.checkAskSplit)
+}
+
+func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
+	env := tests.NewSchedulingTestEnvironment(s.T())
+	defer env.Cleanup()
+	env.RunTest(func(cluster *tests.TestCluster) {
+		re := s.Require()
+		leader := cluster.GetLeaderServer()
+		re.NoError(leader.GetServer().SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.BatchSplit).String()))
+		regions := leader.GetRegions()
+		re.NotEmpty(regions)
+		region := regions[0].GetMeta()
+		if primary := cluster.GetSchedulingPrimaryServer(); primary != nil {
+			primary.GetCluster().PutRegion(regions[0])
+		}
+		client, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+		defer conn.Close()
+		request := &pdpb.AskBatchSplitRequest{
+			Header: testutil.NewRequestHeader(leader.GetClusterID()),
+			Region: region,
+		}
+		for _, count := range []uint32{131073, 1 << 30, math.MaxUint32} {
+			request.SplitCount = count
+			ctx, cancel := context.WithTimeout(s.T().Context(), 10*time.Second)
+			resp, err := client.AskBatchSplit(ctx, request)
+			cancel()
+			re.NoError(err)
+			re.Contains(resp.GetHeader().GetError().GetMessage(), "exceeds maximum")
+			re.Empty(resp.GetIds())
+		}
+		// The boundary batch exercises the monolithic handler's existing per-ID
+		// allocation under race instrumentation, so allow a longer RPC deadline.
+		for _, count := range []uint32{0, 1, 10, 131072} {
+			request.SplitCount = count
+			ctx, cancel := context.WithTimeout(s.T().Context(), 30*time.Second)
+			resp, err := client.AskBatchSplit(ctx, request)
+			cancel()
+			re.NoError(err)
+			re.Nil(resp.GetHeader().GetError())
+			re.Len(resp.GetIds(), int(count))
+		}
+	})
 }
 
 func (s *raftClusterTestSuite) checkAskSplit(cluster *tests.TestCluster) {

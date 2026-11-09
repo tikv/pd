@@ -143,6 +143,9 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 		return nil, errors.New("cannot split affinity region")
 	}
 
+	if err := core.ValidateBatchSplitCount(splitCount); err != nil {
+		return nil, err
+	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	newRegionIDs := make([]uint64, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
