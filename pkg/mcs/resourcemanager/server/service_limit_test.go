@@ -16,6 +16,7 @@ package server
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -250,123 +251,130 @@ func TestServiceLimiterEdgeCases(t *testing.T) {
 }
 
 func TestSetServiceLimit(t *testing.T) {
-	re := require.New(t)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
 
-	// Test setting the same service limit (should be no-op)
-	limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
-	originalTokens := limiter.AvailableTokens
-	originalUpdate := limiter.LastUpdate
+		// Test setting the same service limit (should be no-op)
+		limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
+		setServiceLimit := func(rate float64) {
+			// The update timestamp must be later than the preceding observation.
+			synctest.Sleep(time.Nanosecond)
+			limiter.setServiceLimit(rate)
+		}
+		originalTokens := limiter.AvailableTokens
+		originalUpdate := limiter.LastUpdate
 
-	limiter.setServiceLimit(100.0) // Same limit
-	re.Equal(100.0, limiter.ServiceLimit)
-	re.Equal(originalTokens, limiter.AvailableTokens) // Should remain unchanged
-	re.Equal(originalUpdate, limiter.LastUpdate)      // Should remain unchanged
+		setServiceLimit(100.0) // Same limit
+		re.Equal(100.0, limiter.ServiceLimit)
+		re.Equal(originalTokens, limiter.AvailableTokens) // Should remain unchanged
+		re.Equal(originalUpdate, limiter.LastUpdate)      // Should remain unchanged
 
-	// Test increasing service limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 50.0, nil)
-	baseTime := time.Now()
-	limiter.LastUpdate = baseTime
-	limiter.AvailableTokens = 30.0
+		// Test increasing service limit
+		limiter = newServiceLimiter(constant.NullKeyspaceID, 50.0, nil)
+		baseTime := time.Now()
+		limiter.LastUpdate = baseTime
+		limiter.AvailableTokens = 30.0
 
-	limiter.setServiceLimit(100.0)
-	re.Equal(100.0, limiter.ServiceLimit)
-	re.InDelta(30.0, limiter.AvailableTokens, 0.1) // Should remain the same since no time elapsed (allow for floating point precision)
-	re.True(limiter.LastUpdate.After(baseTime))    // Should update time
+		setServiceLimit(100.0)
+		re.Equal(100.0, limiter.ServiceLimit)
+		re.InDelta(30.0, limiter.AvailableTokens, 0.1) // Should remain the same since no time elapsed (allow for floating point precision)
+		re.True(limiter.LastUpdate.After(baseTime))    // Should update time
 
-	// Test decreasing service limit with available tokens exceeding new limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
-	baseTime = time.Now()
-	limiter.LastUpdate = baseTime
-	limiter.AvailableTokens = 80.0
+		// Test decreasing service limit with available tokens exceeding new limit
+		limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
+		baseTime = time.Now()
+		limiter.LastUpdate = baseTime
+		limiter.AvailableTokens = 80.0
 
-	// Sleep a bit to ensure some time passes
-	time.Sleep(1 * time.Millisecond)
-	limiter.setServiceLimit(50.0)
-	re.Equal(50.0, limiter.ServiceLimit)
-	// After refill, tokens might exceed 80, but should be capped at burst limit (50 * serviceLimiterBurstFactor)
-	re.Greater(limiter.AvailableTokens, 80.0)                               // Should increase the available tokens
-	re.LessOrEqual(limiter.AvailableTokens, 50.0*serviceLimiterBurstFactor) // Should not exceed burst limit
-	re.True(limiter.LastUpdate.After(baseTime))                             // Should update time
+		// Sleep a bit to ensure some time passes
+		synctest.Sleep(1 * time.Millisecond)
+		setServiceLimit(50.0)
+		re.Equal(50.0, limiter.ServiceLimit)
+		// After refill, tokens might exceed 80, but should be capped at burst limit (50 * serviceLimiterBurstFactor)
+		re.Greater(limiter.AvailableTokens, 80.0)                               // Should increase the available tokens
+		re.LessOrEqual(limiter.AvailableTokens, 50.0*serviceLimiterBurstFactor) // Should not exceed burst limit
+		re.True(limiter.LastUpdate.After(baseTime))                             // Should update time
 
-	// Test decreasing service limit with available tokens below new limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
-	baseTime = time.Now()
-	limiter.LastUpdate = baseTime
-	limiter.AvailableTokens = 30.0
+		// Test decreasing service limit with available tokens below new limit
+		limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
+		baseTime = time.Now()
+		limiter.LastUpdate = baseTime
+		limiter.AvailableTokens = 30.0
 
-	limiter.setServiceLimit(50.0)
-	re.Equal(50.0, limiter.ServiceLimit)
-	re.InDelta(30.0, limiter.AvailableTokens, 0.1) // Should remain unchanged since below new limit (allow for floating point precision)
-	re.True(limiter.LastUpdate.After(baseTime))    // Should update time
+		setServiceLimit(50.0)
+		re.Equal(50.0, limiter.ServiceLimit)
+		re.InDelta(30.0, limiter.AvailableTokens, 0.1) // Should remain unchanged since below new limit (allow for floating point precision)
+		re.True(limiter.LastUpdate.After(baseTime))    // Should update time
 
-	// Test setting service limit to zero
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
-	baseTime = time.Now()
-	limiter.LastUpdate = baseTime
-	limiter.AvailableTokens = 50.0
+		// Test setting service limit to zero
+		limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
+		baseTime = time.Now()
+		limiter.LastUpdate = baseTime
+		limiter.AvailableTokens = 50.0
 
-	limiter.setServiceLimit(0.0)
-	re.Equal(0.0, limiter.ServiceLimit)
-	re.Equal(0.0, limiter.AvailableTokens)      // Should be cleared
-	re.True(limiter.LastUpdate.After(baseTime)) // Should update time
+		setServiceLimit(0.0)
+		re.Equal(0.0, limiter.ServiceLimit)
+		re.Equal(0.0, limiter.AvailableTokens)      // Should be cleared
+		re.True(limiter.LastUpdate.After(baseTime)) // Should update time
 
-	// Test setting service limit from zero to positive (should NOT initialize available tokens)
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 0.0, nil)
-	baseTime = time.Now()
-	limiter.LastUpdate = baseTime
-	limiter.AvailableTokens = 0.0
+		// Test setting service limit from zero to positive (should NOT initialize available tokens)
+		limiter = newServiceLimiter(constant.NullKeyspaceID, 0.0, nil)
+		baseTime = time.Now()
+		limiter.LastUpdate = baseTime
+		limiter.AvailableTokens = 0.0
 
-	limiter.setServiceLimit(50.0)
-	re.Equal(50.0, limiter.ServiceLimit)
-	re.Equal(0.0, limiter.AvailableTokens)      // Should remain 0 (not initialized to service limit)
-	re.True(limiter.LastUpdate.After(baseTime)) // Should update time
+		setServiceLimit(50.0)
+		re.Equal(50.0, limiter.ServiceLimit)
+		re.Equal(0.0, limiter.AvailableTokens)      // Should remain 0 (not initialized to service limit)
+		re.True(limiter.LastUpdate.After(baseTime)) // Should update time
 
-	// Test setting negative service limit (should be treated as zero)
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
-	baseTime = time.Now()
-	limiter.LastUpdate = baseTime
-	limiter.AvailableTokens = 50.0
+		// Test setting negative service limit (should be treated as zero)
+		limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
+		baseTime = time.Now()
+		limiter.LastUpdate = baseTime
+		limiter.AvailableTokens = 50.0
 
-	limiter.setServiceLimit(-10.0)
-	re.Equal(0.0, limiter.ServiceLimit)         // Should be treated as zero
-	re.Equal(0.0, limiter.AvailableTokens)      // Should be cleared
-	re.True(limiter.LastUpdate.After(baseTime)) // Should update time
+		setServiceLimit(-10.0)
+		re.Equal(0.0, limiter.ServiceLimit)         // Should be treated as zero
+		re.Equal(0.0, limiter.AvailableTokens)      // Should be cleared
+		re.True(limiter.LastUpdate.After(baseTime)) // Should update time
 
-	// Test setting service limit with time elapsed (should trigger refill)
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 50.0, nil)
-	baseTime = time.Now()
-	limiter.LastUpdate = baseTime
-	limiter.AvailableTokens = 20.0
+		// Test setting service limit with time elapsed (should trigger refill)
+		limiter = newServiceLimiter(constant.NullKeyspaceID, 50.0, nil)
+		baseTime = time.Now()
+		limiter.LastUpdate = baseTime
+		limiter.AvailableTokens = 20.0
 
-	// Simulate time passing before setting new limit
-	time.Sleep(10 * time.Millisecond)
-	limiter.setServiceLimit(100.0)
-	re.Equal(100.0, limiter.ServiceLimit)
-	// Available tokens should be refilled based on elapsed time, but capped at new service limit
-	re.GreaterOrEqual(limiter.AvailableTokens, 20.0) // Should be at least the original amount
-	re.LessOrEqual(limiter.AvailableTokens, 100.0)   // Should not exceed new service limit
-	re.True(limiter.LastUpdate.After(baseTime))      // Should update time
+		// Simulate time passing before setting new limit
+		synctest.Sleep(10 * time.Millisecond)
+		setServiceLimit(100.0)
+		re.Equal(100.0, limiter.ServiceLimit)
+		// Available tokens should be refilled based on elapsed time, but capped at new service limit
+		re.GreaterOrEqual(limiter.AvailableTokens, 20.0) // Should be at least the original amount
+		re.LessOrEqual(limiter.AvailableTokens, 100.0)   // Should not exceed new service limit
+		re.True(limiter.LastUpdate.After(baseTime))      // Should update time
 
-	// Test setting a smaller service limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 1000.0, nil)
-	baseTime = time.Now()
-	limiter.LastUpdate = baseTime
-	limiter.AvailableTokens = 500.0
+		// Test setting a smaller service limit
+		limiter = newServiceLimiter(constant.NullKeyspaceID, 1000.0, nil)
+		baseTime = time.Now()
+		limiter.LastUpdate = baseTime
+		limiter.AvailableTokens = 500.0
 
-	limiter.setServiceLimit(10.0)
-	re.Equal(10.0, limiter.ServiceLimit)
-	// After refill with new limit, tokens should be capped at burst limit (10 * serviceLimiterBurstFactor)
-	re.Equal(10.0*serviceLimiterBurstFactor, limiter.AvailableTokens) // Should be capped at burst limit, not service limit
-	re.True(limiter.LastUpdate.After(baseTime))                       // Should update time
+		setServiceLimit(10.0)
+		re.Equal(10.0, limiter.ServiceLimit)
+		// After refill with new limit, tokens should be capped at burst limit (10 * serviceLimiterBurstFactor)
+		re.Equal(10.0*serviceLimiterBurstFactor, limiter.AvailableTokens) // Should be capped at burst limit, not service limit
+		re.True(limiter.LastUpdate.After(baseTime))                       // Should update time
 
-	// Test setting a larger service limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 10.0, nil)
-	baseTime = time.Now()
-	limiter.LastUpdate = baseTime
-	limiter.AvailableTokens = 5.0
+		// Test setting a larger service limit
+		limiter = newServiceLimiter(constant.NullKeyspaceID, 10.0, nil)
+		baseTime = time.Now()
+		limiter.LastUpdate = baseTime
+		limiter.AvailableTokens = 5.0
 
-	limiter.setServiceLimit(1000000.0)
-	re.Equal(1000000.0, limiter.ServiceLimit)
-	re.Greater(limiter.AvailableTokens, 5.0)
-	re.True(limiter.LastUpdate.After(baseTime))
+		setServiceLimit(1000000.0)
+		re.Equal(1000000.0, limiter.ServiceLimit)
+		re.Greater(limiter.AvailableTokens, 5.0)
+		re.True(limiter.LastUpdate.After(baseTime))
+	})
 }

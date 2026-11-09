@@ -18,8 +18,10 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -40,6 +42,61 @@ import (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
+}
+
+type closedGlobalConfigWatcher struct {
+	clientv3.Watcher
+}
+
+func (closedGlobalConfigWatcher) Watch(context.Context, string, ...clientv3.OpOption) clientv3.WatchChan {
+	ch := make(chan clientv3.WatchResponse)
+	close(ch)
+	return ch
+}
+
+type globalConfigWatchStream struct {
+	pdpb.PD_WatchGlobalConfigServer
+	ctx context.Context
+}
+
+func (s globalConfigWatchStream) Context() context.Context {
+	return s.ctx
+}
+
+func TestWatchGlobalConfigClosedChannel(t *testing.T) {
+	for _, scenario := range []string{"request canceled", "request expired", "server canceled", "unexpected close"} {
+		t.Run(scenario, func(t *testing.T) {
+			re := require.New(t)
+			serverCtx, stopServer := context.WithCancel(t.Context())
+			defer stopServer()
+			requestCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			switch scenario {
+			case "request canceled":
+				cancel()
+			case "request expired":
+				var expire context.CancelFunc
+				requestCtx, expire = context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+				defer expire()
+			case "server canceled":
+				stopServer()
+			}
+			grpcServer := &GrpcServer{Server: &Server{
+				ctx:                             serverCtx,
+				client:                          &clientv3.Client{Watcher: closedGlobalConfigWatcher{}},
+				serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(&config.ServiceMiddlewareConfig{}),
+			}}
+			// Exercise arbitration when both cancellation and channel closure are ready.
+			for range 100 {
+				err := grpcServer.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{}, globalConfigWatchStream{ctx: requestCtx})
+				if scenario == "unexpected close" {
+					re.EqualError(err, "watch channel closed unexpectedly")
+				} else {
+					re.NoError(err)
+				}
+			}
+		})
+	}
 }
 
 func TestValidatePDForwardedHostWithoutLeader(t *testing.T) {

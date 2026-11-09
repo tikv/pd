@@ -141,13 +141,11 @@ func GenerateTestDataConcurrently(count int, f func(int)) {
 	tasks := make(chan int, count)
 	workers := runtime.NumCPU()
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range tasks {
 				f(i)
 			}
-		}()
+		})
 	}
 	for i := range count {
 		tasks <- i

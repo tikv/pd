@@ -142,27 +142,56 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 	re.True(hb.searchRevertRegions[writePeer])
+
+	re.Len(hb.regionPendings, 2)
+	mainPending := hb.regionPendings[ops[0].RegionID()]
+	re.NotNil(mainPending)
+	re.Equal([]uint64{2}, mainPending.froms)
+	re.Equal(uint64(5), mainPending.to)
+	revertPending := hb.regionPendings[ops[1].RegionID()]
+	re.NotNil(revertPending)
+	re.Equal([]uint64{5}, revertPending.froms)
+	re.Equal(uint64(2), revertPending.to)
+
+	// The reverse move offsets the main move's pending load and peer count.
+	storeInfos := statistics.SummaryStoreInfos(tc.GetStores())
+	hb.summaryPendingInfluence(tc, storeInfos)
+	re.NotNil(storeInfos[2].PendingSum)
+	re.NotNil(storeInfos[5].PendingSum)
+	re.InDelta(-2.9*units.MiB, storeInfos[2].PendingSum.Loads[utils.RegionWriteBytes], 1)
+	re.InDelta(0.2*units.MiB, storeInfos[2].PendingSum.Loads[utils.RegionWriteKeys], 1)
+	re.InDelta(2.9*units.MiB, storeInfos[5].PendingSum.Loads[utils.RegionWriteBytes], 1)
+	re.InDelta(-0.2*units.MiB, storeInfos[5].PendingSum.Loads[utils.RegionWriteKeys], 1)
+	re.Zero(storeInfos[2].PendingSum.HotPeerCount)
+	re.Zero(storeInfos[5].PendingSum.HotPeerCount)
+	for _, storeID := range []uint64{1, 3, 4} {
+		re.Nil(storeInfos[storeID].PendingSum)
+	}
 	clearPendingInfluence(hb)
 }
 
-func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T) {
+func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementV2(t *testing.T) {
 	for _, testCase := range []struct {
 		name                  string
 		revertTargetMatchesB  bool
 		historyRejectsRevert  bool
 		locationLabelsOnly    bool
+		disablePlacementRules bool
+		validLocationRevert   bool
 		expectedOperatorCount int
 	}{
 		{name: "valid revert", revertTargetMatchesB: true, expectedOperatorCount: 2},
 		{name: "invalid revert", expectedOperatorCount: 1},
 		{name: "revert rejected by scoped history", revertTargetMatchesB: true, historyRejectsRevert: true, expectedOperatorCount: 1},
 		{name: "revert rejected by location labels", locationLabelsOnly: true, expectedOperatorCount: 1},
+		{name: "revert rejected without placement rules", locationLabelsOnly: true, disablePlacementRules: true, expectedOperatorCount: 1},
+		{name: "valid revert without placement rules", locationLabelsOnly: true, disablePlacementRules: true, validLocationRevert: true, expectedOperatorCount: 2},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
 			cancel, _, tc, oc := prepareSchedulersTest()
 			defer cancel()
-			tc.SetEnablePlacementRules(true)
+			tc.SetEnablePlacementRules(!testCase.disablePlacementRules)
 			sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 			re.NoError(err)
 			hb := sche.(*hotScheduler)
@@ -191,6 +220,9 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 					4: {"zone": "b"},
 					5: {"zone": "c"},
 				}
+				if testCase.validLocationRevert {
+					storeLabels[2]["zone"] = "c"
+				}
 			} else if testCase.revertTargetMatchesB {
 				storeLabels[2]["b"] = "yes"
 			}
@@ -199,10 +231,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 			}
 			tc.SetStoreBusy(4, true)
 			if testCase.locationLabelsOnly {
-				re.NoError(tc.SetRule(&placement.Rule{
-					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
-					Role: placement.Voter, Count: 3, LocationLabels: []string{"zone"},
-				}))
+				tc.SetMaxReplicasWithLabel(!testCase.disablePlacementRules, 3, "zone")
 				re.False(getPlacementLoadState(tc, "v2").enabled)
 			} else {
 				re.NoError(tc.SetRule(&placement.Rule{
@@ -242,7 +271,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 				{6, []uint64{3, 2, 1}, 3 * units.MiB, 1.8 * units.MiB, 0},
 				{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
 			})
-			if testCase.locationLabelsOnly {
+			if testCase.locationLabelsOnly && !testCase.disablePlacementRules {
 				revertFit := tc.GetRuleManager().FitRegion(tc.GetBasicCluster(), tc.GetRegion(7))
 				re.True(revertFit.IsSatisfied())
 				re.False(revertFit.Replace(5, tc.GetStore(2)))

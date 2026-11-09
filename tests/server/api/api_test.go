@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
@@ -53,8 +54,7 @@ func TestMain(m *testing.M) {
 
 func TestReconnect(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
 		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
@@ -129,7 +129,10 @@ func (suite *middlewareTestSuite) SetupSuite() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3)
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		// TestAuditLocalLogBackend checks the request body in the audit log.
+		conf.Security.RedactInfoLog = logutil.RedactInfoLogOFF
+	})
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
@@ -204,7 +207,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 
 func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -222,8 +225,8 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err = doTestRequestWithLogAudit(leader)
 		re.NoError(err)
 	}
@@ -543,7 +546,7 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 
 func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -561,8 +564,8 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err = doTestRequestWithLogAudit(leader)
 		re.NoError(err)
 	}
@@ -572,7 +575,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 
 func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -590,8 +593,8 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err = doTestRequestWithPrometheus(leader)
 		re.NoError(err)
 	}
@@ -601,7 +604,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 
 func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -619,8 +622,8 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		err = doTestRequestWithLogAudit(leader)
 		re.NoError(err)
 	}
@@ -807,7 +810,10 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		b, err := os.ReadFile(fname)
+		return err == nil && strings.Contains(string(b), "/pd/api/v1/regions")
+	})
 	b, err := os.ReadFile(fname)
 	re.NoError(err)
 	l := string(b)
@@ -817,8 +823,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 
 func TestFollowerRegionAPIWithNoForward(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.PDServerCfg.UseRegionStorage = true
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
@@ -885,8 +890,7 @@ func TestFollowerRegionAPIWithNoForward(t *testing.T) {
 
 func TestFollowerRegionResetCacheWithNoForward(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.PDServerCfg.UseRegionStorage = true
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
@@ -1011,9 +1015,7 @@ func deleteFollowerRegionCacheConcurrently(re *require.Assertions, follower *tes
 	startCh := make(chan struct{})
 	errCh := make(chan error, requestCount)
 	for range requestCount {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-startCh
 			statusCode, body, err := requestDeleteFollowerRegionCache(follower, path)
 			if err != nil {
@@ -1023,7 +1025,7 @@ func deleteFollowerRegionCacheConcurrently(re *require.Assertions, follower *tes
 			if statusCode != http.StatusOK {
 				errCh <- fmt.Errorf("unexpected status %d: %s", statusCode, body)
 			}
-		}()
+		})
 	}
 	close(startCh)
 	wg.Wait()
@@ -1105,8 +1107,7 @@ func mustRequestSuccess(re *require.Assertions, s *server.Server) http.Header {
 func TestRemovingProgress(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
 	})
@@ -1183,7 +1184,10 @@ func TestRemovingProgress(t *testing.T) {
 	sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete, http.StatusOK)
 	sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete, http.StatusOK)
 
-	time.Sleep(100 * time.Millisecond) // wait for the removing progress to be created
+	testutil.Eventually(re, func() bool {
+		_, err := leader.GetRaftCluster().GetProgressByAction("removing")
+		return err == nil
+	})
 	// size is not changed.
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
 	var p api.Progress
@@ -1421,8 +1425,7 @@ func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
 
 func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
 	})
@@ -1464,8 +1467,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 func TestPreparingProgress(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
 		// prevent scheduling
@@ -1529,7 +1531,7 @@ func TestPreparingProgress(t *testing.T) {
 		tests.MustPutStore(re, cluster, store)
 	}
 	for i := range core.InitClusterRegionThreshold {
-		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
+		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, fmt.Appendf(nil, "%20d", i), fmt.Appendf(nil, "%20d", i+1), core.SetApproximateSize(10))
 	}
 	testutil.Eventually(re, func() bool {
 		if leader == nil {
@@ -1618,9 +1620,8 @@ func TestPreparingProgress(t *testing.T) {
 	})
 
 	// update size
-	tests.MustPutRegion(re, cluster, 1000, 4, []byte(fmt.Sprintf("%20d", 1000)), []byte(fmt.Sprintf("%20d", 1001)), core.SetApproximateSize(10))
-	tests.MustPutRegion(re, cluster, 1001, 5, []byte(fmt.Sprintf("%20d", 1001)), []byte(fmt.Sprintf("%20d", 1002)), core.SetApproximateSize(40))
-
+	tests.MustPutRegion(re, cluster, 1000, 4, fmt.Appendf(nil, "%20d", 1000), fmt.Appendf(nil, "%20d", 1001), core.SetApproximateSize(10))
+	tests.MustPutRegion(re, cluster, 1001, 5, fmt.Appendf(nil, "%20d", 1001), fmt.Appendf(nil, "%20d", 1002), core.SetApproximateSize(40))
 	testutil.Eventually(re, func() bool {
 		defer triggerCheckStores()
 		output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)

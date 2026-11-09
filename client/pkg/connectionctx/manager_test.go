@@ -116,3 +116,32 @@ func TestManager(t *testing.T) {
 	manager.ReleaseAll()
 	re.Empty(manager.connectionCtxs)
 }
+
+func TestEvictHook(t *testing.T) {
+	re := require.New(t)
+	var evicted []int
+	manager := NewManagerWithEvictHook(func(stream int) { evicted = append(evicted, stream) })
+	store := func(url string, stream int, overwrite bool) context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+		re.True(manager.Store(ctx, cancel, url, stream, overwrite))
+		return ctx
+	}
+	// GC, CleanAllAndStore and an overwriting Store evict connections: the hook runs
+	// before they are canceled.
+	ctx1 := store("url1", 1, false)
+	ctx2 := store("url1", 2, true)
+	re.Error(ctx1.Err())
+	ctx3 := store("url3", 3, false)
+	manager.GC(func(url string) bool { return url == "url3" })
+	re.Error(ctx3.Err())
+	ctx4, cancel4 := context.WithCancel(context.Background())
+	re.True(manager.CleanAllAndStore(ctx4, cancel4, "url4", 4))
+	re.Error(ctx2.Err())
+	re.Equal([]int{1, 3, 2}, evicted)
+	// Release and ReleaseAll do not evict connections.
+	store("url5", 5, false)
+	manager.Release("url5")
+	manager.ReleaseAll()
+	re.Error(ctx4.Err())
+	re.Equal([]int{1, 3, 2}, evicted)
+}

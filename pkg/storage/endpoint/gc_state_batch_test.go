@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -143,7 +144,7 @@ func TestLoadGCSafePointPairsBatchBounds(t *testing.T) {
 		re.Empty(results)
 		re.Empty(methods)
 	}
-	for _, input := range [][]uint32{append(append([]uint32{}, ids...), 6001), {7, 7}} {
+	for _, input := range [][]uint32{append(slices.Clone(ids), 6001), {7, 7}} {
 		results, err := provider.LoadGCSafePointPairs(context.Background(), input)
 		re.Error(err)
 		re.Empty(results)

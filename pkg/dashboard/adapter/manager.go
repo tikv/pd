@@ -196,6 +196,7 @@ func (m *Manager) startService() {
 	if m.service.IsRunning() {
 		return
 	}
+	failpoint.InjectCall("beforeDashboardServiceStart", m.ctx)
 	if err := m.service.Start(m.ctx); err != nil {
 		log.Error("can not start dashboard server", errs.ZapError(errs.ErrDashboardStart, err))
 	} else {

@@ -19,6 +19,7 @@ import (
 	"io"
 	"math"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -283,6 +284,27 @@ func (s *testTSOStreamSuite) TearDownTest() {
 }
 
 func TestTSOStreamTestSuite(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*testTSOStreamSuite)
+	}{
+		{"TestTSOStreamBasic", (*testTSOStreamSuite).testTSOStreamBasic},
+		{"TestTSOStreamBrokenWithEOFNoPendingReq", (*testTSOStreamSuite).testTSOStreamBrokenWithEOFNoPendingReq},
+		{"TestTSOStreamCanceledNoPendingReq", (*testTSOStreamSuite).testTSOStreamCanceledNoPendingReq},
+		{"TestTSOStreamBrokenWithEOFWithPendingReq", (*testTSOStreamSuite).testTSOStreamBrokenWithEOFWithPendingReq},
+		{"TestTSOStreamCanceledWithPendingReq", (*testTSOStreamSuite).testTSOStreamCanceledWithPendingReq},
+		{"TestTSOStreamFIFO", (*testTSOStreamSuite).testTSOStreamFIFO},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s := new(testTSOStreamSuite)
+				s.SetT(t)
+				s.SetupTest()
+				defer s.TearDownTest()
+				tc.run(s)
+			})
+		})
+	}
 	suite.Run(t, new(testTSOStreamSuite))
 }
 
@@ -327,7 +349,7 @@ func (s *testTSOStreamSuite) mustProcessRequestWithResultCh(count int64) <-chan 
 	return ch
 }
 
-func (s *testTSOStreamSuite) TestTSOStreamBasic() {
+func (s *testTSOStreamSuite) testTSOStreamBasic() {
 	ch := s.mustProcessRequestWithResultCh(1)
 	s.noResult(ch)
 	s.inner.returnResult(10, 1, 1)
@@ -396,23 +418,23 @@ func (s *testTSOStreamSuite) testTSOStreamBrokenImpl(err error, pendingRequests 
 	}
 }
 
-func (s *testTSOStreamSuite) TestTSOStreamBrokenWithEOFNoPendingReq() {
+func (s *testTSOStreamSuite) testTSOStreamBrokenWithEOFNoPendingReq() {
 	s.testTSOStreamBrokenImpl(io.EOF, 0)
 }
 
-func (s *testTSOStreamSuite) TestTSOStreamCanceledNoPendingReq() {
+func (s *testTSOStreamSuite) testTSOStreamCanceledNoPendingReq() {
 	s.testTSOStreamBrokenImpl(context.Canceled, 0)
 }
 
-func (s *testTSOStreamSuite) TestTSOStreamBrokenWithEOFWithPendingReq() {
+func (s *testTSOStreamSuite) testTSOStreamBrokenWithEOFWithPendingReq() {
 	s.testTSOStreamBrokenImpl(io.EOF, 5)
 }
 
-func (s *testTSOStreamSuite) TestTSOStreamCanceledWithPendingReq() {
+func (s *testTSOStreamSuite) testTSOStreamCanceledWithPendingReq() {
 	s.testTSOStreamBrokenImpl(context.Canceled, 5)
 }
 
-func (s *testTSOStreamSuite) TestTSOStreamFIFO() {
+func (s *testTSOStreamSuite) testTSOStreamFIFO() {
 	var resultChs []<-chan callbackInvocation
 	const count = 5
 	for i := range count {
@@ -624,7 +646,7 @@ func BenchmarkTSOStreamSendRecv(b *testing.B) {
 	resCh := make(chan tsoRequestResult, 1)
 
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		err := stream.processRequests(1, 1, 1, 1, now, func(result tsoRequestResult, _ uint32, err error) {
 			if err != nil {
 				panic(err)

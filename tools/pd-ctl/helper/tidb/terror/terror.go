@@ -93,16 +93,16 @@ func (m *code2ErrClassMap) Put(key string, err ErrClass) {
 	m.data.Store(key, err)
 }
 
-var registerFinish uint32
+var registerFinish atomic.Uint32
 
 // RegisterFinish makes the register of new error panic.
 // The use pattern should be register all the errors during initialization, and then call RegisterFinish.
 func RegisterFinish() {
-	atomic.StoreUint32(&registerFinish, 1)
+	registerFinish.Store(1)
 }
 
 func frozen() bool {
-	return atomic.LoadUint32(&registerFinish) != 0
+	return registerFinish.Load() != 0
 }
 
 // RegisterErrorClass registers new error class for terror.

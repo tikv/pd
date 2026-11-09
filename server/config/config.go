@@ -18,8 +18,10 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -356,7 +358,12 @@ func (c *Config) Validate() error {
 
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
-	configMetaData := configutil.NewConfigMetadata(meta)
+	return c.AdjustWithMetadata(configutil.NewConfigMetadata(meta), reloading)
+}
+
+// AdjustWithMetadata is used to adjust the PD configurations whose metadata may
+// be nested in a larger configuration file.
+func (c *Config) AdjustWithMetadata(configMetaData *configutil.ConfigMetaData, reloading bool) error {
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
 	}
@@ -473,7 +480,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.Microservice.adjust(configMetaData.Child("micro-service"))
 
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 
@@ -613,7 +620,7 @@ func migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
 
 // Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
-	runtimeServices := append(c.RuntimeServices[:0:0], c.RuntimeServices...)
+	runtimeServices := slices.Clone(c.RuntimeServices)
 	cfg := *c
 	cfg.RuntimeServices = runtimeServices
 	return &cfg
@@ -976,22 +983,19 @@ func AdjustMetaServiceGroups(metaGroups map[string]string) error {
 	for groupID := range metaGroups {
 		delete(metaGroups, groupID)
 	}
-	for groupID, endpoint := range dict {
-		metaGroups[groupID] = endpoint
-	}
+	maps.Copy(metaGroups, dict)
 
 	return nil
 }
 
 // Clone makes a deep copy of the keyspace config.
 func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
+	preAlloc := slices.Clone(c.PreAlloc)
 	cfg := *c
-	cfg.PreAlloc = append(c.PreAlloc[:0:0], c.PreAlloc...)
+	cfg.PreAlloc = preAlloc
 	if c.MetaServiceGroups != nil {
 		cfg.MetaServiceGroups = make(map[string]string, len(c.MetaServiceGroups))
-		for name, endpoint := range c.MetaServiceGroups {
-			cfg.MetaServiceGroups[name] = endpoint
-		}
+		maps.Copy(cfg.MetaServiceGroups, c.MetaServiceGroups)
 	}
 	return &cfg
 }
@@ -1021,9 +1025,7 @@ func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 // GetMetaServiceGroups returns the current meta-service-group configuration.
 func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
 	ret := make(map[string]string, len(c.MetaServiceGroups))
-	for name, endpoint := range c.MetaServiceGroups {
-		ret[name] = endpoint
-	}
+	maps.Copy(ret, c.MetaServiceGroups)
 	return ret
 }
 

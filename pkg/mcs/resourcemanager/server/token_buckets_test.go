@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -28,64 +29,66 @@ import (
 const testResourceGroupName = "test"
 
 func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
-	re := require.New(t)
-	tbSetting := &rmpb.TokenBucket{
-		Tokens: 200000,
-		Settings: &rmpb.TokenLimitSettings{
-			FillRate:   2000,
-			BurstLimit: 20000000,
-		},
-	}
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		tbSetting := &rmpb.TokenBucket{
+			Tokens: 200000,
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   2000,
+				BurstLimit: 20000000,
+			},
+		}
 
-	clientUniqueID := uint64(0)
-	tb := NewGroupTokenBucket(testResourceGroupName, tbSetting)
-	time1 := time.Now()
-	tb.request(time1, 0, 0, clientUniqueID)
-	re.LessOrEqual(math.Abs(tbSetting.Tokens-tb.Tokens), 1e-7)
-	re.Equal(float64(tbSetting.Settings.FillRate), tb.getFillRate())
+		clientUniqueID := uint64(0)
+		tb := NewGroupTokenBucket(testResourceGroupName, tbSetting)
+		time1 := time.Now()
+		tb.request(time1, 0, 0, clientUniqueID)
+		re.LessOrEqual(math.Abs(tbSetting.Tokens-tb.Tokens), 1e-7)
+		re.Equal(float64(tbSetting.Settings.FillRate), tb.getFillRate())
 
-	tbSetting = &rmpb.TokenBucket{
-		Tokens: -100000,
-		Settings: &rmpb.TokenLimitSettings{
-			FillRate:   1000,
-			BurstLimit: 10000000,
-		},
-	}
-	tb.patch(tbSetting)
-	time.Sleep(10 * time.Millisecond)
-	time2 := time.Now()
-	tb.request(time2, 0, 0, clientUniqueID)
-	re.LessOrEqual(math.Abs(100000-tb.Tokens), time2.Sub(time1).Seconds()*float64(tbSetting.Settings.FillRate)+1e7)
-	re.Equal(float64(tbSetting.Settings.FillRate), tb.getFillRate())
+		tbSetting = &rmpb.TokenBucket{
+			Tokens: -100000,
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   1000,
+				BurstLimit: 10000000,
+			},
+		}
+		tb.patch(tbSetting)
+		synctest.Sleep(10 * time.Millisecond)
+		time2 := time.Now()
+		tb.request(time2, 0, 0, clientUniqueID)
+		re.LessOrEqual(math.Abs(100000-tb.Tokens), time2.Sub(time1).Seconds()*float64(tbSetting.Settings.FillRate)+1e7)
+		re.Equal(float64(tbSetting.Settings.FillRate), tb.getFillRate())
 
-	tbSetting = &rmpb.TokenBucket{
-		Tokens: 0,
-		Settings: &rmpb.TokenLimitSettings{
-			FillRate:   2000,
-			BurstLimit: -1,
-		},
-	}
-	tb = NewGroupTokenBucket(testResourceGroupName, tbSetting)
-	tb.request(time2, 0, 0, clientUniqueID)
-	re.LessOrEqual(math.Abs(tbSetting.Tokens), 1e-7)
-	time3 := time.Now()
-	tb.request(time3, 0, 0, clientUniqueID)
-	re.LessOrEqual(math.Abs(tbSetting.Tokens), 1e-7)
+		tbSetting = &rmpb.TokenBucket{
+			Tokens: 0,
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   2000,
+				BurstLimit: -1,
+			},
+		}
+		tb = NewGroupTokenBucket(testResourceGroupName, tbSetting)
+		tb.request(time2, 0, 0, clientUniqueID)
+		re.LessOrEqual(math.Abs(tbSetting.Tokens), 1e-7)
+		time3 := time.Now()
+		tb.request(time3, 0, 0, clientUniqueID)
+		re.LessOrEqual(math.Abs(tbSetting.Tokens), 1e-7)
 
-	tbSetting = &rmpb.TokenBucket{
-		Tokens: 200000,
-		Settings: &rmpb.TokenLimitSettings{
-			FillRate:   2000,
-			BurstLimit: -1,
-		},
-	}
-	tb = NewGroupTokenBucket(testResourceGroupName, tbSetting)
-	tb.request(time3, 0, 0, clientUniqueID)
-	re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
-	time.Sleep(10 * time.Millisecond)
-	time4 := time.Now()
-	tb.request(time4, 0, 0, clientUniqueID)
-	re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
+		tbSetting = &rmpb.TokenBucket{
+			Tokens: 200000,
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   2000,
+				BurstLimit: -1,
+			},
+		}
+		tb = NewGroupTokenBucket(testResourceGroupName, tbSetting)
+		tb.request(time3, 0, 0, clientUniqueID)
+		re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
+		synctest.Sleep(10 * time.Millisecond)
+		time4 := time.Now()
+		tb.request(time4, 0, 0, clientUniqueID)
+		re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
+	})
 }
 
 func TestGroupTokenBucketZeroFillRateGuard(t *testing.T) {

@@ -223,6 +223,9 @@ type tsoStream struct {
 	// For syncing between sender and receiver to guarantee all requests are finished when closing.
 	state          atomic.Int32
 	stoppedWithErr atomic.Pointer[error]
+	// evicted is set before the connection manager cancels the stream for evicting it, so
+	// that its pending requests fail with a retryable error instead of context.Canceled.
+	evicted atomic.Bool
 
 	estimatedLatencyMicros atomic.Uint64
 
@@ -404,7 +407,7 @@ recvLoop:
 	for {
 		select {
 		case <-ctx.Done():
-			finishWithErr = context.Canceled
+			finishWithErr = s.canceledErr()
 			break recvLoop
 		default:
 		}
@@ -430,7 +433,7 @@ recvLoop:
 			if hasReq {
 				metrics.RequestFailedDurationTSO.Observe(latencySeconds)
 			}
-			if err == io.EOF {
+			if err == io.EOF || (ctx.Err() != nil && s.evicted.Load()) {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
 			} else {
 				finishWithErr = errors.WithStack(err)
@@ -459,6 +462,20 @@ recvLoop:
 	}
 }
 
+// markEvicted marks the stream as evicted by the connection manager. Call it before canceling the stream.
+func (s *tsoStream) markEvicted() {
+	s.evicted.Store(true)
+}
+
+// canceledErr returns the error to finish the pending requests with after the stream is canceled.
+// An evicted stream fails them with ErrClientTSOStreamClosed, which callers retry as a leader change.
+func (s *tsoStream) canceledErr() error {
+	if s.evicted.Load() {
+		return errors.WithStack(errs.ErrClientTSOStreamClosed)
+	}
+	return context.Canceled
+}
+
 // EstimatedRPCLatency returns an estimation of the duration of each TSO RPC. If the stream has never handled any RPC,
 // this function returns 0.
 func (s *tsoStream) EstimatedRPCLatency() time.Duration {
@@ -473,11 +490,7 @@ func (s *tsoStream) EstimatedRPCLatency() time.Duration {
 			panic("invalid failpoint value for `tsoStreamSimulateEstimatedRPCLatency`: expected string")
 		}
 	})
-	latencyUs := s.estimatedLatencyMicros.Load()
-	// Limit it at least 100us
-	if latencyUs < 100 {
-		latencyUs = 100
-	}
+	latencyUs := max(s.estimatedLatencyMicros.Load(), 100)
 	return time.Microsecond * time.Duration(latencyUs)
 }
 

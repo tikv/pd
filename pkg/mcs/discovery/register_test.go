@@ -35,8 +35,7 @@ func TestRegister(t *testing.T) {
 	defer clean()
 	etcd, cfg := servers[0], servers[0].Config()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// Test register with http prefix.
 	sr := NewServiceRegister(ctx, client, "test_service", "http://127.0.0.1:1", "http://127.0.0.1:1", 10)
 	err := sr.Register()
@@ -52,13 +51,6 @@ func TestRegister(t *testing.T) {
 	resp, err = client.Get(ctx, sr.key)
 	re.NoError(err)
 	re.Empty(resp.Kvs)
-
-	// Test the case that ctx is canceled.
-	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
-	err = sr.Register()
-	re.NoError(err)
-	sr.cancel()
-	re.Empty(getKeyAfterLeaseExpired(ctx, re, client, sr.key))
 
 	// Test the case that keepalive is failed when the etcd is restarted.
 	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
@@ -92,13 +84,75 @@ func TestRegister(t *testing.T) {
 	etcd.Close()
 }
 
+func TestRevokeLeaseAfterRequestEnds(t *testing.T) {
+	for _, contextErr := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(contextErr.Error(), func(t *testing.T) {
+			re := require.New(t)
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer clean()
+
+			ctx := t.Context()
+			sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance", 60)
+			defer sr.cancel()
+			lease, err := client.Grant(ctx, 60)
+			re.NoError(err)
+			// A registration write can commit before its caller observes a timeout.
+			_, err = client.Put(ctx, sr.key, sr.value, clientv3.WithLease(lease.ID))
+			re.NoError(err)
+			resp, err := client.Get(ctx, sr.key)
+			re.NoError(err)
+			re.Len(resp.Kvs, 1)
+
+			var requestCtx context.Context
+			var cancel context.CancelFunc
+			if contextErr == context.Canceled {
+				requestCtx, cancel = context.WithCancel(ctx)
+				cancel()
+			} else {
+				requestCtx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+			}
+			defer cancel()
+			re.ErrorIs(requestCtx.Err(), contextErr)
+			sr.revokeLease(requestCtx, lease.ID)
+
+			resp, err = client.Get(ctx, sr.key)
+			re.NoError(err)
+			re.Empty(resp.Kvs)
+			ttl, err := client.TimeToLive(ctx, lease.ID)
+			re.NoError(err)
+			re.Equal(int64(-1), ttl.TTL)
+		})
+	}
+}
+
+func TestRegisterLeaseExpiresWithoutDeregister(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx := t.Context()
+	sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance", DefaultLeaseInSeconds)
+	defer sr.cancel()
+	re.NoError(sr.Register())
+	resp, err := client.Get(ctx, sr.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+
+	// Simulate a crash: stop keepalive without actively deregistering the key.
+	sr.cancel()
+	sr.wg.Wait()
+	testutil.Eventually(re, func() bool {
+		resp, err := client.Get(ctx, sr.key)
+		return err == nil && len(resp.Kvs) == 0
+	})
+}
+
 func TestRegisterConflict(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// Register the first instance.
 	sr1 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-1", 2)
 	re.NoError(sr1.Register())
@@ -137,8 +191,7 @@ func TestDeregisterDoesNotDeleteReplacementRegistration(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	sr1 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-1", 2)
 	re.NoError(sr1.Register())
@@ -169,8 +222,7 @@ func TestRegisterConflictSameSerializedValue(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// Two distinct instances that happen to serialize an identical registry
 	// entry (e.g. same address, started within the same StartTimestamp
 	// second) must not be able to take over each other's live registration:
@@ -197,8 +249,7 @@ func TestRegisterRejectsUnleasedExistingKey(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "some-value", 2)
 	// Simulate a pre-existing registry key written without a lease. A fresh
 	// instance's leaseID is also the zero value (clientv3.NoLease), so
@@ -263,8 +314,7 @@ func TestRegisterRetriesUntilExistingLeaseExpires(t *testing.T) {
 	_, client, clean := newLongElectionTestEtcdCluster(t)
 	defer clean()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	oldLease := registerStaleEntry(ctx, re, client, "127.0.0.1:1")
 
 	ttl, err := client.TimeToLive(ctx, oldLease)
@@ -292,8 +342,7 @@ func TestRegisterRetriesAfterLeaderPromotion(t *testing.T) {
 	defer clean()
 
 	etcd, cfg := servers[0], servers[0].Config()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	oldLease := registerStaleEntry(ctx, re, client, "127.0.0.1:1")
 
@@ -323,8 +372,7 @@ func TestRegisterRetriesAfterPromotionFollowingTTLObservation(t *testing.T) {
 	defer clean()
 
 	etcd, cfg := servers[0], servers[0].Config()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	oldLease := registerStaleEntry(ctx, re, client, "127.0.0.1:1")
 

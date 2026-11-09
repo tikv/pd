@@ -15,7 +15,6 @@
 package storage
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -27,8 +26,7 @@ import (
 
 func TestLevelDBBackend(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	backend, err := newLevelDBBackend(ctx, t.TempDir(), nil)
 	re.NoError(err)
 	re.NotNil(backend)

@@ -53,8 +53,7 @@ func TestMain(m *testing.M) {
 
 func TestUpdateAdvertiseUrls(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -94,8 +93,7 @@ func TestUpdateAdvertiseUrls(t *testing.T) {
 
 func TestClusterID(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -124,8 +122,7 @@ func TestClusterID(t *testing.T) {
 
 func TestLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -145,8 +142,7 @@ func TestLeader(t *testing.T) {
 
 func TestGRPCRateLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -426,8 +422,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 
 func TestAPIService(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	re.NoError(err)
@@ -457,8 +452,7 @@ func TestIsPathInDirectory(t *testing.T) {
 
 func TestCheckClusterID(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Start a standalone cluster A
 	clusterA, err := tests.NewTestCluster(ctx, 1)
@@ -513,8 +507,7 @@ func TestCheckClusterID(t *testing.T) {
 
 func TestMeteringWriter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		// Ensure the metering writer can be started.
@@ -543,8 +536,7 @@ func TestMeteringWriter(t *testing.T) {
 
 func TestSetPDServerConfigWithDashboard(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()

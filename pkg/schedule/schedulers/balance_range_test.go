@@ -31,6 +31,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -256,6 +257,48 @@ func TestTIKVEngine(t *testing.T) {
 	checkOperator(re, op, "3.00", "0.00")
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
 	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
+}
+
+func TestSkipAffinityRegions(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// store-1: 3 leader regions
+	// store-2: 2 leader regions
+	// store-3: 0 leader regions
+	for i := 1; i <= 3; i++ {
+		tc.AddLeaderStore(uint64(i), 0)
+	}
+	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(2, "110", "120", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(3, "120", "140", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
+	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
+	re.NoError(err)
+
+	// All regions in the range belong to an affinity group, so none of them should be scheduled.
+	affinityManager := tc.GetAffinityManager()
+	groupID := "test_group"
+	re.NoError(affinityManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID:   groupID,
+		KeyRanges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "300")},
+	}}))
+	_, err = affinityManager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.True(scheduler.IsScheduleAllowed(tc))
+	ops, _ := scheduler.Schedule(tc, true)
+	re.Empty(ops)
+
+	// The regions can be scheduled again after the affinity group is removed.
+	re.NoError(affinityManager.DeleteAffinityGroups([]string{groupID}, true))
+	re.True(scheduler.IsScheduleAllowed(tc))
+	ops, _ = scheduler.Schedule(tc, true)
+	re.Len(ops, 1)
+	re.Contains(ops[0].Brief(), "transfer leader: store 1 to 3")
 }
 
 func TestLocationLabel(t *testing.T) {

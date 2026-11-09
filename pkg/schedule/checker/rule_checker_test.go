@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -150,42 +151,49 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevelCaseInsensit
 	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 }
 
-func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWithIsolationLevel() {
-	re := suite.Require()
-	suite.cluster.SetMaxStoreDownTime(100 * time.Millisecond)
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2", "host": "h3"})
-	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "h4"})
-	suite.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3", "host": "h5"})
-	suite.cluster.AddLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h6"})
-	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 5)
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:        placement.DefaultGroupID,
-		ID:             "test",
-		Index:          100,
-		Override:       true,
-		Role:           placement.Voter,
-		Count:          3,
-		LocationLabels: []string{"zone", "host"},
-		IsolationLevel: "zone",
+func TestReplaceDownPeerWithIsolationLevel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		suite := new(ruleCheckerTestSuite)
+		suite.SetT(t)
+		suite.SetupTest()
+		defer suite.TearDownTest()
+
+		re := suite.Require()
+		suite.cluster.SetMaxStoreDownTime(100 * time.Millisecond)
+		suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
+		suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
+		suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2", "host": "h3"})
+		suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "h4"})
+		suite.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3", "host": "h5"})
+		suite.cluster.AddLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h6"})
+		suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 5)
+		err := suite.ruleManager.SetRule(&placement.Rule{
+			GroupID:        placement.DefaultGroupID,
+			ID:             "test",
+			Index:          100,
+			Override:       true,
+			Role:           placement.Voter,
+			Count:          3,
+			LocationLabels: []string{"zone", "host"},
+			IsolationLevel: "zone",
+		})
+		re.NoError(err)
+		err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+		re.NoError(err)
+		op := suite.rc.Check(suite.cluster.GetRegion(1))
+		re.Nil(op)
+		region := suite.cluster.GetRegion(1)
+		downPeer := []*pdpb.PeerStats{
+			{Peer: region.GetStorePeer(5), DownSeconds: 6000},
+		}
+		region = region.Clone(core.WithDownPeers(downPeer))
+		suite.cluster.PutRegion(region)
+		suite.cluster.SetStoreDown(5)
+		suite.cluster.SetStoreDown(6)
+		synctest.Sleep(200 * time.Millisecond)
+		op = suite.rc.Check(suite.cluster.GetRegion(1))
+		re.Nil(op)
 	})
-	re.NoError(err)
-	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
-	re.NoError(err)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
-	re.Nil(op)
-	region := suite.cluster.GetRegion(1)
-	downPeer := []*pdpb.PeerStats{
-		{Peer: region.GetStorePeer(5), DownSeconds: 6000},
-	}
-	region = region.Clone(core.WithDownPeers(downPeer))
-	suite.cluster.PutRegion(region)
-	suite.cluster.SetStoreDown(5)
-	suite.cluster.SetStoreDown(6)
-	time.Sleep(200 * time.Millisecond)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
-	re.Nil(op)
 }
 
 func (suite *ruleCheckerTestSuite) TestFixPeer() {
@@ -2503,7 +2511,7 @@ func makeStores() placement.StoreSet {
 func makeRegion(def string) (*core.RegionInfo, error) {
 	var regionMeta metapb.Region
 	var leader *metapb.Peer
-	for _, peerDef := range strings.Split(def, ",") {
+	for peerDef := range strings.SplitSeq(def, ",") {
 		role, idStr := placement.Follower, peerDef
 		if strings.Contains(peerDef, "_") {
 			splits := strings.Split(peerDef, "_")
@@ -2537,7 +2545,7 @@ func makeRule(def string) (*placement.Rule, error) {
 	}
 	rule.Role = placement.PeerRoleType(splits[1])
 	// only support k=v type constraint
-	for _, c := range strings.Split(splits[2], ",") {
+	for c := range strings.SplitSeq(splits[2], ",") {
 		if c == "" {
 			break
 		}
@@ -2755,8 +2763,7 @@ func (suite *ruleCheckerTestSuite) TestFixBetterLocationEngineConstraint() {
 
 func TestRecorderRefreshLooksUpStoreIDNotCount(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	// Store 5 exists and is live -- it's the counter *value* below, not a
 	// store ID. Store 999, the counter's real key, is never registered.

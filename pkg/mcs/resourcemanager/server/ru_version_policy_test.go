@@ -15,7 +15,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -94,8 +93,7 @@ func TestManagerSetKeyspaceRUVersion(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 
@@ -130,8 +128,7 @@ func TestManagerSetKeyspaceRUVersionWriteDisabled(t *testing.T) {
 	})
 	m.storage = s
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 
@@ -144,8 +141,7 @@ func TestManagerSetKeyspaceRUVersionMultipleKeyspaces(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 
@@ -168,8 +164,7 @@ func TestUpdateControllerConfigRUVersionPolicy(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 
@@ -217,8 +212,7 @@ func TestUpdateControllerConfigNilRUVersionPolicy(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 
@@ -236,8 +230,7 @@ func TestUpdateControllerConfigValidationViaDefaultPath(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 
@@ -260,8 +253,7 @@ func TestManagerSetKeyspaceRUVersionResetToDefault(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 

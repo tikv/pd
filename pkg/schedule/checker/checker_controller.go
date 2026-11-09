@@ -176,6 +176,7 @@ func (c *Controller) PatrolRegions() {
 			measure(c.metrics.patrolPhaseHistograms[phaseDispatchSplitScatter], func() {
 				c.splitScatter.dispatchSplitScatterRegions()
 			})
+			failpoint.InjectCall("afterSplitScatterDispatch")
 
 			measure(c.metrics.patrolPhaseHistograms[phaseScanRegions], func() {
 				key, regions = c.checkRegions(key)

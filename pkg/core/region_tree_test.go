@@ -446,7 +446,7 @@ func (m *mockRegionTreeData) clearTree() *mockRegionTreeData {
 }
 
 func (m *mockRegionTreeData) shuffleItems() *mockRegionTreeData {
-	for i := 0; i < len(m.items); i++ {
+	for i := range m.items {
 		j := rand.IntN(i + 1)
 		m.items[i], m.items[j] = m.items[j], m.items[i]
 	}
@@ -456,7 +456,7 @@ func (m *mockRegionTreeData) shuffleItems() *mockRegionTreeData {
 func mock1MRegionTree() *mockRegionTreeData {
 	data := &mockRegionTreeData{newRegionTree(), make([]*RegionInfo, 1000000)}
 	for i := range 1_000_000 {
-		region := &RegionInfo{meta: &metapb.Region{Id: uint64(i), StartKey: []byte(fmt.Sprintf("%20d", i)), EndKey: []byte(fmt.Sprintf("%20d", i+1))}}
+		region := &RegionInfo{meta: &metapb.Region{Id: uint64(i), StartKey: fmt.Appendf(nil, "%20d", i), EndKey: fmt.Appendf(nil, "%20d", i+1)}}
 		updateNewItem(data.tree, region)
 		data.items[i] = region
 	}
@@ -468,7 +468,7 @@ const MaxCount = 1_000_000
 func BenchmarkRegionTreeSequentialInsert(b *testing.B) {
 	tree := newRegionTree()
 	for i := range b.N {
-		item := &RegionInfo{meta: &metapb.Region{StartKey: []byte(fmt.Sprintf("%20d", i)), EndKey: []byte(fmt.Sprintf("%20d", i+1))}}
+		item := &RegionInfo{meta: &metapb.Region{StartKey: fmt.Appendf(nil, "%20d", i), EndKey: fmt.Appendf(nil, "%20d", i+1)}}
 		updateNewItem(tree, item)
 	}
 }
@@ -496,7 +496,7 @@ func BenchmarkRegionTreeRandomOverlapsInsert(b *testing.B) {
 			startKey = key2
 			endKey = key1
 		}
-		items = append(items, &RegionInfo{meta: &metapb.Region{StartKey: []byte(fmt.Sprintf("%20d", startKey)), EndKey: []byte(fmt.Sprintf("%20d", endKey))}})
+		items = append(items, &RegionInfo{meta: &metapb.Region{StartKey: fmt.Appendf(nil, "%20d", startKey), EndKey: fmt.Appendf(nil, "%20d", endKey)}})
 	}
 	b.ResetTimer()
 	for i := range b.N {
@@ -534,8 +534,8 @@ func BenchmarkRegionTreeRandomLookUpRegion(b *testing.B) {
 
 func BenchmarkRegionTreeScan(b *testing.B) {
 	data := mock1MRegionTree().shuffleItems()
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		data.tree.scanRanges()
 	}
 }

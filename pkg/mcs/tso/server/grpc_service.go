@@ -92,9 +92,6 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 
 		start := time.Now()
 		// TSO uses lease to determine validity. No need to check primary here.
-		if s.IsClosed() {
-			return errs.ErrNotStarted
-		}
 		header := request.GetHeader()
 		clusterID := header.GetClusterId()
 		if clusterID != keypath.ClusterID() {

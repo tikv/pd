@@ -15,7 +15,6 @@
 package checker
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,8 +30,7 @@ import (
 
 func TestPromoteLearner(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	lc := NewLearnerChecker(cluster)

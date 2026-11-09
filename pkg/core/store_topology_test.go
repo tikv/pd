@@ -220,7 +220,7 @@ func BenchmarkBuildTopology(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
 
-			for range b.N {
+			for b.Loop() {
 				topology, _, _, _ := buildTopology(
 					stores[0],
 					stores,
@@ -253,7 +253,7 @@ func BenchmarkGetStoreTopoWeight(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
 
-			for range b.N {
+			for b.Loop() {
 				benchmarkStoreTopoWeight = GetStoreTopoWeight(
 					stores[0],
 					stores,

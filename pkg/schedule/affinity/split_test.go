@@ -15,7 +15,6 @@
 package affinity
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -35,8 +34,7 @@ import (
 
 func TestAllowSplit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()

@@ -16,7 +16,6 @@ package config
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -50,8 +49,7 @@ func TestMain(m *testing.M) {
 
 func TestRateLimitConfigReload(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -89,8 +87,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 
 func TestGCConcurrencyConfigUpdateAndReload(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(cfg *config.Config, _ string) {
 		cfg.Keyspace.WaitRegionSplit = false
 	})
@@ -148,8 +145,7 @@ func TestGCConcurrencyConfigUpdateAndReload(t *testing.T) {
 
 func TestMetricStorageValidationAtQueryTime(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -785,7 +781,26 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, createTTLUrl(urlPrefix, 5), postData, testutil.StatusOK(re))
 	re.NoError(err)
 	assertTTLConfig(re, cluster, true)
-	time.Sleep(5 * time.Second)
+	expired := func(options ttlConfigInterface) bool {
+		return options.GetMaxSnapshotCount() != 999 &&
+			options.GetMaxMergeRegionSize() != 999 &&
+			options.GetMaxMergeRegionKeys() != 999 &&
+			options.GetSchedulerMaxWaitingOperator() != 999 &&
+			options.GetLeaderScheduleLimit() != 999 &&
+			options.GetRegionScheduleLimit() != 999 &&
+			options.GetHotRegionScheduleLimit() != 999 &&
+			options.GetReplicaScheduleLimit() != 999 &&
+			options.GetMergeScheduleLimit() != 999 &&
+			options.GetSplitScatterScheduleLimit() != 999 &&
+			options.IsLocationReplacementEnabled() && options.IsTikvRegionSplitEnabled()
+	}
+	testutil.Eventually(re, func() bool {
+		if !expired(leaderServer.GetServer().GetPersistOptions()) {
+			return false
+		}
+		primary := cluster.GetSchedulingPrimaryServer()
+		return primary == nil || expired(primary.GetPersistConfig())
+	})
 	assertTTLConfig(re, cluster, false)
 
 	// test cleaning up

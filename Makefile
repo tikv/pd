@@ -178,7 +178,7 @@ PD_PKG := github.com/tikv/pd
 PACKAGES := $(shell go list ./...)
 
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
-GOLANGCI_LINT_VERSION := 2.13.2
+GOLANGCI_LINT_VERSION := 2.14.0
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
@@ -208,6 +208,8 @@ static: install-tools pre-build
 	@ echo "golangci-lint ..."
 	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
+	@ echo "modernize ..."
+	@ go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@v0.52.0 -test ./...
 	@ echo "leakcheck ..."
 	@ leakcheck -exclude-files="tests/server/join/join_test.go" $(PACKAGES)
 	@ echo "promtool ..."

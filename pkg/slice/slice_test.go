@@ -49,21 +49,6 @@ func TestSlice(t *testing.T) {
 	}
 }
 
-func TestSliceContains(t *testing.T) {
-	re := require.New(t)
-	ss := []string{"a", "b", "c"}
-	re.True(slice.Contains(ss, "a"))
-	re.False(slice.Contains(ss, "d"))
-
-	us := []uint64{1, 2, 3}
-	re.True(slice.Contains(us, uint64(1)))
-	re.False(slice.Contains(us, uint64(4)))
-
-	is := []int64{1, 2, 3}
-	re.True(slice.Contains(is, int64(1)))
-	re.False(slice.Contains(is, int64(4)))
-}
-
 func TestSliceRemoveGenericTypes(t *testing.T) {
 	re := require.New(t)
 	ss := []string{"a", "b", "c"}

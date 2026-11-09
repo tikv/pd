@@ -18,11 +18,15 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -44,6 +48,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Pooled timers cannot cross synctest bubble boundaries.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -175,8 +181,7 @@ func TestManagerMetadataWatcherLifecycle(t *testing.T) {
 		re := require.New(t)
 		m := prepareMetadataWatcherManager()
 
-		parentCtx, parentCancel := context.WithCancel(context.Background())
-		defer parentCancel()
+		parentCtx := t.Context()
 
 		watcherErr := errors.New("watcher load failed")
 		var capturedCtx context.Context
@@ -209,8 +214,7 @@ func TestManagerMetadataWatcherLifecycle(t *testing.T) {
 		re := require.New(t)
 		m := prepareMetadataWatcherManager()
 
-		parentCtx, parentCancel := context.WithCancel(context.Background())
-		defer parentCancel()
+		parentCtx := t.Context()
 
 		var capturedCtx context.Context
 		withMetadataLoopWatcherFactory(t, func(
@@ -368,8 +372,7 @@ func TestInitManager(t *testing.T) {
 	m := prepareManager()
 
 	re.Empty(m.getKeyspaceResourceGroupManagers())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// There should only be one null keyspace resource group manager.
@@ -420,8 +423,7 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Test without keyspace ID
@@ -460,7 +462,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		},
 		KeyspaceId: keyspaceIDValue,
 	}
-	err = manager.dispatchConsumption(req)
+	err = manager.dispatchConsumption(1, req)
 	re.NoError(err)
 
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
@@ -472,6 +474,77 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		return updatedGroup.RUConsumption.RRU == req.ConsumptionSinceLastRequest.RRU &&
 			updatedGroup.RUConsumption.WRU == req.ConsumptionSinceLastRequest.WRU
 	})
+}
+
+// TestBackgroundMetricsFlushResetsRUTimeline pins that the RU timeline belongs
+// to one leadership term: the published peaks stop being exposed and the term
+// state is cleared once the flush loop exits.
+func TestBackgroundMetricsFlushResetsRUTimeline(t *testing.T) {
+	re := require.New(t)
+	const start = testTimelineStart
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	timeline := m.metrics.ruTimeline
+	timeline.since = start - 3600
+	timeline.record(timelineReport(1, start, make([][2]float64, 60)), time.Unix(start+65, 0))
+	timeline.flush(time.Unix(start+90, 0))
+	re.Positive(promtestutil.CollectAndCount(ruPeakPerSec))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.wg.Add(1)
+	go m.backgroundMetricsFlush(ctx)
+	cancel()
+	m.wg.Wait()
+	re.Zero(promtestutil.CollectAndCount(ruPeakPerSec))
+	re.Empty(timeline.groups)
+	re.Zero(timeline.since)
+}
+
+// TestBackgroundMetricsFlushLeavesQueueAfterCancel pins that a flusher whose
+// term ended before it takes any event leaves the queue to the next term's
+// flusher, which waits for it while a report may wait for a keyspace lock held
+// across a storage write.
+func TestBackgroundMetricsFlushLeavesQueueAfterCancel(t *testing.T) {
+	re := require.New(t)
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	for range 100 {
+		re.NoError(m.dispatchConsumption(1, &rmpb.TokenBucketRequest{ResourceGroupName: DefaultResourceGroupName}))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m.wg.Add(1)
+	m.backgroundMetricsFlush(ctx)
+	re.Len(m.consumptionDispatcher, 100)
+}
+
+// TestInitDoesNotWaitForPreviousTerm pins that a term becomes ready without
+// waiting for the previous term's goroutines, which may wait for locks held
+// across storage writes, while its metrics flusher takes no report until the
+// previous flusher exits, so the two never update the metrics at once and the
+// previous one cannot reset this term's RU timeline.
+func TestInitDoesNotWaitForPreviousTerm(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	// A previous flusher and persist loop that are still running.
+	m.flushMu.Lock()
+	persistExit := make(chan struct{})
+	m.wg.Go(func() { <-persistExit })
+	inited := make(chan error, 1)
+	go func() { inited <- m.Init(t.Context()) }()
+	select {
+	case err := <-inited:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		re.Fail("Init waited for the previous term")
+	}
+	// A goroutine waiting for a mutex is not durably blocked, so synctest
+	// cannot tell when the new flusher is waiting; give it real time instead.
+	re.NoError(m.dispatchConsumption(1, &rmpb.TokenBucketRequest{ResourceGroupName: DefaultResourceGroupName}))
+	re.Never(func() bool { return len(m.consumptionDispatcher) == 0 }, 100*time.Millisecond, 10*time.Millisecond,
+		"the flusher took a report before the previous one exited")
+	m.flushMu.Unlock()
+	re.Eventually(func() bool { return len(m.consumptionDispatcher) == 0 }, 5*time.Second, 10*time.Millisecond)
+	close(persistExit)
+	m.close()
 }
 
 func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
@@ -487,10 +560,11 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
 	}
 
-	err := m.dispatchConsumption(req)
+	err := m.dispatchConsumption(7, req)
 	re.NoError(err)
 
 	item := <-m.consumptionDispatcher
+	re.Equal(uint64(7), item.clientUniqueID)
 	re.Equal(uint32(42), item.keyspaceID)
 	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
 	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
@@ -519,8 +593,7 @@ func TestAddAndModifyResourceGroup(t *testing.T) {
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 
@@ -564,46 +637,47 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 }
 
 func TestCleanUpTicker(t *testing.T) {
-	re := require.New(t)
-	m := prepareManager()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// Put a keyspace meta.
-	keyspaceID := uint32(1)
-	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, "test_keyspace")
-	// Insert two consumption records manually.
-	m.metrics.consumptionRecordMap[consumptionRecordKey{
-		keyspaceID: keyspaceID,
-		groupName:  "test_group_1",
-		ruType:     defaultTypeLabel,
-	}] = time.Now().Add(-metricsCleanupTimeout * 2)
-	m.metrics.consumptionRecordMap[consumptionRecordKey{
-		keyspaceID: keyspaceID,
-		groupName:  "test_group_2",
-		ruType:     defaultTypeLabel,
-	}] = time.Now().Add(-metricsCleanupTimeout / 2)
-	// Start the background metrics flush loop.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker"))
-	}()
-	err := m.Init(ctx)
-	re.NoError(err)
-	// Ensure the cleanup ticker is triggered.
-	time.Sleep(200 * time.Millisecond)
-	// Close the manager to avoid the data race.
-	m.close()
+		ctx := t.Context()
+		// Put a keyspace meta.
+		keyspaceID := uint32(1)
+		prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}, "test_keyspace")
+		// Insert two consumption records manually.
+		m.metrics.consumptionRecordMap[consumptionRecordKey{
+			keyspaceID: keyspaceID,
+			groupName:  "test_group_1",
+			ruType:     defaultTypeLabel,
+		}] = time.Now().Add(-metricsCleanupTimeout * 2)
+		m.metrics.consumptionRecordMap[consumptionRecordKey{
+			keyspaceID: keyspaceID,
+			groupName:  "test_group_2",
+			ruType:     defaultTypeLabel,
+		}] = time.Now().Add(-metricsCleanupTimeout / 2)
+		// Start the background metrics flush loop.
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker", `return(true)`))
+		defer func() {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker"))
+		}()
+		err := m.Init(ctx)
+		re.NoError(err)
+		// Ensure the cleanup ticker is triggered.
+		synctest.Sleep(200 * time.Millisecond)
+		// Close the manager to avoid the data race.
+		m.close()
 
-	re.Len(m.metrics.consumptionRecordMap, 1)
-	re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{
-		keyspaceID: keyspaceID,
-		groupName:  "test_group_2",
-		ruType:     defaultTypeLabel,
+		re.Len(m.metrics.consumptionRecordMap, 1)
+		re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{
+			keyspaceID: keyspaceID,
+			groupName:  "test_group_2",
+			ruType:     defaultTypeLabel,
+		})
+		keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
+		re.NoError(err)
+		re.Equal("test_keyspace", keyspaceName)
 	})
-	keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
-	re.NoError(err)
-	re.Equal("test_keyspace", keyspaceName)
 }
 
 func TestKeyspaceServiceLimit(t *testing.T) {
@@ -613,8 +687,7 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Test the default service limit is 0.0.
@@ -668,8 +741,7 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err := m.Init(ctx)
 	re.NoError(err)
 	// Get the null keyspace ID by an empty name.
@@ -730,8 +802,7 @@ func TestResourceGroupPersistence(t *testing.T) {
 	m = NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 	// Initialize the manager.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	err = m.Init(ctx)
 	re.NoError(err)
 	// Check the resource group is loaded from the storage.
@@ -760,8 +831,7 @@ func TestManagerMetadataWriteRoleGates(t *testing.T) {
 		role: ResourceGroupWriteRoleRMTokenOnly,
 	})
 	m.storage = storage.NewStorageWithMemoryBackend()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(m.Init(ctx))
 	re.Equal(ResourceGroupWriteRoleRMTokenOnly, m.GetWriteRole())
 
@@ -837,4 +907,56 @@ func TestKeyspaceResourceGroupManagerWriteRoleGates(t *testing.T) {
 	}))
 	re.Equal(1, metaOnlySettingsCount)
 	re.Equal(0, metaOnlyStatesCount)
+}
+
+func TestResourceGroupConsumptionPersistsAcrossReload(t *testing.T) {
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, 42} {
+		for _, order := range []string{"same_snapshot", "settings_newer", "state_newer", "state_only"} {
+			t.Run(strconv.FormatUint(uint64(keyspaceID), 10)+"/"+order, func(t *testing.T) {
+				re := require.New(t)
+				m := prepareManager()
+				group := &rmpb.ResourceGroup{
+					Name: "persisted-consumption", Mode: rmpb.GroupMode_RUMode,
+					KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
+					RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100, BurstLimit: 1000}}},
+				}
+				re.NoError(m.AddResourceGroup(group))
+				rg, err := m.GetMutableResourceGroup(keyspaceID, group.Name)
+				re.NoError(err)
+				persistState := func() { m.getKeyspaceResourceGroupManager(keyspaceID).persistResourceGroupRunningState() }
+				persistSettings := func() {
+					// Normal metadata updates do not need to include RUStats.
+					group.RUSettings.RU.Settings.FillRate++
+					re.NoError(m.ModifyResourceGroup(group))
+				}
+				rg.UpdateRUConsumption(&rmpb.Consumption{RRU: 3})
+				switch order {
+				case "settings_newer":
+					persistState()
+				case "state_newer":
+					persistSettings()
+				}
+				rg.UpdateRUConsumption(&rmpb.Consumption{RRU: 2})
+				switch order {
+				case "same_snapshot":
+					persistSettings()
+					persistState()
+				case "settings_newer":
+					persistSettings()
+				case "state_newer", "state_only":
+					persistState()
+				}
+				for range 2 {
+					reloaded := prepareManager()
+					reloaded.storage = m.storage
+					re.NoError(reloaded.loadKeyspaceResourceGroups())
+					actual, err := reloaded.GetResourceGroup(keyspaceID, group.Name, true)
+					re.NoError(err)
+					re.Equal(5.0, actual.RUConsumption.RRU)
+					re.Empty(reloaded.ruCollector.Aggregate(), "loading cumulative API stats must not create metering records")
+					m = reloaded
+				}
+			})
+		}
+	}
 }

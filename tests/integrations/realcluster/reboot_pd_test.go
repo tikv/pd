@@ -30,9 +30,7 @@ type rebootPDSuite struct {
 
 func TestRebootPD(t *testing.T) {
 	suite.Run(t, &rebootPDSuite{
-		clusterSuite: clusterSuite{
-			suiteName: "reboot_pd",
-		},
+		suiteName: "reboot_pd",
 	})
 }
 

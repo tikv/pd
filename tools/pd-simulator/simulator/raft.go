@@ -16,6 +16,7 @@ package simulator
 
 import (
 	"context"
+	"slices"
 
 	"go.uber.org/zap"
 
@@ -237,11 +238,11 @@ func (r *RaftEngine) GetRegion(regionID uint64) *core.RegionInfo {
 	return nil
 }
 
-// GetRegionChange returns a list of RegionID for a given store.
+// GetRegionChange returns a snapshot of the changed region IDs for a given store.
 func (r *RaftEngine) GetRegionChange(storeID uint64) []uint64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.regionChange[storeID]
+	return slices.Clone(r.regionChange[storeID])
 }
 
 // ResetRegionChange resets RegionInfo on a specific store with a given Region ID
@@ -251,7 +252,7 @@ func (r *RaftEngine) ResetRegionChange(storeID uint64, regionID uint64) {
 	regionIDs := r.regionChange[storeID]
 	for i, id := range regionIDs {
 		if id == regionID {
-			r.regionChange[storeID] = append(r.regionChange[storeID][:i], r.regionChange[storeID][i+1:]...)
+			r.regionChange[storeID] = slices.Delete(r.regionChange[storeID], i, i+1)
 			return
 		}
 	}

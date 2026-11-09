@@ -121,8 +121,8 @@ func BenchmarkFitRegion(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -140,8 +140,8 @@ func BenchmarkFitRegionMoreStores(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(200)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -159,8 +159,8 @@ func BenchmarkFitRegionMorePeers(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -185,8 +185,8 @@ func BenchmarkFitRegionMorePeersEquals(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -213,8 +213,8 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -241,8 +241,8 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -252,8 +252,8 @@ func BenchmarkFitRegionTiflash(b *testing.B) {
 	rules := addExtraRules(1)
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -279,8 +279,8 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -343,8 +343,8 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 		storelists: lists,
 	}
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -401,8 +401,8 @@ func BenchmarkFitRegionWithLocationLabels(b *testing.B) {
 		storelists: lists,
 	}
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }

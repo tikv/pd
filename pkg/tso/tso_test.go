@@ -86,8 +86,7 @@ func TestSetTSO(t *testing.T) {
 
 func TestGenerateTSO(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	current := time.Now()
 	timestampOracle := &timestampOracle{
 		tsoMux: &tsoObject{
@@ -120,8 +119,7 @@ func TestGenerateTSO(t *testing.T) {
 
 func TestCurrentGetTSO(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	current := time.Now()
 	timestampOracle := &timestampOracle{
 		tsoMux: &tsoObject{

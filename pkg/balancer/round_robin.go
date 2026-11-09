@@ -15,6 +15,7 @@
 package balancer
 
 import (
+	"slices"
 	"sync/atomic"
 
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -25,7 +26,7 @@ type RoundRobin[T uint32 | string] struct {
 	syncutil.RWMutex
 	nodes  []T
 	exists map[T]struct{}
-	next   uint32
+	next   atomic.Uint32
 }
 
 // NewRoundRobin creates a balancer that selects nodes in a round-robin fashion.
@@ -43,7 +44,7 @@ func (r *RoundRobin[T]) Next() (t T) {
 	if len(r.nodes) == 0 {
 		return
 	}
-	next := atomic.AddUint32(&r.next, 1)
+	next := r.next.Add(1)
 	node := r.nodes[(int(next)-1)%len(r.nodes)]
 	return node
 }
@@ -53,7 +54,7 @@ func (r *RoundRobin[T]) GetAll() []T {
 	r.RLock()
 	defer r.RUnlock()
 	// return a copy to avoid data race
-	return append(r.nodes[:0:0], r.nodes...)
+	return slices.Clone(r.nodes)
 }
 
 // Put puts one into balancer.
@@ -73,7 +74,7 @@ func (r *RoundRobin[T]) Delete(node T) {
 	if _, ok := r.exists[node]; ok {
 		for i, n := range r.nodes {
 			if n == node {
-				r.nodes = append(r.nodes[:i], r.nodes[i+1:]...)
+				r.nodes = slices.Delete(r.nodes, i, i+1)
 				delete(r.exists, node)
 				break
 			}

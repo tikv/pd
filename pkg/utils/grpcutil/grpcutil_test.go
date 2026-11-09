@@ -214,7 +214,7 @@ func BenchmarkGetForwardedHost(b *testing.B) {
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
 	// Run the GetForwardedHost function b.N times
-	for range b.N {
+	for b.Loop() {
 		GetForwardedHost(ctx)
 	}
 }

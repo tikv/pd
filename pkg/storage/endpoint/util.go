@@ -87,10 +87,7 @@ type TxnStorage interface {
 // The batch is split into multiple transactions if it exceeds the maximum number of operations per transaction.
 func RunBatchOpInTxn(ctx context.Context, storage TxnStorage, batch []func(kv.Txn) error) error {
 	for start := 0; start < len(batch); start += etcdutil.MaxEtcdTxnOps {
-		end := start + etcdutil.MaxEtcdTxnOps
-		if end > len(batch) {
-			end = len(batch)
-		}
+		end := min(start+etcdutil.MaxEtcdTxnOps, len(batch))
 		err := storage.RunInTxn(ctx, func(txn kv.Txn) (err error) {
 			for _, op := range batch[start:end] {
 				if err = op(txn); err != nil {
