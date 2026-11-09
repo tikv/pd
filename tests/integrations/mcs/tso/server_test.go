@@ -43,6 +43,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -434,9 +435,10 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 	}
 }
 
-// TestGetTSAfterTSOPrimaryChanged checks that a client discovering TSO servers directly
-// resumes after primary transfers and shutdowns. Retry timing is covered with a fake clock
-// in TestExecWithBackoffRetriesBeforeMaxInterval, independently of server election latency.
+// TestGetTSAfterTSOPrimaryChanged checks that a client resumes promptly after a
+// primary transfer or shutdown. Server election and timestamp initialization finish
+// before the recovery budget starts. Both discovery loops first miss the new primary,
+// so a full fixed retry interval still violates the client recovery budget.
 func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -451,44 +453,124 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 
-	client := utils.SetupClientWithKeyspaceID(ctx, re, constant.DefaultKeyspaceID, []string{pdLeader.GetAddr()})
+	const (
+		beforeUpdateFailpoint = "github.com/tikv/pd/client/servicediscovery/beforeTSOMemberUpdate"
+		missPrimaryFailpoint  = "github.com/tikv/pd/client/servicediscovery/tsoPrimaryNotReady"
+	)
+	type discoveryGate struct {
+		entered atomic.Int32
+		release chan struct{}
+	}
+	var activeGate atomic.Pointer[discoveryGate]
+	clientCtx := failpoint.WithHook(ctx, func(ctx context.Context, name string) bool {
+		gate := activeGate.Load()
+		if gate == nil {
+			return false
+		}
+		if name == missPrimaryFailpoint {
+			return true
+		}
+		if name != beforeUpdateFailpoint {
+			return false
+		}
+		gate.entered.Add(1)
+		select {
+		case <-gate.release:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	})
+	re.NoError(failpoint.Enable(beforeUpdateFailpoint, "return(true)"))
+	defer func() { re.NoError(failpoint.Disable(beforeUpdateFailpoint)) }()
+	re.NoError(failpoint.Enable(missPrimaryFailpoint, "return(true)"))
+	defer func() { re.NoError(failpoint.Disable(missPrimaryFailpoint)) }()
+
+	client := utils.SetupClientWithKeyspaceID(clientCtx, re, constant.DefaultKeyspaceID, []string{pdLeader.GetAddr()})
 	defer client.Close()
 	utils.WaitForTSOServiceAvailable(ctx, re, client)
+	inner, ok := client.(interface{ GetTSOServiceDiscovery() sd.ServiceDiscovery })
+	re.True(ok)
+	discovery := inner.GetTSOServiceDiscovery()
 
 	checkRecovery := func(changePrimary func()) {
 		var (
-			successes atomic.Uint64
-			// Stop between calls instead of canceling an in-flight GetTS, whose request
-			// may be put back to the pool while the dispatcher still holds it.
+			maxGap          time.Duration
+			lastSuccess     time.Time
+			stoppedAt       time.Time
+			recoveryStarted atomic.Pointer[time.Time]
+			// Stop between calls to avoid canceling a request still held by the dispatcher.
 			stopped atomic.Bool
 		)
 		started := make(chan struct{})
+		recovered := make(chan time.Duration, 1)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
+			firstSuccess := true
 			for !stopped.Load() {
 				if _, _, err := client.GetTS(ctx); err != nil {
 					continue
 				}
-				if successes.Add(1) == 1 {
+				if firstSuccess {
 					close(started)
+					firstSuccess = false
+				}
+				if start := recoveryStarted.Load(); start != nil {
+					now := time.Now()
+					if lastSuccess.IsZero() {
+						lastSuccess = *start
+						recovered <- now.Sub(*start)
+					}
+					maxGap = max(maxGap, now.Sub(lastSuccess))
+					lastSuccess = now
 				}
 			}
+			stoppedAt = time.Now()
 		}()
 		defer func() {
 			stopped.Store(true)
 			<-done
+		}()
+		gate := &discoveryGate{release: make(chan struct{})}
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(gate.release) }) }
+		defer func() {
+			activeGate.Store(nil)
+			release()
 		}()
 		select {
 		case <-started:
 		case <-time.After(10 * time.Second):
 			re.FailNow("GetTS does not succeed before the primary change")
 		}
+		activeGate.Store(gate)
+		discovery.ScheduleCheckMemberChanged()
+		// Drain any earlier background update before changing the primary.
+		testutil.Eventually(re, func() bool { return gate.entered.Load() >= 1 })
+		changedAt := time.Now()
 		changePrimary()
-		tc.WaitForDefaultPrimaryServing(re)
-		// Require a new successful call after the primary is serving, using the same client.
-		before := successes.Load()
-		testutil.Eventually(re, func() bool { return successes.Load() > before })
+		primary := tc.WaitForDefaultPrimaryServing(re)
+		serverWait := time.Since(changedAt)
+		// One blocked update is from the background loop and one from the foreground
+		// leader-change check. Both retry timers start only after release.
+		testutil.Eventually(re, func() bool { return gate.entered.Load() >= 2 })
+		start := time.Now()
+		recoveryStarted.Store(&start)
+		release()
+		select {
+		case elapsed := <-recovered:
+			t.Logf("server primary wait: %s; client recovery: %s", serverWait, elapsed)
+			re.Less(elapsed, 400*time.Millisecond)
+		case <-time.After(5 * time.Second):
+			re.FailNow("GetTS does not recover after the new primary is serving")
+		}
+		// Keep the original observation window and check gaps after recovery too.
+		time.Sleep(time.Second)
+		stopped.Store(true)
+		<-done
+		re.Less(max(maxGap, stoppedAt.Sub(lastSuccess)), 400*time.Millisecond)
+		re.Equal(primary.GetAddr(), discovery.GetServingURL())
 	}
 	for range 3 {
 		checkRecovery(func() {
