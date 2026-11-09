@@ -112,6 +112,14 @@ var (
 			Help:      "Counter of the TiFlash-side experimental v2 request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
+	ruPeakPerSec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "peak_per_second_rolling_60s",
+			Help:      "Maximum net foreground RRU+WRU of a natural second in the 60-second window ending about 30 seconds ago, summed over the clients that reported it, in RU/s. RU is attributed to the second the client settles it; TiFlash, background task, SQL CPU RU and RUv2 are excluded.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+
 	readRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -266,7 +274,8 @@ var (
 )
 
 type metrics struct {
-	mu sync.RWMutex
+	ruTimeline *ruTimeline
+	mu         sync.RWMutex
 	// record update time of each resource group metrics.
 	consumptionRecordMap map[consumptionRecordKey]time.Time
 	// max per sec trackers for each keyspace and resource group.
@@ -324,6 +333,7 @@ func init() {
 	prometheus.MustRegister(sqlCPUCost)
 	prometheus.MustRegister(requestCount)
 	prometheus.MustRegister(availableRUCounter)
+	prometheus.MustRegister(ruPeakPerSec)
 	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(resourceGroupConfigGauge)
@@ -340,6 +350,7 @@ func init() {
 
 func newMetrics() *metrics {
 	return &metrics{
+		ruTimeline:             newRUTimeline(),
 		consumptionRecordMap:   make(map[consumptionRecordKey]time.Time),
 		maxPerSecTrackerMap:    make(map[trackerKey]*maxPerSecCostTracker),
 		counterMetricsMap:      make(map[metricsKey]*counterMetrics),
@@ -547,6 +558,7 @@ func (m *metrics) recordConsumption(
 	if consumption == nil {
 		return
 	}
+	m.ruTimeline.record(consumptionInfo, now)
 	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
 	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig, keyspaceID)
 	m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)

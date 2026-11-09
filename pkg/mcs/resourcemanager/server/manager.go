@@ -53,6 +53,7 @@ type Manager struct {
 	syncutil.RWMutex
 	cancel                context.CancelFunc
 	wg                    sync.WaitGroup
+	flushMu               syncutil.Mutex // held by the running metrics flusher
 	srv                   bs.Server
 	writeRole             ResourceGroupWriteRole
 	enableMetadataWatcher bool
@@ -621,13 +622,14 @@ func (m *Manager) getKeyspaceResourceGroupManagers() []*keyspaceResourceGroupMan
 	return krgms
 }
 
-func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
+func (m *Manager) dispatchConsumption(clientUniqueID uint64, req *rmpb.TokenBucketRequest) error {
 	isBackground := req.GetIsBackground()
 	isTiFlash := req.GetIsTiflash()
 	if isBackground && isTiFlash {
 		return errors.New("background and tiflash cannot be true at the same time")
 	}
 	m.consumptionDispatcher <- &consumptionItem{
+		clientUniqueID:    clientUniqueID,
 		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
@@ -738,6 +740,15 @@ func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.K
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
+	// Flushers of successive terms share the metrics and the RU timeline,
+	// which each resets on exit, so they run one at a time, though not
+	// necessarily in term order. The previous one can still be running,
+	// waiting for a lock held across a storage write; it is awaited here
+	// rather than in Init, so the new term is not delayed.
+	m.flushMu.Lock()
+	defer m.flushMu.Unlock()
+	// The RU timeline belongs to one leadership term.
+	defer m.metrics.ruTimeline.reset()
 	cleanUpTicker := time.NewTicker(metricsCleanupInterval)
 	defer cleanUpTicker.Stop()
 	metricsTicker := time.NewTicker(tickPerSecond)
@@ -746,11 +757,13 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		cleanUpTicker.Reset(100 * time.Millisecond)
 	})
 
-	for {
+	// Check the term before taking each event rather than leaving it to
+	// select: a later term's flusher waits for this loop, and an event can
+	// wait for a keyspace lock held across a storage write. An event that
+	// arrives together with the cancellation can still be handled.
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
-			log.Info("resource group manager background metrics flush loop exits")
-			return
 		case consumptionInfo := <-m.consumptionDispatcher:
 			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
 				continue
@@ -790,6 +803,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				}
 			}
 		case <-metricsTicker.C:
+			m.metrics.ruTimeline.flush(time.Now())
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
 				// Conciliate the fill rates.
@@ -799,6 +813,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 		}
 	}
+	log.Info("resource group manager background metrics flush loop exits")
 }
 
 func (m *Manager) flushResourceGroupMetrics(ctx context.Context, krgm *keyspaceResourceGroupManager) {
