@@ -568,7 +568,9 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	defer m.Unlock()
 	m.updateGroupLabelRulesLocked(newAddedLabelRules, false)
 	m.updateGroupLabelRulesLocked(newRemovedLabelRules, true)
-	m.reconcileRangeConflictsLocked()
+	if m.hasRangeConflicts {
+		m.reconcileRangeConflictsLocked()
+	}
 	return err
 }
 
@@ -833,6 +835,7 @@ func (m *Manager) reconcileRangeConflictsLocked() {
 			}
 		}
 	}
+	m.hasRangeConflicts = len(conflicts) > 0
 	var conflicting, resolved []string
 	for id, group := range m.groups {
 		_, conflict := conflicts[id]

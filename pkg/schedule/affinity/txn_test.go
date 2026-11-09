@@ -535,8 +535,20 @@ func (s *failingAffinityStorage) RunInTxn(ctx context.Context, f func(kv.Txn) er
 // checked against the committed ranges and a retry that skips existing groups
 // creates the rest.
 func TestAffinityGroupsBatchFailure(t *testing.T) {
-	for _, op := range []string{"create", "delete", "update"} {
-		t.Run(op, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, op  string
+		addCount  int
+		removeAll bool
+	}{
+		{name: "create", op: "create"},
+		{name: "delete", op: "delete"},
+		{name: "update/inside adds", op: "update", addCount: etcdutil.MaxEtcdTxnOps + 1},
+		{name: "update/inside partial removes", op: "update", addCount: 1},
+		{name: "update/inside remove-all", op: "update", addCount: 1, removeAll: true},
+		{name: "update/end of adds", op: "update", addCount: etcdutil.MaxEtcdTxnOps},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			op := tc.op
 			re := require.New(t)
 			ctx := t.Context()
 			store := storage.NewStorageWithMemoryBackend()
@@ -551,25 +563,33 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 			// writes one label rule per group.
 			count := etcdutil.MaxEtcdTxnOps/2 + 2
 			if op == "update" {
-				count = etcdutil.MaxEtcdTxnOps + 1
+				count = etcdutil.MaxEtcdTxnOps + 2
 			}
 			changes, ids := make([]GroupKeyRanges, count), make([]string, count)
 			for i := range changes {
 				ids[i] = fmt.Sprintf("batch-group-%d", i)
 				changes[i].GroupID = ids[i]
 				if i > 0 || op == "update" {
-					changes[i].KeyRanges = []keyutil.KeyRange{{StartKey: fmt.Appendf(nil, "%04d", i), EndKey: fmt.Appendf(nil, "%04d", i+1)}}
+					changes[i].KeyRanges = []keyutil.KeyRange{{StartKey: fmt.Appendf(nil, "%04d", 2*i), EndKey: fmt.Appendf(nil, "%04d", 2*i+1)}}
 				}
 			}
 			switch op {
 			case "delete":
 				re.NoError(manager.CreateAffinityGroups(changes))
 			case "update":
-				empty := make([]GroupKeyRanges, count)
-				for i := range empty {
-					empty[i].GroupID = ids[i]
+				initial := make([]GroupKeyRanges, count)
+				for i := range initial {
+					initial[i].GroupID = ids[i]
+					if i >= tc.addCount {
+						initial[i].KeyRanges = changes[i].KeyRanges
+						if !tc.removeAll {
+							initial[i].KeyRanges = append(initial[i].KeyRanges, keyutil.KeyRange{
+								StartKey: fmt.Appendf(nil, "%04d", 2*i+1), EndKey: fmt.Appendf(nil, "%04d", 2*i+2),
+							})
+						}
+					}
 				}
-				re.NoError(manager.CreateAffinityGroups(empty))
+				re.NoError(manager.CreateAffinityGroups(initial))
 			}
 			failingStore.txnCount, failingStore.failAt = 0, 2
 			switch op {
@@ -578,7 +598,7 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 			case "delete":
 				err = manager.DeleteAffinityGroups(ids, true)
 			case "update":
-				err = manager.UpdateAffinityGroupKeyRanges(changes, nil)
+				err = manager.UpdateAffinityGroupKeyRanges(changes[:tc.addCount], changes[tc.addCount:])
 			}
 			re.ErrorContains(err, "injected affinity transaction failure")
 			re.Equal(2, failingStore.txnCount)
@@ -588,7 +608,7 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 			re.NoError(err)
 			reloaded, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), reloadedLabeler)
 			re.NoError(err)
-			for _, change := range changes {
+			for i, change := range changes {
 				ruleID := GetLabelRuleID(change.GroupID)
 				stored, hasRule := reloaded.GetAffinityGroupState(change.GroupID), reloadedLabeler.GetLabelRule(ruleID) != nil
 				if op != "update" {
@@ -602,13 +622,38 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 				if stored != nil {
 					re.Equal(stored.RangeCount, state.RangeCount, change.GroupID)
 				}
+				re.Equal(reloadedLabeler.GetLabelRule(ruleID), regionLabeler.GetLabelRule(ruleID), change.GroupID)
+				if op == "update" {
+					expectedCount := 0
+					if i < tc.addCount {
+						if i < etcdutil.MaxEtcdTxnOps {
+							expectedCount = 1
+						}
+					} else {
+						if !tc.removeAll {
+							expectedCount = 1
+						}
+						if i >= etcdutil.MaxEtcdTxnOps {
+							expectedCount++
+						}
+					}
+					re.Equal(expectedCount, stored.RangeCount, change.GroupID)
+					re.Equal(expectedCount > 0, hasRule, change.GroupID)
+				}
 			}
+			re.Equal(reloaded.keyRanges, manager.keyRanges)
 			// Only the first transaction committed.
-			re.NotEqual(reloadedLabeler.GetLabelRule(GetLabelRuleID(ids[1])) != nil, reloadedLabeler.GetLabelRule(GetLabelRuleID(ids[count-1])) != nil)
+			if op != "update" {
+				re.NotEqual(reloadedLabeler.GetLabelRule(GetLabelRuleID(ids[1])) != nil, reloadedLabeler.GetLabelRule(GetLabelRuleID(ids[count-1])) != nil)
+			}
 
-			// New groups are checked against the committed changes. The first
-			// transaction created group 1, deleted it, or gave it its range.
-			err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "overlap", KeyRanges: changes[1].KeyRanges}})
+			// New groups are checked against a range created, deleted or added
+			// by the first transaction.
+			probe := changes[1]
+			if op == "update" {
+				probe = changes[0]
+			}
+			err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "overlap", KeyRanges: probe.KeyRanges}})
 			if op == "delete" {
 				re.NoError(err)
 			} else {
