@@ -955,6 +955,72 @@ func TestBalanceSmallRegionsAfterScaleOut(t *testing.T) {
 	}
 }
 
+func TestBalanceRegionRejectedSmallFollowerDoesNotBlockLeader(t *testing.T) {
+	for _, rejection := range []string{"hot", "no target"} {
+		for _, retryLimit := range []int{1, 10} {
+			for _, placementRules := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/retries=%d/placement=%t", rejection, retryLimit, placementRules), func(t *testing.T) {
+					re := require.New(t)
+					cancel, _, tc, oc := prepareSchedulersTest(false)
+					defer cancel()
+					tc.SetEnablePlacementRules(placementRules)
+					tc.SetMaxReplicasWithLabel(placementRules, 3)
+					for id := uint64(1); id <= 5; id++ {
+						tc.AddRegionStore(id, 0)
+					}
+					for id := uint64(1); id <= 4; id++ {
+						region := tc.AddLeaderRegion(id, 1, 2, 3)
+						tc.PutRegion(region.Clone(core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
+					}
+					tc.AddLeaderRegionWithWriteInfo(5, 4, 1<<30, 100000, 0, 60, []uint64{1, 3}, 5)
+					small := tc.GetRegion(5).Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2000))
+					tc.PutRegion(small)
+					// Keep the cluster beyond the empty-region initialization exception.
+					for id := uint64(10); id < 110; id++ {
+						region := tc.AddLeaderRegion(id, 2, 3, 4)
+						tc.PutRegion(region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0)))
+					}
+					for id := uint64(1); id <= 5; id++ {
+						tc.UpdateStoreStatus(id)
+					}
+					tc.SetStoreBusy(2, true)
+					tc.SetStoreBusy(3, true)
+					scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+						ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+					re.NoError(err)
+					sb := scheduler.(*balanceRegionScheduler)
+
+					// First prove that the small follower is eligible and has a target.
+					tc.SetHotRegionCacheHitsThreshold(100)
+					re.False(tc.IsRegionHot(small))
+					ops, _ := sb.Schedule(tc, false)
+					re.Len(ops, 1)
+					re.Equal(small.GetID(), ops[0].RegionID())
+					operatorutil.CheckTransferPeer(re, ops[0], 0, 1, 5)
+
+					if rejection == "hot" {
+						tc.SetHotRegionCacheHitsThreshold(3)
+						re.True(tc.IsRegionHot(small))
+					} else {
+						// The only available target already holds a peer of the small region.
+						small = small.Clone(core.WithRemoveStorePeer(3), core.WithAddPeer(&metapb.Peer{Id: 9999, StoreId: 5}))
+						tc.PutRegion(small)
+						tc.UpdateStoreStatus(3)
+						tc.UpdateStoreStatus(5)
+						tc.SetStoreBusy(3, true)
+					}
+					// Include a source whose retry quota has already attenuated to one.
+					sb.limits[1] = retryLimit
+					ops, _ = sb.Schedule(tc, false)
+					re.Len(ops, 1)
+					re.LessOrEqual(ops[0].RegionID(), uint64(4))
+					operatorutil.CheckTransferPeer(re, ops[0], 0, 1, 5)
+				})
+			}
+		}
+	}
+}
+
 func TestConcurrencyUpdateConfig(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()

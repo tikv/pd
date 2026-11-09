@@ -145,68 +145,72 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			rs = km.GetNonOverlappingKeyRanges(&rs[0])
 		}
 	}
+	// Try each peer role in priority order, with a separate retry budget so
+	// rejected candidates cannot prevent balancing regions in later roles.
+	regionSelectors := [...]func(uint64, []keyutil.KeyRange) []*core.RegionInfo{
+		cluster.RandPendingRegions,
+		cluster.RandFollowerRegions,
+		cluster.RandLeaderRegions,
+		cluster.RandLearnerRegions,
+	}
 	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
 	for sourceIndex, solver.Source = range sourceStores {
 		retryLimit := s.getLimit(solver.Source)
 		if sourceIndex == len(sourceStores)-1 {
 			break
 		}
-		for range retryLimit {
-			// Priority pick the region that has a pending peer.
-			// Pending region may mean the disk is overload, remove the pending region firstly.
-			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), rs), collector,
-				append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()))...)
-			if solver.Region == nil {
-				// Then pick the region that has a follower in the source store.
-				solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), rs), collector,
-					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
+		foundRegion := false
+		regionFilters := append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()))
+		for i, selectRegions := range regionSelectors {
+			if i == 1 {
+				regionFilters = append(regionFilters, pendingFilter)
 			}
-			if solver.Region == nil {
-				// Then pick the region has the leader in the source store.
-				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), rs), collector,
-					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
-			}
-			if solver.Region == nil {
-				// Finally, pick learner.
-				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), rs), collector,
-					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
-			}
-			if solver.Region == nil {
-				balanceRegionNoRegionCounter.Inc()
-				continue
-			}
-			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
-			// Skip hot regions.
-			if cluster.IsRegionHot(solver.Region) {
-				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
-				if collector != nil {
-					collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
+			for range retryLimit {
+				regions := selectRegions(solver.sourceStoreID(), rs)
+				if len(regions) == 0 {
+					break
 				}
-				balanceRegionHotCounter.Inc()
-				continue
-			}
-			// Check region leader
-			if solver.Region.GetLeader() == nil {
-				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
-				if collector != nil {
-					collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionNoLeader)))
+				solver.Region = filter.SelectOneRegion(regions, collector, regionFilters...)
+				if solver.Region == nil {
+					continue
 				}
-				balanceRegionNoLeaderCounter.Inc()
-				continue
+				foundRegion = true
+				log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+				// Skip hot regions.
+				if cluster.IsRegionHot(solver.Region) {
+					log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+					if collector != nil {
+						collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
+					}
+					balanceRegionHotCounter.Inc()
+					continue
+				}
+				// Check region leader
+				if solver.Region.GetLeader() == nil {
+					log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+					if collector != nil {
+						collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionNoLeader)))
+					}
+					balanceRegionNoLeaderCounter.Inc()
+					continue
+				}
+				solver.Step++
+				// Now that the candidate region is known, its size can be folded
+				// into the source score the same way targetStoreScore folds it in.
+				solver.sourceScore = solver.sourceStoreScore(s.GetName())
+				// the replica filter will cache the last region fit and the select one will only pict the first one region that
+				// satisfy all the filters, so the region fit must belong the scheduled region.
+				solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
+				if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
+					s.resetLimit(solver.Source)
+					op.Counters = append(op.Counters, balanceRegionNewOpCounter)
+					return []*operator.Operator{op}, collector.GetPlans()
+				}
+				solver.Step--
 			}
-			solver.Step++
-			// Now that the candidate region is known, its size can be folded
-			// into the source score the same way targetStoreScore folds it in.
-			solver.sourceScore = solver.sourceStoreScore(s.GetName())
-			// the replica filter will cache the last region fit and the select one will only pict the first one region that
-			// satisfy all the filters, so the region fit must belong the scheduled region.
-			solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
-			if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
-				s.resetLimit(solver.Source)
-				op.Counters = append(op.Counters, balanceRegionNewOpCounter)
-				return []*operator.Operator{op}, collector.GetPlans()
-			}
-			solver.Step--
+		}
+		if !foundRegion {
+			balanceRegionNoRegionCounter.Inc()
 		}
 		s.attenuate(solver.Source)
 	}
