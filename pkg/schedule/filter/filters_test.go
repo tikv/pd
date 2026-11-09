@@ -577,3 +577,10 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 		_ = createRegionForRuleFit(region.GetStartKey(), region.GetEndKey(), region.GetPeers(), region.GetLeader())
 	}
 }
+
+func TestIsolationFilterEmptyReference(t *testing.T) {
+	re := require.New(t)
+	store := core.NewStoreInfoWithLabel(1, map[string]string{"zone": "z1", "host": "h1"})
+	f := NewIsolationFilter("", "zone", []string{"zone", "host"}, nil)
+	re.Equal(plan.StatusOK, f.Target(mockconfig.NewTestOptions(), store).StatusCode)
+}
