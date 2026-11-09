@@ -27,6 +27,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -956,5 +957,216 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 	}
 	testutil.Eventually(re, func() bool {
 		return controller.GetRUVersion() == 1 // Reset to default
+	})
+}
+
+func matchWatchRevision(revision int64) any {
+	return mock.MatchedBy(func(opts []opt.MetaStorageOption) bool {
+		var options opt.MetaStorageOp
+		for _, apply := range opts {
+			apply(&options)
+		}
+		return options.Revision == revision
+	})
+}
+
+func newWatchRecoveryProvider() *MockResourceGroupProvider {
+	provider := &MockResourceGroupProvider{}
+	provider.On("Get", mock.Anything, []byte(controllerConfigPath), mock.Anything).
+		Return(&meta_storagepb.GetResponse{Header: &meta_storagepb.ResponseHeader{Revision: 10}}, nil).Once()
+	provider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).
+		Return([]*rmpb.TokenBucketResponse{}, nil).Maybe()
+	return provider
+}
+
+func watchRecoveryGroup(name string, fillRate uint64) *rmpb.ResourceGroup {
+	return &rmpb.ResourceGroup{
+		Name: name,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{FillRate: fillRate},
+		}},
+	}
+}
+
+func TestResourceGroupWatchResumesAfterDisconnect(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
+		provider := newWatchRecoveryProvider()
+		first, second := make(chan *metastorage.WatchResponse, 1), make(chan *metastorage.WatchResponse, 1)
+		prefix := pd.GroupSettingsPathPrefixBytes(constants.NullKeyspaceID)
+		provider.On("Watch", mock.Anything, prefix, matchWatchRevision(11)).Return(first, nil).Once()
+		provider.On("Watch", mock.Anything, prefix, matchWatchRevision(13)).Return(second, nil).Once()
+		provider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, matchWatchRevision(11)).
+			Return(make(chan *metastorage.WatchResponse), nil).Once()
+		group := watchRecoveryGroup("watched", 100)
+		provider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+		provider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).
+			Return(watchRecoveryGroup(defaultResourceGroupName, 1000), nil)
+		controller, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+		re.NoError(err)
+		_, err = controller.tryGetResourceGroupController(ctx, group.Name, false)
+		re.NoError(err)
+		controller.Start(ctx)
+		defer func() { re.NoError(controller.Stop()) }()
+		synctest.Wait()
+
+		updated := watchRecoveryGroup(group.Name, 200)
+		value, err := proto.Marshal(updated)
+		re.NoError(err)
+		first <- &metastorage.WatchResponse{Events: []*meta_storagepb.Event{{
+			Type: meta_storagepb.Event_PUT,
+			Kv:   &meta_storagepb.KeyValue{ModRevision: 12, Value: value},
+		}}}
+		close(first)
+		synctest.Wait()
+		re.Equal(uint64(200), controller.GetActiveResourceGroup(group.Name).GetRUSettings().GetRU().GetSettings().GetFillRate())
+
+		// The retry must include changes made while the stream was disconnected.
+		time.Sleep(watchRetryInterval)
+		synctest.Wait()
+		second <- &metastorage.WatchResponse{Events: []*meta_storagepb.Event{{
+			Type: meta_storagepb.Event_DELETE,
+			Kv:   &meta_storagepb.KeyValue{Key: append(prefix, []byte("/"+group.Name)...), ModRevision: 14},
+			// etcd may have compacted the previous value while retaining this delete.
+		}}}
+		synctest.Wait()
+		gc, ok := controller.loadGroupController(group.Name)
+		re.True(ok)
+		re.True(gc.tombstone.Load())
+		provider.AssertNotCalled(t, "LoadResourceGroups", mock.Anything)
+		provider.AssertExpectations(t)
+	})
+}
+
+func TestResourceGroupWatchReloadsAfterCompaction(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
+		provider := newWatchRecoveryProvider()
+		first := make(chan *metastorage.WatchResponse, 1)
+		prefix := pd.GroupSettingsPathPrefixBytes(constants.NullKeyspaceID)
+		provider.On("Watch", mock.Anything, prefix, matchWatchRevision(11)).Return(first, nil).Once()
+		provider.On("Watch", mock.Anything, prefix, matchWatchRevision(31)).
+			Return(make(chan *metastorage.WatchResponse), nil).Once()
+		provider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, matchWatchRevision(11)).
+			Return(make(chan *metastorage.WatchResponse), nil).Once()
+		provider.On("LoadResourceGroups", mock.Anything).
+			Return([]*rmpb.ResourceGroup(nil), int64(0), errors.New("snapshot temporarily unavailable")).Once()
+		provider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{
+			watchRecoveryGroup(defaultResourceGroupName, 1000),
+			watchRecoveryGroup("updated", 200),
+			watchRecoveryGroup("recreated", 300),
+			watchRecoveryGroup("uncached", 400),
+		}, int64(30), nil).Once()
+		controller, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+		re.NoError(err)
+		for _, name := range []string{defaultResourceGroupName, "updated", "deleted", "recreated"} {
+			group := watchRecoveryGroup(name, 100)
+			provider.On("GetResourceGroup", mock.Anything, name, mock.Anything).Return(group, nil)
+			_, err := controller.tryGetResourceGroupController(ctx, name, false)
+			re.NoError(err)
+		}
+		gc, ok := controller.loadGroupController("recreated")
+		re.True(ok)
+		gc.tombstone.Store(true)
+		controller.Start(ctx)
+		defer func() { re.NoError(controller.Stop()) }()
+		synctest.Wait()
+		first <- &metastorage.WatchResponse{CompactRevision: 20}
+		close(first)
+		synctest.Wait()
+
+		// Failed snapshots must not advance the cursor or create another watch.
+		time.Sleep(watchRetryInterval)
+		synctest.Wait()
+		provider.AssertNumberOfCalls(t, "Watch", 2)
+		time.Sleep(watchRetryInterval)
+		synctest.Wait()
+		re.Equal(uint64(200), controller.GetActiveResourceGroup("updated").GetRUSettings().GetRU().GetSettings().GetFillRate())
+		re.Equal(uint64(300), controller.GetActiveResourceGroup("recreated").GetRUSettings().GetRU().GetSettings().GetFillRate())
+		gc, ok = controller.loadGroupController("deleted")
+		re.True(ok)
+		re.True(gc.tombstone.Load())
+		_, ok = controller.loadGroupController("uncached")
+		re.False(ok, "snapshot reconciliation must preserve lazy group loading")
+		provider.AssertExpectations(t)
+	})
+}
+
+func TestControllerConfigWatchReloadsAfterCompaction(t *testing.T) {
+	for _, removed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("removed=%t", removed), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				ctx := t.Context()
+				provider := newWatchRecoveryProvider()
+				first := make(chan *metastorage.WatchResponse, 1)
+				provider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, matchWatchRevision(11)).Return(first, nil).Once()
+				provider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, matchWatchRevision(31)).
+					Return(make(chan *metastorage.WatchResponse), nil).Once()
+				provider.On("Get", mock.Anything, []byte(controllerConfigPath), mock.Anything).
+					Return((*meta_storagepb.GetResponse)(nil), errors.New("snapshot temporarily unavailable")).Once()
+				snapshot := &meta_storagepb.GetResponse{Header: &meta_storagepb.ResponseHeader{Revision: 30}}
+				if !removed {
+					config := DefaultConfig()
+					config.RUVersionPolicy = &RUVersionPolicy{Default: RUVersionV2}
+					value, err := json.Marshal(config)
+					re.NoError(err)
+					snapshot.Kvs = []*meta_storagepb.KeyValue{{Value: value}}
+				}
+				provider.On("Get", mock.Anything, []byte(controllerConfigPath), mock.Anything).Return(snapshot, nil).Once()
+				controller, err := NewResourceGroupController(ctx, 1, provider, nil, 42, EnableSingleGroupByKeyspace())
+				re.NoError(err)
+				controller.Start(ctx)
+				defer func() { re.NoError(controller.Stop()) }()
+				synctest.Wait()
+				// Make a stale cached version observable even when the key was deleted.
+				controller.ruVersion.Store(3)
+				first <- &metastorage.WatchResponse{CompactRevision: 20}
+				close(first)
+				synctest.Wait()
+				time.Sleep(watchRetryInterval)
+				synctest.Wait()
+				re.Equal(RUVersion(3), controller.GetRUVersion())
+				provider.AssertNumberOfCalls(t, "Watch", 1)
+				time.Sleep(watchRetryInterval)
+				synctest.Wait()
+				if removed {
+					re.Equal(DefaultRUVersion, controller.GetRUVersion())
+				} else {
+					re.Equal(RUVersionV2, controller.GetRUVersion())
+				}
+				provider.AssertExpectations(t)
+			})
+		})
+	}
+}
+
+func TestControllerStopCancelsWatches(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
+		provider := newWatchRecoveryProvider()
+		// Allow repeated config reads so this test only constrains cancellation.
+		provider.On("Get", mock.Anything, []byte(controllerConfigPath), mock.Anything).
+			Return(&meta_storagepb.GetResponse{Header: &meta_storagepb.ResponseHeader{Revision: 10}}, nil).Maybe()
+		var watchContexts []context.Context
+		provider.On("Watch", mock.Anything, mock.Anything, mock.Anything).
+			Run(func(args mock.Arguments) {
+				watchContexts = append(watchContexts, args.Get(0).(context.Context))
+			}).Return(make(chan *metastorage.WatchResponse), nil).Twice()
+		controller, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+		re.NoError(err)
+		controller.Start(ctx)
+		synctest.Wait()
+		re.Len(watchContexts, 2)
+		re.NoError(controller.Stop())
+		for _, watchCtx := range watchContexts {
+			re.ErrorIs(watchCtx.Err(), context.Canceled)
+		}
+		re.NoError(ctx.Err(), "the caller's context must remain usable after Stop")
+		provider.AssertExpectations(t)
 	})
 }

@@ -87,8 +87,11 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 	if err := s.checkServing(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(server.Context())
+	// Detect a partitioned etcd endpoint even while the gRPC client stays connected.
+	ctx, cancel := context.WithCancel(clientv3.WithRequireLeader(server.Context()))
 	defer cancel()
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
 	var options []clientv3.OpOption
 	key := string(req.GetKey())
 	var startRevision int64
