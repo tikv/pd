@@ -47,7 +47,7 @@ const (
 
 // Allocator is the allocator to generate unique ID.
 type Allocator interface {
-	// SetBase resets the allocation base to the given ID during recovery.
+	// SetBase set base id
 	SetBase(newBase uint64) error
 	// Alloc allocs a unique id.
 	Alloc(count uint32) (uint64, uint32, error)
@@ -127,16 +127,17 @@ func (alloc *allocatorImpl) Alloc(count uint32) (uint64, uint32, error) {
 	return alloc.base, count, nil
 }
 
-// SetBase resets the allocation base to newBase during recovery. The caller must
-// coordinate recovery so subsequent allocations cannot conflict with valid IDs.
+// SetBase sets the base.
 func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
+	// Ensure the newBase is valid.
 	if newBase >= alloc.effectiveEnd {
 		return errs.ErrIDExhausted.FastGenByArgs()
 	}
 	previousEnd := alloc.end
+	// set current end to new base, rebaseLocked will change it later.
 	alloc.end = newBase
 	if err := alloc.rebaseLocked(false, 0); err != nil {
 		alloc.end = previousEnd

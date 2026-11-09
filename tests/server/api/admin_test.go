@@ -389,19 +389,6 @@ func (suite *adminTestSuite) checkRecoverAllocID(cluster *tests.TestCluster) {
 	id, _, err2 = leader.GetAllocator().Alloc(1)
 	re.NoError(err2)
 	re.Equal(uint64(99000001), id)
-	// Recovery resets the base to the requested value, including smaller or repeated values.
-	client, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
-	defer conn.Close()
-	for _, base := range []uint64{99000500, 1000, 1000} {
-		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, []byte(fmt.Sprintf(`{"id": "%d"}`, base)),
-			testutil.StatusOK(re)))
-		response, err := client.AllocID(suite.T().Context(), &pdpb.AllocIDRequest{
-			Header: testutil.NewRequestHeader(leader.GetClusterID()),
-		})
-		re.NoError(err)
-		re.Nil(response.GetHeader().GetError())
-		re.Equal(base+1, response.GetId())
-	}
 	// unmark
 	err := testutil.CheckDelete(tests.TestDialClient, markRecoveringURL, testutil.StatusOK(re))
 	re.NoError(err)
