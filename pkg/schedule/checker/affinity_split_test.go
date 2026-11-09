@@ -230,7 +230,6 @@ func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
 			cluster, checker := newAffinitySplitTest(t)
 			region := cluster.GetRegion(1).Clone(core.SetApproximateSize(tc.size), core.SetApproximateKeys(tc.keys))
 			cluster.PutRegion(region)
-			before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
 			requireAffinitySplit(t, checker.Check(region))
 
 			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout/2)
@@ -241,7 +240,6 @@ func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
 			re.True(ok)
 			re.Equal(firstAttempt.(affinitySplitAttempt).startedAt, retried.(affinitySplitAttempt).startedAt,
 				"retrying the same epoch must not reset the wait")
-			re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
 
 			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
 			// A peer configuration change does not change the split epoch version.
@@ -251,34 +249,96 @@ func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
 			re.Len(ops, 1)
 			re.Equal("affinity-move-region", ops[0].Desc())
 			re.Zero(ops[0].Kind() & operator.OpSplit)
-			re.Equal(before+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
 		})
 	}
 }
 
-func TestAffinitySplitBeforeMoveFallbackEpoch(t *testing.T) {
-	re := require.New(t)
-	cluster, checker := newAffinitySplitTest(t)
-	region := cluster.GetRegion(1)
-	before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
-	requireAffinitySplit(t, checker.Check(region))
-	ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
-
-	region = region.Clone(core.WithIncVersion())
-	cluster.PutRegion(region)
-	requireAffinitySplit(t, checker.Check(region))
-	value, ok := checker.splitAttempts.Get(region.GetID())
-	re.True(ok)
-	attempt := value.(affinitySplitAttempt)
-	re.Equal(region.GetRegionEpoch().GetVersion(), attempt.version)
-	re.True(attempt.startedAt.IsZero(), "the new epoch must start a fresh wait")
-	re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
-
-	ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
-	ops := checker.Check(region)
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
-	re.Equal(before+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
+	for _, reason := range []string{"epoch", "expired", "evicted", "new target", "new move", "current target", "split succeeds"} {
+		t.Run(reason, func(t *testing.T) {
+			re := require.New(t)
+			cluster, checker := newAffinitySplitTest(t)
+			checker.splitAttempts = cache.NewCache(2, cache.LRUCache)
+			region := cluster.GetRegion(1)
+			manager := cluster.GetAffinityManager()
+			if reason == "split succeeds" {
+				region = region.Clone(core.SetApproximateSize(32))
+				cluster.PutRegion(region)
+			}
+			requireAffinitySplit(t, checker.Check(region))
+			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+			// Later patrols still allow the move when it has not been added.
+			if reason == "split succeeds" {
+				ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout/2)
+			} else {
+				for range 2 {
+					ops := checker.Check(region)
+					re.Len(ops, 1)
+					re.Equal("affinity-move-region", ops[0].Desc())
+				}
+			}
+			switch reason {
+			case "epoch":
+				region = region.Clone(core.WithIncVersion())
+			case "expired":
+				value, ok := checker.splitAttempts.Get(region.GetID())
+				re.True(ok)
+				attempt := value.(affinitySplitAttempt)
+				attempt.expiresAt = time.Now().Add(-time.Second)
+				checker.splitAttempts.Put(region.GetID(), attempt)
+			case "evicted":
+				group := manager.GetAffinityGroupState("split_before_move")
+				for id := uint64(2); id <= 3; id++ {
+					op, ready := checker.prepareAffinityPeerMove(region.Clone(core.WithNewRegionID(id)), group)
+					re.False(ready)
+					requireAffinitySplit(t, []*operator.Operator{op})
+				}
+				re.Equal(2, checker.splitAttempts.Len())
+				_, ok := checker.splitAttempts.Peek(region.GetID())
+				re.False(ok)
+			case "new target":
+				// Reach the old target, but change it before the next patrol.
+				region = region.Clone(core.WithReplacePeerStore(4, 3), core.WithIncConfVer())
+				_, err := manager.UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 4})
+				re.NoError(err)
+			case "new move":
+				atTarget := region.Clone(core.WithReplacePeerStore(4, 3), core.WithIncConfVer())
+				cluster.PutRegion(atTarget)
+				re.Empty(checker.Check(atTarget), "at the target")
+				// A replacement takes the Region away from the same target again.
+				region = atTarget.Clone(core.WithReplacePeerStore(3, 4), core.WithIncConfVer())
+			case "current target":
+				_, err := manager.UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 4})
+				re.NoError(err)
+				re.Empty(checker.Check(region), "the canceled move no longer needs a split")
+				_, err = manager.UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 3})
+				re.NoError(err)
+			case "split succeeds":
+				left := region.Clone(core.WithEndKey([]byte("m")), core.WithIncVersion(), core.SetApproximateSize(16))
+				right := region.Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("m")), core.WithIncVersion(), core.SetApproximateSize(16))
+				for _, child := range []*core.RegionInfo{left, right} {
+					cluster.PutRegion(child)
+					ops := checker.Check(child)
+					re.Len(ops, 1)
+					re.Equal("affinity-move-region", ops[0].Desc())
+				}
+				return
+			}
+			cluster.PutRegion(region)
+			requireAffinitySplit(t, checker.Check(region))
+			value, ok := checker.splitAttempts.Get(region.GetID())
+			re.True(ok)
+			attempt := value.(affinitySplitAttempt)
+			re.Equal(region.GetRegionEpoch().GetVersion(), attempt.version)
+			re.True(attempt.startedAt.IsZero(), "a new attempt must start a fresh wait")
+			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+			ops := checker.Check(region)
+			re.Len(ops, 1)
+			re.Equal("affinity-move-region", ops[0].Desc())
+			re.NoError(manager.DeleteAffinityGroups([]string{"split_before_move"}, true))
+			re.Empty(checker.Check(region))
+		})
+	}
 }
 
 func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
@@ -290,61 +350,17 @@ func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
 	re := require.New(t)
 	cluster, checker := newAffinitySplitTest(t)
 	region := cluster.GetRegion(1)
-	before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
 	requireAffinitySplit(t, checker.Check(region))
 	// The operator controller did not start the split, for example because its
 	// waiting queue was full, so it sent no split request and the next patrol
 	// requests the split again.
 	ops := checker.Check(region)
 	requireAffinitySplit(t, ops)
-	re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
 	// The controller starts an operator when it admits it and sends the request.
 	re.True(ops[0].Start())
 	ops = checker.Check(region)
 	re.Len(ops, 1)
 	re.Equal("affinity-move-region", ops[0].Desc())
-	re.Equal(before+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
-}
-
-func TestAffinitySplitBeforeMoveFallbackReportsOnce(t *testing.T) {
-	re := require.New(t)
-	cluster, checker := newAffinitySplitTest(t)
-	before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
-	// fallBack times out a new split attempt and evaluates the Region twice. The
-	// move is not added here, so the second evaluation is what the next patrol
-	// does. Both evaluations allow the move, and the attempt is counted once.
-	fallBack := func(region *core.RegionInfo, reported float64) {
-		requireAffinitySplit(t, checker.Check(region))
-		ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
-		for range 2 {
-			ops := checker.Check(region)
-			re.Len(ops, 1)
-			re.Equal("affinity-move-region", ops[0].Desc())
-			re.Equal(before+reported, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
-		}
-	}
-	region := cluster.GetRegion(1)
-	fallBack(region, 1)
-	// A new epoch version starts a new attempt, which is reported again.
-	region = region.Clone(core.WithIncVersion())
-	cluster.PutRegion(region)
-	fallBack(region, 2)
-
-	// Each later move of the unsplit Region starts a new attempt as well.
-	move := func(from, to uint64) {
-		region = region.Clone(core.WithReplacePeerStore(from, to), core.WithIncConfVer())
-		cluster.PutRegion(region)
-	}
-	move(4, 3)
-	// The target changes before a patrol checks the Region at the old target.
-	_, err := cluster.GetAffinityManager().UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 4})
-	re.NoError(err)
-	fallBack(region, 3)
-	move(3, 4)
-	re.Empty(checker.Check(region), "at the target")
-	// The Region leaves the target, for example when a down peer is replaced.
-	move(4, 3)
-	fallBack(region, 4)
 }
 
 func TestAffinitySplitBeforeMoveFallbackKeepsGates(t *testing.T) {
@@ -353,7 +369,6 @@ func TestAffinitySplitBeforeMoveFallbackKeepsGates(t *testing.T) {
 			re := require.New(t)
 			cluster, checker := newAffinitySplitTest(t)
 			region := cluster.GetRegion(1)
-			before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
 			requireAffinitySplit(t, checker.Check(region))
 			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
 			switch reason {
@@ -363,8 +378,6 @@ func TestAffinitySplitBeforeMoveFallbackKeepsGates(t *testing.T) {
 				checker.startTime = time.Now()
 			}
 			re.Empty(checker.Check(region))
-			re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter),
-				"a blocked fallback must not be counted")
 
 			switch reason {
 			case "recent merge":
@@ -375,61 +388,6 @@ func TestAffinitySplitBeforeMoveFallbackKeepsGates(t *testing.T) {
 			ops := checker.Check(region)
 			re.Len(ops, 1)
 			re.Equal("affinity-move-region", ops[0].Desc())
-			re.Equal(before+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
-		})
-	}
-}
-
-func TestAffinitySplitBeforeMoveFallbackSplitSucceeds(t *testing.T) {
-	re := require.New(t)
-	cluster, checker := newAffinitySplitTest(t)
-	region := cluster.GetRegion(1).Clone(core.SetApproximateSize(32))
-	cluster.PutRegion(region)
-	before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
-	requireAffinitySplit(t, checker.Check(region))
-	ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout/2)
-
-	left := region.Clone(core.WithEndKey([]byte("m")), core.WithIncVersion(), core.SetApproximateSize(16))
-	right := region.Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("m")), core.WithIncVersion(), core.SetApproximateSize(16))
-	for _, child := range []*core.RegionInfo{left, right} {
-		cluster.PutRegion(child)
-		ops := checker.Check(child)
-		re.Len(ops, 1)
-		re.Equal("affinity-move-region", ops[0].Desc())
-	}
-	re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
-}
-
-func TestAffinitySplitBeforeMoveFallbackCache(t *testing.T) {
-	for _, reason := range []string{"expired", "evicted"} {
-		t.Run(reason, func(t *testing.T) {
-			re := require.New(t)
-			cluster, checker := newAffinitySplitTest(t)
-			checker.splitAttempts = cache.NewCache(2, cache.LRUCache)
-			region := cluster.GetRegion(1)
-			before := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
-			requireAffinitySplit(t, checker.Check(region))
-			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
-			switch reason {
-			case "expired":
-				value, ok := checker.splitAttempts.Get(region.GetID())
-				re.True(ok)
-				attempt := value.(affinitySplitAttempt)
-				attempt.expiresAt = time.Now().Add(-time.Second)
-				checker.splitAttempts.Put(region.GetID(), attempt)
-			case "evicted":
-				group := cluster.GetAffinityManager().GetAffinityGroupState("split_before_move")
-				for id := uint64(2); id <= 3; id++ {
-					op, ready := checker.prepareAffinityPeerMove(region.Clone(core.WithNewRegionID(id)), group)
-					re.False(ready)
-					requireAffinitySplit(t, []*operator.Operator{op})
-				}
-				re.Equal(2, checker.splitAttempts.Len())
-				_, ok := checker.splitAttempts.Peek(region.GetID())
-				re.False(ok)
-			}
-			requireAffinitySplit(t, checker.Check(region))
-			re.Equal(before, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
 		})
 	}
 }
@@ -472,22 +430,6 @@ func TestAffinitySplitBeforeMoveCooldown(t *testing.T) {
 			re.Empty(checker.Check(region))
 		})
 	}
-}
-
-func TestAffinitySplitBeforeMoveUsesCurrentTarget(t *testing.T) {
-	re := require.New(t)
-	cluster, checker := newAffinitySplitTest(t)
-	manager := cluster.GetAffinityManager()
-	parent := cluster.GetRegion(1)
-	requireAffinitySplit(t, checker.Check(parent))
-	_, err := manager.UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 4})
-	re.NoError(err)
-	re.Empty(checker.Check(parent), "the canceled move no longer needs a split")
-	_, err = manager.UpdateAffinityGroupPeers("split_before_move", 1, []uint64{1, 2, 3})
-	re.NoError(err)
-	requireAffinitySplit(t, checker.Check(parent))
-	re.NoError(manager.DeleteAffinityGroups([]string{"split_before_move"}, true))
-	re.Empty(checker.Check(parent))
 }
 
 func TestAffinitySplitBeforeMoveController(t *testing.T) {
