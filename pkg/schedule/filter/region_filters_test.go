@@ -83,6 +83,7 @@ func TestRegionReplicatedFilter(t *testing.T) {
 	re.Equal(filter.Select(region), statusRegionNotReplicated)
 }
 
+// TestRegionEmptyFilter checks key-aware empty detection and the cluster initialization exception.
 func TestRegionEmptyFilter(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()

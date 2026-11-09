@@ -168,6 +168,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 				regionFilters = append(regionFilters, pendingFilter)
 			}
 			attempts := 0
+			filteredBatches := 0
 			for range retryLimit {
 				regions := selectRegions(solver.sourceStoreID(), rs)
 				if len(regions) == 0 {
@@ -222,9 +223,16 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 					solver.Step--
 					rejectedRegions = append(rejectedRegions, solver.Region.GetID())
 				}
-				// Finish an already sampled batch, but do not rescan a role that
-				// has no eligible candidates or has spent its attempt budget.
-				if !foundCandidate || attempts >= retryLimit {
+				// A filtered sample can miss eligible regions. Allow one more
+				// sample without spending the whole quota on a filtered role.
+				if !foundCandidate {
+					filteredBatches++
+					if filteredBatches == 2 {
+						break
+					}
+				}
+				// Finish an already sampled batch before enforcing the attempt budget.
+				if attempts >= retryLimit {
 					break
 				}
 			}
