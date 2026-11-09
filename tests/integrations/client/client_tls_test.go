@@ -395,67 +395,75 @@ func TestClientCertAllowedCN(t *testing.T) {
 			}
 			clus.WaitLeader()
 
-			for _, client := range []struct {
-				name    string
-				allowed bool
-			}{
-				{name: "pd-server", allowed: true},
-				{name: "client", allowed: testCase.allowClient},
-				{name: "tidb-client", allowed: testCase.allowTiDB},
-			} {
-				t.Run(client.name, func(t *testing.T) {
-					re := require.New(t)
-					clientTLSInfo := buildTLSInfo(certPath, client.name)
-					err := testAllowedCN(ctx, endpoints, clientTLSInfo)
-					if client.allowed {
-						re.NoError(err)
-					} else {
-						re.Error(err)
-					}
+			for _, phase := range []string{"initial", "restarted"} {
+				if phase == "restarted" {
+					server := clus.GetLeaderServer()
+					re.NoError(server.Stop())
+					re.NoError(server.Run())
+					clus.WaitLeader()
+				}
+				for _, client := range []struct {
+					name    string
+					allowed bool
+				}{
+					{name: "pd-server", allowed: true},
+					{name: "client", allowed: testCase.allowClient},
+					{name: "tidb-client", allowed: testCase.allowTiDB},
+				} {
+					t.Run(phase+"/"+client.name, func(t *testing.T) {
+						re := require.New(t)
+						clientTLSInfo := buildTLSInfo(certPath, client.name)
+						err := testAllowedCN(ctx, endpoints, clientTLSInfo)
+						if client.allowed {
+							re.NoError(err)
+						} else {
+							re.Error(err)
+						}
 
-					tlsConfig, err := clientTLSInfo.ClientConfig()
-					re.NoError(err)
-					transport := &http.Transport{TLSClientConfig: tlsConfig}
-					t.Cleanup(transport.CloseIdleConnections)
-					httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
-					for _, requestCase := range []struct {
-						method string
-						path   string
-						body   string
-					}{
-						{method: http.MethodGet, path: "/health"},
-						{method: http.MethodPost, path: "/v3/kv/range", body: `{"key":"Zm9v"}`},
-						{method: http.MethodPost, path: "/v3/cluster/member/list", body: `{}`},
-						{method: http.MethodPost, path: "/v3/maintenance/status", body: `{}`},
-					} {
-						request, err := http.NewRequestWithContext(ctx, requestCase.method, endpoints[0]+requestCase.path, strings.NewReader(requestCase.body))
+						tlsConfig, err := clientTLSInfo.ClientConfig()
 						re.NoError(err)
-						response, err := httpClient.Do(request)
-						if !client.allowed {
-							if response != nil {
-								re.NoError(response.Body.Close())
+						transport := &http.Transport{TLSClientConfig: tlsConfig}
+						t.Cleanup(transport.CloseIdleConnections)
+						httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
+						for _, requestCase := range []struct {
+							method string
+							path   string
+							body   string
+						}{
+							{method: http.MethodGet, path: "/health"},
+							{method: http.MethodPost, path: "/v3/kv/range", body: `{"key":"Zm9v"}`},
+							{method: http.MethodPost, path: "/v3/cluster/member/list", body: `{}`},
+							{method: http.MethodPost, path: "/v3/maintenance/status", body: `{}`},
+						} {
+							request, err := http.NewRequestWithContext(ctx, requestCase.method, endpoints[0]+requestCase.path, strings.NewReader(requestCase.body))
+							re.NoError(err)
+							response, err := httpClient.Do(request)
+							if !client.allowed {
+								if response != nil {
+									re.NoError(response.Body.Close())
+								}
+								re.Error(err, requestCase.path)
+								continue
 							}
-							re.Error(err, requestCase.path)
-							continue
-						}
-						re.NoError(err, requestCase.path)
-						body, err := io.ReadAll(response.Body)
-						re.NoError(response.Body.Close())
-						re.NoError(err)
-						if testCase.disableGateway && requestCase.path != "/health" {
-							re.Equal(http.StatusNotFound, response.StatusCode)
-							continue
-						}
-						re.Equal(http.StatusOK, response.StatusCode, "%s: %s", requestCase.path, body)
-						if requestCase.path != "/health" {
-							var result struct {
-								Header json.RawMessage `json:"header"`
+							re.NoError(err, requestCase.path)
+							body, err := io.ReadAll(response.Body)
+							re.NoError(response.Body.Close())
+							re.NoError(err)
+							if testCase.disableGateway && requestCase.path != "/health" {
+								re.Equal(http.StatusNotFound, response.StatusCode)
+								continue
 							}
-							re.NoError(json.Unmarshal(body, &result))
-							re.NotEmpty(result.Header)
+							re.Equal(http.StatusOK, response.StatusCode, "%s: %s", requestCase.path, body)
+							if requestCase.path != "/health" {
+								var result struct {
+									Header json.RawMessage `json:"header"`
+								}
+								re.NoError(json.Unmarshal(body, &result))
+								re.NotEmpty(result.Header)
+							}
 						}
-					}
-				})
+					})
+				}
 			}
 			if testCase.name == "explicit single CN" {
 				etcdClient := clus.GetEtcdClient()

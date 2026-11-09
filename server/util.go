@@ -155,7 +155,7 @@ type etcdGateway struct {
 	etcd atomic.Pointer[embed.Etcd]
 }
 
-// newEtcdGatewayHandler preserves etcd's gateway with an explicit client CN policy.
+// newEtcdGatewayHandler creates a gateway for one embedded etcd lifetime.
 // Its backend is published when etcd starts, independently of PD initialization.
 func (s *Server) newEtcdGatewayHandler(cfg *embed.Config) (*etcdGateway, error) {
 	tlsConfig, err := cfg.ClientTLSInfo.ServerConfig()
