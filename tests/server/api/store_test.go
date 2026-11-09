@@ -72,18 +72,16 @@ func (suite *storeTestSuite) TestStoresList() {
 func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 	re := suite.Require()
 
-	stores := initStores()
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
-
-	// Prevent store 6 (offline store) from being auto-tombstoned
-
-	// Enable failpoint to prevent auto-burying stores during the test
+	// Prevent the background checker from burying offline fixtures before assertions.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
 	}()
+
+	stores := initStores()
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
 
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -126,10 +124,12 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 	checkStoresInfo(re, info.Stores, stores[2:])
 
 	// down store
+	// Use a serving store so background preparation cannot change the fixture.
 	store := &metapb.Store{
 		Id:            100,
 		Address:       "mock://tikv-100:100",
 		State:         metapb.StoreState_Up,
+		NodeState:     metapb.NodeState_Serving,
 		Version:       versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 		LastHeartbeat: time.Now().UnixNano() - int64(1*time.Hour),
 	}
@@ -244,7 +244,7 @@ func (suite *storeTestSuite) checkStoreLimitRemainsAvailableDuringRollingUpgrade
 	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
 	currentDefault := leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer
 	newDefault := currentDefault + 45
-	body := []byte(fmt.Sprintf(`{"rate":%v,"type":"add-peer"}`, newDefault))
+	body := fmt.Appendf(nil, `{"rate":%v,"type":"add-peer"}`, newDefault)
 
 	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
 		entry := &discovery.ServiceRegistryEntry{
@@ -274,6 +274,12 @@ func (suite *storeTestSuite) checkStoreLimitRemainsAvailableDuringRollingUpgrade
 
 func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	// Keep the offline store and its limit until all filter assertions finish.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
+	}()
 
 	for _, store := range initStores() {
 		tests.MustPutStore(re, cluster, store)
@@ -326,6 +332,46 @@ func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
 			re.True(ok)
 		}
 	}
+}
+
+func (suite *storeTestSuite) TestSetLabelStoresLimitSkipsRemovedStore() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkSetLabelStoresLimitSkipsRemovedStore)
+}
+
+func (suite *storeTestSuite) checkSetLabelStoresLimitSkipsRemovedStore(cluster *tests.TestCluster) {
+	re := suite.Require()
+	for _, store := range initStores() {
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	leader := cluster.GetLeaderServer()
+	rc := leader.GetRaftCluster()
+	re.NoError(rc.RemoveStoreLimit(7))
+
+	// Store 7 is tombstoned with no engine label, so IsTiKV() still
+	// classifies it as TiKV -- without skipping removed stores up front,
+	// SetStoreLimit's tombstone rejection for store 7 would abort this
+	// whole request before the live TiKV stores below it get processed.
+	body, err := json.Marshal(map[string]any{
+		"rate":   60,
+		"type":   "add-peer",
+		"labels": map[string]string{"engine": "tikv"},
+	})
+	re.NoError(err)
+	err = testutil.CheckPostJSON(
+		tests.TestDialClient,
+		leader.GetAddr()+"/pd/api/v1/stores/limit",
+		body,
+		testutil.StatusOK(re),
+	)
+	re.NoError(err)
+
+	limits := rc.GetAllStoresLimit()
+	liveLimit, ok := limits[1]
+	re.True(ok)
+	re.Equal(float64(60), liveLimit.AddPeer)
+	_, ok = limits[7]
+	re.False(ok)
 }
 
 func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {

@@ -14,7 +14,11 @@
 
 package config
 
-import "github.com/tikv/pd/pkg/ratelimit"
+import (
+	"maps"
+
+	"github.com/tikv/pd/pkg/ratelimit"
+)
 
 const (
 	defaultEnableAuditMiddleware         = true
@@ -79,9 +83,7 @@ type RateLimitConfig struct {
 // Clone returns a cloned rate limit config.
 func (c *RateLimitConfig) Clone() *RateLimitConfig {
 	m := make(map[string]ratelimit.DimensionConfig, len(c.LimiterConfig))
-	for k, v := range c.LimiterConfig {
-		m[k] = v
-	}
+	maps.Copy(m, c.LimiterConfig)
 	cfg := *c
 	cfg.LimiterConfig = m
 	return &cfg
@@ -98,9 +100,7 @@ type GRPCRateLimitConfig struct {
 // Clone returns a cloned rate limit config.
 func (c *GRPCRateLimitConfig) Clone() *GRPCRateLimitConfig {
 	m := make(map[string]ratelimit.DimensionConfig, len(c.LimiterConfig))
-	for k, v := range c.LimiterConfig {
-		m[k] = v
-	}
+	maps.Copy(m, c.LimiterConfig)
 	cfg := *c
 	cfg.LimiterConfig = m
 	return &cfg

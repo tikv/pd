@@ -16,9 +16,12 @@ package schedulers
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
@@ -209,9 +212,7 @@ func (conf *evictLeaderSchedulerConfig) applyStoreIDs(ids []uint64, explicitRang
 			delete(conf.StoreIDWithRanges, id)
 			conf.cluster.ResumeLeaderTransfer(id, constant.In)
 		}
-		for id, ranges := range prevRanges {
-			conf.StoreIDWithRanges[id] = ranges
-		}
+		maps.Copy(conf.StoreIDWithRanges, prevRanges)
 	}
 
 	for _, id := range ids {
@@ -223,7 +224,7 @@ func (conf *evictLeaderSchedulerConfig) applyStoreIDs(ids []uint64, explicitRang
 			}
 			pausedIDs = append(pausedIDs, id)
 			if hasExplicitRanges {
-				conf.StoreIDWithRanges[id] = append([]keyutil.KeyRange(nil), explicitRanges...)
+				conf.StoreIDWithRanges[id] = slices.Clone(explicitRanges)
 			} else {
 				conf.StoreIDWithRanges[id] = []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 			}
@@ -234,7 +235,7 @@ func (conf *evictLeaderSchedulerConfig) applyStoreIDs(ids []uint64, explicitRang
 			continue
 		}
 		prevRanges[id] = old
-		conf.StoreIDWithRanges[id] = append([]keyutil.KeyRange(nil), explicitRanges...)
+		conf.StoreIDWithRanges[id] = slices.Clone(explicitRanges)
 	}
 	conf.Batch = batch
 
@@ -560,6 +561,44 @@ func storeIDFromFloat(f float64) (uint64, bool) {
 		return 0, false
 	}
 	return uint64(f), true
+}
+
+// multiStoreIDsArgSeparator joins several store IDs into the single
+// persisted creation arg produced by EvictLeaderMultiStoreArgs, so creating
+// evict-leader-scheduler with several stores writes one args entry instead
+// of creating with one store and adding the rest via a follow-up
+// scheduler-config update (which, in microservice mode, is watched
+// independently of scheduler creation and can race with it).
+const multiStoreIDsArgSeparator = ","
+
+// parseMultiStoreIDsArg parses a comma-joined list of store IDs, as produced
+// by EvictLeaderMultiStoreArgs. Callers only reach this after arg has
+// already failed to parse as a single store ID, so a comma-free arg (a
+// single element after Split) fails here too: it's the same string that
+// already failed once.
+func parseMultiStoreIDsArg(arg string) ([]uint64, bool) {
+	parts := strings.Split(arg, multiStoreIDsArgSeparator)
+	ids := make([]uint64, 0, len(parts))
+	for _, part := range parts {
+		id, err := strconv.ParseUint(part, 10, 64)
+		if err != nil {
+			return nil, false
+		}
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+
+// EvictLeaderMultiStoreArgs encodes several store IDs into the single
+// creation arg evict-leader-scheduler expects for a one-call, multi-store
+// creation request (see parseMultiStoreIDsArg). Callers must pass at least
+// two IDs: a single ID should instead be passed as a plain store-id arg.
+func EvictLeaderMultiStoreArgs(ids []uint64) string {
+	strs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		strs = append(strs, strconv.FormatUint(id, 10))
+	}
+	return strings.Join(strs, multiStoreIDsArgSeparator)
 }
 
 // decodeStringSlice converts a JSON-decoded value into []string. A JSON

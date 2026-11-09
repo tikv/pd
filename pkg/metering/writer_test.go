@@ -326,8 +326,7 @@ func readMeteringData(
 
 func TestMeteringDataReadWriteSingleCategory(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create writer and reader using helper function.
 	writer, reader := newLocalWriter(ctx, re, t.TempDir())
@@ -373,8 +372,7 @@ func verifyReadData(re *require.Assertions, readData []map[string]any, testData 
 
 func TestMeteringDataReadWriteMultipleCategories(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create writer and reader using helper function.
 	writer, reader := newLocalWriter(ctx, re, t.TempDir())
@@ -439,8 +437,7 @@ func TestMeteringDataReadWriteMultipleCategories(t *testing.T) {
 
 func TestMeteringDataReadWriteEmptyData(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create writer and reader using helper function.
 	writer, reader := newLocalWriter(ctx, re, t.TempDir())
@@ -466,8 +463,7 @@ func TestMeteringDataReadWriteEmptyData(t *testing.T) {
 
 func TestMeteringDataReadWriteWithRetry(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create writer and reader using helper function.
 	writer, reader := newLocalWriter(ctx, re, t.TempDir())

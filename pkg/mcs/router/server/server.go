@@ -63,7 +63,7 @@ type Server struct {
 	diagnosticspb.DiagnosticsServer
 
 	// Server state. 0 is not running, 1 is running.
-	isRunning int64
+	isRunning atomic.Int64
 
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
@@ -135,13 +135,12 @@ func (s *Server) startServerLoop() {
 	s.regionSyncer.wg.Add(2)
 	go s.regionSyncer.syncLoop()
 	go s.regionSyncer.updatePDMemberLoop()
-	s.regionSyncer.startSyncWithLeader()
 }
 
 // Close closes the server.
 func (s *Server) Close() {
 	s.stopCluster()
-	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
+	if !s.isRunning.CompareAndSwap(1, 0) {
 		// server is already closed
 		return
 	}
@@ -173,7 +172,7 @@ func (s *Server) Close() {
 
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
-	return s != nil && atomic.LoadInt64(&s.isRunning) == 0
+	return s != nil && s.isRunning.Load() == 0
 }
 
 // GetTLSConfig gets the security config.
@@ -255,7 +254,7 @@ func (s *Server) startServer() (err error) {
 		cb()
 	}
 
-	atomic.StoreInt64(&s.isRunning, 1)
+	s.isRunning.Store(1)
 	return nil
 }
 

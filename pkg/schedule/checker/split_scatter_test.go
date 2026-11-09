@@ -16,6 +16,7 @@ package checker
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -1129,12 +1130,7 @@ func splitScatterPendingGroup(t *testing.T, controller *Controller, regionID uin
 
 func splitScatterKeyspaceValidatorFor(keyspaces ...uint32) splitScatterKeyspaceValidator {
 	return func(keyspaceID uint32) bool {
-		for _, validKeyspaceID := range keyspaces {
-			if validKeyspaceID == keyspaceID {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(keyspaces, keyspaceID)
 	}
 }
 
@@ -1263,31 +1259,31 @@ func splitScatterKeyspacePrefixRange(keyspaceID uint32, rawPrefix []byte) splitS
 }
 
 func newSplitScatterIndexKey(suffix string) []byte {
-	key := append([]byte(nil), splitScatterIndexKeyPrefix()...)
+	key := slices.Clone(splitScatterIndexKeyPrefix())
 	key = append(key, suffix...)
 	return codec.EncodeBytes(key)
 }
 
 func newSplitScatterKeyspaceIndexKey(keyspaceID uint32, suffix string) []byte {
-	key := append([]byte(nil), splitScatterIndexKeyPrefix()...)
+	key := slices.Clone(splitScatterIndexKeyPrefix())
 	key = append(key, suffix...)
 	return newSplitScatterKeyspaceKey(keyspaceID, codec.TxnKeyspaceModePrefix, key)
 }
 
 func newSplitScatterRecordKey(tableID int64, suffix string) []byte {
-	key := append([]byte(nil), codec.GenerateRecordKeyPrefix(tableID)...)
+	key := slices.Clone(codec.GenerateRecordKeyPrefix(tableID))
 	key = append(key, suffix...)
 	return codec.EncodeBytes(key)
 }
 
 func newSplitScatterKeyspaceRecordKey(keyspaceID uint32, suffix string) []byte {
-	key := append([]byte(nil), codec.GenerateRecordKeyPrefix(splitScatterTestTableID)...)
+	key := slices.Clone(codec.GenerateRecordKeyPrefix(splitScatterTestTableID))
 	key = append(key, suffix...)
 	return newSplitScatterKeyspaceKey(keyspaceID, codec.TxnKeyspaceModePrefix, key)
 }
 
 func newSplitScatterRawKeyspaceRecordKey(keyspaceID uint32, tableID int64, suffix string) []byte {
-	key := append([]byte(nil), codec.GenerateRecordKeyPrefix(tableID)...)
+	key := slices.Clone(codec.GenerateRecordKeyPrefix(tableID))
 	key = append(key, suffix...)
 	return newSplitScatterKeyspaceKey(keyspaceID, codec.RawKeyspaceModePrefix, key)
 }

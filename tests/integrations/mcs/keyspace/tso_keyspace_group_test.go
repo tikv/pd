@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -673,12 +674,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	re := suite.Require()
 
-	// Test configuration constants
-	const (
-		// Time to wait for GetTS to start
-		waitForGetTSStart = 3 * time.Second
-		keyspaceGroupID   = uint32(1)
-	)
+	const keyspaceGroupID = uint32(1)
 
 	// Enable mockLoadKeyspace failpoint to return hardcoded keyspace meta for testing
 	// This bypasses the gRPC LoadKeyspace call which may fail due to timing issues
@@ -725,12 +721,25 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	}
 	resultCh := make(chan getTSResult, 1)
 
+	requestStarted := make(chan struct{})
+	notify := sync.OnceFunc(func() { close(requestStarted) })
+	const hook = "github.com/tikv/pd/client/afterDispatchTSORequest"
+	re.NoError(failpoint.EnableCall(hook, func(ctx context.Context) {
+		if ctx == getTSCtx {
+			notify()
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
 	go func() {
 		physicalTS, logicalTS, getErr := client.GetTS(getTSCtx)
 		resultCh <- getTSResult{physicalTS: physicalTS, logicalTS: logicalTS, err: getErr}
 	}()
 
-	time.Sleep(waitForGetTSStart) // Give it time to begin execution
+	select {
+	case <-requestStarted:
+	case <-time.After(10 * time.Second):
+		suite.T().Fatal("GetTS did not attempt to dispatch while the service was unavailable")
+	}
 
 	// Step 6: Restart one TSO node to recover the TSO service
 	newNode, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, firstNodeAddr)

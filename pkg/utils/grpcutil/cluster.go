@@ -19,7 +19,6 @@ import (
 	"fmt"
 
 	"go.uber.org/multierr"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -29,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 // GetRegion implements the GetRegion RPC method.
@@ -39,10 +39,10 @@ func GetRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest, isFollower
 	region := rc.GetRegionByKey(request.GetRegionKey())
 	if region == nil {
 		if isFollower {
-			log.Warn("follower get region nil", zap.String("key", string(request.GetRegionKey())))
+			log.Warn("follower get region nil", logutil.ZapRedactString("key", string(request.GetRegionKey())))
 			return &pdpb.GetRegionResponse{Header: RegionNotFound()}, nil
 		}
-		log.Warn("leader get region nil", zap.String("key", string(request.GetRegionKey())))
+		log.Warn("leader get region nil", logutil.ZapRedactString("key", string(request.GetRegionKey())))
 		return &pdpb.GetRegionResponse{Header: WrapHeader()}, nil
 	}
 

@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 // Watcher is used to watch the affinity group and label rule changes from PD.
@@ -111,6 +112,7 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	w.groupWatcher.SetReconcileDeletedKeys()
 	w.groupWatcher.StartWatchLoop()
 	return w.groupWatcher.WaitLoad()
 }
@@ -123,7 +125,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		log.Info("update affinity label rule", zap.String("key", key), zap.String("value", string(kv.Value)))
+		log.Info("update affinity label rule", zap.String("key", key), logutil.ZapRedactByteString("value", kv.Value))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			log.Warn("failed to unmarshal affinity label rule", zap.String("key", key), zap.Error(err))
@@ -150,6 +152,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	w.labelWatcher.SetReconcileDeletedKeys()
 	w.labelWatcher.StartWatchLoop()
 	return w.labelWatcher.WaitLoad()
 }

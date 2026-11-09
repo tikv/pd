@@ -15,7 +15,6 @@
 package cluster_test
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -33,8 +32,7 @@ import (
 
 func TestClusterAndPing(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()

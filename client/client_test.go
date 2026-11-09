@@ -30,6 +30,7 @@ import (
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -84,6 +85,7 @@ func TestIsRetryableGetTSError(t *testing.T) {
 
 	re.True(isRetryableGetTSError(fmt.Errorf("%s", errs.NotLeaderErr)))
 	re.True(isRetryableGetTSError(fmt.Errorf("%s", errs.MismatchCalleeIDErr)))
+	re.True(isRetryableGetTSError(perrors.WithStack(errs.ErrClientTSOStreamClosed)))
 	re.False(isRetryableGetTSError(errors.New("other error")))
 }
 

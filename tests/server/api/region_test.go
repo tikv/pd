@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -397,7 +398,7 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	r4.Adjust()
 	re.Equal(&response.RegionsInfo{Count: 0, Regions: []response.RegionInfo{}}, r4)
 
-	r = r.Clone(core.SetApproximateSize(1))
+	r = r.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
@@ -606,17 +607,24 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	regionCount := 100
 	testutil.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
-			[]byte(fmt.Sprintf("%09d", i)),
-			[]byte(fmt.Sprintf("%09d", i+1)),
+			fmt.Appendf(nil, "%09d", i),
+			fmt.Appendf(nil, "%09d", i+1),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		tests.MustPutRegionInfo(re, cluster, r)
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	doneCh := make(chan struct{}, 1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/slowRequest", "return(true)"))
+	requestStarted := make(chan struct{})
+	notifyStarted := sync.OnceFunc(func() { close(requestStarted) })
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/api/slowRequest", func(ctx context.Context) {
+		notifyStarted()
+		<-ctx.Done()
+	}))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/slowRequest")) }()
 	go func() {
 		resp, err := tests.TestDialClient.Do(req)
 		defer func() {
@@ -633,11 +641,14 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 		as.Nil(resp)
 		doneCh <- struct{}{}
 	}()
-	time.Sleep(100 * time.Millisecond) // wait for the request to be sent
+	select {
+	case <-requestStarted:
+	case <-time.After(5 * time.Second):
+		re.FailNow("request did not reach the server")
+	}
 	cancel()
 	<-doneCh
 	close(doneCh)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/slowRequest"))
 }
 
 func (suite *regionTestSuite) TestRegionKey() {
@@ -800,8 +811,7 @@ func (suite *regionTestSuite) checkRegionRangeHoles(cluster *tests.TestCluster) 
 
 func BenchmarkGetRegions(b *testing.B) {
 	re := require.New(b)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -815,8 +825,8 @@ func BenchmarkGetRegions(b *testing.B) {
 	regionCount := 1000000
 	for i := range regionCount {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
-			[]byte(fmt.Sprintf("%09d", i)),
-			[]byte(fmt.Sprintf("%09d", i+1)),
+			fmt.Appendf(nil, "%09d", i),
+			fmt.Appendf(nil, "%09d", i+1),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		tests.MustPutRegionInfo(re, cluster, r)
 	}
@@ -828,8 +838,7 @@ func BenchmarkGetRegions(b *testing.B) {
 	re.Equal(regionCount, regions.Count)
 	resp.Body.Close()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
 		re.NoError(err)
 		resp.Body.Close()

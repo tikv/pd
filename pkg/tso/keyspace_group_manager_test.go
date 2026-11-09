@@ -22,7 +22,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"reflect"
-	"sort"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -122,8 +122,7 @@ func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
 		}),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	kgm = &KeyspaceGroupManager{
 		ctx:        ctx,
 		httpClient: client,
@@ -630,9 +629,14 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, event.ksg)
 	re.NoError(err)
 
-	// Sleep for a while to wait for the events to propagate. If the logic doesn't work
-	// as expected, it will cause random failure.
-	time.Sleep(1 * time.Second)
+	resp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(event.ksg.ID))
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	testutil.Eventually(re, func() bool {
+		mgr.RLock()
+		defer mgr.RUnlock()
+		return mgr.modRevision >= uint64(resp.Kvs[0].ModRevision)
+	})
 	oldModRevision := modRevision
 	// Behavior differs between Classic and NextGen modes
 	if kerneltype.IsNextGen() {
@@ -723,9 +727,14 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, event.ksg)
 	re.NoError(err)
 
-	// Sleep for a while to wait for the events to propagate. If the restriction is not working,
-	// it will cause random failure.
-	time.Sleep(1 * time.Second)
+	resp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(event.ksg.ID))
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	testutil.Eventually(re, func() bool {
+		mgr.RLock()
+		defer mgr.RUnlock()
+		return mgr.modRevision >= uint64(resp.Kvs[0].ModRevision)
+	})
 	// Should still be able to get the allocator for keyspace 10 in keyspace group 1.
 	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
 	re.NoError(err)
@@ -854,10 +863,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 		go func(startID int) {
 			defer wg.Done()
 
-			endID := startID + step
-			if endID > numberOfKeyspaceGroupsToAdd {
-				endID = numberOfKeyspaceGroupsToAdd
-			}
+			endID := min(startID+step, numberOfKeyspaceGroupsToAdd)
 
 			for j := startID; j < endID; j++ {
 				assignToMe := false
@@ -898,9 +904,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 
 	// Verify the keyspace group assignment.
 	// Sort the keyspaces in ascending order
-	sort.Slice(expectedGroupIDs, func(i, j int) bool {
-		return expectedGroupIDs[i] < expectedGroupIDs[j]
-	})
+	slices.Sort(expectedGroupIDs)
 	assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
 	re.Equal(expectedGroupIDs, assignedGroupIDs)
 }
@@ -1041,9 +1045,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	kgm := &KeyspaceGroupManager{
-		state: state{
-			keyspaceLookupTable: make(map[uint32]uint32),
-		}}
+		keyspaceLookupTable: make(map[uint32]uint32)}
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
 	verifyLocalKeyspaceLookupTable(re, newGroup.KeyspaceLookupTable, newGroup.Keyspaces)
@@ -1897,9 +1899,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestStaleCache() {
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
 	kgm := &KeyspaceGroupManager{
-		state: state{
-			keyspaceLookupTable: make(map[uint32]uint32),
-		},
+		keyspaceLookupTable: make(map[uint32]uint32),
 	}
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)

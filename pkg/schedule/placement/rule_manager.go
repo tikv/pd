@@ -24,6 +24,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 
@@ -39,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -60,6 +62,9 @@ type RuleManager struct {
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
+	// storeLoadRestrictions caches ruleConfig.mayRestrictStoreLoad as bits for
+	// the hot scheduler's lock-free fast path.
+	storeLoadRestrictions atomic.Uint32
 
 	// used for rule validation
 	keyType          string
@@ -155,6 +160,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 		}
 	}
 	m.ruleConfig.adjust()
+	m.updateStoreLoadRestrictions()
 	ruleList, err := buildRuleList(m.ruleConfig)
 	if err != nil {
 		return err
@@ -173,24 +179,27 @@ func (m *RuleManager) loadRules() error {
 	err := m.storage.LoadRules(func(k, v string) {
 		r, err := NewRuleFromJSON([]byte(v))
 		if err != nil {
-			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
 		err = m.AdjustRule(r, "")
 		if err != nil {
-			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
+			if errs.ErrHexDecodingString.Equal(err) {
+				err = errors.New(logutil.RedactString(err.Error()))
+			}
+			log.Error("rule is in bad format", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
 			return
 		}
 		_, ok := m.ruleConfig.rules[r.Key()]
 		if ok {
-			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			log.Error("duplicated rule key", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if k != r.StoreKey() {
-			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			toSave = append(toSave, r)
 		}
@@ -325,7 +334,7 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
-	log.Info("placement rule updated", zap.String("rule", fmt.Sprint(rule)))
+	log.Info("placement rule updated", logutil.ZapRedactString("rule", fmt.Sprint(rule)))
 	return nil
 }
 
@@ -361,11 +370,102 @@ func (m *RuleManager) GetAllRules() []*Rule {
 	return rules
 }
 
+// GetIsolationPrefix returns the location labels up to the isolation level that every
+// effective rule agrees on, which names one isolation domain (see Rule.isolationPrefix). It
+// reports false when any effective rule enforces no isolation level, when a rule's isolation
+// level is not one of its location labels, when rules disagree, or when no rule applies.
+// It also reports false when any effective rule's role is not Voter or Leader: a leader may
+// only move to a store matching a Voter or Leader rule, so with Follower or Learner rules some
+// domains may hold no legal leader destination.
+//
+// It walks the per-range applyRules rather than the persisted rule set, so a rule that is
+// overridden everywhere cannot veto the result. Every range has to agree because a caller
+// acting on this drains one domain for all regions at once, so a prefix that holds for only
+// part of the key space is not enough.
+//
+// Unlike GetAllRules this neither clones nor sorts, so callers on a hot path (schedulers run
+// as often as every 10ms) do not pay a JSON round-trip per rule, and the read lock is held
+// only for a few field reads. Reading rule fields directly is safe because every mutation
+// path takes the write lock and rebuilds ruleList rather than editing rules in place.
+func (m *RuleManager) GetIsolationPrefix() ([]string, bool) {
+	m.RLock()
+	defer m.RUnlock()
+	var labels []string
+	found := false
+	for _, rr := range m.ruleList.ranges {
+		for _, r := range rr.applyRules {
+			if r.Role != Voter && r.Role != Leader {
+				return nil, false
+			}
+			prefix, ok := r.isolationPrefix()
+			if !ok {
+				return nil, false
+			}
+			if !found {
+				labels, found = prefix, true
+				continue
+			}
+			if !slices.Equal(labels, prefix) {
+				return nil, false
+			}
+		}
+	}
+	if !found {
+		return nil, false
+	}
+	// Copy: labels aliases a live rule's LocationLabels.
+	return slices.Clone(labels), true
+}
+
+// GetLeaderRuleConstraints returns the label constraints of every distinct effective Voter or
+// Leader rule. operator.Builder only lets a store hold a leader if it matches one of them. It
+// does not report which key ranges each rule covers. Like GetIsolationPrefix it walks the
+// per-range rules once without cloning, so the returned slices alias live rules and must not
+// be modified.
+func (m *RuleManager) GetLeaderRuleConstraints() [][]LabelConstraint {
+	m.RLock()
+	defer m.RUnlock()
+	// Ranges share *Rule pointers, so a few distinct rules repeat across many entries.
+	var seen []*Rule
+	var constraints [][]LabelConstraint
+	for _, rr := range m.ruleList.ranges {
+		for _, r := range rr.applyRules {
+			if (r.Role != Voter && r.Role != Leader) || slices.Contains(seen, r) {
+				continue
+			}
+			seen = append(seen, r)
+			constraints = append(constraints, r.LabelConstraints)
+		}
+	}
+	return constraints
+}
+
 // GetRulesCount returns the number of rules.
 func (m *RuleManager) GetRulesCount() int {
 	m.RLock()
 	defer m.RUnlock()
 	return len(m.ruleConfig.rules)
+}
+
+// MayRestrictStoreLoad returns whether placement rules may restrict the load
+// statistics population for the given store engine.
+func (m *RuleManager) MayRestrictStoreLoad(isTiKV bool) bool {
+	restrictions := m.storeLoadRestrictions.Load()
+	if isTiKV {
+		return restrictions&1 != 0
+	}
+	return restrictions&2 != 0
+}
+
+func (m *RuleManager) updateStoreLoadRestrictions() {
+	var restrictions uint32
+	if m.ruleConfig.mayRestrictStoreLoad[0] {
+		restrictions |= 1
+	}
+	if m.ruleConfig.mayRestrictStoreLoad[1] {
+		restrictions |= 2
+	}
+	m.storeLoadRestrictions.Store(restrictions)
 }
 
 // GetGroupsCount returns the number of rule groups.
@@ -477,19 +577,24 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) (fit
 	fit.regionStores = regionStores
 	fit.rules = rules
 	if isCached {
-		m.SetRegionFitCache(region, fit)
+		m.SetRegionFitCache(storeSet, region, fit)
 	}
 	return fit
 }
 
 // SetRegionFitCache sets RegionFitCache
-func (m *RuleManager) SetRegionFitCache(region *core.RegionInfo, fit *RegionFit) {
-	m.cache.SetCache(region, fit)
+func (m *RuleManager) SetRegionFitCache(storeSet StoreSet, region *core.RegionInfo, fit *RegionFit) {
+	m.cache.SetCache(storeSet, region, fit)
 }
 
 // InvalidCache invalids the cache.
 func (m *RuleManager) InvalidCache(regionID uint64) {
 	m.cache.Invalid(regionID)
+}
+
+// RemoveStoreCache removes the store cache with a given store ID.
+func (m *RuleManager) RemoveStoreCache(storeID uint64) {
+	m.cache.RemoveStoreCache(storeID)
 }
 
 // SetPlaceholderRegionFitCache sets a placeholder region fit cache information
@@ -534,6 +639,7 @@ func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 
 	// update in-memory state
 	patch.commit()
+	m.updateStoreLoadRestrictions()
 	m.ruleList = ruleList
 	return nil
 }
@@ -585,7 +691,7 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 		return err
 	}
 
-	log.Info("placement rules updated", zap.String("rules", fmt.Sprint(rules)))
+	log.Info("placement rules updated", logutil.ZapRedactString("rules", fmt.Sprint(rules)))
 	return nil
 }
 
@@ -648,7 +754,7 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 		return err
 	}
 
-	log.Info("placement rules updated", zap.String("batch", fmt.Sprint(todo)))
+	log.Info("placement rules updated", logutil.ZapRedactString("batch", fmt.Sprint(todo)))
 	return nil
 }
 
@@ -786,7 +892,7 @@ func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) er
 	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
-	log.Info("full config reset", zap.String("config", fmt.Sprint(groups)))
+	log.Info("full config reset", logutil.ZapRedactString("config", fmt.Sprint(groups)))
 	return nil
 }
 
@@ -817,7 +923,7 @@ func (m *RuleManager) SetGroupBundle(group GroupBundle) error {
 	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
-	log.Info("group is reset", zap.String("group", fmt.Sprint(group)))
+	log.Info("group is reset", logutil.ZapRedactString("group", fmt.Sprint(group)))
 	return nil
 }
 

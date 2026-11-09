@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,7 +119,7 @@ func (c *TransferCounter) prepare() {
 	for storeID := range set {
 		c.indexArray = append(c.indexArray, storeID)
 	}
-	sort.Slice(c.indexArray, func(i, j int) bool { return c.indexArray[i] < c.indexArray[j] })
+	slices.Sort(c.indexArray)
 
 	for index, storeID := range c.indexArray {
 		c.unIndexMap[storeID] = index

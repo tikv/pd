@@ -18,6 +18,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
@@ -32,6 +33,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Pooled timers cannot cross synctest bubble boundaries.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -86,6 +89,16 @@ func (suite *operatorBuilderTestSuite) TestNewBuilder() {
 	region = region.Clone(core.WithLeader(nil))
 	builder = NewBuilder("test", suite.cluster, region)
 	re.Error(builder.err)
+}
+
+func (suite *operatorBuilderTestSuite) TestLabelMatchCaseInsensitive() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(11, 0, map[string]string{"zone": "Z1", "host": "H1"})
+	suite.cluster.AddLabelsStore(12, 0, map[string]string{"zone": "Z1", "host": "H2"})
+	builder := suite.newBuilder()
+	re.Equal(2, builder.labelMatch(1, 11))
+	re.Equal(1, builder.labelMatch(1, 12))
+	re.Equal(0, builder.labelMatch(8, 11))
 }
 
 func (suite *operatorBuilderTestSuite) newBuilder() *Builder {

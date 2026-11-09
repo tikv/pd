@@ -17,8 +17,8 @@ package api
 import (
 	"context"
 	"io"
+	"net/http"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -33,51 +33,52 @@ import (
 func TestGetVersion(t *testing.T) {
 	re := require.New(t)
 
-	fname := filepath.Join(os.TempDir(), "stdout")
-	old := os.Stdout
-	temp, err := os.Create(fname)
+	temp, err := os.CreateTemp(t.TempDir(), "stdout")
 	re.NoError(err)
+	fname := temp.Name()
+	old := os.Stdout
+	t.Cleanup(func() {
+		os.Stdout = old
+		re.NoError(temp.Close())
+	})
 	os.Stdout = temp
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/memberNil", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/memberNil"))
-	}()
-
-	reqCh := make(chan struct{})
-	go func() {
-		<-reqCh
-		time.Sleep(200 * time.Millisecond)
-		leader := cluster.GetLeaderServer()
-		if leader == nil {
+	var requestErr error
+	var responseCode int
+	var requested bool
+	addr := cluster.GetServer("pd1").GetAddr() + api.APIPrefix + "/api/v1/version"
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/memberNil", func() {
+		requested = true
+		requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, addr, http.NoBody)
+		if err != nil {
+			requestErr = err
 			return
 		}
-		addr := leader.GetAddr() + api.APIPrefix + "/api/v1/version"
-		resp, err := tests.TestDialClient.Get(addr)
+		resp, err := tests.TestDialClient.Do(req)
 		if err != nil {
+			requestErr = err
 			return
 		}
 		defer resp.Body.Close()
-		_, _ = io.ReadAll(resp.Body)
-	}()
-
-	reqCh <- struct{}{}
+		responseCode = resp.StatusCode
+		_, requestErr = io.ReadAll(resp.Body)
+	}))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/server/memberNil")) }()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
+	re.True(requested, "the request must run before member initialization")
+	re.NoError(requestErr)
+	re.Equal(http.StatusOK, responseCode)
 
 	out, err := os.ReadFile(fname)
 	re.NoError(err)
 	re.NotContains(string(out), "PANIC")
-
-	// clean up
-	temp.Close()
-	os.Stdout = old
-	os.RemoveAll(fname)
 }

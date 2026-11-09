@@ -75,7 +75,6 @@ function download_embed_asset {
 
   echo '+ Unpack embedded asset from archive'
   unzip -o "${CACHE_FILE}"
-  gofmt -s -w ${ASSET_FILE_NAME}
   mv "${ASSET_FILE_NAME}" "${ASSET_DEST_PATH}"
   echo "  - Unpacked ${ASSET_DEST_PATH}"
 }
@@ -159,3 +158,5 @@ if [ "${DASHBOARD-}" == "COMPILE" ]; then
 else
   download_embed_asset
 fi
+
+gofmt -s -w -r 'interface{} -> any' "${ASSET_DEST_PATH}"

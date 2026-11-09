@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,6 +53,10 @@ const (
 	tsoSvcDiscoveryFormat = "/ms/%d/tso/%05d/primary"
 	// initRetryInterval is the rpc retry interval during the initialization phase.
 	initRetryInterval = time.Second
+	// checkMemberMaxRetryInterval and checkMemberMaxRetryTimes bound the retries of
+	// CheckMemberChanged, which callers use after a primary change is detected.
+	checkMemberMaxRetryInterval = 500 * time.Millisecond
+	checkMemberMaxRetryTimes    = 10
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
@@ -250,10 +255,10 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 			log.Info("[tso] exit check member loop")
 			return
 		}
-		// Make sure queryRetryMaxTimes * queryRetryInterval is far less than memberUpdateInterval,
+		// Make sure MaxRetryTimes * initRetryInterval is far less than memberUpdateInterval,
 		// so that we can speed up the process of tso service discovery when failover happens on the
 		// tso service side and also ensures it won't call updateMember too frequently during normal time.
-		if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+		if err := c.updateMemberWithBackoff(c.getPrimaryURL(), initRetryInterval, c.option.MaxRetryTimes); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -347,14 +352,51 @@ func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 // CheckMemberChanged Immediately check if there is any membership change among the primary/secondaries in
 // a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) CheckMemberChanged() error {
+	// Read the primary before any query so that a switch made by others meanwhile is noticed.
+	oldPrimaryURL := c.getPrimaryURL()
 	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
-	if err := retry.WithConfig(c.ctx, c.updateMember); err != nil {
+	if err := c.updateMemberWithBackoff(oldPrimaryURL, checkMemberMaxRetryInterval, checkMemberMaxRetryTimes); err != nil {
 		log.Error("[tso] failed to update member", errs.ZapError(err))
 		return err
 	}
 	return nil
+}
+
+// updateMemberWithBackoff calls updateMember until it succeeds or the primary is no longer
+// oldPrimaryURL, at most maxRetryTimes times however long each call takes. The interval
+// starts from UpdateMemberBackOffBaseTime and doubles up to maxInterval: during a planned
+// primary transfer, the old primary rejects requests before the new primary is elected, so
+// the first query often misses the new primary, which becomes ready tens of milliseconds later.
+//
+// For example, with a maxInterval of 500ms, the waits between attempts are 20ms, 40ms,
+// 80ms, 160ms, 320ms and then 500ms each, so the retries start about 20ms, 60ms, 140ms,
+// 300ms and 620ms after the first attempt, plus the time each attempt takes.
+func (c *tsoServiceDiscovery) updateMemberWithBackoff(
+	oldPrimaryURL string, maxInterval time.Duration, maxRetryTimes int,
+) error {
+	return execWithBackoff(c.ctx, maxInterval, maxRetryTimes, func() error {
+		err := c.updateMember()
+		// Another caller, such as the background check loop, may find the new primary while
+		// the servers queried here still miss it, so stop once the primary has switched.
+		if err != nil && !strings.EqualFold(c.getPrimaryURL(), oldPrimaryURL) {
+			return nil
+		}
+		return err
+	})
+}
+
+// execWithBackoff calls fn until it succeeds, at most maxRetryTimes times. It bounds the
+// calls instead of the total backoff, which does not count the time each call takes.
+func execWithBackoff(ctx context.Context, maxInterval time.Duration, maxRetryTimes int, fn func() error) error {
+	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, maxInterval, 0)
+	attempts := 0
+	bo.SetRetryableChecker(func(error) bool { return attempts < maxRetryTimes }, true)
+	return bo.Exec(ctx, func() error {
+		attempts++
+		return fn()
+	})
 }
 
 // ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
@@ -788,7 +830,7 @@ func EqualWithoutOrder[T comparable](a, b []T) bool {
 		return false
 	}
 	for _, item := range a {
-		if !Contains(b, item) {
+		if !slices.Contains(b, item) {
 			return false
 		}
 	}
@@ -796,11 +838,8 @@ func EqualWithoutOrder[T comparable](a, b []T) bool {
 }
 
 // Contains returns true if the given slice contains the value.
+//
+// Deprecated: Use slices.Contains instead.
 func Contains[T comparable](slice []T, value T) bool {
-	for _, v := range slice {
-		if v == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, value)
 }

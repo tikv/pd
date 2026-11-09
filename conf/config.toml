@@ -37,7 +37,7 @@
 ##   - false: disable redact log.
 ##   - true: enable redact log, which will replace the sensitive information with "?".
 ##   - "MARKER": enable redact log, which will use single guillemets ‹› to enclose the sensitive information.
-# redact-info-log = false
+# redact-info-log = true
 
 [security.encryption]
 ## Encryption method to use for PD data. One of "plaintext", "aes128-ctr", "aes192-ctr" and "aes256-ctr".
@@ -110,6 +110,12 @@
 # metric-storage = ""
 ## There are some values supported: "auto", "none", or a specific address, default: "auto".
 # dashboard-address = "auto"
+## Concurrent metadata scans per GC keyspace index load attempt (range: 1-16).
+## Online changes apply to the next full-load attempt, including retries.
+# gc-keyspace-index-load-concurrency = 4
+## Concurrent GC state reads per initial cache warmup campaign (range: 1-16).
+## Online changes apply to the next campaign, normally on the next leadership term.
+# gc-state-cache-warmup-concurrency = 4
 
 [schedule]
 ## Controls the size limit of Region Merge.

@@ -17,6 +17,7 @@ package schedulers
 import (
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,7 +56,7 @@ type grantHotRegionSchedulerConfig struct {
 func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) {
 	conf.Lock()
 	defer conf.Unlock()
-	if !slice.Contains(peers, leaderID) {
+	if !slices.Contains(peers, leaderID) {
 		peers = append(peers, leaderID)
 	}
 	conf.StoreLeaderID = leaderID
@@ -181,7 +182,7 @@ func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 	storeIDs := make([]uint64, 0)
-	for _, v := range strings.Split(ids, ",") {
+	for v := range strings.SplitSeq(ids, ",") {
 		id, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
 			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
@@ -288,18 +289,30 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID), errs.ZapError(errs.ErrGetSourceStore))
 		return nil, errs.ErrStoreNotFound
 	}
-	filters := []filter.Filter{
-		filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
-	}
+	filters := make([]filter.Filter, 0, 4)
 
 	storeIDs := s.conf.getStoreIDs()
 	destStoreIDs := make([]uint64, 0, len(storeIDs))
 	var candidate []uint64
 	if isLeader {
+		targetStoreID := s.conf.getStoreLeaderID()
+		// A pure leader transfer requires an existing peer. Reject normal
+		// scheduling misses before the leader safeguard logs a warning.
+		if srcRegion.GetStorePeer(targetStoreID) == nil {
+			return nil, errs.ErrCheckerNotFound
+		}
+		leaderStore := cluster.GetStore(srcRegion.GetLeader().GetStoreId())
+		if leaderStore == nil {
+			return nil, errs.ErrStoreNotFound
+		}
+		if leaderFilter := filter.NewPlacementLeaderSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, leaderStore, false); leaderFilter != nil {
+			filters = append(filters, leaderFilter)
+		}
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.High})
-		candidate = []uint64{s.conf.getStoreLeaderID()}
+		candidate = []uint64{targetStoreID}
 	} else {
-		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.High},
+		filters = append(filters, filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
+			&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.High},
 			filter.NewHotRegionEvictedTargetFilter(s.GetName()),
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
 		candidate = storeIDs

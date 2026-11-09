@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -191,6 +192,8 @@ const (
 	// EmptyRegionApproximateSize is the region approximate size of an empty region
 	// (heartbeat size <= 1MB).
 	EmptyRegionApproximateSize = 1
+	// EmptyRegionApproximateKeys is the approximate key count of an empty region.
+	EmptyRegionApproximateKeys = 0
 	// ImpossibleFlowSize is an impossible flow size (such as written_bytes, read_keys, etc.)
 	// It may be caused by overflow, refer to https://github.com/tikv/pd/issues/3379.
 	// They need to be filtered so as not to affect downstream.
@@ -202,6 +205,11 @@ const (
 	// InitClusterRegionThreshold is a threshold which represent a new cluster.
 	InitClusterRegionThreshold = 100
 )
+
+// IsEmptyRegion returns whether a region has no meaningful data according to its approximate size and keys.
+func IsEmptyRegion(size, keys int64) bool {
+	return size <= EmptyRegionApproximateSize && keys == EmptyRegionApproximateKeys
+}
 
 // RegionHeartbeatResponse is the interface for region heartbeat response.
 type RegionHeartbeatResponse interface {
@@ -296,7 +304,7 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 	// To distinguish between "truly empty region" and "uninitialized statistics", TiKV uses:
 	// - size=0, keys=0: Uninitialized (need to inherit from previous values)
 	// - size=1, keys=0: Truly empty region
-	// - size>1, keys>0: Region has data
+	// - size=1, keys>0 or size>1: Region has data
 	// Ref: https://github.com/tikv/tikv/pull/19181
 	if r.GetApproximateSize() == 0 {
 		if origin != nil {
@@ -670,9 +678,7 @@ func (r *RegionInfo) CompareAndSetReportBuckets(buckets *metapb.Buckets) bool {
 			return true
 		}
 	}
-	failpoint.Inject("concurrentBucketHeartbeat", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("concurrentBucketHeartbeat")
 	return atomic.CompareAndSwapPointer(&r.reportBuckets, unsafe.Pointer(old), unsafe.Pointer(buckets))
 }
 
@@ -953,6 +959,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				// We check it first and do not return because the log is important for us to investigate,
 				saveCache, needSync = true, true
 			}
+			// Remember elections even when the leader and rounded flow are unchanged.
+			if region.GetTerm() > origin.GetTerm() {
+				saveCache = true
+			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true
 				return
@@ -1022,10 +1032,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 // RWLockStats is a read-write lock with statistics.
 type RWLockStats struct {
 	syncutil.RWMutex
-	totalWaitTime     int64
-	lockCount         int64
-	lastLockCount     int64
-	lastTotalWaitTime int64
+	totalWaitTime     atomic.Int64
+	lockCount         atomic.Int64
+	lastLockCount     atomic.Int64
+	lastTotalWaitTime atomic.Int64
 }
 
 // Lock locks the lock and records the waiting time.
@@ -1033,8 +1043,8 @@ func (l *RWLockStats) Lock() {
 	startTime := time.Now()
 	l.RWMutex.Lock()
 	elapsed := time.Since(startTime).Nanoseconds()
-	atomic.AddInt64(&l.totalWaitTime, elapsed)
-	atomic.AddInt64(&l.lockCount, 1)
+	l.totalWaitTime.Add(elapsed)
+	l.lockCount.Add(1)
 }
 
 // Unlock unlocks the lock.
@@ -1047,8 +1057,8 @@ func (l *RWLockStats) RLock() {
 	startTime := time.Now()
 	l.RWMutex.RLock()
 	elapsed := time.Since(startTime).Nanoseconds()
-	atomic.AddInt64(&l.totalWaitTime, elapsed)
-	atomic.AddInt64(&l.lockCount, 1)
+	l.totalWaitTime.Add(elapsed)
+	l.lockCount.Add(1)
 }
 
 // RUnlock unlocks the lock for reading.
@@ -1379,7 +1389,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 				}
 			}
 			if idx >= 0 {
-				ol = append(ol[:idx], ol[idx+1:]...)
+				ol = slices.Delete(ol, idx, idx+1)
 			}
 			r.tree.remove(origin)
 			// Update the RegionInfo in the regionItem.
@@ -2279,23 +2289,23 @@ const defaultPollInterval = 15 * time.Second
 
 // CollectWaitLockMetrics collects the metrics of waiting time for lock
 func (r *RegionsInfo) CollectWaitLockMetrics() {
-	regionsLockTotalWaitTime := atomic.LoadInt64(&r.t.totalWaitTime)
-	regionsLockCount := atomic.LoadInt64(&r.t.lockCount)
+	regionsLockTotalWaitTime := r.t.totalWaitTime.Load()
+	regionsLockCount := r.t.lockCount.Load()
 
-	lastRegionsLockTotalWaitTime := atomic.LoadInt64(&r.t.lastTotalWaitTime)
-	lastsRegionsLockCount := atomic.LoadInt64(&r.t.lastLockCount)
+	lastRegionsLockTotalWaitTime := r.t.lastTotalWaitTime.Load()
+	lastsRegionsLockCount := r.t.lastLockCount.Load()
 
-	subRegionsLockTotalWaitTime := atomic.LoadInt64(&r.st.totalWaitTime)
-	subRegionsLockCount := atomic.LoadInt64(&r.st.lockCount)
+	subRegionsLockTotalWaitTime := r.st.totalWaitTime.Load()
+	subRegionsLockCount := r.st.lockCount.Load()
 
-	lastSubRegionsLockTotalWaitTime := atomic.LoadInt64(&r.st.lastTotalWaitTime)
-	lastSubRegionsLockCount := atomic.LoadInt64(&r.st.lastLockCount)
+	lastSubRegionsLockTotalWaitTime := r.st.lastTotalWaitTime.Load()
+	lastSubRegionsLockCount := r.st.lastLockCount.Load()
 
 	// update last metrics
-	atomic.StoreInt64(&r.t.lastTotalWaitTime, regionsLockTotalWaitTime)
-	atomic.StoreInt64(&r.t.lastLockCount, regionsLockCount)
-	atomic.StoreInt64(&r.st.lastTotalWaitTime, subRegionsLockTotalWaitTime)
-	atomic.StoreInt64(&r.st.lastLockCount, subRegionsLockCount)
+	r.t.lastTotalWaitTime.Store(regionsLockTotalWaitTime)
+	r.t.lastLockCount.Store(regionsLockCount)
+	r.st.lastTotalWaitTime.Store(subRegionsLockTotalWaitTime)
+	r.st.lastLockCount.Store(subRegionsLockCount)
 
 	// skip invalid situation like initial status
 	if lastRegionsLockTotalWaitTime == 0 || lastsRegionsLockCount == 0 || lastSubRegionsLockTotalWaitTime == 0 || lastSubRegionsLockCount == 0 ||

@@ -66,11 +66,7 @@ func (s *SlidingWindows) Feedback(e float64) {
 	// There are two constants to control the proportion of the sum and the current error.
 	// The sum of the error is used to ensure the capacity is more stable even if the error is zero.
 	// In the final scene, the sum of the error should be stable and the current error should be zero.
-	cap := defaultProportion*e + defaultIntegral*s.lastSum
-	// The capacity should be at least the default window size.
-	if cap < defaultWindowSize {
-		cap = defaultWindowSize
-	}
+	cap := max(defaultProportion*e+defaultIntegral*s.lastSum, defaultWindowSize)
 	s.set(cap, SendSnapshot)
 }
 

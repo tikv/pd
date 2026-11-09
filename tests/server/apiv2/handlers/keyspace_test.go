@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"strconv"
 	"testing"
@@ -342,9 +343,7 @@ func mustMakeTestKeyspacesByIDs(re *require.Assertions, server *tests.TestServer
 // checkUpdateRequest verifies a keyspace meta matches a update request.
 func checkUpdateRequest(re *require.Assertions, request *handlers.UpdateConfigParams, oldConfig, newConfig map[string]string) {
 	expected := map[string]string{}
-	for k, v := range oldConfig {
-		expected[k] = v
-	}
+	maps.Copy(expected, oldConfig)
 	for k, v := range request.Config {
 		if v == nil {
 			delete(expected, k)

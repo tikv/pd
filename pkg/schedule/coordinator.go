@@ -16,6 +16,7 @@ package schedule
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -282,6 +283,12 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	if err != nil {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
+	// Schedulers that are not run are only registered as handlers, so they
+	// must remove themselves the same way.
+	removeSchedulerCb := c.schedulers.RemoveScheduler
+	if !needRun {
+		removeSchedulerCb = c.schedulers.RemoveSchedulerHandler
+	}
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
@@ -311,7 +318,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			continue
 		}
 		s, err := schedulers.CreateScheduler(types.ConvertOldStrToType[cfg.Type], c.opController,
-			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
+			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), removeSchedulerCb)
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
@@ -351,7 +358,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 
 		tp := types.ConvertOldStrToType[schedulerCfg.Type]
 		s, err := schedulers.CreateScheduler(tp, c.opController,
-			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), c.schedulers.RemoveScheduler)
+			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), removeSchedulerCb)
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type),
 				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
@@ -383,7 +390,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	validSchedulers := append(sc.SchedulerConfigs(nil), scheduleCfg.Schedulers...)
+	validSchedulers := slices.Clone(scheduleCfg.Schedulers)
 	c.cluster.GetSchedulerConfig().SetSchedulers(validSchedulers)
 	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
@@ -536,7 +543,15 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)
+		// HotPeerCache.gc() only removes a tombstoned store from status.AsLeader/
+		// AsPeer's source data on its own TTL-throttled schedule, not every tick,
+		// so a known-tombstoned store here can still have stale hot-peer data.
+		// Treat it as not hot regardless, so the delete branches below run
+		// instead of republishing hotSpotStatusGauge every tick until
+		// HotPeerCache.gc() eventually catches up.
+		removed := s.IsRemoved()
 		stat, hasHotLeader := status.AsLeader[storeID]
+		hasHotLeader = hasHotLeader && !removed
 		if hasHotLeader {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalKeysRate)
@@ -552,6 +567,7 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		}
 
 		stat, hasHotPeer := status.AsPeer[storeID]
+		hasHotPeer = hasHotPeer && !removed
 		if hasHotPeer {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalKeysRate)
@@ -579,7 +595,7 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		// iteration's own s was still live: once a snapshot correctly shows
 		// IsRemoved(), a tombstoned store sitting in GetStores() for up to 30
 		// days doesn't cost a scan on every tick.
-		if !s.IsRemoved() {
+		if !removed {
 			if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
 				DeleteStoreMetrics(storeLabel)
 			}

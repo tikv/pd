@@ -153,16 +153,16 @@ func TestRegionsInfoMarshal(t *testing.T) {
 
 func BenchmarkHexRegionKey(b *testing.B) {
 	key := []byte("region_number_infinity")
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		_ = core.HexRegionKey(key)
 	}
 }
 
 func BenchmarkHexRegionKeyStr(b *testing.B) {
 	key := []byte("region_number_infinity")
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		_ = core.HexRegionKeyStr(key)
 	}
 }

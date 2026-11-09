@@ -158,9 +158,7 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 	var wg sync.WaitGroup
 	// mock 11000 goroutines as tso proxy client
 	for range 11000 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			dipatchReqDoneCh := make(chan struct{})
 			for range 20 {
 				req := &mockRequest{
@@ -183,7 +181,7 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 					// If the request takes too long, we assume there is a goroutine leak
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

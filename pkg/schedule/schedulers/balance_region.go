@@ -271,6 +271,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
+		op.SetStoreHealthCheck(true)
 		return op
 	}
 

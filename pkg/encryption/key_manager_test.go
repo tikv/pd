@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -328,14 +329,19 @@ func TestLoadKeyEmpty(t *testing.T) {
 func TestWatcher(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
+	watchStarted := make(chan struct{})
+	notifyWatchStarted := sync.OnceFunc(func() { close(watchStarted) })
+	helper.tick = func(ticker *time.Ticker) <-chan time.Time {
+		notifyWatchStarted()
+		return ticker.C
+	}
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		reloadEvent <- struct{}{}
@@ -365,8 +371,11 @@ func TestWatcher(t *testing.T) {
 			},
 		},
 	}
-	// wait watch to start
-	time.Sleep(time.Second)
+	select {
+	case <-watchStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("encryption key watcher did not start")
+	}
 	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	<-reloadEvent
@@ -430,8 +439,7 @@ func TestSetLeadershipWithEncryptionOff(t *testing.T) {
 func TestSetLeadershipWithEncryptionEnabling(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -483,8 +491,7 @@ func TestSetLeadershipWithEncryptionEnabling(t *testing.T) {
 func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -559,8 +566,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -630,8 +636,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -705,8 +710,7 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	keyFile2 := newTestKeyFile(t, re, testMasterKey2)
@@ -850,8 +854,7 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -906,8 +909,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 func TestKeyRotation(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -1002,8 +1004,7 @@ func TestKeyRotation(t *testing.T) {
 func TestKeyRotationConflict(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)

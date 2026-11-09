@@ -17,6 +17,7 @@ package alloc
 import (
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -27,8 +28,53 @@ import (
 
 var (
 	testAddrMutex sync.Mutex
-	testAddrMap   = make(map[string]struct{})
+	testAddrMap   = make(map[string]int) // addr -> insertSeq
+	testAddrSeq   int
 )
+
+// maxTestAddrMapLen caps how many concurrently-allocated addresses the shared
+// allocator retains before it re-issues an address.
+//
+// Each address's listener is closed before the address is published, and
+// nothing on the consumer side releases it, so entries here outlive the child
+// process that asked for them. A long, retry-heavy pd-ut run would otherwise
+// keep a slot for every allocation it has ever handed out, until the
+// allocator exhausts its 50 retries and calls log.Fatal. Recycling the
+// oldest addresses once the live set grows past this bound stops the port
+// namespace being drained for the remainder of the run. The bound is chosen
+// so that a steady-state run with at most that many test services in flight
+// allocates exclusively fresh addresses — only a pathological run that
+// actually exceeds the bound ever sees recycling.
+// The bound exceeds the maximum concurrent in-flight allocations a pd-ut run
+// can hold: an explicit --parallel is clamped to this bound (values above it
+// are capped so they can never drive the live set past the limit), each test
+// case runs to completion before the next one, and a 2-minute child timeout
+// bounds any single allocation. Eviction therefore only triggers on a
+// pathological run, where the stalest addresses — those most likely already
+// bound — are re-issued; at realistic concurrency all retained entries are
+// still unbound.
+const maxTestAddrMapLen = 4096
+
+// reclaimTestAddrs frees the oldest addresses until at most limit remain.
+// The caller must hold testAddrMutex.
+func reclaimTestAddrs(limit int) {
+	if len(testAddrMap) <= limit {
+		return
+	}
+	// Oldest first: seq was assigned monotonically at insertion time.
+	type order struct {
+		enc  string // formatted seq, for sorting
+		addr string
+	}
+	evict := make([]order, 0, len(testAddrMap)-limit)
+	for addr, seq := range testAddrMap {
+		evict = append(evict, order{fmt.Sprintf("%010d", seq), addr})
+	}
+	sort.Slice(evict, func(i, j int) bool { return evict[i].enc < evict[j].enc })
+	for i := 0; len(testAddrMap) > limit && i < len(evict); i++ {
+		delete(testAddrMap, evict[i].addr)
+	}
+}
 
 // Alloc allocates a local URL for testing.
 func Alloc() string {
@@ -61,6 +107,12 @@ func tryAllocTestURL() string {
 	if !environmentCheck(addr) {
 		return ""
 	}
-	testAddrMap[addr] = struct{}{}
+	// The shared allocator outlives individual child processes, so re-issue
+	// the oldest addresses once the live set grows past the bound; otherwise
+	// a long, retry-heavy run drains the ephemeral port namespace and the
+	// 50-attempt retry loop below log.Fatal's.
+	reclaimTestAddrs(maxTestAddrMapLen)
+	testAddrSeq++
+	testAddrMap[addr] = testAddrSeq
 	return addr
 }

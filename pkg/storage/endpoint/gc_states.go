@@ -284,8 +284,15 @@ func (p GCStateProvider) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 // loadGCSafePointForUnifiedGC loads the GC safe point of the unified GC.
 func (p GCStateProvider) loadGCSafePointForUnifiedGC() (uint64, error) {
 	value, err := p.storage.Load(keypath.GCSafePointPath(constant.NullKeyspaceID))
-	if err != nil || value == "" {
+	if err != nil {
 		return 0, err
+	}
+	return decodeUnifiedGCSafePoint(value)
+}
+
+func decodeUnifiedGCSafePoint(value string) (uint64, error) {
+	if value == "" {
+		return 0, nil
 	}
 	gcSafePoint, err := strconv.ParseUint(value, 16, 64)
 	if err != nil {
@@ -310,13 +317,17 @@ func (p GCStateProvider) loadGCSafePointForKeyspaceLevelGC(keyspaceID uint32) (u
 	if err != nil {
 		return 0, err
 	}
+	return decodeKeyspaceGCSafePoint(value)
+}
+
+func decodeKeyspaceGCSafePoint(value string) (uint64, error) {
 	// GC safe point has not been set for the given keyspace
 	if value == "" {
 		return 0, nil
 	}
 
 	gcSafePoint := &keyspaceGCSafePoint{}
-	if err = json.Unmarshal([]byte(value), gcSafePoint); err != nil {
+	if err := json.Unmarshal([]byte(value), gcSafePoint); err != nil {
 		return 0, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return gcSafePoint.SafePoint, nil
@@ -326,8 +337,15 @@ func (p GCStateProvider) loadGCSafePointForKeyspaceLevelGC(keyspaceID uint32) (u
 func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	key := keypath.TxnSafePointPath(keyspaceID)
 	value, err := p.storage.Load(key)
-	if err != nil || value == "" {
+	if err != nil {
 		return 0, err
+	}
+	return decodeTxnSafePoint(value)
+}
+
+func decodeTxnSafePoint(value string) (uint64, error) {
+	if value == "" {
+		return 0, nil
 	}
 	txnSafePoint, err := strconv.ParseUint(value, 10, 64)
 	if err != nil {
@@ -471,6 +489,16 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 			Key:    revisionKey,
 			OpType: kv.RawTxnOpPut,
 			Value:  nextRevision,
+		})
+	} else {
+		// etcd treats a Compare-only transaction as serializable and may check
+		// the revision on a stale follower. A non-serializable Get makes etcd
+		// linearize the whole transaction before evaluating the comparison,
+		// including when it takes the empty Else branch. It does not write or
+		// advance the revision; its response is counted along with the ops below.
+		ops = append(ops, kv.RawTxnOp{
+			Key:    revisionKey,
+			OpType: kv.RawTxnOpGet,
 		})
 	}
 

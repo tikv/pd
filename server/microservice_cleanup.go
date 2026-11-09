@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -43,11 +44,7 @@ const (
 
 var errMicroserviceMetadataCleanupRejected = errors.New("microservice metadata cleanup rejected")
 
-type microserviceMetadataCleanupTerm struct {
-	leaderKey   string
-	leaderValue string
-	leaseID     clientv3.LeaseID
-}
+type microserviceMetadataCleanupTerm = election.LeadershipTerm
 
 func rejectMicroserviceMetadataCleanup(format string, args ...any) error {
 	return errors.Wrapf(errMicroserviceMetadataCleanupRejected, format, args...)
@@ -112,20 +109,7 @@ func (s *Server) captureMicroserviceMetadataCleanupTerm() (microserviceMetadataC
 	if s.member == nil {
 		return microserviceMetadataCleanupTerm{}, false
 	}
-	leadership := s.member.GetLeadership()
-	if leadership == nil {
-		return microserviceMetadataCleanupTerm{}, false
-	}
-	lease := leadership.GetLease()
-	if lease == nil {
-		return microserviceMetadataCleanupTerm{}, false
-	}
-	term := microserviceMetadataCleanupTerm{
-		leaderKey:   leadership.GetLeaderKey(),
-		leaderValue: leadership.GetLeaderValue(),
-		leaseID:     lease.GetID(),
-	}
-	return term, term.leaderKey != "" && term.leaderValue != "" && term.leaseID != 0
+	return s.member.GetLeadership().CaptureTerm()
 }
 
 func (s *Server) cleanupMicroserviceMetadataInPDMode(
@@ -197,12 +181,12 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(
 	}
 
 	failpoint.InjectCall("beforeMicroserviceMetadataCleanupCommit")
+	conditions := append(
+		term.Comparisons(),
+		clientv3.Compare(clientv3.ModRevision(groupKey), "=", groupKV.ModRevision),
+	)
 	txnResp, err := kv.NewSlowLogTxnWithContext(ctx, s.client).
-		If(
-			clientv3.Compare(clientv3.Value(term.leaderKey), "=", term.leaderValue),
-			clientv3.Compare(clientv3.LeaseValue(term.leaderKey), "=", term.leaseID),
-			clientv3.Compare(clientv3.ModRevision(groupKey), "=", groupKV.ModRevision),
-		).
+		If(conditions...).
 		Then(clientv3.OpPut(groupKey, string(value))).
 		Commit()
 	if err != nil {

@@ -17,8 +17,10 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"math/rand/v2"
 	"net/http"
@@ -90,6 +92,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 
@@ -135,7 +138,7 @@ type Server struct {
 	diagnosticspb.DiagnosticsServer
 
 	// Server state. 0 is not running, 1 is running.
-	isRunning int64
+	isRunning atomic.Int64
 
 	// Server start timestamp
 	startTimestamp int64
@@ -469,9 +472,7 @@ func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
 			}
 		}
 	}
-	failpoint.Inject("memberNil", func() {
-		time.Sleep(1500 * time.Millisecond)
-	})
+	failpoint.InjectCall("memberNil")
 	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
 	return nil
 }
@@ -541,7 +542,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.storage, s.cfg.Keyspace.GetMetaServiceGroups())
+	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(
+		s.storage,
+		s.cfg.Keyspace.GetMetaServiceGroups(),
+		func() (*tls.Config, error) {
+			return s.cfg.Security.ToClientTLSConfig()
+		},
+	)
 	s.keyspaceManager = keyspace.NewKeyspaceManager(
 		s.ctx,
 		s.storage,
@@ -563,6 +570,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
+	s.gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
+	if kerneltype.IsNextGen() {
+		s.gcStateManager.SetEtcdClient(s.client)
+	}
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
@@ -588,7 +599,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	failpoint.InjectCall("delayStartServer")
 	// Server has started.
-	atomic.StoreInt64(&s.isRunning, 1)
+	s.isRunning.Store(1)
 	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 	return nil
 }
@@ -600,7 +611,7 @@ func (s *Server) AddCloseCallback(callbacks ...func()) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
+	if !s.isRunning.CompareAndSwap(1, 0) {
 		// server is already closed
 		return
 	}
@@ -622,7 +633,6 @@ func (s *Server) Close() {
 	if s.meteringWriter != nil {
 		s.meteringWriter.Stop()
 	}
-
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
@@ -676,7 +686,7 @@ func (s *Server) Close() {
 
 // IsClosed checks whether server is closed or not.
 func (s *Server) IsClosed() bool {
-	return atomic.LoadInt64(&s.isRunning) == 0
+	return s.isRunning.Load() == 0
 }
 
 // Run runs the pd server.
@@ -1481,9 +1491,7 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
 	cfg := s.GetServiceMiddlewareConfig()
 	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
-	for label, item := range cfg.RateLimitConfig.LimiterConfig {
-		rateLimitCfg[label] = item
-	}
+	maps.Copy(rateLimitCfg, cfg.RateLimitConfig.LimiterConfig)
 	rateLimitCfg[label] = value
 	return s.UpdateRateLimit(&cfg.RateLimitConfig, key, &rateLimitCfg)
 }
@@ -1530,9 +1538,7 @@ func (s *Server) SetRateLimitConfig(cfg config.RateLimitConfig) error {
 func (s *Server) UpdateGRPCRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
 	cfg := s.GetServiceMiddlewareConfig()
 	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
-	for label, item := range cfg.GRPCRateLimitConfig.LimiterConfig {
-		rateLimitCfg[label] = item
-	}
+	maps.Copy(rateLimitCfg, cfg.GRPCRateLimitConfig.LimiterConfig)
 	rateLimitCfg[label] = value
 	return s.UpdateGRPCRateLimit(&cfg.GRPCRateLimitConfig, key, &rateLimitCfg)
 }
@@ -1926,7 +1932,7 @@ func memberFailpointEnabled(val failpoint.Value, memberID uint64) bool {
 	if !ok {
 		return false
 	}
-	for _, memberIDString := range strings.Split(memberString, ",") {
+	for memberIDString := range strings.SplitSeq(memberString, ",") {
 		id, err := strconv.ParseUint(strings.TrimSpace(memberIDString), 10, 64)
 		if err == nil && id == memberID {
 			return true
@@ -2414,6 +2420,12 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
 			return v.(string), true
 		}
+		// The watcher may have missed the PUT of a new TSO primary (e.g. an etcd watch gap),
+		// so reload from etcd instead of waiting for a watch event that may never come.
+		// ForceLoad is rate-limited, so retrying it on every miss is cheap.
+		if serviceName == mcs.TSOServiceName && s.tsoPrimaryWatcher != nil {
+			s.tsoPrimaryWatcher.ForceLoad()
+		}
 		select {
 		case <-s.ctx.Done():
 			return "", false
@@ -2429,6 +2441,12 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 // Note: This function is only used for test.
 func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 	s.servicePrimaryMap.Store(serviceName, addr)
+}
+
+// DeleteServicePrimaryAddr deletes the primary address directly.
+// Note: This function is only used for test.
+func (s *Server) DeleteServicePrimaryAddr(serviceName string) {
+	s.servicePrimaryMap.Delete(serviceName)
 }
 
 func (s *Server) initTSOPrimaryWatcher() {

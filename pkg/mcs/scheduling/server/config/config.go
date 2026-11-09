@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -136,7 +137,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	c.adjustLog(configMetaData.Child("log"))
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 
@@ -294,7 +295,10 @@ func (o *PersistConfig) SetSchedulers(schedulers sc.SchedulerConfigs) {
 	defer o.scheduleMu.Unlock()
 
 	next := o.GetScheduleConfig().Clone()
-	next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+	next.Schedulers = slices.Clone(schedulers)
+	if len(next.Schedulers) == 0 {
+		next.Schedulers = nil
+	}
 	o.installScheduleConfig(next)
 }
 

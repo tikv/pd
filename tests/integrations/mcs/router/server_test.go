@@ -330,3 +330,47 @@ func (suite *serverTestSuite) TestBasicSync() {
 	}
 	re.NotEmpty(grpcMetrics)
 }
+
+func (suite *serverTestSuite) TestSyncAfterFirstPDMemberStops() {
+	re := suite.Require()
+	// The router probes the PD members in member list order to find the leader.
+	// Make the first member the leader, so that after it stops, the router can
+	// reach the new leader only if the probe of the stopped member ends.
+	members, err := suite.routerServer.GetClient().MemberList(suite.ctx)
+	re.NoError(err)
+	first := members.Members[0]
+	firstServer := suite.cluster.GetServer(first.Name)
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	if leaderName != first.Name {
+		leader := suite.cluster.GetServer(leaderName)
+		testutil.Eventually(re, func() bool {
+			return leader.MoveEtcdLeader(leader.GetServerID(), first.ID) == nil
+		})
+		re.Equal(first.Name, suite.cluster.WaitLeaderChange(leaderName))
+	}
+	region := firstServer.GetRegionInfoByID(1)
+	checkRegionSync := func() {
+		region = region.Clone(core.WithIncVersion())
+		re.NoError(suite.cluster.HandleRegionHeartbeat(region))
+		testutil.Eventually(re, func() bool {
+			synced := suite.routerServer.GetBasicCluster().GetRegion(region.GetID())
+			return synced != nil && synced.GetRegionEpoch().GetVersion() == region.GetRegionEpoch().GetVersion()
+		})
+	}
+	checkRegionSync()
+	// The router etcd client starts with suite.backendEndpoints as its only
+	// endpoint. Stopping that member before the client learns the others would
+	// fail the member list instead of the probe under test.
+	testutil.Eventually(re, func() bool {
+		return len(suite.routerServer.GetClient().Endpoints()) > 1
+	})
+
+	re.NoError(firstServer.Stop())
+	// The other tests in the suite share this cluster.
+	defer func() { re.NoError(firstServer.Run()) }()
+	re.NotEmpty(suite.cluster.WaitLeaderChange(first.Name))
+	// Only the PD leader serves region sync, so the change reaches the router
+	// only after its scan gets past the stopped member to the new leader.
+	checkRegionSync()
+}

@@ -15,9 +15,12 @@
 package schedulers
 
 import (
+	"container/heap"
 	"math"
+	stdslices "slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -33,6 +36,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -51,6 +55,19 @@ type balanceSolver struct {
 	resourceTy       resourceType
 
 	cur *solution
+	// curFit is the placement-rule fit for the current region.
+	curFit *placement.RegionFit
+	// regionCache reuses region snapshots and placement fits within one solve.
+	regionCache map[uint64]hotRegionSnapshot
+	// curScope and revertScope contain placement-scoped load statistics. A nil
+	// scope uses the existing engine-wide statistics.
+	curScope                          *placementLoadScope
+	revertScope                       *placementLoadScope
+	placementScopeCache               map[placementScopeKey]*placementLoadScope
+	placementPopulationIndex          *placementPopulationIndex
+	placementPopulationIndexValidated bool
+	placementV2Enabled                bool
+	placementCanRestrict              [2]bool
 
 	best *solution
 	ops  []*operator.Operator
@@ -73,6 +90,38 @@ type balanceSolver struct {
 	rank
 }
 
+type placementScopeKey struct {
+	ruleScope string
+	isTiKV    bool
+}
+
+type revertLocationKey struct {
+	region        *core.RegionInfo
+	sourceStoreID uint64
+}
+
+type hotRegionSnapshot struct {
+	region *core.RegionInfo
+	fit    *placement.RegionFit
+}
+
+type placementLoadScope struct {
+	expect     statistics.StoreLoad
+	stddev     statistics.StoreLoad
+	population []uint64
+}
+
+type placementPopulationIndex struct {
+	stores    map[uint64]uint
+	wordCount int
+}
+
+type placementLoadState struct {
+	enabled         bool
+	canRestrict     [2]bool
+	populationIndex *placementPopulationIndex
+}
+
 func (bs *balanceSolver) init() {
 	// Load the configuration items of the scheduler.
 	bs.resourceTy = toResourceType(bs.rwTy, bs.opTy)
@@ -80,7 +129,8 @@ func (bs *balanceSolver) init() {
 	bs.minHotDegree = bs.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.getGreatDecRatio(), bs.sche.conf.getMinorDecRatio()
-	switch bs.sche.conf.getRankFormulaVersion() {
+	rankFormulaVersion := bs.sche.conf.getRankFormulaVersion()
+	switch rankFormulaVersion {
 	case "v1":
 		bs.rank = initRankV1(bs)
 	default:
@@ -103,8 +153,6 @@ func (bs *balanceSolver) init() {
 		bs.maxSrc = statistics.MaxLoad(bs.maxSrc, detail.LoadPred.Min())
 		bs.minDst = statistics.MinLoad(bs.minDst, detail.LoadPred.Max())
 		maxCur = statistics.MaxLoad(maxCur, &detail.LoadPred.Current)
-		bs.nthHotPeer[detail.GetID()] = make([]*statistics.HotPeerStat, utils.DimLen)
-		bs.filteredHotPeers[detail.GetID()] = bs.filterHotPeers(detail)
 	}
 
 	rankStepRatios := []float64{
@@ -121,6 +169,10 @@ func (bs *balanceSolver) init() {
 		Loads:        stepLoads,
 		HotPeerCount: maxCur.HotPeerCount * bs.sche.conf.getCountRankStepRatio(),
 	}
+	state := getPlacementLoadState(bs.SchedulerCluster, rankFormulaVersion)
+	bs.placementV2Enabled = state.enabled
+	bs.placementCanRestrict = state.canRestrict
+	bs.placementPopulationIndex = state.populationIndex
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
@@ -169,6 +221,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
+	defer func() { bs.regionCache = nil }()
 	tryUpdateBestSolution := func() {
 		if label, ok := bs.filterUniformStore(); ok {
 			bs.skipCounter(label).Inc()
@@ -203,9 +256,40 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
-		for _, mainPeerStat := range bs.filteredHotPeers[srcStoreID] {
-			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
+		// The reverse target is fixed while scanning this source store.
+		var revertLocationCache map[revertLocationKey]bool
+		if bs.opTy == movePeer && !bs.GetSchedulerConfig().IsPlacementRulesEnabled() && len(bs.GetSchedulerConfig().GetLocationLabels()) > 0 {
+			revertLocationCache = make(map[revertLocationKey]bool)
+		}
+		usePlacementScope := bs.beginSourcePlacement(srcStore.IsTiKV())
+		sourceResultRecorded := !usePlacementScope
+		var globalSourceFailure, sourceFailure string
+		if usePlacementScope {
+			globalSourceFailure = bs.sourceStoreFailure(srcStore, nil)
+			sourceFailure = globalSourceFailure
+		}
+		checkedRegion := false
+		for _, mainPeerStat := range bs.getFilteredHotPeers(srcStoreID) {
+			region, fit := bs.getRegion(mainPeerStat, srcStoreID)
+			if region == nil {
 				continue
+			}
+			bs.cur.region, bs.curFit = region, fit
+			if usePlacementScope {
+				checkedRegion = true
+				bs.curScope = nil
+				bs.curScope = bs.prepareForRegion(bs.cur.region, bs.curFit, srcStore)
+				sourceFailure = globalSourceFailure
+				if bs.curScope != nil {
+					sourceFailure = bs.sourceStoreFailure(srcStore, bs.curScope)
+				}
+				if sourceFailure != "" {
+					continue
+				}
+			}
+			if !sourceResultRecorded {
+				bs.recordSourceStoreResult("src-store-succ", srcStoreID)
+				sourceResultRecorded = true
 			}
 			if bs.opTy == movePeer && !snapshotFilter.Select(bs.cur.region).IsOK() {
 				hotSchedulerSnapshotSenderLimitCounter.Inc()
@@ -232,12 +316,29 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				bs.calcProgressiveRank()
 				tryUpdateBestSolution()
 				if bs.needSearchRevertRegions() {
+					if bs.regionCache == nil {
+						bs.regionCache = map[uint64]hotRegionSnapshot{
+							bs.cur.region.GetID(): {region: bs.cur.region, fit: bs.curFit},
+						}
+					}
 					hotSchedulerSearchRevertRegionsCounter.Inc()
 					dstStoreID := dstStore.GetID()
-					for _, revertPeerStat := range bs.filteredHotPeers[dstStoreID] {
-						revertRegion := bs.getRegion(revertPeerStat, dstStoreID)
+					for _, revertPeerStat := range bs.getFilteredHotPeers(dstStoreID) {
+						revertRegion, revertFit := bs.getRegion(revertPeerStat, dstStoreID)
+						useRevertPlacementScope := bs.mayUsePlacementScope(dstStore.IsTiKV())
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
-							!allowRevertRegion(revertRegion, srcStoreID) {
+							!allowRevertRegion(revertRegion, srcStoreID) ||
+							!bs.isRevertRegionValid(revertRegion, revertFit, revertLocationCache) {
+							continue
+						}
+						if useRevertPlacementScope {
+							bs.revertScope = nil
+							bs.revertScope = bs.prepareForRegion(revertRegion, revertFit, dstStore)
+						}
+						if bs.placementV2Enabled &&
+							!samePlacementLoadPopulation(bs.curScope, srcStore.IsTiKV(), bs.revertScope, dstStore.IsTiKV()) &&
+							(bs.sourceStoreFailure(dstStore, bs.revertScope) != "" ||
+								bs.destinationStoreFailure(srcStore, bs.revertScope, bs.dstToleranceRatio(srcStore)) != "") {
 							continue
 						}
 						bs.cur.revertPeerStat = revertPeerStat
@@ -247,8 +348,17 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 					}
 					bs.cur.revertPeerStat = nil
 					bs.cur.revertRegion = nil
+					if bs.placementV2Enabled {
+						bs.revertScope = nil
+					}
 				}
 			}
+		}
+		if !sourceResultRecorded {
+			if !checkedRegion {
+				sourceFailure = globalSourceFailure
+			}
+			bs.recordSourceStoreResult(sourceFailureOrSuccess(sourceFailure), srcStoreID)
 		}
 	}
 
@@ -331,7 +441,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	// revert peers
 	if bs.best.revertPeerStat != nil && len(bs.ops) > 1 {
 		infl := bs.collectPendingInfluence(bs.best.revertPeerStat)
-		if !bs.sche.tryAddPendingInfluence(bs.ops[1], srcStoreIDs, dstStoreID, infl, maxZombieDur) {
+		if !bs.sche.tryAddPendingInfluence(bs.ops[1], []uint64{dstStoreID}, bs.best.srcStore.GetID(), infl, maxZombieDur) {
 			return false
 		}
 	}
@@ -374,9 +484,40 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 	}
 }
 
-// filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
-// its expectation * ratio, the store would be selected as hot source store
+// filterSrcStores selects stores with hot peers that support the resource type.
+// The global load safeguards are deferred only when placement may narrow the
+// store population for the engine.
 func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetail {
+	if !bs.placementV2Enabled {
+		return bs.filterSrcStoresDefault()
+	}
+	ret := make(map[uint64]*statistics.StoreLoadDetail)
+	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
+	for id, detail := range bs.stLoadDetail {
+		if !detail.IsTiKV() {
+			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
+				continue
+			}
+			if bs.rwTy != utils.Write || bs.opTy != movePeer {
+				continue
+			}
+		}
+		if len(detail.HotPeers) == 0 {
+			continue
+		}
+		if !bs.mayUsePlacementScope(detail.IsTiKV()) {
+			failure := bs.sourceStoreFailure(detail, nil)
+			bs.recordSourceStoreResult(sourceFailureOrSuccess(failure), id)
+			if failure != "" {
+				continue
+			}
+		}
+		ret[id] = detail
+	}
+	return ret
+}
+
+func (bs *balanceSolver) filterSrcStoresDefault() map[uint64]*statistics.StoreLoadDetail {
 	ret := make(map[uint64]*statistics.StoreLoadDetail)
 	confSrcToleranceRatio := bs.sche.conf.getSrcToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
@@ -410,6 +551,39 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	return ret
 }
 
+func (bs *balanceSolver) sourceStoreFailure(detail *statistics.StoreLoadDetail, scope *placementLoadScope) string {
+	srcToleranceRatio := bs.sche.conf.getSrcToleranceRatio()
+	if !detail.IsTiKV() {
+		srcToleranceRatio += tiflashToleranceRatioCorrection
+	}
+	expect := bs.expectLoad(detail, scope)
+	if !bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), expect, srcToleranceRatio) {
+		return "src-store-failed"
+	}
+	if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, expect, srcToleranceRatio) {
+		return "src-store-history-loads-failed"
+	}
+	return ""
+}
+
+func sourceFailureOrSuccess(failure string) string {
+	if failure == "" {
+		return "src-store-succ"
+	}
+	return failure
+}
+
+func (*balanceSolver) expectLoad(detail *statistics.StoreLoadDetail, scope *placementLoadScope) *statistics.StoreLoad {
+	if scope != nil {
+		return &scope.expect
+	}
+	return &detail.LoadPred.Expect
+}
+
+func (bs *balanceSolver) recordSourceStoreResult(result string, storeID uint64) {
+	hotSchedulerResultCounter.WithLabelValues(result+"-"+bs.resourceTy.String(), strconv.FormatUint(storeID, 10)).Inc()
+}
+
 func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
 	return bs.checkByPriorityAndTolerance(minLoad.Loads, func(i int) bool {
 		return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
@@ -431,7 +605,7 @@ func (bs *balanceSolver) checkSrcHistoryLoadsByPriorityAndTolerance(current, exp
 // The returned hotPeer count in controlled by `max-peer-number`.
 func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) []*statistics.HotPeerStat {
 	hotPeers := storeLoad.HotPeers
-	ret := make([]*statistics.HotPeerStat, 0, len(hotPeers))
+	var ret []*statistics.HotPeerStat
 	appendItem := func(item *statistics.HotPeerStat) {
 		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree, bs.rwTy) {
 			// no in pending operator and no need cool down after transfer leader
@@ -441,19 +615,18 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 
 	var firstSort, secondSort []*statistics.HotPeerStat
 	if len(hotPeers) >= topnPosition || len(hotPeers) > bs.maxPeerNum {
-		firstSort = make([]*statistics.HotPeerStat, len(hotPeers))
-		copy(firstSort, hotPeers)
-		sort.Slice(firstSort, func(i, j int) bool {
-			return firstSort[i].GetLoad(bs.firstPriority) > firstSort[j].GetLoad(bs.firstPriority)
-		})
-		secondSort = make([]*statistics.HotPeerStat, len(hotPeers))
-		copy(secondSort, hotPeers)
-		sort.Slice(secondSort, func(i, j int) bool {
-			return secondSort[i].GetLoad(bs.secondPriority) > secondSort[j].GetLoad(bs.secondPriority)
-		})
+		limit := topnPosition
+		if len(hotPeers) > bs.maxPeerNum {
+			limit = max(limit, bs.maxPeerNum)
+		}
+		firstSort = selectHotPeers(hotPeers, bs.firstPriority, limit)
+		secondSort = selectHotPeers(hotPeers, bs.secondPriority, limit)
 	}
 	if len(hotPeers) >= topnPosition {
 		storeID := storeLoad.GetID()
+		if bs.nthHotPeer[storeID] == nil {
+			bs.nthHotPeer[storeID] = make([]*statistics.HotPeerStat, utils.DimLen)
+		}
 		bs.nthHotPeer[storeID][bs.firstPriority] = firstSort[topnPosition-1]
 		bs.nthHotPeer[storeID][bs.secondPriority] = secondSort[topnPosition-1]
 	}
@@ -466,10 +639,82 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 		return ret
 	}
 
+	ret = make([]*statistics.HotPeerStat, 0, len(hotPeers))
 	for _, peer := range hotPeers {
 		appendItem(peer)
 	}
 	return ret
+}
+
+func (bs *balanceSolver) getFilteredHotPeers(storeID uint64) []*statistics.HotPeerStat {
+	if peers, ok := bs.filteredHotPeers[storeID]; ok {
+		return peers
+	}
+	detail := bs.stLoadDetail[storeID]
+	if detail == nil {
+		return nil
+	}
+	peers := bs.filterHotPeers(detail)
+	bs.filteredHotPeers[storeID] = peers
+	return peers
+}
+
+func (bs *balanceSolver) getNthHotPeer(storeID uint64, dim int) *statistics.HotPeerStat {
+	bs.getFilteredHotPeers(storeID)
+	if peers := bs.nthHotPeer[storeID]; peers != nil {
+		return peers[dim]
+	}
+	return nil
+}
+
+// selectHotPeers sorts only the hottest limit peers, leaving the load snapshot intact.
+func selectHotPeers(peers []*statistics.HotPeerStat, dim, limit int) []*statistics.HotPeerStat {
+	limit = min(limit, len(peers))
+	if limit <= 0 {
+		return nil
+	}
+	h := &hotPeerHeap{dim: dim, peers: make([]*statistics.HotPeerStat, limit)}
+	copy(h.peers, peers[:limit])
+	heap.Init(h)
+	for _, peer := range peers[limit:] {
+		if h.lessPeer(h.peers[0], peer) {
+			h.peers[0] = peer
+			heap.Fix(h, 0)
+		}
+	}
+	sort.Slice(h.peers, func(i, j int) bool { return h.Less(j, i) })
+	return h.peers
+}
+
+type hotPeerHeap struct {
+	dim   int
+	peers []*statistics.HotPeerStat
+}
+
+func (h *hotPeerHeap) Len() int { return len(h.peers) }
+
+func (h *hotPeerHeap) lessPeer(a, b *statistics.HotPeerStat) bool {
+	left, right := a.GetLoad(h.dim), b.GetLoad(h.dim)
+	if left == right {
+		return a.RegionID > b.RegionID
+	}
+	return left < right
+}
+
+func (h *hotPeerHeap) Less(i, j int) bool { return h.lessPeer(h.peers[i], h.peers[j]) }
+
+func (h *hotPeerHeap) Swap(i, j int) { h.peers[i], h.peers[j] = h.peers[j], h.peers[i] }
+
+// Push adds a peer to the heap.
+func (h *hotPeerHeap) Push(v any) { h.peers = append(h.peers, v.(*statistics.HotPeerStat)) }
+
+// Pop removes the last peer from the heap.
+func (h *hotPeerHeap) Pop() any {
+	last := len(h.peers) - 1
+	peer := h.peers[last]
+	h.peers[last] = nil
+	h.peers = h.peers[:last]
+	return peer
 }
 
 func sortHotPeers[T any](firstSort, secondSort []*T, maxPeerNum int) map[*T]struct{} {
@@ -499,31 +744,50 @@ func sortHotPeers[T any](firstSort, secondSort []*T, maxPeerNum int) map[*T]stru
 	return union
 }
 
-// isRegionAvailable checks whether the given region is not available to schedule.
-func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
+// isRegionAvailable checks whether the given region is available to schedule
+// and returns its placement fit when placement rules are enabled.
+func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) (*placement.RegionFit, bool) {
 	if region == nil {
 		hotSchedulerNoRegionCounter.Inc()
-		return false
+		return nil, false
 	}
 
 	if !filter.IsRegionHealthyAllowPending(region) {
 		hotSchedulerUnhealthyReplicaCounter.Inc()
-		return false
+		return nil, false
 	}
 
-	if !filter.IsRegionReplicated(bs.SchedulerCluster, region) {
+	var fit *placement.RegionFit
+	replicated := false
+	if bs.GetSchedulerConfig().IsPlacementRulesEnabled() {
+		fit = bs.GetRuleManager().FitRegion(bs.GetBasicCluster(), region)
+		replicated = fit.IsSatisfied()
+	} else {
+		replicated = filter.IsRegionReplicated(bs.SchedulerCluster, region)
+	}
+	if !replicated {
 		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
 		hotSchedulerAbnormalReplicaCounter.Inc()
-		return false
+		return nil, false
 	}
 
-	return true
+	return fit, true
 }
 
-func (bs *balanceSolver) getRegion(peerStat *statistics.HotPeerStat, storeID uint64) *core.RegionInfo {
-	region := bs.GetRegion(peerStat.ID())
-	if !bs.isRegionAvailable(region) {
-		return nil
+func (bs *balanceSolver) getRegion(peerStat *statistics.HotPeerStat, storeID uint64) (*core.RegionInfo, *placement.RegionFit) {
+	snapshot, ok := bs.regionCache[peerStat.ID()]
+	if !ok {
+		region := bs.GetRegion(peerStat.ID())
+		if fit, available := bs.isRegionAvailable(region); available {
+			snapshot = hotRegionSnapshot{region: region, fit: fit}
+		}
+		if bs.regionCache != nil {
+			bs.regionCache[peerStat.ID()] = snapshot
+		}
+	}
+	region, fit := snapshot.region, snapshot.fit
+	if region == nil {
+		return nil, nil
 	}
 
 	switch bs.opTy {
@@ -533,20 +797,20 @@ func (bs *balanceSolver) getRegion(peerStat *statistics.HotPeerStat, storeID uin
 			log.Debug("region does not have a peer on source store, maybe stat out of date",
 				zap.Uint64("region-id", peerStat.ID()),
 				zap.Uint64("leader-store-id", storeID))
-			return nil
+			return nil, nil
 		}
 	case transferLeader:
 		if region.GetLeader().GetStoreId() != storeID {
 			log.Debug("region leader is not on source store, maybe stat out of date",
 				zap.Uint64("region-id", peerStat.ID()),
 				zap.Uint64("leader-store-id", storeID))
-			return nil
+			return nil, nil
 		}
 	default:
-		return nil
+		return nil, nil
 	}
 
-	return region
+	return region, fit
 }
 
 // filterDstStores select the candidate store by filters
@@ -566,7 +830,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			filter.NewHotRegionEvictedTargetFilter(bs.sche.GetName()),
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, nil),
+			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, bs.curFit),
 		}
 		for _, detail := range bs.stLoadDetail {
 			candidates = append(candidates, detail)
@@ -586,7 +850,13 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 				&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High},
 				filter.NewHotRegionEvictedTargetFilter(bs.sche.GetName()),
 			}
-			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
+			if !bs.GetSchedulerConfig().IsPlacementRulesEnabled() && len(bs.GetSchedulerConfig().GetLocationLabels()) > 0 {
+				// Moving the leader to a new store also replaces a peer, so
+				// preserve its location isolation when placement rules are disabled.
+				moveLeaderFilters = append(moveLeaderFilters, filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(),
+					bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, bs.curFit))
+			}
+			if leaderFilter := filter.NewPlacementLeaderSafeguardWithFit(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, bs.curFit, true /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
 			for storeID, detail := range bs.stLoadDetail {
@@ -606,7 +876,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 				}
 			}
 		} else {
-			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, false /*allowMoveLeader*/); leaderFilter != nil {
+			if leaderFilter := filter.NewPlacementLeaderSafeguardWithFit(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, bs.curFit, false /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
 			for _, peer := range bs.cur.region.GetFollowers() {
@@ -622,7 +892,64 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	return bs.pickDstStores(filters, candidates)
 }
 
+func (bs *balanceSolver) isRevertRegionValid(region *core.RegionInfo, fit *placement.RegionFit, locationCache map[revertLocationKey]bool) bool {
+	if bs.GetSchedulerConfig().IsPlacementRulesEnabled() {
+		locationCache = nil
+	} else if len(bs.GetSchedulerConfig().GetLocationLabels()) == 0 {
+		return true
+	}
+	source, target := bs.cur.dstStore.StoreInfo, bs.cur.srcStore.StoreInfo
+	key := revertLocationKey{region: region, sourceStoreID: source.GetID()}
+	if valid, ok := locationCache[key]; ok {
+		return valid
+	}
+	var safeguard filter.Filter
+	switch bs.opTy {
+	case movePeer:
+		safeguard = filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(),
+			bs.GetRuleManager(), region, source, fit)
+	case transferLeader:
+		safeguard = filter.NewPlacementLeaderSafeguardWithFit(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(),
+			bs.GetRuleManager(), region, source, fit, bs.rwTy == utils.Read)
+	}
+	valid := safeguard == nil || safeguard.Target(bs.GetSchedulerConfig(), target).IsOK()
+	if locationCache != nil {
+		locationCache[key] = valid
+	}
+	return valid
+}
+
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*statistics.StoreLoadDetail) map[uint64]*statistics.StoreLoadDetail {
+	if !bs.placementV2Enabled {
+		return bs.pickDstStoresDefault(filters, candidates)
+	}
+	ret := make(map[uint64]*statistics.StoreLoadDetail, len(candidates))
+	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
+	for _, detail := range candidates {
+		store := detail.StoreInfo
+		if !detail.IsTiKV() {
+			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
+				continue
+			}
+			if bs.rwTy != utils.Write || bs.opTy != movePeer {
+				continue
+			}
+		}
+		if filter.Target(bs.GetSchedulerConfig(), store, filters) {
+			id := store.GetID()
+			if failure := bs.destinationStoreFailure(detail, bs.curScope, bs.dstToleranceRatio(detail)); failure != "" {
+				hotSchedulerResultCounter.WithLabelValues(failure+"-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+				continue
+			}
+
+			hotSchedulerResultCounter.WithLabelValues("dst-store-succ-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+			ret[id] = detail
+		}
+	}
+	return ret
+}
+
+func (bs *balanceSolver) pickDstStoresDefault(filters []filter.Filter, candidates []*statistics.StoreLoadDetail) map[uint64]*statistics.StoreLoadDetail {
 	ret := make(map[uint64]*statistics.StoreLoadDetail, len(candidates))
 	confDstToleranceRatio := bs.sche.conf.getDstToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
@@ -654,6 +981,28 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		}
 	}
 	return ret
+}
+
+func (bs *balanceSolver) dstToleranceRatio(detail *statistics.StoreLoadDetail) float64 {
+	ratio := bs.sche.conf.getDstToleranceRatio()
+	if !detail.IsTiKV() {
+		ratio += tiflashToleranceRatioCorrection
+	}
+	return ratio
+}
+
+func (bs *balanceSolver) destinationStoreFailure(detail *statistics.StoreLoadDetail, scope *placementLoadScope, toleranceRatio float64) string {
+	if scope != nil && !bs.placementLoadScopeContains(scope, detail.GetID()) {
+		return "dst-store-out-of-scope"
+	}
+	expect := bs.expectLoad(detail, scope)
+	if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), expect, toleranceRatio) {
+		return "dst-store-failed"
+	}
+	if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, expect, toleranceRatio) {
+		return "dst-store-history-loads-failed"
+	}
+	return ""
 }
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statistics.StoreLoad, toleranceRatio float64) bool {
@@ -721,13 +1070,252 @@ func (bs *balanceSolver) enableExpectation() bool {
 	return bs.sche.conf.getDstToleranceRatio() > 0 && bs.sche.conf.getSrcToleranceRatio() > 0
 }
 
+// prepareForRegion derives the stores that can legally carry the current load.
+// Leaders can move between different non-witness RuleFits with the same placement role.
+func (bs *balanceSolver) prepareForRegion(region *core.RegionInfo, fit *placement.RegionFit, source *statistics.StoreLoadDetail) *placementLoadScope {
+	if fit == nil {
+		return nil
+	}
+	sourcePeer := region.GetStorePeer(source.GetID())
+	if sourcePeer == nil {
+		return nil
+	}
+	sourceFit := fit.GetRuleFit(sourcePeer.GetId())
+	if sourceFit == nil {
+		return nil
+	}
+	if sourceFit.Rule.IsWitness {
+		return nil
+	}
+
+	rules := []*placement.Rule{sourceFit.Rule}
+	if bs.opTy == transferLeader {
+		rules = rules[:0]
+		for _, ruleFit := range fit.RuleFits {
+			if ruleFit.Rule.Role == sourceFit.Rule.Role && !ruleFit.Rule.IsWitness {
+				rules = append(rules, ruleFit.Rule)
+			}
+		}
+	}
+	// The region fit and store load details are collected independently. If a
+	// label change makes them disagree, use the engine-wide expectation until
+	// the load snapshot catches up.
+	if !slice.AnyOf(rules, func(i int) bool {
+		return placement.MatchLabelConstraints(source.StoreInfo, rules[i].LabelConstraints)
+	}) {
+		hotSchedulerPlacementScopeFallbackCounter.Inc()
+		return nil
+	}
+	scope := bs.getPlacementLoadScope(rules, source.IsTiKV())
+	if scope == nil {
+		// The rules do not narrow the engine population; keep the global stats.
+		hotSchedulerPlacementScopeFallbackCounter.Inc()
+	}
+	return scope
+}
+
+// recordStorePlacementRestriction marks an engine as "may restrict" when any
+// store of that engine does not satisfy the default (unconstrained) ruleset.
+// For TiKV this is an over-approximation: a store carrying an exclusive label
+// that no rule constrains is treated as restrictable even if no rule actually
+// restricts its load population. This is intentional — it keeps the scoped
+// statistics path active until every store of the engine matches the default
+// rules — so that a newly-restrictive rule is detected without re-scanning
+// the rule set on the hot path.
+func recordStorePlacementRestriction(canRestrict *[2]bool, store *core.StoreInfo) {
+	isTiKV := store.IsTiKV()
+	engine := 0
+	if !isTiKV {
+		engine = 1
+	}
+	if canRestrict[engine] {
+		return
+	}
+	var constraints []placement.LabelConstraint
+	if !isTiKV {
+		constraints = []placement.LabelConstraint{{Key: core.EngineKey, Op: placement.In, Values: []string{core.EngineTiFlash}}}
+	}
+	if !placement.MatchLabelConstraints(store, constraints) {
+		canRestrict[engine] = true
+	}
+}
+
+func (bs *balanceSolver) recordPlacementRestriction(detail *statistics.StoreLoadDetail) {
+	recordStorePlacementRestriction(&bs.placementCanRestrict, detail.StoreInfo)
+}
+
+func (bs *balanceSolver) mayUsePlacementScope(isTiKV bool) bool {
+	if !bs.placementV2Enabled {
+		return false
+	}
+	if isTiKV {
+		return bs.placementCanRestrict[0]
+	}
+	return bs.placementCanRestrict[1]
+}
+
+func (bs *balanceSolver) beginSourcePlacement(isTiKV bool) bool {
+	if !bs.placementV2Enabled {
+		return false
+	}
+	bs.curScope = nil
+	if isTiKV {
+		return bs.placementCanRestrict[0]
+	}
+	return bs.placementCanRestrict[1]
+}
+
+// getPlacementLoadScope calculates local safeguards only when the placement
+// population is narrower than the existing engine-wide population.
+func (bs *balanceSolver) getPlacementLoadScope(rules []*placement.Rule, isTiKV bool) *placementLoadScope {
+	if len(rules) == 0 {
+		return nil
+	}
+
+	// Build a value-derived scope key from the rule constraints so the cache
+	// stays valid across RuleManager commits that re-allocate the Rule structs.
+	var builder strings.Builder
+	builder.WriteString(strconv.Itoa(len(rules)))
+	builder.WriteByte(':')
+	for _, rule := range rules {
+		builder.WriteString(strconv.Itoa(len(rule.LabelConstraints)))
+		builder.WriteByte(':')
+		for _, constraint := range rule.LabelConstraints {
+			appendPlacementScopeKeyPart(&builder, constraint.Key)
+			appendPlacementScopeKeyPart(&builder, string(constraint.Op))
+			builder.WriteString(strconv.Itoa(len(constraint.Values)))
+			builder.WriteByte(':')
+			for _, value := range constraint.Values {
+				appendPlacementScopeKeyPart(&builder, value)
+			}
+		}
+	}
+	key := placementScopeKey{ruleScope: builder.String(), isTiKV: isTiKV}
+	scope, ok := bs.placementScopeCache[key]
+
+	if !ok {
+		allCount := 0
+		var summary statistics.StoreLoadSummary
+		var details []*statistics.StoreLoadDetail
+		for _, detail := range bs.stLoadDetail {
+			if detail.IsTiKV() != isTiKV {
+				continue
+			}
+			allCount++
+			if !slice.AnyOf(rules, func(i int) bool {
+				return placement.MatchLabelConstraints(detail.StoreInfo, rules[i].LabelConstraints)
+			}) {
+				continue
+			}
+			details = append(details, detail)
+			summary.Add(&detail.LoadPred.Current)
+		}
+		if len(details) > 0 && len(details) < allCount {
+			expect, stddev := summary.Result(details)
+			scope = &placementLoadScope{
+				expect:     expect,
+				stddev:     stddev,
+				population: bs.getPlacementLoadPopulation(details),
+			}
+		}
+		if bs.placementScopeCache == nil {
+			bs.placementScopeCache = make(map[placementScopeKey]*placementLoadScope)
+		}
+		bs.placementScopeCache[key] = scope
+	}
+	return scope
+}
+
+func (bs *balanceSolver) getPlacementLoadPopulation(details []*statistics.StoreLoadDetail) []uint64 {
+	bs.ensurePlacementPopulationIndex()
+	population := make([]uint64, bs.placementPopulationIndex.wordCount)
+	for _, detail := range details {
+		position := bs.placementPopulationIndex.stores[detail.GetID()]
+		population[position/64] |= 1 << (position % 64)
+	}
+	return population
+}
+
+func (bs *balanceSolver) placementLoadScopeContains(scope *placementLoadScope, storeID uint64) bool {
+	bs.ensurePlacementPopulationIndex()
+	position, ok := bs.placementPopulationIndex.stores[storeID]
+	if !ok || int(position/64) >= len(scope.population) {
+		return false
+	}
+	return scope.population[position/64]&(1<<(position%64)) != 0
+}
+
+func (bs *balanceSolver) ensurePlacementPopulationIndex() {
+	if bs.placementPopulationIndexValidated {
+		return
+	}
+	bs.placementPopulationIndexValidated = true
+	if bs.placementPopulationIndex != nil {
+		for storeID := range bs.stLoadDetail {
+			if _, ok := bs.placementPopulationIndex.stores[storeID]; !ok {
+				bs.placementPopulationIndex = nil
+				break
+			}
+		}
+	}
+	if bs.placementPopulationIndex == nil {
+		// The cached index and the load details come from separate store snapshots.
+		// Rebuild from the load snapshot if a concurrent store removal made it stale.
+		bs.placementPopulationIndex = newPlacementPopulationIndex(bs.stLoadDetail)
+	}
+}
+
+func newPlacementPopulationIndex(details map[uint64]*statistics.StoreLoadDetail) *placementPopulationIndex {
+	index := &placementPopulationIndex{
+		stores:    make(map[uint64]uint, len(details)),
+		wordCount: (len(details) + 63) / 64,
+	}
+	position := uint(0)
+	for storeID := range details {
+		index.stores[storeID] = position
+		position++
+	}
+	return index
+}
+
+func samePlacementLoadPopulation(
+	first *placementLoadScope,
+	firstIsTiKV bool,
+	second *placementLoadScope,
+	secondIsTiKV bool,
+) bool {
+	if first == nil || second == nil {
+		return first == second && firstIsTiKV == secondIsTiKV
+	}
+	return firstIsTiKV == secondIsTiKV && stdslices.Equal(first.population, second.population)
+}
+
+func appendPlacementScopeKeyPart(builder *strings.Builder, value string) {
+	builder.WriteString(strconv.Itoa(len(value)))
+	builder.WriteByte(':')
+	builder.WriteString(value)
+}
+
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {
 	// first priority should be more uniform than second priority
-	return store.IsUniform(bs.firstPriority, stddevThreshold*0.5)
+	return bs.isUniform(store, bs.firstPriority, stddevThreshold*0.5)
 }
 
 func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDetail) bool {
-	return store.IsUniform(bs.secondPriority, stddevThreshold)
+	return bs.isUniform(store, bs.secondPriority, stddevThreshold)
+}
+
+func (bs *balanceSolver) isUniform(store *statistics.StoreLoadDetail, dim int, threshold float64) bool {
+	if !bs.placementV2Enabled {
+		return store.IsUniform(dim, threshold)
+	}
+	uniform := func(scope *placementLoadScope) bool {
+		if scope != nil {
+			return scope.stddev.Loads[dim] < threshold
+		}
+		return store.IsUniform(dim, threshold)
+	}
+	return uniform(bs.curScope) || bs.cur.revertRegion != nil && uniform(bs.revertScope)
 }
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
@@ -777,34 +1365,7 @@ var dimToStep = [utils.DimLen]float64{
 // 2. compare detail1 and detail2 by first priority and second priority, we pick the larger one to speed up the convergence;
 // 3. if the first priority and second priority are equal, we pick the store with the smaller difference between current and future to minimize oscillations.
 func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadDetail) int {
-	if detail1 != detail2 {
-		var lpCmp storeLPCmp
-		if bs.resourceTy == writeLeader {
-			lpCmp = sliceLPCmp(
-				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-				))),
-				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.HotPeerCount)),
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(0, bs.rankStep.Loads[bs.secondPriority])),
-				)),
-			)
-		} else {
-			lpCmp = sliceLPCmp(
-				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.maxSrc.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-				))),
-				diffCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
-				),
-			)
-		}
-		return lpCmp(detail1.LoadPred, detail2.LoadPred)
-	}
-	return 0
+	return bs.compareStoreLoad(detail1, detail2, true)
 }
 
 // compareDstStore compares the destination store of detail1, detail2, the result is:
@@ -816,32 +1377,45 @@ func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadD
 // 2. compare detail1 and detail2 by first priority and second priority, we pick the smaller one to speed up the convergence;
 // 3. if the first priority and second priority are equal, we pick the store with the smaller difference between current and future to minimize oscillations.
 func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadDetail) int {
-	if detail1 != detail2 {
-		// compare destination store
-		var lpCmp storeLPCmp
-		if bs.resourceTy == writeLeader {
-			lpCmp = sliceLPCmp(
-				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.minDst.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.minDst.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-				)),
-				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.HotPeerCount)),
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(0, bs.rankStep.Loads[bs.secondPriority])),
-				)))
-		} else {
-			lpCmp = sliceLPCmp(
-				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(bs.minDst.Loads[bs.firstPriority], bs.rankStep.Loads[bs.firstPriority])),
-					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.minDst.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
-				)),
-				diffCmp(
-					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
-				),
-			)
+	return bs.compareStoreLoad(detail1, detail2, false)
+}
+
+func (bs *balanceSolver) compareStoreLoad(detail1, detail2 *statistics.StoreLoadDetail, source bool) int {
+	if detail1 == detail2 {
+		return 0
+	}
+	lp1, lp2 := detail1.LoadPred, detail2.LoadPred
+	extreme, baseline := math.Max, bs.minDst
+	if source {
+		extreme, baseline = math.Min, bs.maxSrc
+	}
+	priorities := [2]int{bs.firstPriority, bs.secondPriority}
+	for _, dim := range priorities {
+		r := rankCmp(extreme(lp1.Current.Loads[dim], lp1.Future.Loads[dim]),
+			extreme(lp2.Current.Loads[dim], lp2.Future.Loads[dim]),
+			stepRank(baseline.Loads[dim], bs.rankStep.Loads[dim]))
+		if source {
+			r = -r
 		}
-		return lpCmp(detail1.LoadPred, detail2.LoadPred)
+		if r != 0 {
+			return r
+		}
+	}
+	// Keep the existing pending-load tie breakers without constructing full loads.
+	if bs.resourceTy == writeLeader {
+		if r := rankCmp(math.Abs(lp1.Current.HotPeerCount-lp1.Future.HotPeerCount),
+			math.Abs(lp2.Current.HotPeerCount-lp2.Future.HotPeerCount), stepRank(0, bs.rankStep.HotPeerCount)); r != 0 {
+			return r
+		}
+	}
+	for _, dim := range priorities {
+		if r := rankCmp(math.Abs(lp1.Current.Loads[dim]-lp1.Future.Loads[dim]),
+			math.Abs(lp2.Current.Loads[dim]-lp2.Future.Loads[dim]), stepRank(0, bs.rankStep.Loads[dim])); r != 0 {
+			return r
+		}
+		if bs.resourceTy != writeLeader {
+			break
+		}
 	}
 	return 0
 }
@@ -1103,6 +1677,9 @@ func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dst
 				srcStoreID,
 				dstPeer)
 		}
+	}
+	if op != nil {
+		op.SetStoreHealthCheck(true)
 	}
 	return
 }

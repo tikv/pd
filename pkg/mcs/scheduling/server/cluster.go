@@ -345,6 +345,7 @@ func (c *Cluster) SetRuntimeResources(
 	c.keyspaceWatcher = keyspaceWatcher
 	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
 		c.hotStat.RemoveRollingStoreStats(storeID)
+		c.ruleManager.RemoveStoreCache(storeID)
 		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 	})
 }
@@ -883,7 +884,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		return err
 	}
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
-	cluster.HandleStatsAsync(c, region)
+	cluster.HandleStatsWithOriginAsync(c, region, origin)
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
