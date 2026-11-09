@@ -605,30 +605,25 @@ func (m *Manager) getCurrentRanges(groupID string) (GroupKeyRanges, error) {
 
 // applyRemoveOps filters out ranges that match remove operations.
 // Optimized with a map for O(n+m) complexity instead of O(n*m).
-// currentRanges has been sorted by start key and not overlapping.
 func applyRemoveOps(currentRanges GroupKeyRanges, removes GroupKeyRanges) (GroupKeyRanges, error) {
 	if len(removes.KeyRanges) == 0 {
 		return currentRanges, nil
 	}
 
-	// Build a set of ranges to remove for O(1) lookup
-	// Use hex encoding to avoid key collisions
-	removeSet := make(map[string]keyutil.KeyRange, len(removes.KeyRanges))
+	// Match both bounds because persisted overlapping ranges may share a start.
+	removeSet := make(map[[2]string]struct{}, len(removes.KeyRanges))
 	for _, remove := range removes.KeyRanges {
-		key := hex.EncodeToString(remove.StartKey)
+		key := [2]string{string(remove.StartKey), string(remove.EndKey)}
 		if _, exists := removeSet[key]; exists {
 			return GroupKeyRanges{}, errs.ErrAffinityGroupExist.GenWithStackByArgs(removes.GroupID)
 		}
-		removeSet[key] = remove
+		removeSet[key] = struct{}{}
 	}
 
 	var filtered []keyutil.KeyRange
 	for _, current := range currentRanges.KeyRanges {
-		key := hex.EncodeToString(current.StartKey)
-		if remove, exists := removeSet[key]; exists {
-			if !bytes.Equal(remove.EndKey, current.EndKey) {
-				return GroupKeyRanges{}, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(removes.GroupID)
-			}
+		key := [2]string{string(current.StartKey), string(current.EndKey)}
+		if _, exists := removeSet[key]; exists {
 			delete(removeSet, key)
 		} else {
 			filtered = append(filtered, current)

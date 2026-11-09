@@ -276,6 +276,9 @@ func TestLoadOverlappingAffinityRanges(t *testing.T) {
 		{"within group", []GroupKeyRanges{
 			{GroupID: "self", KeyRanges: []keyutil.KeyRange{keyRange("a", "d"), keyRange("b", "c")}},
 		}},
+		{"same start", []GroupKeyRanges{
+			{GroupID: "self", KeyRanges: []keyutil.KeyRange{keyRange("a", "z"), keyRange("a", "b")}},
+		}},
 		// outer covers inner and later, which do not overlap each other, and has
 		// a disjoint range m-n.
 		{"nested ranges", []GroupKeyRanges{
@@ -353,6 +356,10 @@ func TestLoadOverlappingAffinityRanges(t *testing.T) {
 			first := testCase.groups[0]
 			if len(testCase.groups) == 1 {
 				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: first.GroupID, KeyRanges: first.KeyRanges[1:]}}))
+				re.Equal(first.KeyRanges[:1], manager.keyRanges[first.GroupID].KeyRanges)
+				stored, err := extractKeyRangesFromLabelRule(regionLabeler.GetLabelRule(GetLabelRuleID(first.GroupID)))
+				re.NoError(err)
+				re.Equal(first.KeyRanges[:1], stored.KeyRanges)
 			} else {
 				re.NoError(manager.DeleteAffinityGroups([]string{first.GroupID}, true))
 			}
