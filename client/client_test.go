@@ -239,8 +239,9 @@ func (*attributionServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 				}
 				actual = components[i]
 			}
-			expected := strconv.FormatUint(id, 10)
-			if id == 0 {
+			// Region ID 0 is invalid, so wrapper n queries region ID n+1.
+			expected := strconv.FormatUint(id-1, 10)
+			if id == 1 {
 				expected = ""
 			}
 			if actual != expected {
@@ -310,11 +311,11 @@ func TestRouterCallerAttribution(t *testing.T) {
 					case 1:
 						region, err = wrapped.GetPrevRegion(requestCtx, []byte(component))
 					case 2:
-						region, err = wrapped.GetRegionByID(requestCtx, id)
+						region, err = wrapped.GetRegionByID(requestCtx, id+1)
 					}
 					expectedID := uint64(42)
 					if method == 2 {
-						expectedID = id
+						expectedID = id + 1
 					}
 					if err == nil && (region == nil || region.Meta.GetId() != expectedID) {
 						err = errors.New("incorrect region result")
