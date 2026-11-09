@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -395,11 +396,6 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	}
 	reqRegion := request.GetRegion()
 	splitCount := request.GetSplitCount()
-	if err := core.ValidateBatchSplitCount(splitCount, len(reqRegion.GetPeers())); err != nil {
-		return &schedulingpb.AskBatchSplitResponse{
-			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
 	err := c.ValidRegion(reqRegion)
 	if err != nil {
 		return &schedulingpb.AskBatchSplitResponse{
@@ -416,16 +412,20 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 
-	requestIDCount := splitCount * (1 + uint32(len(request.Region.Peers)))
-	id, count, err := c.AllocID(requestIDCount)
-	if err != nil {
-		return nil, err
+	requestIDCount, batch := batchSplitIDCount(splitCount, len(request.Region.Peers))
+	var id uint64
+	var count uint32
+	if batch {
+		id, count, err = c.AllocID(requestIDCount)
+		if err != nil {
+			return nil, err
+		}
+		batch = count == requestIDCount
 	}
 
-	// If the count is not equal to the requestIDCount, it means that the
-	// PD doesn't support allocating IDs in batch. We need to allocate IDs
-	// for each region.
-	if requestIDCount != count {
+	// Use individual allocations when the total exceeds one uint32 batch or
+	// the PD leader does not support batch ID allocation.
+	if !batch {
 		// use non batch way to split region
 		for range splitCount {
 			newRegionID, _, err := c.AllocID(1)
@@ -493,6 +493,14 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 		Header: wrapHeader(),
 		Ids:    splitIDs,
 	}, nil
+}
+
+func batchSplitIDCount(splitCount uint32, peerCount int) (uint32, bool) {
+	idsPerSplit := uint64(peerCount) + 1
+	if uint64(splitCount) > math.MaxUint32/idsPerSplit {
+		return 0, false
+	}
+	return splitCount * uint32(idsPerSplit), true
 }
 
 // RegisterGRPCService registers the service to gRPC server.

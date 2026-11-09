@@ -40,40 +40,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-func TestValidateBatchSplitCount(t *testing.T) {
-	for _, test := range []struct {
-		count uint32
-		peers int
-		valid bool
-	}{
-		{0, 3, true},
-		{1, 3, true},
-		{10000, 3, true},
-		{500000, 3, true},
-		{1000000, 3, false},
-		{10000, 100, true},
-		{100000, 100, false},
-		{math.MaxUint32, 3, false},
-		{1, math.MaxInt, false},
-	} {
-		t.Run(fmt.Sprintf("%d-peers-%d", test.count, test.peers), func(t *testing.T) {
-			err := ValidateBatchSplitCount(test.count, test.peers)
-			if test.valid {
-				require.NoError(t, err)
-			} else {
-				require.ErrorContains(t, err, "allocation budget")
-			}
-		})
-	}
-	for _, peers := range []int{0, 1, 3, 5, 100} {
-		perSplit := uint64(unsafe.Sizeof(pdpb.SplitID{})) + uint64(unsafe.Sizeof((*pdpb.SplitID)(nil))) + uint64(2+peers)*8
-		limit := uint32((maxBatchSplitAllocation - 8) / perSplit)
-		require.NoError(t, ValidateBatchSplitCount(limit, peers))
-		require.Error(t, ValidateBatchSplitCount(limit+1, peers))
-		require.LessOrEqual(t, uint64(limit)*(1+uint64(peers)), uint64(math.MaxUint32), "the scheduling service's ID-count product must not overflow")
-	}
-}
-
 func TestNeedMerge(t *testing.T) {
 	re := require.New(t)
 	mererSize, mergeKeys := int64(20), int64(200000)

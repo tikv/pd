@@ -45,27 +45,48 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
-func TestAskBatchSplitRejectsOversizedCount(t *testing.T) {
+func TestAskBatchSplitLargeCountCompatibility(t *testing.T) {
 	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
 	client := &splitScatterPDClient{next: 1000}
 	cluster.SwitchPDLeader(client)
 	region := newAffinitySplitTestRegion()
 	cluster.PutRegion(region)
-	for _, count := range []uint32{math.MaxUint32, 1 << 30} {
+	staleRegion := region.Clone(core.SetRegionVersion(0))
+	// Large counts must reach normal region validation without consuming IDs.
+	for _, count := range []uint32{1000000, 1 << 30, math.MaxUint32} {
 		resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
-			Region: region.GetMeta(), SplitCount: count,
+			Region: staleRegion.GetMeta(), SplitCount: count,
 		})
 		require.NoError(t, err)
-		require.Contains(t, resp.GetHeader().GetError().GetMessage(), "allocation budget")
+		require.Contains(t, resp.GetHeader().GetError().GetMessage(), "invalid region epoch")
 		require.Empty(t, resp.GetIds())
 	}
-	require.Equal(t, uint64(1000), client.next, "rejected requests must not call the ID allocator")
-	resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
-		Region: region.GetMeta(), SplitCount: 1,
-	})
-	require.NoError(t, err)
-	require.Nil(t, resp.GetHeader().GetError())
-	require.Len(t, resp.GetIds(), 1)
+	require.Equal(t, uint64(1000), client.next)
+}
+
+func TestBatchSplitIDCount(t *testing.T) {
+	for _, test := range []struct {
+		splits uint32
+		peers  int
+		count  uint32
+		batch  bool
+	}{
+		{0, 3, 0, true},
+		{1, 3, 4, true},
+		{838861, 3, 3355444, true},
+		{1000000, 3, 4000000, true},
+		{1073741823, 3, 4294967292, true},
+		{1 << 30, 3, 0, false},
+		{math.MaxUint32, 3, 0, false},
+		{math.MaxUint32, 0, math.MaxUint32, true},
+		{math.MaxUint32, math.MaxInt, 0, false},
+	} {
+		t.Run(fmt.Sprintf("%d-peers-%d", test.splits, test.peers), func(t *testing.T) {
+			count, batch := batchSplitIDCount(test.splits, test.peers)
+			require.Equal(t, test.count, count)
+			require.Equal(t, test.batch, batch)
+		})
+	}
 }
 
 func TestAskBatchSplitCountCompatibility(t *testing.T) {

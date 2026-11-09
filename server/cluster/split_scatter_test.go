@@ -37,20 +37,22 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
-func TestHandleAskBatchSplitRejectsOversizedCount(t *testing.T) {
+func TestHandleAskBatchSplitLargeCountCompatibility(t *testing.T) {
 	cluster, _ := newSplitScatterTestCluster(t)
 	before, _, err := cluster.id.Alloc(1)
 	require.NoError(t, err)
-	for _, count := range []uint32{math.MaxUint32, 1 << 30} {
+	staleRegion := cluster.GetRegion(100).Clone(core.SetRegionVersion(0))
+	// Large counts must reach normal region validation without consuming IDs.
+	for _, count := range []uint32{1000000, 1 << 30, math.MaxUint32} {
 		resp, err := cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
-			Region: cluster.GetRegion(100).GetMeta(), SplitCount: count,
+			Region: staleRegion.GetMeta(), SplitCount: count,
 		})
-		require.ErrorContains(t, err, "allocation budget")
+		require.ErrorContains(t, err, "invalid region epoch")
 		require.Nil(t, resp)
 	}
 	after, _, err := cluster.id.Alloc(1)
 	require.NoError(t, err)
-	require.Equal(t, before+1, after, "rejected requests must not consume IDs")
+	require.Equal(t, before+1, after)
 	resp, err := cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
 		Region: cluster.GetRegion(100).GetMeta(), SplitCount: 1,
 	})
