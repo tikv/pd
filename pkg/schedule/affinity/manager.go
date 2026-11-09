@@ -98,6 +98,10 @@ type Manager struct {
 	balanceTables        map[TableID]*balanceTable
 	lastBalanceVersion   uint64
 
+	// Validated PD writes cannot introduce conflicts, so they only need to
+	// recompute when existing conflicts may have been resolved.
+	hasRangeConflicts bool
+
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// rangeConflictsStale is set when the etcd sync methods change groups or key
 	// ranges without recomputing range conflicts.
@@ -255,7 +259,9 @@ func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule)
 		m.initGroupLocked(group)
 		m.updateGroupLabelRuleLocked(group.ID, labelRules[i], false)
 	}
-	m.reconcileRangeConflictsLocked()
+	if m.hasRangeConflicts {
+		m.reconcileRangeConflictsLocked()
+	}
 }
 
 func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
@@ -354,7 +360,9 @@ func (m *Manager) deleteGroups(groupIDs []string) {
 	for _, groupID := range groupIDs {
 		m.deleteGroupLocked(groupID)
 	}
-	m.reconcileRangeConflictsLocked()
+	if m.hasRangeConflicts {
+		m.reconcileRangeConflictsLocked()
+	}
 }
 
 func (m *Manager) deleteCacheLocked(regionID uint64) {
