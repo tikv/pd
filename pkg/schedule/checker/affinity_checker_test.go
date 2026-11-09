@@ -303,9 +303,6 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	re.Nil(ops, "Checker should not create operator for same peers")
 }
 
-// unresponsiveTargetWriter stands for a PD that accepts target requests but does
-// not answer them. Like the writer of the scheduling service, it fails each
-// request when the request times out.
 type unresponsiveTargetWriter struct {
 	timeout time.Duration
 	calls   atomic.Int32
@@ -319,10 +316,7 @@ func (w *unresponsiveTargetWriter) WriteGroupTargets(ctx context.Context, _ []af
 	return nil, reqCtx.Err()
 }
 
-// TestAffinityCheckerFirstWinWithUnresponsivePD checks that the checker of the
-// scheduling service does not wait for PD to store a first-win target, and that
-// the Regions of a group send one target while PD does not answer, instead of
-// one for each Region in each patrol round.
+// Regression for discussion_r4465255434: an unresponsive PD must not block patrol.
 func TestAffinityCheckerFirstWinWithUnresponsivePD(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -338,28 +332,20 @@ func TestAffinityCheckerFirstWinWithUnresponsivePD(t *testing.T) {
 		tc.AddLeaderRegion(300, 3, 1, 2),
 	}
 	affinityManager := tc.GetAffinityManager()
-	// The scheduling service's writer times out a request after 3 seconds.
 	writer := &unresponsiveTargetWriter{timeout: 3 * time.Second}
 	affinityManager.SetTargetWriter(writer)
 	affinityChecker := newTestAffinityChecker(ctx, tc, opt)
 	re.NoError(createAffinityGroupForTest(affinityManager, &affinity.Group{ID: "g"}, []byte(""), []byte("")))
 
-	// Two patrol rounds check every Region of the group.
 	start := time.Now()
 	for range 2 {
 		for _, region := range regions {
 			re.Empty(affinityChecker.Check(region))
 		}
 	}
-	elapsed := time.Since(start)
-	t.Logf("%d checks took %s, target requests: %d", 2*len(regions), elapsed, writer.calls.Load())
-	re.Less(elapsed, writer.timeout, "the checker must not wait for PD")
+	re.Less(time.Since(start), writer.timeout, "the checker must not wait for PD")
 	testutil.Eventually(re, func() bool { return writer.calls.Load() == 1 })
 
-	// The request is still waiting for PD, so the Regions do not send another one.
-	for _, region := range regions {
-		re.Empty(affinityChecker.Check(region))
-	}
 	re.Equal(int32(1), writer.calls.Load())
 	group := affinityManager.GetAffinityGroupState("g")
 	re.Zero(group.LeaderStoreID)

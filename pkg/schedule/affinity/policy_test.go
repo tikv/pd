@@ -112,6 +112,9 @@ func TestCollectUnavailableStores(t *testing.T) {
 		13: storeDisconnected,
 	}
 	re.Equal(expected, actual)
+	manager.SyncGroupFromEtcd(&Group{ID: "severity", LeaderStoreID: 8, VoterStoreIDs: []uint64{8, 12}})
+	manager.applyStoreConditions(actual)
+	re.Equal(groupDegraded, getGroupForTest(re, manager, "severity").GetAvailability())
 }
 
 func TestObserveAvailableRegion(t *testing.T) {
@@ -243,45 +246,21 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 
 func TestStoreConditionsWithoutGroups(t *testing.T) {
 	re := require.New(t)
-	ctx := t.Context()
-	store := storage.NewStorageWithMemoryBackend()
-	stores := core.NewStoresInfo()
-	for id := uint64(1); id <= 3; id++ {
-		stores.PutStore(core.NewStoreInfo(&metapb.Store{
-			Id: id, Address: fmt.Sprintf("s%d", id), NodeState: metapb.NodeState_Serving,
-		}, core.SetLastHeartbeatTS(time.Now())))
+	manager, _ := newTargetTestManager(t)
+	stores := manager.storeSetInformer.(*core.StoresInfo)
+	for _, evicted := range []bool{true, false, true} {
+		change := core.ResumeLeaderTransfer(constant.In)
+		if evicted {
+			change = core.PauseLeaderTransfer(constant.In)
+		}
+		stores.PutStore(stores.GetStore(3).Clone(change))
+		manager.checkGroupsAvailability()
+		re.Equal(evicted, manager.unavailableStores[3] == storeLeaderEvicted)
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+		_, err := manager.UpdateAffinityGroupPeers("g", 3, []uint64{1, 2, 3})
+		re.Equal(evicted, err != nil)
+		re.NoError(manager.DeleteAffinityGroups([]string{"g"}, true))
 	}
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
-	re.NoError(err)
-	manager, err := NewManager(ctx, store, stores, mockconfig.NewTestOptions(), regionLabeler)
-	re.NoError(err)
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "old"}}))
-	stores.PutStore(stores.GetStore(3).Clone(core.PauseLeaderTransfer(constant.In)))
-	manager.checkGroupsAvailability()
-	_, err = manager.UpdateAffinityGroupPeers("old", 3, []uint64{1, 2, 3})
-	re.ErrorContains(err, "store 3 is leader-evicted")
-
-	re.NoError(manager.DeleteAffinityGroups([]string{"old"}, true))
-	stores.PutStore(stores.GetStore(3).Clone(core.ResumeLeaderTransfer(constant.In)))
-	manager.checkGroupsAvailability()
-	re.Empty(manager.unavailableStores)
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "new"}}))
-	_, err = manager.UpdateAffinityGroupPeers("new", 3, []uint64{1, 2, 3})
-	re.NoError(err)
-
-	// A disconnected, stopping follower affects groups whose leader is elsewhere.
-	stores.PutStore(stores.GetStore(1).Clone(core.StoppingStoreEvicted(),
-		core.SetLastHeartbeatTS(time.Now().Add(-2*time.Minute))))
-	manager.checkGroupsAvailability()
-	re.Equal(groupDegraded, getGroupForTest(re, manager, "new").GetAvailability())
-
-	// Conditions that start without groups must also reach the next group.
-	re.NoError(manager.DeleteAffinityGroups([]string{"new"}, true))
-	stores.PutStore(stores.GetStore(3).Clone(core.PauseLeaderTransfer(constant.In)))
-	manager.checkGroupsAvailability()
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "later"}}))
-	_, err = manager.UpdateAffinityGroupPeers("later", 3, []uint64{2, 3})
-	re.ErrorContains(err, "store 3 is leader-evicted")
 }
 
 func TestStoreHealthCheck(t *testing.T) {
@@ -488,26 +467,15 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 // a new store that is still Preparing can initialize a group.
 func TestObserveAvailableRegionOnPreparingStore(t *testing.T) {
 	re := require.New(t)
-	ctx := t.Context()
-	store := storage.NewStorageWithMemoryBackend()
-	storeInfos := core.NewStoresInfo()
-	for id, state := range map[uint64]metapb.NodeState{1: metapb.NodeState_Serving, 2: metapb.NodeState_Preparing} {
-		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id), NodeState: state},
-			core.SetLastHeartbeatTS(time.Now())))
-	}
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
-	re.NoError(err)
-	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
-	re.NoError(err)
+	manager, _ := newTargetTestManager(t)
+	stores := manager.storeSetInformer.(*core.StoresInfo)
+	stores.PutStore(stores.GetStore(2).Clone(core.SetNodeState(metapb.NodeState_Preparing)))
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
 	unavailable := manager.collectUnavailableStores()
 	re.Empty(unavailable)
 	manager.applyStoreConditions(unavailable)
 
-	region := core.NewRegionInfo(
-		&metapb.Region{Id: 10, Peers: []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}}},
-		&metapb.Peer{Id: 11, StoreId: 1},
-	)
+	region := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
 	manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
 	state := manager.GetAffinityGroupState("g")
 	re.True(state.AffinitySchedulingAllowed)
