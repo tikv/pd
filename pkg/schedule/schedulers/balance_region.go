@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 
@@ -160,53 +161,72 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			break
 		}
 		foundRegion := false
+		var rejectedRegions []uint64
 		regionFilters := append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()))
 		for i, selectRegions := range regionSelectors {
 			if i == 1 {
 				regionFilters = append(regionFilters, pendingFilter)
 			}
+			attempts := 0
 			for range retryLimit {
 				regions := selectRegions(solver.sourceStoreID(), rs)
 				if len(regions) == 0 {
 					break
 				}
-				solver.Region = filter.SelectOneRegion(regions, collector, regionFilters...)
-				if solver.Region == nil {
-					continue
-				}
-				foundRegion = true
-				log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
-				// Skip hot regions.
-				if cluster.IsRegionHot(solver.Region) {
-					log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
-					if collector != nil {
-						collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
+				foundCandidate := false
+				for j, region := range regions {
+					if slices.Contains(rejectedRegions, region.GetID()) {
+						foundCandidate = true
+						continue
 					}
-					balanceRegionHotCounter.Inc()
-					continue
-				}
-				// Check region leader
-				if solver.Region.GetLeader() == nil {
-					log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
-					if collector != nil {
-						collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionNoLeader)))
+					solver.Region = filter.SelectOneRegion(regions[j:j+1], collector, regionFilters...)
+					if solver.Region == nil {
+						continue
 					}
-					balanceRegionNoLeaderCounter.Inc()
-					continue
+					foundCandidate = true
+					foundRegion = true
+					attempts++
+					log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+					// Skip hot regions.
+					if cluster.IsRegionHot(solver.Region) {
+						log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+						if collector != nil {
+							collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
+						}
+						balanceRegionHotCounter.Inc()
+						rejectedRegions = append(rejectedRegions, solver.Region.GetID())
+						continue
+					}
+					// Check region leader
+					if solver.Region.GetLeader() == nil {
+						log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+						if collector != nil {
+							collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionNoLeader)))
+						}
+						balanceRegionNoLeaderCounter.Inc()
+						rejectedRegions = append(rejectedRegions, solver.Region.GetID())
+						continue
+					}
+					solver.Step++
+					// Now that the candidate region is known, its size can be folded
+					// into the source score the same way targetStoreScore folds it in.
+					solver.sourceScore = solver.sourceStoreScore(s.GetName())
+					// the replica filter will cache the last region fit and the select one will only pict the first one region that
+					// satisfy all the filters, so the region fit must belong the scheduled region.
+					solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
+					if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
+						s.resetLimit(solver.Source)
+						op.Counters = append(op.Counters, balanceRegionNewOpCounter)
+						return []*operator.Operator{op}, collector.GetPlans()
+					}
+					solver.Step--
+					rejectedRegions = append(rejectedRegions, solver.Region.GetID())
 				}
-				solver.Step++
-				// Now that the candidate region is known, its size can be folded
-				// into the source score the same way targetStoreScore folds it in.
-				solver.sourceScore = solver.sourceStoreScore(s.GetName())
-				// the replica filter will cache the last region fit and the select one will only pict the first one region that
-				// satisfy all the filters, so the region fit must belong the scheduled region.
-				solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
-				if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
-					s.resetLimit(solver.Source)
-					op.Counters = append(op.Counters, balanceRegionNewOpCounter)
-					return []*operator.Operator{op}, collector.GetPlans()
+				// Finish an already sampled batch, but do not rescan a role that
+				// has no eligible candidates or has spent its attempt budget.
+				if !foundCandidate || attempts >= retryLimit {
+					break
 				}
-				solver.Step--
 			}
 		}
 		if !foundRegion {
