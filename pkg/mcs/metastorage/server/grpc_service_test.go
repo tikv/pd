@@ -41,6 +41,7 @@ func TestValidateMetaStorageAccess(t *testing.T) {
 		allowed bool
 	}{
 		{name: "service discovery", key: "/ms/42/router/registry/address", allowed: true},
+		{name: "timestamp read", key: "/ms/42/tso/00001/gta/timestamp", allowed: true},
 		{name: "resource group", key: "resource_group/settings/default", allowed: true},
 		{name: "controller", key: "resource_group/controller", allowed: true},
 		{name: "keyspace resource group", key: "resource_group/keyspace/settings/1/default", allowed: true},
@@ -78,6 +79,41 @@ func TestValidateMetaStorageAccess(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateMetaStorageAccess([]byte(tc.key), []byte(tc.end))
+			if tc.allowed {
+				require.NoError(t, err)
+			} else {
+				require.Equal(t, codes.PermissionDenied, status.Code(err))
+			}
+		})
+	}
+}
+
+func TestValidateMetaStorageWriteAccess(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		key     string
+		end     string
+		allowed bool
+	}{
+		{name: "timestamp", key: keypath.TimestampPath(1)},
+		{name: "other cluster timestamp", key: fmt.Sprintf("/ms/%d/tso/00001/gta/timestamp", keypath.ClusterID()+1)},
+		{name: "other group timestamp", key: "/ms/42/tso/65535/gta/timestamp"},
+		{name: "timestamp with range", key: "/ms/42/tso/00001/gta/timestamp", end: "/ms0"},
+		{name: "primary discovery", key: "/ms/42/tso/00000/primary", allowed: true},
+		{name: "service registry", key: "/ms/42/router/registry/address", allowed: true},
+		{name: "other service suffix", key: "/ms/42/router/00001/gta/timestamp", allowed: true},
+		{name: "registry address suffix", key: "/ms/42/router/registry/address/gta/timestamp", allowed: true},
+		{name: "timestamp sibling", key: "/ms/42/tso/00001/gta/timestamp-other", allowed: true},
+		{name: "timestamp child", key: "/ms/42/tso/00001/gta/timestamp/child", allowed: true},
+		{name: "whole discovery namespace", key: "/ms/", end: "/ms0", allowed: true},
+		{name: "controller", key: "resource_group/controller", allowed: true},
+		{name: "backup checkpoint", key: "/tidb/br-stream/storage-checkpoint/task/1", allowed: true},
+		{name: "region label", key: keypath.RegionLabelPathPrefix() + "rule", allowed: true},
+		{name: "outside allowed namespaces", key: "/pd/42/leader"},
+		{name: "unbounded discovery", key: "/ms/42/", end: "\x00"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateMetaStorageWriteAccess([]byte(tc.key), []byte(tc.end))
 			if tc.allowed {
 				require.NoError(t, err)
 			} else {
