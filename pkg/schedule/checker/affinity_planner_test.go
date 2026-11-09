@@ -15,7 +15,7 @@
 package checker
 
 import (
-	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,10 +32,10 @@ func TestAffinityPlannerSameRoleIsolation(t *testing.T) {
 	for i, zone := range []string{"a", "a", "b"} {
 		id := uint64(i + 1)
 		tc.AddRegionStore(id, 10)
-		tc.SetStoreLabel(id, map[string]string{"zone": zone, "id": fmt.Sprint(id)})
+		tc.SetStoreLabel(id, map[string]string{"zone": zone, "id": strconv.FormatUint(id, 10)})
 	}
 	for i, stores := range [][]string{{"1"}, {"2", "3"}} {
-		re.NoError(c.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: fmt.Sprint(i), Index: i + 1,
+		re.NoError(c.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: strconv.Itoa(i), Index: i + 1,
 			Override: i == 0, Role: placement.Voter, Count: 1, LocationLabels: []string{"zone"},
 			LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: stores}}}))
 	}
