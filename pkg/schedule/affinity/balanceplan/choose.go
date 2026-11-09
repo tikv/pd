@@ -34,12 +34,11 @@ func (r *Rule) leaf() bool { return r.level >= r.depth() }
 //
 //	0 voter count after removing the group
 //	1 leader count (leader only)
-//	2 voter count before removing the group
-//	3 whether the store is new to the target this greedy call started from
-//	4 whether the leader leaves that target's leader (leader only)
-//	5 voter count of other tables, which spreads tables apart on ties
-//	6 leader count of other tables (leader only)
-type cost [7]int64
+//	2 whether the store is new to the target this greedy call started from
+//	3 whether the leader leaves that target's leader (leader only)
+//	4 voter count of other tables, which spreads tables apart on ties
+//	5 leader count of other tables (leader only)
+type cost [6]int64
 
 func (a cost) add(b cost) cost {
 	for i := range a {
@@ -65,23 +64,20 @@ func (a cost) cmp(b cost) int {
 }
 
 func (p *planner) costOf(g *groupState, s int, leader bool) cost {
-	c := cost{int64(p.v[s]), 0, int64(p.v[s]), 1}
-	if slices.Contains(g.cur, s) {
-		c[2]++
-	}
+	c := cost{int64(p.v[s]), 0, 1}
 	if slices.Contains(g.startV, s) {
-		c[3] = 0
+		c[2] = 0
 	}
 	if p.otherV != nil {
-		c[5] = int64(p.otherV[s])
+		c[4] = int64(p.otherV[s])
 	}
 	if leader {
 		c[1] = int64(p.l[s])
 		if s != g.startLd {
-			c[4] = 1
+			c[3] = 1
 		}
 		if p.otherL != nil {
-			c[6] = int64(p.otherL[s])
+			c[5] = int64(p.otherL[s])
 		}
 	}
 	return c

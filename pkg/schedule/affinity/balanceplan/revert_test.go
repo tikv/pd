@@ -21,8 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// revertChain lets greedy save a neutral chain shift together with an
-// independent improvement. Only the last shifted group can revert per pass.
+// revertChain has a neutral chain and an independent improvement.
 func revertChain(groups int) *Input {
 	n := groups + 3
 	in := &Input{Stores: n, BaseVoters: make([]int, n), BaseLeaders: make([]int, n)}
@@ -46,7 +45,14 @@ func TestRevertChainStops(t *testing.T) {
 				in := revertChain(groups)
 				p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
 				origV, origL := p.layout()
-				voters, leaders, best := p.greedy(0)
+				// Install an adversarial saved layout directly: only the last
+				// shifted group can revert per pass, regardless of chooser ties.
+				for i := range groups {
+					p.move(&p.gs[i], []int{i}, i)
+				}
+				p.move(&p.gs[groups], []int{groups + 2}, groups+2)
+				voters, leaders := p.layout()
+				best := p.score()
 				for i := range groups {
 					re.Equal([]int{i}, voters[i], "the saved snapshot must contain the whole chain shift")
 				}
@@ -120,12 +126,18 @@ func TestRevertRestoresRuleAssignment(t *testing.T) {
 func TestPlanRevertStops(t *testing.T) {
 	const groups = 32
 	in := revertChain(groups)
+	s := in.Stores
+	in.Stores += 2
+	in.BaseVoters = append(in.BaseVoters, 1, 0)
+	in.BaseLeaders = append(in.BaseLeaders, 1, 0)
+	in.Groups = append(in.Groups, Group{Rules: []*Rule{{Count: 1, Stores: []int{s, s + 1}}},
+		Voters: []int{s}, Leader: s, CanLead: allTrue(in.Stores)})
 	searchChecks := 0
 	opt := Options{Sweeps: 1, WorkBudget: DefaultWorkBudget, Cancel: func() bool { searchChecks++; return false }}
 	p := newPlanner(in, opt)
 	_, _, best := p.greedy(opt.Seed)
 	for _, reason := range []StopReason{StopBudget, StopCanceled} {
-		for _, trials := range []int{0, groups} {
+		for _, trials := range []int{0, 1} {
 			t.Run(string(reason)+"/"+strconv.Itoa(trials), func(t *testing.T) {
 				re := require.New(t)
 				run := func() Result {
@@ -134,18 +146,15 @@ func TestPlanRevertStops(t *testing.T) {
 					options.Cancel = nil
 					if reason == StopBudget {
 						options.WorkBudget = p.work + int64(8*trials)
-						if trials > 0 {
-							options.WorkBudget -= 4
-						}
 					} else {
 						cancelAfter := searchChecks
 						if trials > 0 {
-							cancelAfter += 1 + trials
+							cancelAfter += 1 + groups + trials
 						}
 						options.Cancel = func() bool {
 							checks++
 							// Cleanup checks once at entry, then before
-							// every trial in this first sweep.
+							// every group in this first sweep.
 							return checks > cancelAfter
 						}
 					}
@@ -155,9 +164,6 @@ func TestPlanRevertStops(t *testing.T) {
 				re.Equal(reason, r.Stop)
 				re.Equal(p.visits+trials, r.Visits)
 				expectedWork := p.work + int64(8*trials)
-				if trials > 0 {
-					expectedWork -= 4
-				}
 				re.Equal(expectedWork, r.Work)
 				re.Equal(best, r.Score)
 				re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score)

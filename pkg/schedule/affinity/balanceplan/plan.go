@@ -639,10 +639,8 @@ func (p *planner) visitLeader(g *groupState) bool {
 
 // revert restores the original target of every changed group whose change is
 // not needed for the planned score, so fewer groups are rewritten and moved.
-// The search breaks ties by moving, which helps it cross plateaus but leaves
-// neutral changes behind; re-planning a mostly balanced 128-group table
-// rewrites 39 groups with this pass and 75 without it. It repeats until a pass
-// reverts nothing; every other pass reverts at least one group, so it ends.
+// Later visits may make an earlier change unnecessary. It repeats until a
+// pass reverts nothing; every other pass reverts at least one group, so it ends.
 // Trials share the search's cancellation and work budget. A cutoff keeps the
 // last accepted layout, whose score is never worse than the saved best layout.
 // A reverted group also gets the rule assignment of its input target back,

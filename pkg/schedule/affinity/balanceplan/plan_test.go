@@ -329,6 +329,46 @@ func TestOtherTablesSpreadTies(t *testing.T) {
 	re.Equal(alone.Score, r.Score) // only ties change
 }
 
+func TestGreedyKeepsTiedTargets(t *testing.T) {
+	re := require.New(t)
+	in := revertChain(32)
+	p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
+	baseline := p.score()
+	voters, leaders, score := p.greedy(0)
+	re.True(score.Less(baseline))
+	for i, g := range in.Groups[:32] {
+		re.Equal(g.Voters, voters[i])
+		re.Equal(g.Leader, leaders[i])
+	}
+}
+
+func TestScaleOutKeepsExistingTargets(t *testing.T) {
+	const groups, stores = 900, 300
+	for _, replicas := range []int{3, 5} {
+		re := require.New(t)
+		in := general(groups, stores+1, replicas, replicas/2+1)
+		for i := range in.Groups {
+			g := &in.Groups[i]
+			for k := range g.Voters {
+				g.Voters[k] = (i + k) % stores
+			}
+			g.Leader = i % stores
+		}
+		r := Plan(in, Options{Seed: 4242})
+		re.True(r.Score.Less(r.Baseline))
+		moves := 0
+		for i, g := range in.Groups {
+			for _, s := range r.Voters[i] {
+				if !slices.Contains(g.Voters, s) {
+					moves++
+				}
+			}
+		}
+		re.Positive(moves)
+		re.LessOrEqual(moves, 3*groups*replicas/stores)
+	}
+}
+
 func TestPlanKeepsInput(t *testing.T) {
 	re := require.New(t)
 	in := overlapInput()
