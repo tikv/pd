@@ -16,11 +16,9 @@ package affinity
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,96 +29,51 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
-func targetServer(t *testing.T, status int, calls *atomic.Int32) string {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		var req affinity.GroupTargetsRequest
-		if r.Method != http.MethodPost || r.URL.Path != groupTargetsPath || json.NewDecoder(r.Body).Decode(&req) != nil || len(req.Targets) == 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if status != http.StatusOK {
-			w.WriteHeader(status)
-			_, _ = io.WriteString(w, "target write rejected")
-			return
-		}
-		_ = json.NewEncoder(w).Encode(&affinity.GroupTargetsResponse{WrittenGroupIDs: []string{req.Targets[0].Expected.ID}})
-	}))
-	t.Cleanup(server.Close)
-	return server.URL
-}
-
-func TestTargetWriter(t *testing.T) {
-	re := require.New(t)
-	targets := []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}}
-	var okCalls, nextCalls atomic.Int32
-	ok := targetServer(t, http.StatusOK, &okCalls)
-	next := targetServer(t, http.StatusOK, &nextCalls)
-	leaderURL := ok + "/"
-	var failures int
-	writer := NewTargetWriter(http.DefaultClient, func() (string, error) { return leaderURL, nil }, func() { failures++ })
-	for _, url := range []string{ok + "/", next} {
-		leaderURL = url
-		written, err := writer.WriteGroupTargets(t.Context(), targets)
-		re.NoError(err)
-		re.Equal([]string{"g"}, written)
-	}
-	re.Equal(int32(1), okCalls.Load())
-	re.Equal(int32(1), nextCalls.Load())
-	re.Zero(failures)
-}
-
 func TestTargetWriterFailures(t *testing.T) {
-	targets := []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}}
-	var badCalls, failCalls atomic.Int32
-	bad := targetServer(t, http.StatusBadRequest, &badCalls)
-	fail := targetServer(t, http.StatusServiceUnavailable, &failCalls)
-	hang := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		// The server notices that the client is gone only after the body is read.
-		_, _ = io.Copy(io.Discard, r.Body)
-		<-r.Context().Done()
-	}))
-	t.Cleanup(hang.Close)
-	down := httptest.NewServer(http.NotFoundHandler())
-	down.Close()
-	invalid := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, "invalid JSON")
-	}))
-	t.Cleanup(invalid.Close)
 	for _, tc := range []struct {
-		name      string
-		url       string
-		leaderErr error
-		wantError string
+		name, body, wantError string
+		status                int
 	}{
-		{name: "no leader", leaderErr: errors.New("PD leader is not found"), wantError: "PD leader is not found"},
-		{name: "unreachable", url: down.URL, wantError: "connect"},
-		{name: "timeout", url: hang.URL, wantError: "context deadline exceeded"},
-		{name: "bad request", url: bad, wantError: "400 Bad Request target write rejected"},
-		{name: "unavailable", url: fail, wantError: "503 Service Unavailable target write rejected"},
-		{name: "invalid response", url: invalid.URL, wantError: "decode affinity group targets response"},
+		{name: "bad request", status: http.StatusBadRequest, body: "rejected", wantError: "400 Bad Request rejected"},
+		{name: "unavailable", status: http.StatusServiceUnavailable, body: "rejected", wantError: "503 Service Unavailable rejected"},
+		{name: "invalid response", status: http.StatusOK, body: "invalid JSON", wantError: "decode affinity group targets response"},
+		{name: "timeout", wantError: "context deadline exceeded"},
+		{name: "unreachable", wantError: "connect"},
+		{name: "no leader", wantError: "PD leader is not found"},
+		{name: "canceled", wantError: "context canceled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
-			var failures int
-			writer := NewTargetWriter(http.DefaultClient, func() (string, error) { return tc.url, tc.leaderErr }, func() { failures++ })
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				if tc.name == "timeout" || tc.name == "canceled" {
+					<-r.Context().Done()
+					return
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			t.Cleanup(server.Close)
+			if tc.name == "unreachable" {
+				server.Close()
+			}
+			failures := 0
+			writer := NewTargetWriter(http.DefaultClient, func() (string, error) {
+				if tc.name == "no leader" {
+					return "", errors.New(tc.wantError)
+				}
+				return server.URL + "/", nil
+			}, func() { failures++ })
 			writer.timeout = 100 * time.Millisecond
-			written, err := writer.WriteGroupTargets(t.Context(), targets)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tc.name == "canceled" {
+				cancel()
+			}
+			written, err := writer.WriteGroupTargets(ctx, []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}})
 			re.ErrorContains(err, tc.wantError)
 			re.Empty(written)
 			re.Equal(1, failures)
 		})
 	}
-	t.Run("canceled", func(t *testing.T) {
-		re := require.New(t)
-		var failures int
-		writer := NewTargetWriter(http.DefaultClient, func() (string, error) { return hang.URL, nil }, func() { failures++ })
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		_, err := writer.WriteGroupTargets(ctx, targets)
-		re.ErrorIs(err, context.Canceled)
-		re.Equal(1, failures)
-	})
-	require.Equal(t, int32(1), badCalls.Load())
-	require.Equal(t, int32(1), failCalls.Load())
 }

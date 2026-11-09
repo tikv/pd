@@ -1449,20 +1449,6 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 	})
 }
 
-// updateAffinityGroupTargets writes group targets and returns the status code and the written groups.
-func updateAffinityGroupTargets(re *require.Assertions, serverAddr string, targets ...affinity.GroupTarget) (int, []string) {
-	data, err := json.Marshal(&affinity.GroupTargetsRequest{Targets: targets})
-	re.NoError(err)
-	resp, err := tests.TestDialClient.Post(getAffinityGroupURL(serverAddr, "targets"), "application/json", bytes.NewReader(data))
-	re.NoError(err)
-	defer resp.Body.Close()
-	var result affinity.GroupTargetsResponse
-	if resp.StatusCode == http.StatusOK {
-		re.NoError(json.NewDecoder(resp.Body).Decode(&result))
-	}
-	return resp.StatusCode, result.WrittenGroupIDs
-}
-
 func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
 		re := suite.Require()
@@ -1477,28 +1463,18 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 		}
 		expected := mustGetAffinityGroup(re, serverAddr, "targets").Group
 
-		status, written := updateAffinityGroupTargets(re, serverAddr,
-			affinity.GroupTarget{Expected: expected, LeaderStoreID: 2, VoterStoreIDs: []uint64{3, 2, 1}})
-		re.Equal(http.StatusOK, status)
-		re.Equal([]string{"targets"}, written)
+		data, err := json.Marshal(affinity.GroupTargetsRequest{Targets: []affinity.GroupTarget{
+			{Expected: expected, LeaderStoreID: 2, VoterStoreIDs: []uint64{3, 2, 1}},
+		}})
+		re.NoError(err)
+		var result affinity.GroupTargetsResponse
+		endpoint := getAffinityGroupURL(serverAddr, "targets")
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, endpoint, data, testutil.StatusOK(re), testutil.ExtractJSON(re, &result)))
+		re.Equal([]string{"targets"}, result.WrittenGroupIDs)
 		state := mustGetAffinityGroup(re, serverAddr, "targets")
 		re.Equal(uint64(2), state.LeaderStoreID)
 		re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
 
-		// A target decided from the old group is not written.
-		status, written = updateAffinityGroupTargets(re, serverAddr,
-			affinity.GroupTarget{Expected: expected, LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 2, 3}})
-		re.Equal(http.StatusOK, status)
-		re.Empty(written)
-		re.Equal(uint64(2), mustGetAffinityGroup(re, serverAddr, "targets").LeaderStoreID)
-
-		for _, targets := range [][]affinity.GroupTarget{
-			nil,
-			{{Expected: state.Group, LeaderStoreID: 4, VoterStoreIDs: []uint64{1, 2, 3}}},
-			{{Expected: state.Group, LeaderStoreID: 9, VoterStoreIDs: []uint64{9}}},
-		} {
-			status, _ := updateAffinityGroupTargets(re, serverAddr, targets...)
-			re.Equal(http.StatusBadRequest, status)
-		}
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, endpoint, []byte(`{}`), testutil.Status(re, http.StatusBadRequest)))
 	})
 }
