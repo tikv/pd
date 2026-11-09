@@ -157,5 +157,5 @@ func (f *RegionFit) IsLeaderIsolationPreserved(region *core.RegionInfo, leaderSt
 		return true
 	}
 	after := fitRegion(f.regionStores, region.Clone(core.WithLeader(leader)), f.rules, supportWitness)
-	return after.IsSatisfied() && f.isIsolationPreserved(after, false)
+	return after.IsSatisfied() && f.preservesIsolation(after, false)
 }

@@ -428,6 +428,12 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	if b.err != nil {
 		return nil, b.err
 	}
+	// The non-joint plan can keep an intermediate leader when no candidate is
+	// admissible. Validate the leader the steps actually end with.
+	if b.isolationLeader != nil && !b.isolationLeader(b.currentLeaderStoreID) {
+		b.err = errors.New("cannot create operator: final layout breaks placement isolation")
+		return nil, b.err
+	}
 
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
 }
@@ -442,6 +448,13 @@ func (b *Builder) prepareBuild() (string, error) {
 	b.toWitness = newPeersMap()
 	b.toNonWitness = newPeersMap()
 	b.toPromoteNonWitness = newPeersMap()
+
+	// Snapshot the intended final roles. The diff below can rewrite a target
+	// peer into a temporary execution state, such as a witness learner.
+	finalPeers := newPeersMap()
+	for _, peer := range b.targetPeers {
+		finalPeers.set(&metapb.Peer{Id: peer.GetId(), StoreId: peer.GetStoreId(), Role: peer.GetRole(), IsWitness: peer.GetIsWitness()})
+	}
 
 	voterCount := 0
 	for _, peer := range b.targetPeers {
@@ -531,7 +544,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	}
 
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
-	b.isolationLeader = b.newIsolationLeaderCheck()
+	b.isolationLeader = b.newIsolationLeaderCheck(finalPeers)
 
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
@@ -940,7 +953,8 @@ func (b *Builder) execBatchSwitchWitnesses() {
 // newIsolationLeaderCheck covers peer changes whose final leader changes rule
 // assignment, such as moving the leader peer. Leader-only transfers are checked
 // by their factory, and force, skip and repairs keep their existing behavior.
-func (b *Builder) newIsolationLeaderCheck() func(uint64) bool {
+// finalPeers holds the intended final roles, taken before execution planning.
+func (b *Builder) newIsolationLeaderCheck(finalPeers peersMap) func(uint64) bool {
 	if b.originFit == nil || b.originRegion == nil || b.forceTargetLeader || b.skipPlacementRulesCheck {
 		return nil
 	}
@@ -957,15 +971,16 @@ func (b *Builder) newIsolationLeaderCheck() func(uint64) bool {
 			return nil
 		}
 	}
-	peers := make([]*metapb.Peer, 0, len(b.targetPeers))
-	for _, storeID := range b.targetPeers.IDs() {
-		peer := b.targetPeers[storeID]
+	peers := make([]*metapb.Peer, 0, len(finalPeers))
+	for _, storeID := range finalPeers.IDs() {
+		peer := finalPeers[storeID]
+		id := peer.GetId()
 		if added, ok := b.toAdd[storeID]; ok {
-			peer = added
-		} else if origin, ok := b.originPeers[storeID]; ok && origin.GetId() != peer.GetId() {
-			peer = &metapb.Peer{Id: origin.GetId(), StoreId: storeID, Role: peer.GetRole(), IsWitness: peer.GetIsWitness()}
+			id = added.GetId()
+		} else if origin, ok := b.originPeers[storeID]; ok {
+			id = origin.GetId()
 		}
-		peers = append(peers, peer)
+		peers = append(peers, &metapb.Peer{Id: id, StoreId: storeID, Role: peer.GetRole(), IsWitness: peer.GetIsWitness()})
 	}
 	stores, witness := b.GetBasicCluster(), b.GetSharedConfig().IsWitnessAllowed()
 	return func(leaderStoreID uint64) bool {

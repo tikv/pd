@@ -81,6 +81,72 @@ func TestReplaceLeaderPeerRejectsIsolationBreakingLeader(t *testing.T) {
 	require.Equal(t, uint64(3), finalLeader(op))
 }
 
+func TestMovePeerRejectsWithoutAdmissibleFinalLeader(t *testing.T) {
+	// Stores 3/4 would preserve isolation but cannot receive leadership. The
+	// remaining store 2 breaks it, so neither plan may return an operator.
+	for _, joint := range []bool{false, true} {
+		t.Run(map[bool]string{false: "non-joint", true: "joint"}[joint], func(t *testing.T) {
+			tc, region := newLeaderVoterIsolationCluster(t, "host")
+			tc.SetEnableUseJointConsensus(joint)
+			tc.SetStoreEvictLeader(3, true)
+			tc.SetStoreEvictLeader(4, true)
+			op, err := CreateMovePeerOperator("test", tc, region, OpRegion, 1, &metapb.Peer{StoreId: 4, Role: metapb.PeerRole_Voter})
+			require.Error(t, err)
+			require.Nil(t, op)
+		})
+	}
+}
+
+func TestMoveWitnessChecksFinalRoles(t *testing.T) {
+	// Witness 2 becomes an ordinary voter. The builder demotes it to a witness
+	// learner as an execution step; the check must use its final role.
+	tc := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	tc.SetEnableWitness(true)
+	tc.SetMaxReplicas(5)
+	for i, host := range []string{"l", "a", "b", "a", "c"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+	}
+	rm := tc.GetRuleManager()
+	leader := rm.GetRule("pd", "default").Clone()
+	leader.Role, leader.Count = placement.Leader, 1
+	require.NoError(t, rm.SetRule(leader))
+	voters := leader.Clone()
+	voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+	voters.LocationLabels, voters.IsolationLevel = []string{"host"}, "host"
+	require.NoError(t, rm.SetRule(voters))
+	witnesses := voters.Clone()
+	witnesses.ID, witnesses.IsWitness = "witnesses", true
+	require.NoError(t, rm.SetRule(witnesses))
+
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+		{Id: 13, StoreId: 3, Role: metapb.PeerRole_Voter, IsWitness: true},
+		{Id: 14, StoreId: 4, Role: metapb.PeerRole_Voter},
+		{Id: 15, StoreId: 5, Role: metapb.PeerRole_Voter},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}, peers[0])
+	tc.PutRegion(region)
+	require.True(t, rm.FitRegion(tc, region).IsSatisfied())
+
+	// After moving the witness from 2 to 5, leader 1 would leave ordinary
+	// voters 2/4 on host a. Leader 4 takes the leader slot instead, leaving
+	// ordinary voters 1/2 and witnesses 3/5 isolated.
+	op, err := CreateMoveWitnessOperator("test", tc, region, 2, 5)
+	require.NoError(t, err)
+	require.Equal(t, uint64(4), finalLeader(op))
+	// Without leader 4, no final leader preserves isolation.
+	tc.SetStoreEvictLeader(4, true)
+	_, err = CreateMoveWitnessOperator("test", tc, region, 2, 5)
+	require.Error(t, err)
+	// Moving the witness to store 4 keeps leader 1 with voters 2/5 isolated.
+	tc.SetStoreEvictLeader(4, false)
+	op, err = CreateMoveWitnessOperator("test", tc, region, 2, 4)
+	require.NoError(t, err)
+	require.Zero(t, finalLeader(op))
+}
+
 func TestFinalIsolationCheckKeepsRepairs(t *testing.T) {
 	// Replacing a peer on an offline store keeps the existing behavior.
 	tc, region := newLeaderVoterIsolationCluster(t, "host")

@@ -267,13 +267,13 @@ func isolationConflicts(stores []*core.StoreInfo, labels []string) (pairs, maxPe
 // IsIsolationPreserved checks complete fits made with the same effective rules.
 // It is for fixed-size scheduling, not replica-count-changing repairs.
 func (f *RegionFit) IsIsolationPreserved(target *RegionFit) bool {
-	return f.isIsolationPreserved(target, true)
+	return f.preservesIsolation(target, true)
 }
 
-// isIsolationPreserved optionally keeps the weighted score check. Leader
+// preservesIsolation optionally keeps the weighted score check. Leader
 // transfers skip it: they move no peer, so a lower score only reflects how
 // peers are assigned to rules, not a change in replica locations.
-func (f *RegionFit) isIsolationPreserved(target *RegionFit, checkScore bool) bool {
+func (f *RegionFit) preservesIsolation(target *RegionFit, checkScore bool) bool {
 	if target == nil || len(f.RuleFits) != len(target.RuleFits) {
 		return false
 	}
