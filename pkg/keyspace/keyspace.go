@@ -818,6 +818,14 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 
 // LoadKeyspaceByIDWithRevision returns the keyspace and the modification revision of its persisted metadata.
 func (manager *Manager) LoadKeyspaceByIDWithRevision(ctx context.Context, spaceID uint32) (*keyspacepb.KeyspaceMeta, int64, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(manager.ctx, cancel)
+	defer func() { stop(); cancel() }()
+	// AfterFunc dispatches asynchronously for an already-canceled manager.
+	// Reflect that cancellation before passing the context to storage.
+	if manager.ctx.Err() != nil {
+		cancel()
+	}
 	meta, revision, err := manager.store.LoadKeyspaceMetaWithRevision(ctx, spaceID)
 	if err != nil {
 		return nil, 0, err
