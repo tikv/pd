@@ -107,6 +107,10 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	conf := cluster.GetSchedulerConfig()
 	snapshotFilter := filter.NewSnapshotSendFilter(stores, constant.Medium)
 	faultTargets := filter.SelectUnavailableTargetStores(stores, s.filters, conf, collector, s.filterCounter)
+	faultTargetIDs := make(map[uint64]struct{}, len(faultTargets))
+	for _, store := range faultTargets {
+		faultTargetIDs[store.GetID()] = struct{}{}
+	}
 	sourceStores := filter.SelectSourceStores(stores, s.filters, conf, collector, s.filterCounter)
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	s.OpController.GetFastOpInfluence(cluster.GetBasicCluster(), opInfluence)
@@ -212,7 +216,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 					// the replica filter will cache the last region fit and the select one will only pict the first one region that
 					// satisfy all the filters, so the region fit must belong the scheduled region.
 					solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
-					op, retryRegion := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets)
+					op, retryRegion := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargetIDs)
 					if op != nil {
 						s.resetLimit(solver.Source)
 						op.Counters = append(op.Counters, balanceRegionNewOpCounter)
@@ -220,8 +224,8 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 					}
 					solver.Step--
 					rejectedRegions = append(rejectedRegions, solver.Region.GetID())
-					// Region-specific target restrictions can fall back within the
-					// bounded samples. Share score-rejected attempts across roles.
+					// Preserve source-wide backoff while allowing region-dependent
+					// rejections to continue within the sampling bound.
 					if !retryRegion {
 						attempts++
 						if attempts >= retryLimit {
@@ -241,12 +245,12 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-// The boolean reports whether store filters blocked an otherwise useful target,
-// so another region can be tried without spending the source retry quota.
-func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector, dstStores []*core.StoreInfo, faultStores []*core.StoreInfo) (*operator.Operator, bool) {
+// On failure, the boolean permits a bounded retry when a region-specific
+// restriction may have blocked a useful move.
+func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector, dstStores []*core.StoreInfo, faultTargetIDs map[uint64]struct{}) (*operator.Operator, bool) {
 	excludeTargets := solver.Region.GetStoreIDs()
-	for _, store := range faultStores {
-		excludeTargets[store.GetID()] = struct{}{}
+	for storeID := range faultTargetIDs {
+		excludeTargets[storeID] = struct{}{}
 	}
 	// the order of the filters should be sorted by the cost of the cpu overhead.
 	// the more expensive the filter is, the later it should be placed.
@@ -260,6 +264,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	hasTarget := len(candidates.Stores) != 0
 	if hasTarget {
 		solver.Step++
+		defer func() { solver.Step-- }()
 	}
 
 	// candidates are sorted by region score desc, so we pick the last store as target store.
@@ -288,7 +293,8 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
 			}
-			return nil, false
+			solver.Step--
+			return nil, true
 		}
 		if collector != nil {
 			collector.Collect()
@@ -305,16 +311,17 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	}
 
 	balanceRegionNoReplacementCounter.Inc()
-	if hasTarget {
-		solver.Step--
-	}
-	// A target rejected for this region may still accept a different one.
-	// If no store would improve the score even without those restrictions,
-	// preserve the source's backoff instead of scanning more candidates.
+	// A smaller region or one with different peers may still move. Use the
+	// tolerance delta as an optimistic bound, while retaining global exclusions.
+	minimumDelta := solver.getTolerantResource()
+	sourceScore := solver.sourceStoreScoreWithRegionDelta(s.GetName(), minimumDelta)
 	for _, target := range dstStores {
+		if _, unavailable := faultTargetIDs[target.GetID()]; unavailable {
+			continue
+		}
 		solver.Target = target
-		solver.targetScore = solver.targetStoreScore(s.GetName())
-		if solver.shouldBalance(s.GetName()) {
+		targetScore := solver.targetStoreScoreWithRegionDelta(s.GetName(), minimumDelta)
+		if sourceScore > targetScore {
 			return nil, true
 		}
 	}
