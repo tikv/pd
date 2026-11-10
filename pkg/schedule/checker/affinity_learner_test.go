@@ -158,6 +158,48 @@ func TestAffinityCheckerLearnerSwapIsolation(t *testing.T) {
 	re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
 }
 
+func TestAffinityCheckerLearnerSwapFallback(t *testing.T) {
+	re := require.New(t)
+	c, tc, _ := newLearnerConflictController(t)
+	tc.SetEnableUseJointConsensus(true)
+	tc.AddRegionStore(6, 10)
+	re.NoError(tc.GetRuleManager().SetRule(newLearnerRule("2", "4", "6")))
+	rule := newLearnerRule("2", "5")
+	rule.ID = "learner-2"
+	re.NoError(tc.GetRuleManager().SetRule(rule))
+	putLearner(tc, 1, 4)
+	region := tc.GetRegion(1).Clone(core.WithAddPeer(&metapb.Peer{Id: 201, StoreId: 5, Role: metapb.PeerRole_Learner}))
+	tc.PutRegion(region)
+	manager := tc.GetAffinityManager()
+	const id = "learner-swap-fallback"
+	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+		ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 4, 5},
+	}, region.GetStartKey(), region.GetEndKey()))
+	re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+	re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(cloneRegionWithReplacePeerStores(region, 1, 1, 4, 5), false))
+
+	// The first learner can use store 2 or 6; the second can use only store 2.
+	ops := c.CheckRegion(region)
+	re.Len(ops, 1, "the mixed layout fits (group available: %t)", manager.GetAffinityGroupState(id).AffinitySchedulingAllowed)
+	moved := operator.ApplyOperatorStep(region, ops[0])
+	re.NotNil(moved.GetStoreLearner(6))
+	// ApplyOperatorStep does not simulate joint role changes.
+	moved = moved.Clone(core.WithRole(region.GetStoreLearner(4).GetId(), metapb.PeerRole_Voter),
+		core.WithRole(region.GetStoreLearner(5).GetId(), metapb.PeerRole_Voter),
+		core.WithRole(region.GetStoreVoter(2).GetId(), metapb.PeerRole_Learner),
+		core.WithRole(region.GetStoreVoter(3).GetId(), metapb.PeerRole_Learner))
+	tc.PutRegion(moved)
+	operator.ApplyOperator(tc, ops[0])
+	checkAndApply(c, tc, 1)
+	moved = tc.GetRegion(1)
+	re.NotNil(moved.GetStoreLearner(6))
+	re.NotNil(moved.GetStoreLearner(2))
+	re.True(tc.GetRuleManager().FitRegionWithoutCache(tc, moved).IsSatisfied())
+	state := manager.GetAffinityGroupState(id)
+	re.Equal(affinity.PhaseStable, state.Phase)
+	re.Equal([]uint64{1, 4, 5}, state.VoterStoreIDs)
+}
+
 // If the rule of the learner does not allow the voter store that the target
 // drops, or with location labels another store is a better location, the
 // learner moves to that store. While that store is busy, the move waits

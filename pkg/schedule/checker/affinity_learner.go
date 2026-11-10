@@ -125,9 +125,9 @@ func (c *AffinityChecker) waitsForBetterStore(region *core.RegionInfo) bool {
 // placeLearners returns roles with another store for each learner of
 // conflicts, the first such layout that accept takes, or nil. With swap, a
 // learner takes in turn each voter store of the Region that the layout does
-// not keep and its rule allows, and only a learner without such a store takes
-// a store chosen as the rule checker adds a learner. It also reports whether a
-// learner took a voter store and whether a store was temporarily unavailable.
+// not keep and its rule allows, followed by a store chosen as the rule checker
+// adds a learner. It also reports whether a learner took a voter store and
+// whether a store was temporarily unavailable.
 func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.RegionFit,
 	roles map[uint64]placement.PeerRoleType, conflicts []*metapb.Peer, swap bool,
 	accept func(map[uint64]placement.PeerRoleType) bool) (target map[uint64]placement.PeerRoleType, swapped, temporary bool) {
@@ -147,29 +147,31 @@ func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.
 		storeIDs = c.learnerSwapStores(region, rf.Rule, roles)
 		swapped = len(storeIDs) > 0
 	}
-	if !swapped {
-		used := make(map[uint64]struct{}, len(roles))
-		var stores []*core.StoreInfo
-		for id := range roles {
-			used[id] = struct{}{}
-			if store := c.cluster.GetStore(id); store != nil && placement.MatchLabelConstraints(store, rf.Rule.LabelConstraints) {
-				stores = append(stores, store)
+	// A zero ID tries the rule checker's store after all swaps.
+	for _, storeID := range append(storeIDs, 0) {
+		if storeID == 0 {
+			used := make(map[uint64]struct{}, len(roles))
+			var stores []*core.StoreInfo
+			for id := range roles {
+				used[id] = struct{}{}
+				if store := c.cluster.GetStore(id); store != nil && placement.MatchLabelConstraints(store, rf.Rule.LabelConstraints) {
+					stores = append(stores, store)
+				}
+			}
+			var blocked bool
+			storeID, blocked = c.strategy(region, rf.Rule, false).SelectStoreToAdd(stores, filter.NewExcludedFilter(c.Name(), nil, used))
+			temporary = temporary || blocked
+			if storeID == 0 {
+				break
 			}
 		}
-		storeID, blocked := c.strategy(region, rf.Rule, false).SelectStoreToAdd(stores, filter.NewExcludedFilter(c.Name(), nil, used))
-		if storeID == 0 {
-			return nil, false, blocked
-		}
-		storeIDs = []uint64{storeID}
-	}
-	for _, storeID := range storeIDs {
 		next := maps.Clone(roles)
 		next[storeID] = placement.Learner
 		var nextSwapped, blocked bool
 		target, nextSwapped, blocked = c.placeLearners(region, fit, next, conflicts[1:], swap, accept)
 		swapped, temporary = swapped || nextSwapped, temporary || blocked
 		if target != nil {
-			break
+			return target, region.GetStoreVoter(storeID) != nil || nextSwapped, temporary
 		}
 	}
 	return target, swapped, temporary
