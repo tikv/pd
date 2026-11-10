@@ -105,7 +105,7 @@ func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *htt
 		return
 	}
 	if isAffinityLabelRulePatch(patch) {
-		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	if err := cluster.GetRegionLabeler().Patch(patch); err != nil {
@@ -188,7 +188,7 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 		return
 	}
 	if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
-		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	err = cluster.GetRegionLabeler().DeleteLabelRule(id)
@@ -223,7 +223,7 @@ func (h *regionLabelHandler) SetRegionLabelRule(w http.ResponseWriter, r *http.R
 		return
 	}
 	if isAffinityLabelRule(&rule) {
-		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	if err := cluster.GetRegionLabeler().SetLabelRule(&rule); err != nil {

@@ -36,5 +36,5 @@ We use [Swagger 2.0](https://swagger.io/specification/v2/) to automatically gene
 
 ## Error responses
 
-Use `apiutil.ErrorResp` with `apiutil.NewInvalidInputErr` or `apiutil.NewInternalErr` for structured error responses.
+Use `apiutil.ErrorResp` with `errs.NewInvalidInputErr` or `errs.NewInternalErr` for structured error responses.
 These responses include the `TiDB-Error-Code` header and a JSON body with `code`, `msg`, and `data` fields. Internal errors also include a `stack` field.

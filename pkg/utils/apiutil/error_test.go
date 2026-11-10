@@ -26,6 +26,8 @@ import (
 	"github.com/unrolled/render"
 
 	"github.com/pingcap/errors"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 type responseTestError struct {
@@ -33,6 +35,11 @@ type responseTestError struct {
 }
 
 func (e *responseTestError) Error() string { return e.Detail }
+
+type causeOnlyResponseError struct{ error }
+
+// Cause exposes a legacy wrapper that has no Unwrap method.
+func (e causeOnlyResponseError) Cause() error { return e.error }
 
 func TestErrorResp(t *testing.T) {
 	plainErr := stderrors.New("request failed")
@@ -48,12 +55,17 @@ func TestErrorResp(t *testing.T) {
 	}{
 		{name: "nil", status: http.StatusInternalServerError, message: "nil error"},
 		{name: "plain", err: plainErr, status: http.StatusInternalServerError, message: plainErr.Error()},
-		{name: "invalid input", err: NewInvalidInputErr(plainErr), status: http.StatusBadRequest, code: "input", message: plainErr.Error(), data: `{}`},
-		{name: "typed input", err: NewInvalidInputErr(typeErr), status: http.StatusBadRequest, code: "input", message: typeErr.Error(), data: `{"detail":"invalid store ID"}`},
-		{name: "annotated input", err: errors.Annotate(NewInvalidInputErr(plainErr), "store"), status: http.StatusBadRequest, code: "input", message: "store: request failed", data: `{}`},
-		{name: "wrapped input", err: fmt.Errorf("store: %w", NewInvalidInputErr(plainErr)), status: http.StatusBadRequest, code: "input", message: "store: request failed", data: `{}`},
-		{name: "internal", err: NewInternalErr(plainErr), status: http.StatusInternalServerError, code: "internal", message: plainErr.Error(), data: `{}`, stack: true},
-		{name: "wrapped internal", err: errors.Annotate(NewInternalErr(plainErr), "config"), status: http.StatusInternalServerError, code: "internal", message: "config: request failed", data: `{}`, stack: true},
+		{name: "invalid input", err: errs.NewInvalidInputErr(plainErr), status: http.StatusBadRequest, code: "input", message: plainErr.Error(), data: `{}`},
+		{name: "typed input", err: errs.NewInvalidInputErr(typeErr), status: http.StatusBadRequest, code: "input", message: typeErr.Error(), data: `{"detail":"invalid store ID"}`},
+		{name: "annotated input", err: errors.Annotate(errs.NewInvalidInputErr(plainErr), "store"), status: http.StatusBadRequest, code: "input", message: "store: request failed", data: `{}`},
+		{name: "wrapped input", err: fmt.Errorf("store: %w", errs.NewInvalidInputErr(plainErr)), status: http.StatusBadRequest, code: "input", message: "store: request failed", data: `{}`},
+		{name: "cause input", err: causeOnlyResponseError{errs.NewInvalidInputErr(plainErr)}, status: http.StatusBadRequest, code: "input", message: plainErr.Error(), data: `{}`},
+		{name: "mixed input chain", err: fmt.Errorf("store: %w", causeOnlyResponseError{errs.NewInvalidInputErr(typeErr)}), status: http.StatusBadRequest, code: "input", message: "store: invalid store ID", data: `{"detail":"invalid store ID"}`},
+		{name: "repeated typed input", err: errs.NewInvalidInputErr(errs.NewInvalidInputErr(typeErr)), status: http.StatusBadRequest, code: "input", message: typeErr.Error(), data: `{"detail":"invalid store ID"}`},
+		{name: "repeated typed internal", err: errs.NewInternalErr(errs.NewInternalErr(typeErr)), status: http.StatusInternalServerError, code: "internal", message: typeErr.Error(), data: `{"detail":"invalid store ID"}`, stack: true},
+		{name: "cause internal", err: causeOnlyResponseError{errs.NewInternalErr(plainErr)}, status: http.StatusInternalServerError, code: "internal", message: plainErr.Error(), data: `{}`, stack: true},
+		{name: "internal", err: errs.NewInternalErr(plainErr), status: http.StatusInternalServerError, code: "internal", message: plainErr.Error(), data: `{}`, stack: true},
+		{name: "wrapped internal", err: errors.Annotate(errs.NewInternalErr(plainErr), "config"), status: http.StatusInternalServerError, code: "internal", message: "config: request failed", data: `{}`, stack: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -88,7 +100,8 @@ func TestErrorResp(t *testing.T) {
 func TestInternalErrorPreservesStack(t *testing.T) {
 	re := require.New(t)
 	original := errors.New("storage failed")
-	wrapped := NewInternalErr(original)
+	wrapped := errs.NewInternalErr(original)
+	re.Implements((*errors.StackTracer)(nil), wrapped)
 	re.ErrorIs(wrapped, original)
 	re.Equal(original, errors.Cause(wrapped))
 	response := httptest.NewRecorder()

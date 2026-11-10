@@ -406,9 +406,9 @@ func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.Read
 	}
 	var responseErr error
 	if jsonErr, ok := errors.Cause(err).(JSONError); ok {
-		responseErr = NewInvalidInputErr(jsonErr.Err)
+		responseErr = errs.NewInvalidInputErr(jsonErr.Err)
 	} else {
-		responseErr = NewInternalErr(err)
+		responseErr = errs.NewInternalErr(err)
 	}
 	ErrorResp(rd, w, responseErr)
 	return err

@@ -473,7 +473,7 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 	if err := h.svr.PatchScheduleConfig(data); err != nil {
 		taggedErr := apiutil.TagJSONError(err)
 		if jsonErr, ok := errors.Cause(taggedErr).(apiutil.JSONError); ok {
-			apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(jsonErr.Err))
+			apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(jsonErr.Err))
 			return
 		}
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -605,13 +605,13 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	}
 	version, ok := input["cluster-version"]
 	if !ok {
-		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errors.New("not set cluster-version")))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errors.New("not set cluster-version")))
 		return
 	}
 
 	err := h.svr.SetClusterVersion(version)
 	if err != nil {
-		apiutil.ErrorResp(h.rd, w, apiutil.NewInternalErr(err))
+		apiutil.ErrorResp(h.rd, w, errs.NewInternalErr(err))
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, "The cluster version is updated.")
