@@ -276,12 +276,10 @@ func NewGroupTokenBucket(resourceGroupName string, tokenBucket *rmpb.TokenBucket
 		return &GroupTokenBucket{}
 	}
 	return &GroupTokenBucket{
-		Settings: tokenBucket.GetSettings(),
-		GroupTokenBucketState: GroupTokenBucketState{
-			Tokens:            tokenBucket.GetTokens(),
-			resourceGroupName: resourceGroupName,
-			tokenSlots:        make(map[uint64]*tokenSlot),
-		},
+		Settings:          tokenBucket.GetSettings(),
+		Tokens:            tokenBucket.GetTokens(),
+		resourceGroupName: resourceGroupName,
+		tokenSlots:        make(map[uint64]*tokenSlot),
 	}
 }
 

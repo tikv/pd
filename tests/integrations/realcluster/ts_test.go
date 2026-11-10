@@ -27,9 +27,7 @@ type tsSuite struct {
 
 func TestTS(t *testing.T) {
 	suite.Run(t, &tsSuite{
-		realClusterSuite: realClusterSuite{
-			suiteName: "ts",
-		},
+		suiteName: "ts",
 	})
 }
 

@@ -33,10 +33,21 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-func TestSecurity(t *testing.T) {
+func TestRedactInfoLogDefault(t *testing.T) {
 	re := require.New(t)
-	cfg := NewConfig()
-	re.Equal(logutil.RedactInfoLogOFF, cfg.Security.RedactInfoLog)
+	for _, tc := range []struct {
+		data     string
+		expected logutil.RedactInfoLogType
+	}{
+		{"", logutil.RedactInfoLogON},
+		{"[security]\nredact-info-log = false", logutil.RedactInfoLogOFF},
+	} {
+		cfg := NewConfig()
+		meta, err := toml.Decode(tc.data, cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta, false))
+		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
+	}
 }
 
 func TestTLS(t *testing.T) {
@@ -52,6 +63,51 @@ func TestBadFormatJoinAddr(t *testing.T) {
 	cfg := NewConfig()
 	cfg.Join = "127.0.0.1:2379" // Wrong join addr without scheme.
 	re.Error(cfg.Adjust(nil, false))
+}
+
+// TestJoinAddr covers that --join accepts the comma-separated endpoint list it
+// is documented to take, and still rejects a list containing a bad endpoint.
+func TestJoinAddr(t *testing.T) {
+	testCases := []struct {
+		name    string
+		join    string
+		wantErr bool
+	}{
+		{
+			name: "single endpoint",
+			join: "http://127.0.0.1:2379",
+		},
+		{
+			name: "two endpoints",
+			join: "http://127.0.0.1:2379,http://127.0.0.1:2381",
+		},
+		{
+			name: "three endpoints with mixed schemes",
+			join: "http://pd-0.pd-peer:2379,https://pd-1.pd-peer:2379,http://[::1]:2379",
+		},
+		{
+			name: "peer service endpoints",
+			join: "http://demo-pd-0.demo-pd-peer.demo.svc:2380,http://demo-pd-1.demo-pd-peer.demo.svc:2380",
+		},
+		{
+			name:    "second endpoint has no scheme",
+			join:    "http://127.0.0.1:2379,127.0.0.1:2381",
+			wantErr: true,
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			cfg.Join = testCase.join
+			err := cfg.Adjust(nil, false)
+			if testCase.wantErr {
+				re.Error(err)
+				return
+			}
+			re.NoError(err)
+		})
+	}
 }
 
 func TestReloadConfig(t *testing.T) {
@@ -478,6 +534,38 @@ hot-regions-write-interval= "30m"
 	re.NoError(err)
 	re.Equal(10*time.Minute, cfg.Schedule.HotRegionsWriteInterval.Duration)
 	re.Equal(uint64(7), cfg.Schedule.HotRegionsReservedDays)
+}
+
+func TestMaxStorePreparingTime(t *testing.T) {
+	re := require.New(t)
+	cfgData := ``
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(48*time.Hour, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+	cfgData = `
+[schedule]
+max-store-preparing-time = "40h"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(40*time.Hour, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+	cfgData = `
+[schedule]
+max-store-preparing-time = "0s"
+`
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(0*time.Second, cfg.Schedule.MaxStorePreparingTime.Duration)
 }
 
 func TestConfigClone(t *testing.T) {
