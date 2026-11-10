@@ -149,12 +149,13 @@ func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.
 	}
 	if !swapped {
 		used := make(map[uint64]struct{}, len(roles))
+		var stores []*core.StoreInfo
 		for id := range roles {
 			used[id] = struct{}{}
+			if store := c.cluster.GetStore(id); store != nil && placement.MatchLabelConstraints(store, rf.Rule.LabelConstraints) {
+				stores = append(stores, store)
+			}
 		}
-		stores := slices.DeleteFunc(getRuleFitStores(c.cluster, rf), func(store *core.StoreInfo) bool {
-			return store.GetID() == learner.GetStoreId()
-		})
 		storeID, blocked := c.strategy(region, rf.Rule, false).SelectStoreToAdd(stores, filter.NewExcludedFilter(c.Name(), nil, used))
 		if storeID == 0 {
 			return nil, false, blocked

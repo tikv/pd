@@ -163,17 +163,19 @@ func TestAffinityCheckerLearnerSwapIsolation(t *testing.T) {
 // learner moves to that store. While that store is busy, the move waits
 // instead of expiring the group.
 func TestAffinityCheckerLearnerMoveToRuleStore(t *testing.T) {
-	for _, kind := range []string{"label-constraint", "location-label"} {
+	for _, kind := range []string{"label-constraint", "location-label", "location-label-less-regions"} {
 		t.Run(kind, func(t *testing.T) {
 			re := require.New(t)
 			c, tc, _ := newLearnerConflictController(t)
 			rule := newLearnerRule("4", "5")
-			if kind == "location-label" {
+			if kind != "label-constraint" {
 				// Store 5 is the only store in a zone that no target voter uses. While
 				// it is busy, the swap to store 3 and the move to store 6 fail the
-				// layout check only because store 5 is a better location. Store 6 has
-				// more Regions, so the learner moves to store 5 once it is not busy.
+				// layout check only because store 5 is a better location.
 				tc.AddRegionStore(6, 100)
+				if kind == "location-label-less-regions" {
+					tc.AddRegionStore(6, 0)
+				}
 				for i, zone := range []string{"a", "b", "a", "c", "d", "b"} {
 					tc.SetStoreLabel(uint64(i+1), map[string]string{"zone": zone})
 				}
@@ -196,9 +198,11 @@ func TestAffinityCheckerLearnerMoveToRuleStore(t *testing.T) {
 			tc.SetStoreBusy(5, false)
 			checkAndApply(c, tc, 1, 1)
 			moved := tc.GetRegion(1)
+			state := manager.GetAffinityGroupState(id)
+			re.Equal([]uint64{1, 2, 4}, state.VoterStoreIDs, "the group keeps its target")
 			re.NotNil(moved.GetStoreLearner(5))
 			re.True(tc.GetRuleManager().FitRegionWithoutCache(tc, moved).IsSatisfied())
-			re.Equal(affinity.PhaseStable, manager.GetAffinityGroupState(id).Phase)
+			re.Equal(affinity.PhaseStable, state.Phase)
 			re.Equal(moves+1, promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter))
 			re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
 		})
