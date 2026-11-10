@@ -560,6 +560,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager,
 		s.metaServiceGroupManager,
 	)
+	s.keyspaceManager.StopCacheEpoch()
 	// Only start the metering writer if a valid metering config is provided.
 	if len(s.cfg.Metering.Type) > 0 {
 		s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))

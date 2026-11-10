@@ -386,14 +386,12 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	initClusterDuration := time.Since(initClusterStart)
 	log.Info("initialize cluster completed", zap.Duration("cost", initClusterDuration))
 	if c.keyspaceManager != nil {
-		// The keyspace cache may have been repopulated by a follower-handle
-		// read (which does not require this node to be running or leader)
-		// at any point since the last Stop, including after some other node
-		// removed or changed a keyspace this node cached while it was not
-		// leader. Clear it again here, symmetric with Stop, so this term
-		// starts trusting the cache only from the point it rebuilds it
-		// itself as leader.
-		c.keyspaceManager.ClearCache()
+		c.keyspaceManager.StartCacheEpoch()
+		defer func() {
+			if !c.running {
+				c.keyspaceManager.StopCacheEpoch()
+			}
+		}()
 	}
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
@@ -1029,6 +1027,11 @@ func (c *RaftCluster) Stop() {
 	}
 	c.Unlock()
 
+	if c.keyspaceManager != nil {
+		// API requests are not drained by c.wg. Fence their cache publication
+		// before waiting for the leader-owned background jobs to finish.
+		c.keyspaceManager.StopCacheEpoch()
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -1049,14 +1052,6 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.wg.Wait()
-	// The keyspace cache is only kept in sync with storage while this node is
-	// leader (creates/updates/deletes are leader-only), so it can no longer be
-	// trusted once leadership is lost. Clear it now that every goroutine that
-	// could read or backfill it has stopped, so the next time this node becomes
-	// leader it rebuilds from a known-empty state instead of risking stale data.
-	if c.keyspaceManager != nil {
-		c.keyspaceManager.ClearCache()
-	}
 	log.Info("raft cluster is stopped")
 }
 

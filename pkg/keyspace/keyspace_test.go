@@ -898,6 +898,125 @@ func TestGetKeyspaceIDInRangeBackfillScansToCompletion(t *testing.T) {
 		"a single call should scan all of storage to completion, not just up to the queried end")
 }
 
+func TestKeyspaceCachePublicationAcrossLeaderEpochs(t *testing.T) {
+	writers := []struct {
+		name      string
+		failpoint string
+		write     func(*Manager) error
+	}{
+		{
+			name: "create", failpoint: "saveNewKeyspaceBeforeCacheWrite",
+			write: func(manager *Manager) error {
+				return manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+					Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101}, Name: "ks101", State: keyspacepb.KeyspaceState_DISABLED,
+				})
+			},
+		},
+		{
+			name: "state by ID", failpoint: "updateKeyspaceStateByIDBeforeCacheWrite",
+			write: func(manager *Manager) error {
+				_, err := manager.UpdateKeyspaceStateByID(101, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+				return err
+			},
+		},
+		{
+			name: "state by name", failpoint: "updateKeyspaceStateBeforeCacheWrite",
+			write: func(manager *Manager) error {
+				_, err := manager.UpdateKeyspaceState("ks101", keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+				return err
+			},
+		},
+		{
+			name: "config", failpoint: "updateKeyspaceConfigBeforeCacheWrite",
+			write: func(manager *Manager) error {
+				_, err := manager.UpdateKeyspaceConfig("ks101", []*Mutation{{Op: OpPut, Key: "test", Value: "value"}})
+				return err
+			},
+		},
+	}
+	for _, writer := range writers {
+		t.Run(writer.name, func(t *testing.T) {
+			for _, transition := range []string{"stepdown", "restart after tombstone", "restart after removal", "clear within term"} {
+				t.Run(transition, func(t *testing.T) {
+					re := require.New(t)
+					store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+					manager := NewKeyspaceManager(t.Context(), store, nil, mockid.NewIDAllocator(), &mockConfig{}, nil, nil)
+					manager.StartCacheEpoch()
+					epoch := manager.currentCacheEpoch()
+					if writer.name != "create" {
+						re.NoError(manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+							Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101}, Name: "ks101", State: keyspacepb.KeyspaceState_DISABLED,
+						}))
+					}
+					reached, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+					var releaseOnce sync.Once
+					fp := "github.com/tikv/pd/pkg/keyspace/" + writer.failpoint
+					re.NoError(failpoint.EnableCall(fp, func() {
+						close(reached)
+						<-release
+					}))
+					t.Cleanup(func() {
+						releaseOnce.Do(func() { close(release) })
+						<-done
+						re.NoError(failpoint.Disable(fp))
+					})
+					var writeErr error
+					go func() {
+						defer close(done)
+						writeErr = writer.write(manager)
+					}()
+					<-reached // The old-term transaction has committed, but not published.
+					if transition == "clear within term" {
+						manager.ClearCache()
+						re.Equal(epoch, manager.currentCacheEpoch())
+					} else {
+						manager.StopCacheEpoch()
+						re.Equal(epoch, manager.currentCacheEpoch(), "only becoming leader advances the epoch")
+						// Another leader modifies storage without this node's metaLock.
+						re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+							if transition == "restart after removal" {
+								return store.RemoveKeyspace(txn, 101, "ks101")
+							}
+							meta, err := store.LoadKeyspaceMeta(txn, 101)
+							if err != nil {
+								return err
+							}
+							meta.State = keyspacepb.KeyspaceState_TOMBSTONE
+							return store.SaveKeyspaceMeta(txn, meta)
+						}))
+						if transition != "stepdown" {
+							manager.StartCacheEpoch()
+							re.Equal(epoch+1, manager.currentCacheEpoch())
+							ids, err := manager.GetKeyspaceIDInRange(101, 101, 1)
+							re.NoError(err)
+							re.Empty(ids)
+							re.Greater(manager.keyspaceIDVerifiedUpTo, constant.MaxValidKeyspaceID)
+						}
+					}
+					releaseOnce.Do(func() { close(release) })
+					<-done
+					re.NoError(writeErr, "a committed transaction still reports success when publication is fenced")
+					item, cached := manager.cache.getKeyspaceByID(101)
+					if transition == "clear within term" {
+						re.True(cached, "a normal cache clear must not fence current-term writers")
+					} else {
+						re.True(!cached || item.state == keyspacepb.KeyspaceState_TOMBSTONE,
+							"an old request must not restore live metadata after leadership loss")
+						if transition == "stepdown" {
+							_, err := manager.GetKeyspaceIDInRange(101, 101, 1)
+							re.ErrorContains(err, "not active")
+						} else {
+							ids, err := manager.GetKeyspaceIDInRange(101, 101, 1)
+							re.NoError(err)
+							re.Empty(ids, "a completed backfill must stay correct after the old request resumes")
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestMaxKeyspaceIDExistsOnlyWithMetadata(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)

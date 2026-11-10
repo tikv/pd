@@ -16,6 +16,8 @@ package keyspace
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,6 +75,70 @@ func (suite *keyspaceTestSuite) SetupTest() {
 func (suite *keyspaceTestSuite) TearDownTest() {
 	suite.cancel()
 	suite.cluster.Destroy()
+}
+
+func TestKeyspaceCacheEpochAfterLeaderReturns(t *testing.T) {
+	re := require.New(t)
+	tc, err := tests.NewTestCluster(t.Context(), 2, func(cfg *config.Config, _ string) {
+		cfg.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	t.Cleanup(tc.Destroy)
+	re.NoError(tc.RunInitialServers())
+	oldLeader := tc.WaitLeader()
+	re.NotEmpty(oldLeader)
+	oldServer := tc.GetLeaderServer()
+	re.NoError(oldServer.BootstrapCluster())
+	manager := oldServer.GetKeyspaceManager()
+	id := uint32(101)
+	_, err = manager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{ID: &id, Name: "epoch-test", CreateTime: time.Now().Unix()})
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+
+	reached, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var paused atomic.Bool
+	var releaseOnce sync.Once
+	fp := "github.com/tikv/pd/pkg/keyspace/updateKeyspaceStateByIDBeforeCacheWrite"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		// Only pause the old leader's request, not updates on its successor.
+		if paused.CompareAndSwap(false, true) {
+			close(reached)
+			<-release
+		}
+	}))
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		<-done
+		re.NoError(failpoint.Disable(fp))
+	})
+	var writeErr error
+	go func() {
+		defer close(done)
+		_, writeErr = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+	}()
+	<-reached
+	re.NoError(oldServer.ResignLeader())
+	newLeader := tc.WaitLeaderChange(oldLeader)
+	re.NotEmpty(newLeader)
+	newServer := tc.GetLeaderServer()
+	_, err = newServer.GetKeyspaceManager().UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	re.NoError(newServer.ResignLeader())
+	re.Equal(oldLeader, tc.WaitLeaderChange(newLeader))
+	// Wait until the real Start hook has activated the new epoch and backfilled
+	// its cache before allowing the old request to resume.
+	testutil.Eventually(re, func() bool {
+		ids, err := manager.GetKeyspaceIDInRange(id, id, 1)
+		return err == nil && len(ids) == 0
+	})
+	releaseOnce.Do(func() { close(release) })
+	<-done
+	re.NoError(writeErr)
+	re.False(manager.KeyspaceExist(id), "the old request must not resurrect the tombstoned keyspace")
+	ids, err := manager.GetKeyspaceIDInRange(id, id, 1)
+	re.NoError(err)
+	re.Empty(ids)
 }
 
 func makeMutations() []*keyspace.Mutation {

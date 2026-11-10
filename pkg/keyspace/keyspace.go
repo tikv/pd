@@ -114,6 +114,12 @@ type Manager struct {
 	keyspaceStateLookup  sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
 	cache                *Cache
 	gcBarrierInvalidator atomic.Pointer[func(uint32)]
+	// TODO: Scope KeyspaceManager to the leader lifecycle in a follow-up PR,
+	// separating follower reads as needed, instead of fencing a server-lived manager.
+	// cacheEpochMu serializes publication with leader transitions, not storage IO.
+	cacheEpochMu syncutil.RWMutex
+	cacheEpoch   uint64
+	cacheActive  bool
 	// keyspaceIDRangeMu guards keyspaceIDVerifiedUpTo and the backfill that advances it.
 	keyspaceIDRangeMu syncutil.Mutex
 	// keyspaceIDVerifiedUpTo records that keyspace IDs in [0, keyspaceIDVerifiedUpTo)
@@ -187,6 +193,9 @@ func NewKeyspaceManager(
 		mgm:               mgm,
 		nextPatrolStartID: constant.StartKeyspaceID,
 		cache:             NewCache(),
+		// Standalone managers own an active cache. Server disables publication
+		// until its first leader term and manages subsequent transitions.
+		cacheActive: true,
 	}
 	// Let the meta-service group manager validate group deletion against actual
 	// keyspace assignments instead of the drift-prone persisted counter.
@@ -579,6 +588,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
 	manager.metaLock.Lock(keyspace.GetId())
 	defer manager.metaLock.Unlock(keyspace.GetId())
+	epoch := manager.currentCacheEpoch()
 
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// Save keyspace ID.
@@ -606,7 +616,8 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	})
 	if err == nil {
-		manager.cache.Save(keyspace.GetId(), keyspace.Name, keyspace.State)
+		failpoint.InjectCall("saveNewKeyspaceBeforeCacheWrite")
+		manager.publishKeyspaceMeta(epoch, keyspace)
 	}
 	return err
 }
@@ -1074,6 +1085,7 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 		}
 		return nil
 	}
+	epoch := manager.currentCacheEpoch()
 	err := manager.runTxnWithMetaGroupLock(txnFunc)
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
@@ -1084,7 +1096,7 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 		return nil, err
 	}
 	failpoint.InjectCall("updateKeyspaceConfigBeforeCacheWrite")
-	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	manager.publishKeyspaceMeta(epoch, meta)
 	manager.metaLock.Unlock(lockedID)
 	locked = false
 	// AttachEndpoints takes mgm.RLock. Do not hold metaLock here: another
@@ -1123,6 +1135,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 			manager.metaLock.Unlock(lockedID)
 		}
 	}()
+	epoch := manager.currentCacheEpoch()
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// First get KeyspaceID from Name.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
@@ -1158,7 +1171,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		return nil, err
 	}
 	failpoint.InjectCall("updateKeyspaceStateBeforeCacheWrite")
-	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	manager.publishKeyspaceMeta(epoch, meta)
 	manager.metaLock.Unlock(lockedID)
 	locked = false
 	if manager.mgm != nil {
@@ -1313,6 +1326,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	defer unlockMeta()
 	var meta *keyspacepb.KeyspaceMeta
 	var err error
+	epoch := manager.currentCacheEpoch()
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// Load keyspace by id.
 		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
@@ -1337,7 +1351,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		return nil, err
 	}
 	failpoint.InjectCall("updateKeyspaceStateByIDBeforeCacheWrite")
-	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	manager.publishKeyspaceMeta(epoch, meta)
 	// Cache publication must stay ordered with the transaction, but endpoint
 	// attachment must not acquire mgm.RLock while still holding metaLock.
 	unlockMeta()
@@ -1441,6 +1455,12 @@ func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]ui
 	}
 	manager.keyspaceIDRangeMu.Lock()
 	defer manager.keyspaceIDRangeMu.Unlock()
+	manager.cacheEpochMu.RLock()
+	active := manager.cacheActive
+	manager.cacheEpochMu.RUnlock()
+	if !active {
+		return nil, errors.New("keyspace cache is not active on this node")
+	}
 	// Keep eviction/ClearCache serialized through the lookup too: otherwise an
 	// eviction after a successful backfill could expose an incomplete cache.
 	if err := manager.backfillKeyspaceIDRange(); err != nil {
@@ -1523,17 +1543,52 @@ func (manager *Manager) backfillKeyspaceIDRange() error {
 	return nil
 }
 
-// ClearCache empties the keyspace cache and resets the backfill watermark. It must
-// be called whenever this Manager stops being able to trust that its cache reflects
-// every write (e.g. when the owning RaftCluster loses leadership): creates, updates,
-// and deletes are only ever applied on the leader, so a Manager that was not leader
-// for a while cannot tell whether entries it cached earlier (including ones warmed
-// by serving a read while a follower) are still accurate. Clearing both the cache
-// contents and the watermark together avoids leaving the cache trusted-but-empty for
-// a range GetKeyspaceIDInRange would otherwise skip re-verifying.
+func (manager *Manager) currentCacheEpoch() uint64 {
+	manager.cacheEpochMu.RLock()
+	defer manager.cacheEpochMu.RUnlock()
+	return manager.cacheEpoch
+}
+
+func (manager *Manager) publishKeyspaceMeta(epoch uint64, meta *keyspacepb.KeyspaceMeta) {
+	manager.cacheEpochMu.RLock()
+	defer manager.cacheEpochMu.RUnlock()
+	if manager.cacheActive && manager.cacheEpoch == epoch {
+		manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	}
+}
+
+// StartCacheEpoch starts a new leader term with an empty cache. Old API requests
+// may outlive a leader transition, but must not publish into the new term.
+func (manager *Manager) StartCacheEpoch() {
+	manager.setCacheLeader(true)
+}
+
+// StopCacheEpoch disables publication and clears the cache on leadership loss.
+func (manager *Manager) StopCacheEpoch() {
+	manager.setCacheLeader(false)
+}
+
+func (manager *Manager) setCacheLeader(active bool) {
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
+	manager.cacheEpochMu.Lock()
+	defer manager.cacheEpochMu.Unlock()
+	if active {
+		manager.cacheEpoch++
+	}
+	manager.cacheActive = active
+	manager.cache.clearAll()
+	manager.keyspaceIDVerifiedUpTo = 0
+}
+
+// ClearCache empties the cache and resets its watermark within the current epoch.
+// Leadership changes must use StartCacheEpoch/StopCacheEpoch to also fence API
+// requests that may outlive the previous leader term.
 func (manager *Manager) ClearCache() {
 	manager.keyspaceIDRangeMu.Lock()
 	defer manager.keyspaceIDRangeMu.Unlock()
+	manager.cacheEpochMu.Lock()
+	defer manager.cacheEpochMu.Unlock()
 	manager.cache.clearAll()
 	manager.keyspaceIDVerifiedUpTo = 0
 }
@@ -1631,7 +1686,7 @@ func (manager *Manager) UpdateKeyspaceMetaToCache(meta *keyspacepb.KeyspaceMeta)
 	if meta == nil {
 		return
 	}
-	manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+	manager.publishKeyspaceMeta(manager.currentCacheEpoch(), meta)
 }
 
 // DeleteKeyspaceMetaFromCache removes a keyspace from cache by ID.
