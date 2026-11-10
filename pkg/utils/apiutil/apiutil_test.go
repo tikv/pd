@@ -16,6 +16,7 @@ package apiutil
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -49,27 +50,32 @@ func TestJsonRespondErrorOk(t *testing.T) {
 }
 
 func TestJsonRespondErrorBadInput(t *testing.T) {
-	re := require.New(t)
-	rd := render.New(render.Options{
-		IndentJSON: true,
-	})
-	response := httptest.NewRecorder()
-	body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
-	var input []string
-	err := ReadJSONRespondError(rd, response, body, &input)
-	re.EqualError(err, "json: cannot unmarshal object into Go value of type []string")
-	result := response.Result()
-	defer result.Body.Close()
-	re.Equal(400, result.StatusCode)
-
-	{
-		body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\","))
-		var input []string
-		err := ReadJSONRespondError(rd, response, body, &input)
-		re.EqualError(err, "unexpected end of JSON input")
-		result := response.Result()
-		defer result.Body.Close()
-		re.Equal(400, result.StatusCode)
+	for _, tc := range []struct {
+		name    string
+		body    string
+		message string
+	}{
+		{name: "type mismatch", body: `{"zone":"cn","host":"local"}`, message: "json: cannot unmarshal object into Go value of type []string"},
+		{name: "invalid syntax", body: `{"zone":"cn",`, message: "unexpected end of JSON input"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			response := httptest.NewRecorder()
+			var input []string
+			err := ReadJSONRespondError(render.New(), response, io.NopCloser(bytes.NewBufferString(tc.body)), &input)
+			re.EqualError(err, tc.message)
+			re.Equal(http.StatusBadRequest, response.Code)
+			re.Equal("input", response.Header().Get("TiDB-Error-Code"))
+			var body struct {
+				Code string          `json:"code"`
+				Msg  string          `json:"msg"`
+				Data json.RawMessage `json:"data"`
+			}
+			re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
+			re.Equal("input", body.Code)
+			re.Equal(tc.message, body.Msg)
+			re.NotEmpty(body.Data)
+		})
 	}
 }
 

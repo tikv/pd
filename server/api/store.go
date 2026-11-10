@@ -25,7 +25,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
@@ -66,7 +65,7 @@ func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -98,7 +97,7 @@ func (h *storeHandler) DeleteStore(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -130,7 +129,7 @@ func (h *storeHandler) SetStoreState(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errParse))
 		return
 	}
 	stateStr := r.URL.Query().Get("state")
@@ -184,7 +183,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -195,7 +194,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 
 	// EngineKey is set by TiKV/TiFlash and should not be modified by user
 	if _, ok := input[core.EngineKey]; ok {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.Errorf("label key %q is reserved", core.EngineKey)))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errors.Errorf("label key %q is reserved", core.EngineKey)))
 		return
 	}
 
@@ -208,7 +207,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := sc.ValidateLabels(labels); err != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(err))
 		return
 	}
 
@@ -237,7 +236,7 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -246,12 +245,12 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := sc.ValidateLabelKey(labelKey); err != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(err))
 		return
 	}
 	// EngineKey is set by TiKV/TiFlash and should not be modified by user
 	if labelKey == core.EngineKey {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.Errorf("can't modify label key %q", core.EngineKey)))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errors.Errorf("can't modify label key %q", core.EngineKey)))
 		return
 	}
 	if err := rc.DeleteStoreLabel(storeID, labelKey); err != nil {
@@ -279,7 +278,7 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -344,7 +343,7 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -487,7 +486,7 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 		}
 
 		if err := sc.ValidateLabels(labels); err != nil {
-			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+			apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(err))
 			return
 		}
 		for _, typ := range typeValues {
@@ -565,7 +564,7 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 	if v := r.URL.Query().Get("id"); v != "" {
 		storeID, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+			apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(err))
 			return
 		}
 

@@ -24,8 +24,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 
-	"github.com/pingcap/errcode"
-
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -96,7 +94,7 @@ func (h *regionLabelHandler) GetAllRegionLabelRules(w http.ResponseWriter, r *ht
 //	@Param			patch	body	labeler.LabelRulePatch	true	"Patch to update rules"
 //	@Produce		json
 //	@Success		200	{string}	string			"Update region label rules successfully."
-//	@Failure		400	{object}	any				"Invalid input: a JSON string, or an errcode.JSONFormat object with code, msg, and data for affinity rejections."
+//	@Failure		400	{object}	any				"Invalid input: a JSON string, or a JSON object with code, msg, and data for affinity rejections."
 //	@Header			400	{string}	TiDB-Error-Code	"Error code for structured errors; input for affinity rejections."
 //	@Failure		500	{string}	string			"PD server failed to proceed the request."
 //	@Router			/config/region-label/rules [patch]
@@ -107,7 +105,7 @@ func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *htt
 		return
 	}
 	if isAffinityLabelRulePatch(patch) {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	if err := cluster.GetRegionLabeler().Patch(patch); err != nil {
@@ -177,7 +175,7 @@ func (h *regionLabelHandler) GetRegionLabelRuleByID(w http.ResponseWriter, r *ht
 //	@Param			id	path	string	true	"Rule Id"
 //	@Produce		json
 //	@Success		200	{string}	string			"Delete rule successfully."
-//	@Failure		400	{object}	any				"Invalid input: a JSON string, or an errcode.JSONFormat object with code, msg, and data for affinity rejections."
+//	@Failure		400	{object}	any				"Invalid input: a JSON string, or a JSON object with code, msg, and data for affinity rejections."
 //	@Header			400	{string}	TiDB-Error-Code	"Error code for structured errors; input for affinity rejections."
 //	@Failure		404	{string}	string			"The rule does not exist."
 //	@Failure		500	{string}	string			"PD server failed to proceed the request."
@@ -190,7 +188,7 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 		return
 	}
 	if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	err = cluster.GetRegionLabeler().DeleteLabelRule(id)
@@ -214,7 +212,7 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 //	@Param			rule	body	labeler.LabelRule	true	"Parameters of label rule"
 //	@Produce		json
 //	@Success		200	{string}	string			"Update rule successfully."
-//	@Failure		400	{object}	any				"Invalid input: a JSON string, or an errcode.JSONFormat object with code, msg, and data for affinity rejections."
+//	@Failure		400	{object}	any				"Invalid input: a JSON string, or a JSON object with code, msg, and data for affinity rejections."
 //	@Header			400	{string}	TiDB-Error-Code	"Error code for structured errors; input for affinity rejections."
 //	@Failure		500	{string}	string			"PD server failed to proceed the request."
 //	@Router			/config/region-label/rule [post]
@@ -225,7 +223,7 @@ func (h *regionLabelHandler) SetRegionLabelRule(w http.ResponseWriter, r *http.R
 		return
 	}
 	if isAffinityLabelRule(&rule) {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
+		apiutil.ErrorResp(h.rd, w, apiutil.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	if err := cluster.GetRegionLabeler().SetLabelRule(&rule); err != nil {
