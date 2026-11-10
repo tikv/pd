@@ -146,8 +146,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			rs = km.GetNonOverlappingKeyRanges(&rs[0])
 		}
 	}
-	// Try each peer role in priority order, with a separate retry budget so
-	// rejected candidates cannot prevent balancing regions in later roles.
+	// Try each peer role in priority order.
 	regionSelectors := [...]func(uint64, []keyutil.KeyRange) []*core.RegionInfo{
 		cluster.RandPendingRegions,
 		cluster.RandFollowerRegions,
@@ -161,32 +160,43 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			break
 		}
 		foundRegion := false
+		// Share the source quota across roles, reserving a separate quota for
+		// small regions so their rejection cannot hide larger candidates.
+		attempts, smallRegionAttempts := 0, 0
 		var rejectedRegions []uint64
 		regionFilters := append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()))
 		for i, selectRegions := range regionSelectors {
+			if attempts >= retryLimit && smallRegionAttempts >= retryLimit {
+				break
+			}
 			if i == 1 {
 				regionFilters = append(regionFilters, pendingFilter)
 			}
-			attempts := 0
-			filteredBatches := 0
-			for range retryLimit {
+			// Allow one resample without letting repeated rejected regions
+			// exhaust the source quota before trying the next role.
+			for range min(2, retryLimit) {
 				regions := selectRegions(solver.sourceStoreID(), rs)
 				if len(regions) == 0 {
 					break
 				}
-				foundCandidate := false
 				for j, region := range regions {
 					if slices.Contains(rejectedRegions, region.GetID()) {
-						foundCandidate = true
+						continue
+					}
+					smallRegion := region.GetApproximateSize() <= core.EmptyRegionApproximateSize
+					if (smallRegion && smallRegionAttempts >= retryLimit) || (!smallRegion && attempts >= retryLimit) {
 						continue
 					}
 					solver.Region = filter.SelectOneRegion(regions[j:j+1], collector, regionFilters...)
 					if solver.Region == nil {
 						continue
 					}
-					foundCandidate = true
 					foundRegion = true
-					attempts++
+					if smallRegion {
+						smallRegionAttempts++
+					} else {
+						attempts++
+					}
 					log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 					// Skip hot regions.
 					if cluster.IsRegionHot(solver.Region) {
@@ -223,16 +233,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 					solver.Step--
 					rejectedRegions = append(rejectedRegions, solver.Region.GetID())
 				}
-				// A filtered sample can miss eligible regions. Allow one more
-				// sample without spending the whole quota on a filtered role.
-				if !foundCandidate {
-					filteredBatches++
-					if filteredBatches == 2 {
-						break
-					}
-				}
-				// Finish an already sampled batch before enforcing the attempt budget.
-				if attempts >= retryLimit {
+				if attempts >= retryLimit && smallRegionAttempts >= retryLimit {
 					break
 				}
 			}
