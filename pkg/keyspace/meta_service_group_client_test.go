@@ -30,7 +30,6 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -314,7 +313,7 @@ func TestMetaServiceGroupClientTransport(t *testing.T) {
 		unhealthyCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		defer cancel()
 		err = manager.UpdateGroupsSafely(unhealthyCtx, map[string]string{"g": "https://" + urls[0].Host}, nil, func() error { persisted = true; return nil }, nil)
-		re.ErrorIs(err, errs.ErrMetaServiceGroupUnhealthy)
+		re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
 		re.False(persisted)
 		persistErr := errors.New("persist failed")
 		err = manager.UpdateGroupsSafely(ctx, map[string]string{"g": httpsEndpoint}, nil, func() error { return persistErr }, nil)

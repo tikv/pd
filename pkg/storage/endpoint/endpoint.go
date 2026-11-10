@@ -66,8 +66,6 @@ func (se *StorageEndpoint) createRawTxnWithContext(ctx context.Context) (kv.RawT
 	return rawTxnCapable.CreateRawTxnWithContext(ctx), nil
 }
 
-<<<<<<< HEAD
-=======
 // loadValueWithRevision loads a key and its modification revision in one linearizable read.
 // Revision zero means the key is absent; an existing empty value retains its revision.
 func (se *StorageEndpoint) loadValueWithRevision(ctx context.Context, key string) (string, int64, error) {
@@ -92,25 +90,6 @@ func (se *StorageEndpoint) loadValueWithRevision(ctx context.Context, key string
 	return pairs[0].Value, pairs[0].ModRevision, nil
 }
 
-// RunInTxnWithConditions runs f in a transaction with additional etcd
-// comparisons. Backends without conditional transaction support may still run
-// transactions that have no additional conditions.
-func (se *StorageEndpoint) RunInTxnWithConditions(
-	ctx context.Context,
-	conditions []clientv3.Cmp,
-	f func(txn kv.Txn) error,
-) error {
-	if len(conditions) == 0 {
-		return se.RunInTxn(ctx, f)
-	}
-	runner, ok := se.Base.(kv.ConditionalTxnRunner)
-	if !ok {
-		return errors.New("storage backend does not support conditional transactions")
-	}
-	return runner.RunInTxnWithConditions(ctx, conditions, f)
-}
-
->>>>>>> cbcc61de66 (gc, keyspace: honor min-start-ts in meta-service groups (#11447))
 // loadJSON loads a specific key from the StorageEndpoint, and parses it as JSON into type T.
 func loadJSON[T any](se *StorageEndpoint, key string) (T, error) {
 	value, err := se.Load(key)

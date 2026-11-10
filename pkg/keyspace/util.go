@@ -53,6 +53,8 @@ var (
 
 	// ErrUnknownMetaServiceGroup is returned when the specified meta-service group does not exist.
 	ErrUnknownMetaServiceGroup = errors.New("unknown meta-service group")
+	// ErrMetaServiceGroupUnhealthy is returned when a configured group endpoint fails validation or its health check.
+	ErrMetaServiceGroupUnhealthy = errors.New("meta-service group etcd server is unhealthy")
 	// ErrInvalidAssignmentCount is returned when the patched assignment count is negative.
 	ErrInvalidAssignmentCount = errors.New("assignment count must be non-negative")
 	// ErrMetaServiceGroupDisabled is returned when assigning a keyspace to a

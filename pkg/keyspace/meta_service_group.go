@@ -16,15 +16,21 @@ package keyspace
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"maps"
 	"math"
+	"strings"
+	"sync"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
 )
@@ -33,6 +39,8 @@ import (
 type MetaServiceGroupManager struct {
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
+	updateMu        sync.Mutex
+	tlsConfigLoader func() (*tls.Config, error)
 	// metaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	metaServiceGroups map[string]string
@@ -59,17 +67,13 @@ func (m *MetaServiceGroupManager) SetKeyspaceAssignmentCounter(counter func(grou
 func NewMetaServiceGroupManager(
 	store endpoint.MetaServiceGroupStorage,
 	metaServiceGroups map[string]string,
+	tlsConfigLoader func() (*tls.Config, error),
 ) *MetaServiceGroupManager {
 	return &MetaServiceGroupManager{
-<<<<<<< HEAD
-		store:             store,
-		metaServiceGroups: metaServiceGroups,
-=======
 		store:                    store,
 		tlsConfigLoader:          tlsConfigLoader,
 		metaServiceGroups:        cloneMetaServiceGroups(metaServiceGroups),
 		initialMetaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
->>>>>>> cbcc61de66 (gc, keyspace: honor min-start-ts in meta-service groups (#11447))
 	}
 }
 
@@ -319,7 +323,14 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 	persist func() error,
 	afterPersist func(),
 ) error {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+
 	if err := config.AdjustMetaServiceGroups(metaServiceGroups); err != nil {
+		return err
+	}
+	err := m.checkNewGroupsHealth(ctx, metaServiceGroups)
+	if err != nil {
 		return err
 	}
 	if err := m.persistGroupsLocked(ctx, metaServiceGroups, deletedGroups, persist); err != nil {
@@ -331,8 +342,6 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 	return nil
 }
 
-<<<<<<< HEAD
-=======
 // checkNewGroupsHealth verifies every configured endpoint before a group is
 // added or its endpoint is changed.
 func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, metaServiceGroups map[string]string) error {
@@ -347,18 +356,18 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 	for groupID, addresses := range groups {
 		endpoints, err := parseMetaServiceGroupEndpoints(addresses)
 		if err != nil {
-			return fmt.Errorf("%w: group %s: %v", errs.ErrMetaServiceGroupUnhealthy, groupID, err)
+			return fmt.Errorf("%w: group %s: %v", ErrMetaServiceGroupUnhealthy, groupID, err)
 		}
 		for _, endpoint := range endpoints {
 			client, err := m.newEtcdClient([]string{endpoint})
 			if err != nil {
-				return fmt.Errorf("%w: group %s endpoint %s: %v", errs.ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
+				return fmt.Errorf("%w: group %s endpoint %s: %v", ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
 			}
 			healthy := etcdutil.IsHealthy(ctx, client)
 			_ = client.Close()
 			if !healthy {
 				return fmt.Errorf("%w: group %s endpoint %s: etcd health check failed",
-					errs.ErrMetaServiceGroupUnhealthy, groupID, endpoint)
+					ErrMetaServiceGroupUnhealthy, groupID, endpoint)
 			}
 		}
 	}
@@ -377,7 +386,6 @@ func splitMetaServiceGroupEndpoints(addresses string) []string {
 	return endpoints
 }
 
->>>>>>> cbcc61de66 (gc, keyspace: honor min-start-ts in meta-service groups (#11447))
 // persistGroupsLocked performs the delete-guard check and persists the new
 // groups while holding the write lock, which blocks concurrent keyspace
 // assignment (AssignToGroup/PickGroup/reassign all take the read lock).
@@ -403,12 +411,8 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	if err := persist(); err != nil {
 		return err
 	}
-<<<<<<< HEAD
-	m.metaServiceGroups = metaServiceGroups
-=======
 	m.reconcileEtcdClientsLocked(metaServiceGroups)
 	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
->>>>>>> cbcc61de66 (gc, keyspace: honor min-start-ts in meta-service groups (#11447))
 	// Clear the persisted status for deleted groups so re-adding a group with
 	// the same ID does not inherit a stale assignment count or enabled state,
 	// which would skew list output and PickGroup balancing. Best-effort: the
@@ -466,9 +470,6 @@ func (m *MetaServiceGroupManager) assignedKeyspaceCounts(ctx context.Context, gr
 func (m *MetaServiceGroupManager) updateGroups(metaServiceGroups map[string]string) {
 	m.Lock()
 	defer m.Unlock()
-<<<<<<< HEAD
-	m.metaServiceGroups = metaServiceGroups
-=======
 	m.reconcileEtcdClientsLocked(metaServiceGroups)
 	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
 }
@@ -480,5 +481,4 @@ func cloneMetaServiceGroups(metaServiceGroups map[string]string) map[string]stri
 	cloned := make(map[string]string, len(metaServiceGroups))
 	maps.Copy(cloned, metaServiceGroups)
 	return cloned
->>>>>>> cbcc61de66 (gc, keyspace: honor min-start-ts in meta-service groups (#11447))
 }

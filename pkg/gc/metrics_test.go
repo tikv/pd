@@ -898,17 +898,10 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRemovalFencesInflightPublica
 	re.NoError(groupManager.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{2}}}))
 	counted := &barrierMetricsTestKV{Base: s.storage.Base}
 	m.gcMetaStorage = endpoint.NewStorageEndpoint(counted, nil).GetGCStateProvider()
-<<<<<<< HEAD
-	// Remove metadata after it was resolved and the GC transaction loaded its
-	// barriers. The successful GC commit must not restore the removed sample.
-	counted.beforeCommit = func() {
-		_, err := groupManager.RemoveKeyspacesFromGroup(101, m.keyspaceManager, []uint32{2})
-=======
 	// Remove metadata after the GC commit succeeds but before metrics publication.
 	// The successful advancement must not restore the removed sample.
 	counted.afterCommit = func() {
-		_, err := groupManager.RemoveKeyspacesFromGroup(context.Background(), 101, m.keyspaceManager, nil, []uint32{2})
->>>>>>> cbcc61de66 (gc, keyspace: honor min-start-ts in meta-service groups (#11447))
+		_, err := groupManager.RemoveKeyspacesFromGroup(101, m.keyspaceManager, []uint32{2})
 		re.NoError(err)
 		re.Equal(map[string]float64{"global//global": 1_999_712_000}, gatherBarrierMetrics(s.T(), registry))
 	}

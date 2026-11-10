@@ -68,7 +68,7 @@ func (m *MetaServiceGroupManager) GetEtcdClientWithConfigRevision(ctx context.Co
 	}
 	addresses, ok := groups[groupID]
 	if !ok {
-		return nil, 0, fmt.Errorf("%w: %s", errs.ErrUnknownMetaServiceGroup, groupID)
+		return nil, 0, fmt.Errorf("%w: %s", ErrUnknownMetaServiceGroup, groupID)
 	}
 	if current, exists := m.metaServiceGroups[groupID]; !exists || current != addresses {
 		return nil, 0, errs.ErrEtcdTxnConflict.GenWithStackByArgs()
@@ -83,7 +83,7 @@ func (m *MetaServiceGroupManager) getEtcdClientLocked(groupID string) (*clientv3
 	}
 	addresses, ok := m.metaServiceGroups[groupID]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", errs.ErrUnknownMetaServiceGroup, groupID)
+		return nil, fmt.Errorf("%w: %s", ErrUnknownMetaServiceGroup, groupID)
 	}
 	if client := m.etcdClients[groupID]; client != nil {
 		return client, nil

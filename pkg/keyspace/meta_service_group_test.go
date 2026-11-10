@@ -16,12 +16,17 @@ package keyspace
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
+	"maps"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
 type metaServiceGroupTestSuite struct {
@@ -46,11 +51,44 @@ func mockMetaServiceGroups() map[string]string {
 func (suite *metaServiceGroupTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.manager = NewMetaServiceGroupManager(store, mockMetaServiceGroups())
+	suite.manager = NewMetaServiceGroupManager(store, mockMetaServiceGroups(), nil)
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
 	suite.cancel()
+}
+
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelySerializesUpdates() {
+	re := suite.Require()
+	firstPersistStarted := make(chan struct{})
+	releaseFirstPersist := make(chan struct{})
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+
+	go func() {
+		firstDone <- suite.manager.UpdateGroupsSafely(suite.ctx, map[string]string{}, nil, func() error {
+			close(firstPersistStarted)
+			<-releaseFirstPersist
+			return nil
+		}, nil)
+	}()
+
+	<-firstPersistStarted
+	go func() {
+		secondDone <- suite.manager.UpdateGroupsSafely(suite.ctx, map[string]string{}, nil, func() error {
+			return nil
+		}, nil)
+	}()
+
+	select {
+	case err := <-secondDone:
+		re.Failf("concurrent update completed before the first update was released", "error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseFirstPersist)
+	re.NoError(<-firstDone)
+	re.NoError(<-secondDone)
 }
 
 func (suite *metaServiceGroupTestSuite) TestGetAssignmentCountsInitialZero() {
@@ -254,10 +292,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 	delete(groups2, "etcd-group-2")
 	err = suite.manager.UpdateGroupsSafely(suite.ctx, groups2, []string{"etcd-group-1"},
 		func() error { return nil }, nil)
-<<<<<<< HEAD
 	re.ErrorIs(err, ErrGroupHasAssignedKeyspaces)
-=======
-	re.ErrorIs(err, errs.ErrGroupHasAssignedKeyspaces)
 }
 
 func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHealth() {
@@ -290,7 +325,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 		persisted = true
 		return nil
 	}, nil)
-	re.ErrorIs(err, errs.ErrMetaServiceGroupUnhealthy)
+	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
 	re.False(persisted)
 	_, exists := suite.manager.GetGroups()["unhealthy"]
 	re.False(exists)
@@ -301,7 +336,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyChecksNewGroupHeal
 		persisted = true
 		return nil
 	}, nil)
-	re.ErrorIs(err, errs.ErrMetaServiceGroupUnhealthy)
+	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
 	re.False(persisted)
 	re.Equal(endpoint, suite.manager.GetGroups()["healthy"])
 }
@@ -319,7 +354,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelySkipsEmptyEndpoint
 			return nil
 		}, nil)
 		if addresses == " , , " {
-			re.ErrorIs(err, errs.ErrMetaServiceGroupUnhealthy)
+			re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
 			re.False(persisted)
 			continue
 		}
@@ -359,7 +394,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyRefreshesTLSConfig
 	err := manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
 		return nil
 	}, nil)
-	re.ErrorIs(err, errs.ErrMetaServiceGroupUnhealthy)
+	re.ErrorIs(err, ErrMetaServiceGroupUnhealthy)
 	re.Contains(err.Error(), "tls config reload failed")
 	re.Equal(2, loads)
 }
@@ -404,7 +439,6 @@ func (suite *metaServiceGroupTestSuite) TestGroupMapsAreCopiedAtOwnershipBoundar
 	manager.updateGroups(replacement)
 	replacement["etcd-group-0"] = "mutated after replacement"
 	re.Equal("etcd-group-0.tidb-serverless.cluster.svc.local", manager.GetGroups()["etcd-group-0"])
->>>>>>> cbcc61de66 (gc, keyspace: honor min-start-ts in meta-service groups (#11447))
 }
 
 func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() {
