@@ -205,8 +205,8 @@ func TestHTTPError(t *testing.T) {
 		})
 	}
 	re := require.New(t)
-	re.NoError(NewInvalidInputErr(nil))
-	re.NoError(NewInternalErr(nil))
+	re.Panics(func() { _ = NewInvalidInputErr(nil) })
+	re.Panics(func() { _ = NewInternalErr(nil) })
 	re.Nil(FindHTTPError(nil))
 	re.Nil(GetStackTracer(nil))
 }

@@ -25,8 +25,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-// ErrorResp writes a structured response for errors marked by errs.NewInvalidInputErr
-// or errs.NewInternalErr. Other errors produce HTTP status 500 and a JSON string.
+// ErrorResp writes a structured response for HTTP errors, including legacy
+// errcode.ErrorCode values. Other errors produce HTTP status 500 and a JSON string.
 // A nil error also produces HTTP status 500 and is logged at the error level.
 func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	if err == nil {
@@ -39,22 +39,41 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var stack errors.StackTrace
-	if httpErr.HTTPCode() >= http.StatusInternalServerError {
-		if tracer := errs.GetStackTracer(err); tracer != nil {
-			stack = tracer.StackTrace()
+	w.Header().Set("TiDB-Error-Code", httpErr.Code())
+	rd.JSON(w, httpErr.HTTPCode(), newHTTPErrorResponse(httpErr))
+}
+
+type httpErrorResponse struct {
+	Code      string              `json:"code"`
+	Msg       string              `json:"msg"`
+	Data      any                 `json:"data"`
+	Operation string              `json:"operation,omitempty"`
+	Stack     errors.StackTrace   `json:"stack,omitempty"`
+	Others    []httpErrorResponse `json:"others,omitempty"`
+}
+
+func newHTTPErrorResponse(err errs.HTTPError) httpErrorResponse {
+	response := httpErrorResponse{Code: err.Code(), Msg: err.Error(), Data: err.GetClientData()}
+	for _, value := range []any{err, response.Data} {
+		if operation, ok := value.(interface{ GetOperation() string }); ok {
+			response.Operation = operation.GetOperation()
+			if response.Operation != "" {
+				break
+			}
 		}
 	}
-	w.Header().Set("TiDB-Error-Code", httpErr.Code())
-	rd.JSON(w, httpErr.HTTPCode(), struct {
-		Code  string            `json:"code"`
-		Msg   string            `json:"msg"`
-		Data  any               `json:"data"`
-		Stack errors.StackTrace `json:"stack,omitempty"`
-	}{
-		Code:  httpErr.Code(),
-		Msg:   err.Error(),
-		Data:  httpErr.GetClientData(),
-		Stack: stack,
-	})
+	if errs.IsInternalHTTPError(err) {
+		if tracer := errs.GetStackTracer(err); tracer != nil {
+			response.Stack = tracer.StackTrace()
+		}
+	}
+	if group, ok := err.(errors.ErrorGroup); ok {
+		items := group.Errors()
+		for _, item := range items[1:] {
+			if other, ok := item.(errs.HTTPError); ok {
+				response.Others = append(response.Others, newHTTPErrorResponse(other))
+			}
+		}
+	}
+	return response
 }
