@@ -282,9 +282,17 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID), errs.ZapError(errs.ErrGetSourceStore))
 		return nil, errs.ErrStoreNotFound
 	}
+<<<<<<< HEAD
 	filters := []filter.Filter{
 		filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
 	}
+=======
+	srcPeer := srcRegion.GetStorePeer(srcStoreID)
+	if srcPeer == nil {
+		return nil, errs.ErrRegionAbnormalPeer.FastGenByArgs(regionID)
+	}
+	filters := make([]filter.Filter, 0, 4)
+>>>>>>> abea67a10c (schedule: preserve learner roles in grant-hot-region (#11366))
 
 	storeIDs := s.conf.getStoreIDs()
 	destStoreIDs := make([]uint64, 0, len(storeIDs))
@@ -308,12 +316,17 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		return nil, errs.ErrCheckerNotFound
 	}
 
+<<<<<<< HEAD
 	srcPeer := srcStore.GetMeta()
 	if srcPeer == nil {
 		return nil, errs.ErrStoreNotFound
 	}
 	i := s.r.Int() % len(destStoreIDs)
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
+=======
+	i := rand.Int() % len(destStoreIDs)
+	dstStore := &metapb.Peer{StoreId: destStoreIDs[i], Role: srcPeer.GetRole()}
+>>>>>>> abea67a10c (schedule: preserve learner roles in grant-hot-region (#11366))
 
 	if isLeader {
 		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
