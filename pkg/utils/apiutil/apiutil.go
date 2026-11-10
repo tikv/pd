@@ -112,6 +112,24 @@ func TagJSONError(err error) error {
 	return err
 }
 
+// ErrorResp writes a structured response for HTTP errors, including legacy
+// errcode.ErrorCode values. Other errors produce HTTP status 500 and a JSON string.
+// A nil error also produces HTTP status 500 and is logged at the error level.
+func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
+	if err == nil {
+		log.Error("nil is given to errorResp")
+		rd.JSON(w, http.StatusInternalServerError, "nil error")
+		return
+	}
+	httpErr := errs.FindHTTPError(err)
+	if httpErr == nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("TiDB-Error-Code", httpErr.Code())
+	rd.JSON(w, httpErr.HTTPCode(), newHTTPErrorResponse(httpErr))
+}
+
 // GetIPPortFromHTTPRequest returns http client host IP and port from context.
 // Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
 // so `X-Forwarded-For` has the higher priority than `X-Real-Ip`.

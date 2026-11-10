@@ -41,8 +41,10 @@ type causeOnlyResponseError struct{ error }
 // Cause exposes a legacy wrapper that has no Unwrap method.
 func (e causeOnlyResponseError) Cause() error { return e.error }
 
+// TestErrorResp checks response metadata through legacy and standard wrappers.
 func TestErrorResp(t *testing.T) {
 	plainErr := stderrors.New("request failed")
+	normalizedErr := errs.ErrStrconvParseInt.FastGenByArgs("invalid value")
 	typeErr := &responseTestError{Detail: "invalid store ID"}
 	for _, tc := range []struct {
 		name    string
@@ -55,6 +57,7 @@ func TestErrorResp(t *testing.T) {
 	}{
 		{name: "nil", status: http.StatusInternalServerError, message: "nil error"},
 		{name: "plain", err: plainErr, status: http.StatusInternalServerError, message: plainErr.Error()},
+		{name: "normalized error", err: normalizedErr, status: http.StatusInternalServerError, message: normalizedErr.Error()},
 		{name: "invalid input", err: errs.NewInvalidInputErr(plainErr), status: http.StatusBadRequest, code: "input", message: plainErr.Error(), data: `{}`},
 		{name: "typed input", err: errs.NewInvalidInputErr(typeErr), status: http.StatusBadRequest, code: "input", message: typeErr.Error(), data: `{"detail":"invalid store ID"}`},
 		{name: "annotated input", err: errors.Annotate(errs.NewInvalidInputErr(plainErr), "store"), status: http.StatusBadRequest, code: "input", message: "store: request failed", data: `{}`},
@@ -97,6 +100,7 @@ func TestErrorResp(t *testing.T) {
 	}
 }
 
+// TestInternalErrorPreservesStack prevents wrapping from replacing the cause's trace.
 func TestInternalErrorPreservesStack(t *testing.T) {
 	re := require.New(t)
 	original := errors.New("storage failed")
@@ -158,6 +162,7 @@ type operationResponseData struct {
 
 func (operationResponseData) GetOperation() string { return "update store" }
 
+// TestLegacyErrorResp checks legacy values without restoring the errcode dependency.
 func TestLegacyErrorResp(t *testing.T) {
 	typed := &responseTestError{Detail: "invalid store ID"}
 	legacy := func(code string, status int) *legacyResponseError {
@@ -232,4 +237,131 @@ func TestLegacyErrorResp(t *testing.T) {
 			re.Equal(tc.others, codes)
 		})
 	}
+}
+
+type legacyResponseMembers struct {
+	*legacyResponseError
+	members []error
+}
+
+func (e *legacyResponseMembers) Errors() []error { return e.members }
+
+// TestLegacyErrorGroupMembers protects empty groups and the primary member's slot.
+func TestLegacyErrorGroupMembers(t *testing.T) {
+	data := &responseTestError{Detail: "invalid store ID"}
+	input := &legacyResponseError{code: legacyResponseCode{"input", http.StatusBadRequest}, data: data}
+	missing := &legacyResponseError{code: legacyResponseCode{"missing", http.StatusNotFound}, data: data}
+	plain := stderrors.New("uncoded member")
+	for _, tc := range []struct {
+		name    string
+		members []error
+		others  []string
+	}{
+		{name: "empty"},
+		{name: "nil member", members: []error{nil}},
+		{name: "uncoded primary", members: []error{plain}},
+		{name: "all uncoded", members: []error{plain, plain}},
+		{name: "single coded", members: []error{input}},
+		{name: "uncoded before coded", members: []error{plain, missing}, others: []string{"missing"}},
+		{name: "nil before coded", members: []error{nil, missing}, others: []string{"missing"}},
+		{name: "uncoded between coded", members: []error{input, plain, missing}, others: []string{"missing"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			response := httptest.NewRecorder()
+			group := &legacyResponseMembers{legacyResponseError: input, members: tc.members}
+			re.NotPanics(func() { ErrorResp(render.New(), response, group) })
+			re.Equal(http.StatusBadRequest, response.Code)
+			re.Equal("input", response.Header().Get("TiDB-Error-Code"))
+			var body struct {
+				Code   string                  `json:"code"`
+				Msg    string                  `json:"msg"`
+				Data   json.RawMessage         `json:"data"`
+				Others []struct{ Code string } `json:"others"`
+			}
+			re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
+			re.Equal("input", body.Code)
+			re.Equal(group.Error(), body.Msg)
+			re.JSONEq(`{"detail":"invalid store ID"}`, string(body.Data))
+			var codes []string
+			for _, other := range body.Others {
+				codes = append(codes, other.Code)
+			}
+			re.Equal(tc.others, codes)
+		})
+	}
+}
+
+type responseErrorGroup struct{ members []error }
+
+func (*responseErrorGroup) Error() string     { return "multiple errors" }
+func (e *responseErrorGroup) Errors() []error { return e.members }
+
+type nativeResponseError struct {
+	*responseTestError
+	code   string
+	status int
+}
+
+func (e *nativeResponseError) Code() string       { return e.code }
+func (e *nativeResponseError) HTTPCode() int      { return e.status }
+func (e *nativeResponseError) GetClientData() any { return e.responseTestError }
+
+// TestResponseErrorGroups checks grouped lookups, public HTTPError values, and stack reuse.
+func TestResponseErrorGroups(t *testing.T) {
+	data := &responseTestError{Detail: "invalid store ID"}
+	input := &legacyResponseError{code: legacyResponseCode{"input", http.StatusBadRequest}, data: data}
+	missing := &legacyResponseError{code: legacyResponseCode{"missing", http.StatusNotFound}, data: data}
+	plain := stderrors.New("uncoded member")
+	for _, tc := range []struct {
+		name    string
+		members []error
+		status  int
+		code    string
+	}{
+		{name: "empty", status: http.StatusInternalServerError},
+		{name: "uncoded", members: []error{plain}, status: http.StatusInternalServerError},
+		{name: "single coded", members: []error{input}, status: http.StatusBadRequest, code: "input"},
+		{name: "multiple coded", members: []error{input, missing}, status: http.StatusBadRequest, code: "input"},
+		{name: "mixed", members: []error{plain, input, missing}, status: http.StatusBadRequest, code: "input"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			group := &responseErrorGroup{members: tc.members}
+			response := httptest.NewRecorder()
+			ErrorResp(render.New(), response, group)
+			re.Equal(tc.status, response.Code)
+			re.Equal(tc.code, response.Header().Get("TiDB-Error-Code"))
+			if tc.code == "" {
+				var message string
+				re.NoError(json.Unmarshal(response.Body.Bytes(), &message))
+				re.Equal(group.Error(), message)
+				return
+			}
+			var body map[string]json.RawMessage
+			re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
+			re.JSONEq(`"input"`, string(body["code"]))
+			re.JSONEq(`"multiple errors"`, string(body["msg"]))
+			re.JSONEq(`{"detail":"invalid store ID"}`, string(body["data"]))
+			re.Len(body, 3)
+		})
+	}
+	t.Run("public metadata", func(t *testing.T) {
+		re := require.New(t)
+		original := &nativeResponseError{responseTestError: data, code: "quota.exceeded", status: http.StatusTooManyRequests}
+		wrapped := errs.NewInvalidInputErr(original)
+		response := httptest.NewRecorder()
+		ErrorResp(render.New(), response, wrapped)
+		re.Equal(http.StatusTooManyRequests, response.Code)
+		re.Equal("quota.exceeded", response.Header().Get("TiDB-Error-Code"))
+		re.Equal(data, errs.FindHTTPError(wrapped).GetClientData())
+	})
+	t.Run("grouped stack", func(t *testing.T) {
+		re := require.New(t)
+		traced := errors.New("storage failed")
+		group := &responseErrorGroup{members: []error{plain, traced}}
+		wrapped := errs.NewInternalErr(group)
+		re.Equal(errors.GetStackTracer(traced).StackTrace(), errs.GetStackTracer(wrapped).StackTrace())
+		re.Nil(errs.GetStackTracer(&responseErrorGroup{members: []error{plain}}))
+	})
 }

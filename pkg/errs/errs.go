@@ -237,6 +237,7 @@ func asHTTPError(err error) HTTPError {
 	}}
 }
 
+// legacyHTTPCodeValue retains the original code identity through local wrappers.
 func legacyHTTPCodeValue(err HTTPError) any {
 	if legacy, ok := err.(interface{ legacyCodeValue() any }); ok {
 		return legacy.legacyCodeValue()
@@ -244,6 +245,7 @@ func legacyHTTPCodeValue(err HTTPError) any {
 	return nil
 }
 
+// sameHTTPErrorCode preserves legacy equality for distinct codes sharing a name.
 func sameHTTPErrorCode(first, second HTTPError) bool {
 	if first.Code() != second.Code() {
 		return false
@@ -272,14 +274,15 @@ func (e *legacyHTTPError) GetOperation() string {
 	return ""
 }
 
-// Errors adapts the members of a legacy error group.
+// Errors adapts coded members without changing their positions in the group.
 func (e *legacyHTTPError) Errors() []error {
 	if group, ok := e.err.(errors.ErrorGroup); ok {
 		items := group.Errors()
-		result := make([]error, 0, len(items))
-		for _, item := range items {
+		result := make([]error, len(items))
+		for i, item := range items {
+			result[i] = item
 			if httpErr := asHTTPError(item); httpErr != nil {
-				result = append(result, httpErr)
+				result[i] = httpErr
 			}
 		}
 		return result
@@ -310,6 +313,7 @@ type httpErrorGroup struct {
 
 func (e *httpErrorGroup) legacyCodeValue() any { return legacyHTTPCodeValue(e.HTTPError) }
 
+// Error preserves the legacy semicolon-separated group message.
 func (e *httpErrorGroup) Error() string {
 	var message strings.Builder
 	message.WriteString(e.HTTPError.Error())
@@ -328,6 +332,7 @@ func (e *httpErrorGroup) Errors() []error {
 	return append([]error{e.HTTPError}, e.others...)
 }
 
+// unwrapError gives legacy Cause methods precedence over standard Unwrap methods.
 func unwrapError(err error) error {
 	if cause := errors.Unwrap(err); cause != nil {
 		return cause
