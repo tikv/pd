@@ -331,6 +331,10 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 							!bs.isRevertRegionValid(revertRegion, revertFit, revertLocationCache) {
 							continue
 						}
+						if !affinityFilter.Select(revertRegion).IsOK() {
+							hotSchedulerIgnoredAffinity.Inc()
+							continue
+						}
 						if useRevertPlacementScope {
 							bs.revertScope = nil
 							bs.revertScope = bs.prepareForRegion(revertRegion, revertFit, dstStore)
