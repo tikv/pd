@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -39,7 +40,7 @@ func RegisterMicroservice(r *gin.RouterGroup) {
 	router := r.Group("ms")
 	router.GET("members/:service", GetMembers)
 	router.GET("primary/:service", GetPrimary)
-	router.POST("tso/primary/evict", EvictTSOPrimary)
+	router.POST("tso/primary/evict", middlewares.Audit("EvictTSOPrimary", audit.LocalLogLabel), EvictTSOPrimary)
 }
 
 // GetMembers gets all members of the cluster for the specified service.

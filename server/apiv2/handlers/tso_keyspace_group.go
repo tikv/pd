@@ -24,6 +24,7 @@ import (
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -44,18 +45,18 @@ const (
 func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router := r.Group("tso/keyspace-groups")
 	router.Use(middlewares.BootstrapChecker())
-	router.POST("", CreateKeyspaceGroups)
+	router.POST("", middlewares.Audit("CreateKeyspaceGroups", audit.LocalLogLabel), CreateKeyspaceGroups)
 	router.GET("", GetKeyspaceGroups)
 	router.GET("/:id", GetKeyspaceGroupByID)
-	router.DELETE("/:id", DeleteKeyspaceGroupByID)
-	router.PATCH("/:id", SetNodesForKeyspaceGroup)          // only to support set nodes
-	router.PATCH("/:id/*node", SetPriorityForKeyspaceGroup) // only to support set priority
-	router.POST("/:id/alloc", AllocNodesForKeyspaceGroup)
-	router.POST("/:id/split", SplitKeyspaceGroupByID)
-	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
-	router.POST("/:id/merge", MergeKeyspaceGroups)
-	router.DELETE("/:id/merge", FinishMergeKeyspaceByID)
-	router.DELETE("/:id/keyspaces", RemoveKeyspacesFromGroup)
+	router.DELETE("/:id", middlewares.Audit("DeleteKeyspaceGroupByID", audit.LocalLogLabel), DeleteKeyspaceGroupByID)
+	router.PATCH("/:id", middlewares.Audit("SetNodesForKeyspaceGroup", audit.LocalLogLabel), SetNodesForKeyspaceGroup)             // only to support set nodes
+	router.PATCH("/:id/*node", middlewares.Audit("SetPriorityForKeyspaceGroup", audit.LocalLogLabel), SetPriorityForKeyspaceGroup) // only to support set priority
+	router.POST("/:id/alloc", middlewares.Audit("AllocNodesForKeyspaceGroup", audit.LocalLogLabel), AllocNodesForKeyspaceGroup)
+	router.POST("/:id/split", middlewares.Audit("SplitKeyspaceGroupByID", audit.LocalLogLabel), SplitKeyspaceGroupByID)
+	router.DELETE("/:id/split", middlewares.Audit("FinishSplitKeyspaceByID", audit.LocalLogLabel), FinishSplitKeyspaceByID)
+	router.POST("/:id/merge", middlewares.Audit("MergeKeyspaceGroups", audit.LocalLogLabel), MergeKeyspaceGroups)
+	router.DELETE("/:id/merge", middlewares.Audit("FinishMergeKeyspaceByID", audit.LocalLogLabel), FinishMergeKeyspaceByID)
+	router.DELETE("/:id/keyspaces", middlewares.Audit("RemoveKeyspacesFromGroup", audit.LocalLogLabel), RemoveKeyspacesFromGroup)
 }
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.

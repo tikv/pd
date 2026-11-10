@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +87,27 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 	bootstrapKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.GetBootstrapKeyspaceName())
 	re.Equal(keyspace.GetBootstrapKeyspaceName(), bootstrapKeyspace.Name)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
+}
+
+func (suite *keyspaceTestSuite) TestHTTPAuditSwitch() {
+	re := suite.Require()
+	logFile := testutil.InitTempFileLogger(suite.T(), "info")
+	configURL := suite.server.GetAddr() + "/pd/api/v1/service-middleware/config"
+	for i, enabled := range []bool{false, true, false} {
+		body := fmt.Appendf(nil, `{"audit.enable-audit":"%t"}`, enabled)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, body, testutil.StatusOK(re)))
+		request := &handlers.CreateKeyspaceParams{Name: fmt.Sprintf("audit-keyspace-%d", i)}
+		MustCreateKeyspace(re, suite.server, request)
+		re.Equal(request.Name, mustLoadKeyspaces(re, suite.server, request.Name).Name)
+		data, err := os.ReadFile(logFile)
+		re.NoError(err)
+		expected := 0
+		if i > 0 {
+			expected = 1
+		}
+		re.Equal(expected, strings.Count(string(data), "ServiceLabel:CreateKeyspace,"))
+		re.NotContains(string(data), "ServiceLabel:LoadKeyspace,")
+	}
 }
 
 func (suite *keyspaceTestSuite) TestCreateLoadKeyspaceByID() {

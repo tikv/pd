@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server"
@@ -39,12 +40,12 @@ const managerUninitializedErr = "keyspace manager is not initialized"
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
 	router.Use(middlewares.BootstrapChecker())
-	router.POST("", CreateKeyspace)
-	router.POST("/id", CreateKeyspaceByID)
+	router.POST("", middlewares.Audit("CreateKeyspace", audit.LocalLogLabel), CreateKeyspace)
+	router.POST("/id", middlewares.Audit("CreateKeyspaceByID", audit.LocalLogLabel), CreateKeyspaceByID)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)
-	router.PATCH("/:name/config", UpdateKeyspaceConfig)
-	router.PUT("/:name/state", UpdateKeyspaceState)
+	router.PATCH("/:name/config", middlewares.Audit("UpdateKeyspaceConfig", audit.LocalLogLabel), UpdateKeyspaceConfig)
+	router.PUT("/:name/state", middlewares.Audit("UpdateKeyspaceState", audit.LocalLogLabel), UpdateKeyspaceState)
 	router.GET("/id/:id", LoadKeyspaceByID)
 }
 

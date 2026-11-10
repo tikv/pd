@@ -29,6 +29,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/maintenance"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -39,10 +40,10 @@ import (
 // RegisterMaintenance register maintenance related handlers to router paths.
 func RegisterMaintenance(r *gin.RouterGroup) {
 	router := r.Group("maintenance")
-	router.PUT("/:task_type/:task_id", StartMaintenanceTask)
+	router.PUT("/:task_type/:task_id", middlewares.Audit("StartMaintenanceTask", audit.LocalLogLabel), StartMaintenanceTask)
 	router.GET("", GetMaintenanceTasks)
 	router.GET("/:task_type", GetMaintenanceTaskByType)
-	router.DELETE("/:task_type/:task_id", DeleteMaintenanceTask)
+	router.DELETE("/:task_type/:task_id", middlewares.Audit("DeleteMaintenanceTask", audit.LocalLogLabel), DeleteMaintenanceTask)
 }
 
 // StartMaintenanceTask starts a maintenance task.
