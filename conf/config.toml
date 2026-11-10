@@ -110,6 +110,7 @@
 # metric-storage = ""
 ## There are some values supported: "auto", "none", or a specific address, default: "auto".
 # dashboard-address = "auto"
+## The following two settings take effect only on NextGen kernels.
 ## Concurrent metadata scans per GC keyspace index load attempt (range: 1-16).
 ## Online changes apply to the next full-load attempt, including retries.
 # gc-keyspace-index-load-concurrency = 4

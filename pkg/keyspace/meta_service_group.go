@@ -45,6 +45,11 @@ type MetaServiceGroupManager struct {
 	// metaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	metaServiceGroups map[string]string
+	etcdClients       map[string]*clientv3.Client
+	closed            bool
+	// Initial file config is usable only before persisted config has been observed.
+	initialMetaServiceGroups map[string]string
+	hasPersistedConfig       bool
 	// keyspaceAssignmentCounter, when set, returns the actual number of keyspaces
 	// assigned to each of the given groups by scanning keyspace metadata. It is
 	// the authoritative source for the delete guard so a stale persisted counter
@@ -66,9 +71,10 @@ func NewMetaServiceGroupManager(
 	tlsConfigLoader func() (*tls.Config, error),
 ) *MetaServiceGroupManager {
 	return &MetaServiceGroupManager{
-		store:             store,
-		tlsConfigLoader:   tlsConfigLoader,
-		metaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
+		store:                    store,
+		tlsConfigLoader:          tlsConfigLoader,
+		metaServiceGroups:        cloneMetaServiceGroups(metaServiceGroups),
+		initialMetaServiceGroups: cloneMetaServiceGroups(metaServiceGroups),
 	}
 }
 
@@ -363,22 +369,12 @@ func (m *MetaServiceGroupManager) checkNewGroupsHealth(ctx context.Context, meta
 	}
 	m.RUnlock()
 	for groupID, addresses := range groups {
-		endpoints := splitMetaServiceGroupEndpoints(addresses)
+		endpoints, err := parseMetaServiceGroupEndpoints(addresses)
+		if err != nil {
+			return fmt.Errorf("%w: group %s: %v", errs.ErrMetaServiceGroupUnhealthy, groupID, err)
+		}
 		for _, endpoint := range endpoints {
-			var tlsConfig *tls.Config
-			if m.tlsConfigLoader != nil {
-				var err error
-				tlsConfig, err = m.tlsConfigLoader()
-				if err != nil {
-					return fmt.Errorf("%w: group %s endpoint %s: failed to load TLS config: %v",
-						errs.ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
-				}
-			}
-			client, err := clientv3.New(clientv3.Config{
-				Endpoints:   []string{endpoint},
-				DialTimeout: etcdutil.DefaultRequestTimeout,
-				TLS:         tlsConfig,
-			})
+			client, err := m.newEtcdClient([]string{endpoint})
 			if err != nil {
 				return fmt.Errorf("%w: group %s endpoint %s: %v", errs.ErrMetaServiceGroupUnhealthy, groupID, endpoint, err)
 			}
@@ -397,7 +393,10 @@ func splitMetaServiceGroupEndpoints(addresses string) []string {
 	rawEndpoints := strings.Split(addresses, ",")
 	endpoints := make([]string, 0, len(rawEndpoints))
 	for _, endpoint := range rawEndpoints {
-		endpoints = append(endpoints, strings.TrimSpace(endpoint))
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint != "" {
+			endpoints = append(endpoints, endpoint)
+		}
 	}
 	return endpoints
 }
@@ -427,6 +426,7 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	if err := persist(); err != nil {
 		return err
 	}
+	m.reconcileEtcdClientsLocked(metaServiceGroups)
 	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
 	// Clear the persisted status for deleted groups so re-adding a group with
 	// the same ID does not inherit a stale assignment count or enabled state,
@@ -485,6 +485,7 @@ func (m *MetaServiceGroupManager) assignedKeyspaceCounts(ctx context.Context, gr
 func (m *MetaServiceGroupManager) updateGroups(metaServiceGroups map[string]string) {
 	m.Lock()
 	defer m.Unlock()
+	m.reconcileEtcdClientsLocked(metaServiceGroups)
 	m.metaServiceGroups = cloneMetaServiceGroups(metaServiceGroups)
 }
 
