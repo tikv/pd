@@ -160,15 +160,11 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			break
 		}
 		foundRegion := false
-		// Share the source quota across roles, reserving a separate quota for
-		// small regions so their rejection cannot hide larger candidates.
-		attempts, smallRegionAttempts := 0, 0
+		attempts := 0
 		var rejectedRegions []uint64
 		regionFilters := append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()))
+	regionSelection:
 		for i, selectRegions := range regionSelectors {
-			if attempts >= retryLimit && smallRegionAttempts >= retryLimit {
-				break
-			}
 			if i == 1 {
 				regionFilters = append(regionFilters, pendingFilter)
 			}
@@ -183,20 +179,11 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 					if slices.Contains(rejectedRegions, region.GetID()) {
 						continue
 					}
-					smallRegion := region.GetApproximateSize() <= core.EmptyRegionApproximateSize
-					if (smallRegion && smallRegionAttempts >= retryLimit) || (!smallRegion && attempts >= retryLimit) {
-						continue
-					}
 					solver.Region = filter.SelectOneRegion(regions[j:j+1], collector, regionFilters...)
 					if solver.Region == nil {
 						continue
 					}
 					foundRegion = true
-					if smallRegion {
-						smallRegionAttempts++
-					} else {
-						attempts++
-					}
 					log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 					// Skip hot regions.
 					if cluster.IsRegionHot(solver.Region) {
@@ -225,16 +212,22 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 					// the replica filter will cache the last region fit and the select one will only pict the first one region that
 					// satisfy all the filters, so the region fit must belong the scheduled region.
 					solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
-					if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
+					op, retryRegion := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets)
+					if op != nil {
 						s.resetLimit(solver.Source)
 						op.Counters = append(op.Counters, balanceRegionNewOpCounter)
 						return []*operator.Operator{op}, collector.GetPlans()
 					}
 					solver.Step--
 					rejectedRegions = append(rejectedRegions, solver.Region.GetID())
-				}
-				if attempts >= retryLimit && smallRegionAttempts >= retryLimit {
-					break
+					// Region-specific target restrictions can fall back within the
+					// bounded samples. Share score-rejected attempts across roles.
+					if !retryRegion {
+						attempts++
+						if attempts >= retryLimit {
+							break regionSelection
+						}
+					}
 				}
 			}
 		}
@@ -248,7 +241,9 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector, dstStores []*core.StoreInfo, faultStores []*core.StoreInfo) *operator.Operator {
+// The boolean reports whether store filters blocked an otherwise useful target,
+// so another region can be tried without spending the source retry quota.
+func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector, dstStores []*core.StoreInfo, faultStores []*core.StoreInfo) (*operator.Operator, bool) {
 	excludeTargets := solver.Region.GetStoreIDs()
 	for _, store := range faultStores {
 		excludeTargets[store.GetID()] = struct{}{}
@@ -262,7 +257,8 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 			solver.Region, solver.Source, solver.fit),
 	}
 	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
-	if len(candidates.Stores) != 0 {
+	hasTarget := len(candidates.Stores) != 0
+	if hasTarget {
 		solver.Step++
 	}
 
@@ -292,7 +288,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
 			}
-			return nil
+			return nil, false
 		}
 		if collector != nil {
 			collector.Collect()
@@ -305,12 +301,22 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
 		op.SetStoreHealthCheck(true)
-		return op
+		return op, false
 	}
 
 	balanceRegionNoReplacementCounter.Inc()
-	if len(candidates.Stores) != 0 {
+	if hasTarget {
 		solver.Step--
 	}
-	return nil
+	// A target rejected for this region may still accept a different one.
+	// If no store would improve the score even without those restrictions,
+	// preserve the source's backoff instead of scanning more candidates.
+	for _, target := range dstStores {
+		solver.Target = target
+		solver.targetScore = solver.targetStoreScore(s.GetName())
+		if solver.shouldBalance(s.GetName()) {
+			return nil, true
+		}
+	}
+	return nil, false
 }
