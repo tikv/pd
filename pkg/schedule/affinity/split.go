@@ -51,11 +51,11 @@ func (m *Manager) AllowSplit(region *core.RegionInfo, reason pdpb.SplitReason) b
 	}
 
 	group, _ := m.GetRegionAffinityGroupState(region)
-	if group != nil && !group.RegularSchedulingAllowed {
+	if group != nil && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
 		maxSize := (configSize + affinityRegionSizeBufferMB) * affinityRegionSizeMultiplier
 		maxKeys := maxSize * config.RegionSizeToKeysRatio
-		// Only block splitting when the Region is in the affinity state.
-		// But still allow splitting if the Region size is too big.
+		// Retain split suppression while the group has a target, even if it expires.
+		// Size and key-count limits still allow oversized Regions to split.
 		if region.GetApproximateSize() < maxSize && region.GetApproximateKeys() < maxKeys {
 			regionSplitDenyCount.Inc()
 			return false
