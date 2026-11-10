@@ -172,17 +172,17 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 
 	// The bootstrap keyspace (DefaultKeyspaceID or SystemKeyspaceID) exists automatically after bootstrapping.
 	if opt.specifyInitialKeyspaces == nil {
-		// In NextGen, all keyspaces should use keyspace_level GC
-		// In Classic, we can have different GC management types
+		// These fixtures model historical GC modes, including Classic independent GC.
 		var ks1Config map[string]string
 		if kerneltype.IsNextGen() {
-			ks1Config = map[string]string{"gc_management_type": "keyspace_level"}
+			ks1Config = map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC}
 		} else {
-			ks1Config = map[string]string{"gc_management_type": "unified"}
+			ks1Config = map[string]string{keyspace.GCManagementType: keyspace.UnifiedGC}
 		}
+
 		id := new(uint32)
 		*id = 1
-		ks1, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+		ks1, err := createHistoricalGCKeyspaceByID(t, s, keyspaceManager, &keyspace.CreateKeyspaceByIDRequest{
 			ID:         id,
 			Name:       "ks1",
 			Config:     ks1Config,
@@ -192,7 +192,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.Equal(uint32(1), ks1.GetId())
 
 		*id = 2
-		ks2, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+		ks2, err := createHistoricalGCKeyspaceByID(t, s, keyspaceManager, &keyspace.CreateKeyspaceByIDRequest{
 			ID:         id,
 			Name:       "ks2",
 			Config:     map[string]string{"gc_management_type": "keyspace_level"},
@@ -202,7 +202,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.Equal(uint32(2), ks2.GetId())
 
 		*id = 3
-		ks3, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+		ks3, err := createHistoricalGCKeyspaceByID(t, s, keyspaceManager, &keyspace.CreateKeyspaceByIDRequest{
 			ID:         id,
 			Name:       "ks3",
 			Config:     map[string]string{},
@@ -212,7 +212,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.Equal(uint32(3), ks3.GetId())
 
 		*id = 4
-		ks4, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+		ks4, err := createHistoricalGCKeyspaceByID(t, s, keyspaceManager, &keyspace.CreateKeyspaceByIDRequest{
 			ID:         id,
 			Name:       "ks4",
 			Config:     map[string]string{},
@@ -224,7 +224,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.Equal(uint32(4), ks4.GetId())
 	} else {
 		for _, req := range opt.specifyInitialKeyspaces {
-			_, err := keyspaceManager.CreateKeyspaceByID(req)
+			_, err := createHistoricalGCKeyspaceByID(t, s, keyspaceManager, req)
 			re.NoError(err)
 		}
 	}
@@ -240,6 +240,159 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	}
 
 	return s, s.GetGCStateProvider(), gcStateManager, clean, cancel
+}
+
+// createHistoricalGCKeyspaceByID preserves mixed-mode fixtures without weakening public creation.
+func createHistoricalGCKeyspaceByID(t testing.TB, storage endpoint.KeyspaceStorage, manager *keyspace.Manager, req *keyspace.CreateKeyspaceByIDRequest) (*keyspacepb.KeyspaceMeta, error) {
+	t.Helper()
+	original := req.Config
+	requestCopy := *req
+	requestCopy.Config = make(map[string]string, len(original))
+	for k, v := range original {
+		if k != keyspace.GCManagementType && k != "safe_point_version" {
+			requestCopy.Config[k] = v
+		}
+	}
+	meta, err := manager.CreateKeyspaceByID(&requestCopy)
+	if err != nil {
+		return nil, err
+	}
+	if mode, ok := original[keyspace.GCManagementType]; ok {
+		meta.Config[keyspace.GCManagementType] = mode
+	}
+	if legacy, ok := original["safe_point_version"]; ok {
+		if _, present := original[keyspace.GCManagementType]; !present {
+			delete(meta.Config, keyspace.GCManagementType)
+		}
+		meta.Config["safe_point_version"] = legacy
+	}
+	persistHistoricalGCKeyspace(t, storage, meta)
+	return meta, nil
+}
+
+// persistHistoricalGCKeyspace models metadata written before GC mode validation.
+func persistHistoricalGCKeyspace(t testing.TB, storage endpoint.KeyspaceStorage, meta *keyspacepb.KeyspaceMeta) {
+	t.Helper()
+	require.NoError(t, storage.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		if err := storage.SaveKeyspaceID(txn, meta.GetId(), meta.Name); err != nil {
+			return err
+		}
+		return storage.SaveKeyspaceMeta(txn, meta)
+	}))
+}
+
+func TestLegacyGCModeRouting(t *testing.T) {
+	storage, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{specifyInitialKeyspaces: []*keyspace.CreateKeyspaceByIDRequest{}})
+	defer clean()
+	defer cancel()
+	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 42}, Name: "legacy", State: keyspacepb.KeyspaceState_ENABLED, Config: map[string]string{"safe_point_version": "v2"}}
+	persistHistoricalGCKeyspace(t, storage, meta)
+	// Historical v2 paths must be reused without copying or changing unified state.
+	provider := storage.GetGCStateProvider()
+	require.NoError(t, provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		if err := wb.SetTxnSafePoint(constant.NullKeyspaceID, 100); err != nil {
+			return err
+		}
+		if err := wb.SetGCSafePoint(constant.NullKeyspaceID, 90); err != nil {
+			return err
+		}
+		if err := wb.SetGCBarrier(constant.NullKeyspaceID, endpoint.NewGCBarrier("unified-barrier", 120, nil)); err != nil {
+			return err
+		}
+		if err := wb.SetTxnSafePoint(42, 20); err != nil {
+			return err
+		}
+		if err := wb.SetGCSafePoint(42, 15); err != nil {
+			return err
+		}
+		return wb.SetGCBarrier(42, endpoint.NewGCBarrier("legacy-barrier", 25, nil))
+	}))
+	state, err := m.GetGCState(42, false)
+	require.NoError(t, err)
+	require.Equal(t, uint64(20), state.TxnSafePoint)
+	require.Equal(t, uint64(15), state.GCSafePoint)
+	require.Len(t, state.GCBarriers, 1)
+	require.Equal(t, "legacy-barrier", state.GCBarriers[0].BarrierID)
+
+	for _, exclude := range []bool{false, true} {
+		states, err := m.GetAllKeyspacesGCStates(context.Background(), exclude)
+		require.NoError(t, err)
+		require.True(t, states[42].IsKeyspaceLevel)
+		require.Equal(t, uint64(20), states[42].TxnSafePoint)
+		if !exclude {
+			require.Len(t, states[42].GCBarriers, 1)
+		}
+	}
+	scope, _, source, err := m.loadTxnSafePointKeyspace(context.Background(), 42, true)
+	require.NoError(t, err)
+	require.Equal(t, uint32(42), scope)
+	require.Equal(t, uint32(42), source.sourceID)
+	result, err := m.AdvanceTxnSafePoint(42, 22, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, uint64(22), result.NewTxnSafePoint)
+	unified, err := m.GetGCState(constant.NullKeyspaceID, false)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), unified.TxnSafePoint)
+	require.Equal(t, uint64(90), unified.GCSafePoint)
+	require.Len(t, unified.GCBarriers, 1)
+	require.Equal(t, "unified-barrier", unified.GCBarriers[0].BarrierID)
+
+	// A legacy keyspace without state keeps the existing zero/empty defaults.
+	meta.Keyspace = &keyspacepb.KeyspaceMeta_Id{Id: 43}
+	meta.Name = "legacy-empty"
+	persistHistoricalGCKeyspace(t, storage, meta)
+	empty, err := m.GetGCState(43, false)
+	require.NoError(t, err)
+	require.True(t, empty.IsKeyspaceLevel)
+	require.Zero(t, empty.TxnSafePoint)
+	require.Zero(t, empty.GCSafePoint)
+	require.Empty(t, empty.GCBarriers)
+}
+
+func TestGCNormalizationRejectsStaleMetadataRevision(t *testing.T) {
+	for _, legacy := range []string{"v1", "v2"} {
+		t.Run(legacy, func(t *testing.T) {
+			storage, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{specifyInitialKeyspaces: []*keyspace.CreateKeyspaceByIDRequest{}})
+			defer clean()
+			defer cancel()
+			meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 42}, Name: "legacy", State: keyspacepb.KeyspaceState_ENABLED, Config: map[string]string{"safe_point_version": legacy}}
+			persistHistoricalGCKeyspace(t, storage, meta)
+			scope, _, source, err := m.loadTxnSafePointKeyspace(context.Background(), 42, true)
+			require.NoError(t, err)
+			require.Equal(t, uint32(42), source.sourceID)
+			if legacy == "v1" {
+				require.Equal(t, constant.NullKeyspaceID, scope)
+			} else {
+				require.Equal(t, uint32(42), scope)
+			}
+			// Normalize metadata while the GC transaction is in flight, after scope selection.
+			hook := "github.com/tikv/pd/pkg/gc/txnSafePointMinStartTSLoaded"
+			mutated := false
+			require.NoError(t, failpoint.EnableCall(hook, func() {
+				mutated = true
+				_, err := m.keyspaceManager.UpdateKeyspaceConfig("legacy", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: "unrelated", Value: "value"}})
+				require.NoError(t, err)
+			}))
+			defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+			_, updated, err := m.CompatibleUpdateServiceGCSafePoint(42, keypath.GCWorkerServiceSafePointID, 100, math.MaxInt64, time.Now())
+			require.True(t, mutated)
+			require.False(t, updated)
+			require.ErrorIs(t, err, errs.ErrEtcdTxnConflict)
+			require.NoError(t, failpoint.Disable(hook))
+			_, revision, err := m.keyspaceManager.LoadKeyspaceByIDWithRevision(context.Background(), 42)
+			require.NoError(t, err)
+			require.Greater(t, revision, source.revision)
+			current, err := m.gcMetaStorage.LoadTxnSafePoint(scope)
+			require.NoError(t, err)
+			require.Zero(t, current)
+			_, updated, err = m.CompatibleUpdateServiceGCSafePoint(42, keypath.GCWorkerServiceSafePointID, 100, math.MaxInt64, time.Now())
+			require.NoError(t, err)
+			require.True(t, updated)
+			current, err = m.gcMetaStorage.LoadTxnSafePoint(scope)
+			require.NoError(t, err)
+			require.Equal(t, uint64(100), current)
+		})
+	}
 }
 
 func (s *gcStateManagerTestSuite) SetupTest() {
@@ -2596,12 +2749,10 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriers
 		keyspaceIDUnified  = uint32(3)
 	)
 
-	_, err := s.manager.keyspaceManager.UpdateKeyspaceConfig("ks3", []*keyspace.Mutation{{
-		Op:    keyspace.OpPut,
-		Key:   keyspace.GCManagementType,
-		Value: keyspace.KeyspaceLevelGC,
-	}})
+	meta, err := s.manager.keyspaceManager.LoadKeyspace("ks3")
 	re.NoError(err)
+	meta.Config[keyspace.GCManagementType] = keyspace.KeyspaceLevelGC
+	persistHistoricalGCKeyspace(s.T(), s.storage, meta)
 
 	_, err = s.manager.AdvanceTxnSafePoint(keyspaceIDUnified, 20, time.Now())
 	re.NoError(err)
@@ -2609,12 +2760,8 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriers
 	_, ok := s.manager.gcStateCache.load(keyspaceIDUnified)
 	re.True(ok)
 
-	_, err = s.manager.keyspaceManager.UpdateKeyspaceConfig("ks3", []*keyspace.Mutation{{
-		Op:    keyspace.OpPut,
-		Key:   keyspace.GCManagementType,
-		Value: keyspace.UnifiedGC,
-	}})
-	re.NoError(err)
+	meta.Config[keyspace.GCManagementType] = keyspace.UnifiedGC
+	persistHistoricalGCKeyspace(s.T(), s.storage, meta)
 
 	// The keyspace config change itself does not invalidate GCStateManager's local cache.
 	cachedState, ok := s.manager.gcStateCache.load(keyspaceIDUnified)
@@ -3699,4 +3846,51 @@ func BenchmarkGetGCState_ExcludeGCBarriers_KS128_P64_W10(b *testing.B) {
 
 func BenchmarkGetGCState_KS128_P64_W10(b *testing.B) {
 	benchmarkGetGCStateImpl(b, false, 128, 64, 10)
+}
+
+func TestLegacyGCModeWarmupAndIndexedWatch(t *testing.T) {
+	id := uint32(42)
+	_, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
+		specifyInitialKeyspaces: []*keyspace.CreateKeyspaceByIDRequest{{ID: &id, Name: "legacy", Config: map[string]string{"safe_point_version": "v2"}}},
+		useEnabledKeyspaceIndex: true,
+		beforeLeader: func(client *clientv3.Client) {
+			provider := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil).GetGCStateProvider()
+			require.NoError(t, provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+				if err := wb.SetTxnSafePoint(42, 20); err != nil {
+					return err
+				}
+				return wb.SetGCSafePoint(42, 15)
+			}))
+		},
+	})
+	defer clean()
+	defer cancel()
+	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	select {
+	case <-m.generation.warmup.done:
+	case <-ctx.Done():
+		t.Fatal("legacy GC warmup timed out")
+	}
+	cached, ok := m.gcStateCache.load(42)
+	require.True(t, ok, "warmup must recognize the legacy independent scope")
+	require.Equal(t, uint64(20), cached.TxnSafePoint)
+	require.Equal(t, uint64(15), cached.GCSafePoint)
+	watcher, err := m.WatchGCStates(ctx, false)
+	require.NoError(t, err)
+	defer watcher.Close()
+	found := false
+	for !found {
+		changes, err := watcher.RecvBatch(16)
+		require.NoError(t, err)
+		for _, change := range changes {
+			state := mustUpsert(t, change)
+			if state.KeyspaceID == 42 {
+				require.True(t, state.IsKeyspaceLevel)
+				require.Equal(t, uint64(20), state.TxnSafePoint)
+				require.Equal(t, uint64(15), state.GCSafePoint)
+				found = true
+			}
+		}
+	}
 }

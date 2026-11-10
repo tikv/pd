@@ -47,7 +47,7 @@ const (
 	enabledKeyspaceWatchTimeout   = 10 * time.Second
 )
 
-// enabledKeyspace is a value copy of the metadata needed by GC initialization.
+// enabledKeyspace contains the canonical effective GC mode used by GC initialization.
 type enabledKeyspace struct {
 	id               uint32
 	gcManagementType string
@@ -71,6 +71,8 @@ type enabledKeyspaceIndex struct {
 	// onRemoved is set before run and persists after initial load hooks end.
 	// It runs outside mu and owns its slice of IDs removed by a watch batch.
 	onRemoved func([]uint32)
+	// observeGCConfig receives complete metadata before filtering by state.
+	observeGCConfig func(*keyspacepb.KeyspaceMeta)
 
 	mu       sync.Mutex
 	entries  map[uint32]enabledKeyspace
@@ -387,7 +389,10 @@ func (i *enabledKeyspaceIndex) decodeKeyspaceMeta(rawKey, rawValue []byte) (uint
 	if meta.GetId() != id {
 		return 0, enabledKeyspace{}, false, fmt.Errorf("keyspace metadata %q contains ID %d", rawKey, meta.GetId())
 	}
-	return id, enabledKeyspace{id: id, gcManagementType: meta.Config[keyspace.GCManagementType]}, meta.State == keyspacepb.KeyspaceState_ENABLED, nil
+	if i.observeGCConfig != nil {
+		i.observeGCConfig(meta)
+	}
+	return id, enabledKeyspace{id: id, gcManagementType: keyspace.EffectiveGCManagementType(meta.Config)}, meta.State == keyspacepb.KeyspaceState_ENABLED, nil
 }
 
 func sortedEnabledKeyspaces(entries map[uint32]enabledKeyspace) []enabledKeyspace {

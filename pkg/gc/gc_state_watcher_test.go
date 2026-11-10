@@ -859,7 +859,7 @@ func TestGCStateWatcherIgnoresOldRemovalCallback(t *testing.T) {
 }
 
 func TestGCStateWatcherUsesEnabledMetadataIndex(t *testing.T) {
-	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{useEnabledKeyspaceIndex: true})
+	storage, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{useEnabledKeyspaceIndex: true})
 	defer clean()
 	defer cancel()
 	ctx, stop := context.WithTimeout(context.Background(), 10*time.Second)
@@ -867,7 +867,7 @@ func TestGCStateWatcherUsesEnabledMetadataIndex(t *testing.T) {
 	require.NoError(t, manager.generation.index.waitReady(ctx))
 
 	id := uint32(19)
-	_, err := manager.keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+	_, err := createHistoricalGCKeyspaceByID(t, storage, manager.keyspaceManager, &keyspace.CreateKeyspaceByIDRequest{
 		ID: &id, Name: "watch-cache-created", Config: map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC}, CreateTime: time.Now().Unix(),
 	})
 	require.NoError(t, err)
@@ -892,7 +892,7 @@ func TestGCStateWatcherUsesEnabledMetadataIndex(t *testing.T) {
 
 func TestGCStateWatcherWaitsForCommittedMetadataRevision(t *testing.T) {
 	var client *clientv3.Client
-	_, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
+	storage, _, manager, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
 		beforeLeader: func(c *clientv3.Client) { client = c },
 	})
 	defer clean()
@@ -931,7 +931,7 @@ func TestGCStateWatcherWaitsForCommittedMetadataRevision(t *testing.T) {
 	}
 
 	id := uint32(19)
-	_, err := manager.keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+	_, err := createHistoricalGCKeyspaceByID(t, storage, manager.keyspaceManager, &keyspace.CreateKeyspaceByIDRequest{
 		ID: &id, Name: "watch-cache-lagged", Config: map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC}, CreateTime: time.Now().Unix(),
 	})
 	require.NoError(t, err)

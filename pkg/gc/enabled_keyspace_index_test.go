@@ -1311,3 +1311,32 @@ func TestEnabledKeyspaceIndexPagesAfterConsumedRanges(t *testing.T) {
 	}, ranges)
 	require.ElementsMatch(t, []int{256, 256, 88, 256, 45}, pageSizes)
 }
+
+func TestEnabledKeyspaceIndexLegacyModes(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	put := func(id uint32, config map[string]string) int64 {
+		value, err := proto.Marshal(&keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id}, Name: "history", State: keyspacepb.KeyspaceState_ENABLED, Config: config})
+		require.NoError(t, err)
+		resp, err := client.Put(context.Background(), fmt.Sprintf("%s%08d", enabledKeyspaceTestPrefix, id), string(value))
+		require.NoError(t, err)
+		return resp.Header.Revision
+	}
+	revision := put(1, map[string]string{"safe_point_version": "v2"})
+	index := startEnabledKeyspaceTestIndex(t, client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	list, _, err := index.snapshotAtLeast(ctx, revision)
+	require.NoError(t, err)
+	require.Equal(t, []enabledKeyspace{{id: 1, gcManagementType: keyspace.KeyspaceLevelGC}}, list)
+	revision = put(2, map[string]string{"safe_point_version": "v2"})
+	list, _, err = index.snapshotAtLeast(ctx, revision)
+	require.NoError(t, err)
+	require.Equal(t, []enabledKeyspace{{id: 1, gcManagementType: keyspace.KeyspaceLevelGC}, {id: 2, gcManagementType: keyspace.KeyspaceLevelGC}}, list)
+	for _, value := range []string{"", "invalid", "unified"} {
+		revision = put(1, map[string]string{"safe_point_version": "v2", keyspace.GCManagementType: value})
+		list, _, err = index.snapshotAtLeast(ctx, revision)
+		require.NoError(t, err)
+		require.Equal(t, keyspace.UnifiedGC, list[0].gcManagementType)
+	}
+}

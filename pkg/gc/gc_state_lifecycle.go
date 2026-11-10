@@ -92,6 +92,9 @@ func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	if m.etcdClient != nil {
 		generation.workDone = make(chan struct{})
 		generation.index = newEnabledKeyspaceIndex(m.etcdClient, keypath.KeyspaceMetaPrefix())
+		if m.keyspaceManager != nil {
+			generation.index.observeGCConfig = m.keyspaceManager.ObserveGCConfig
+		}
 		generation.index.getLoadConcurrency = func() int { return m.getConfig().GCKeyspaceIndexLoadConcurrency }
 		generation.index.onRemoved = func(ids []uint32) { m.publishGCStateRemovals(generation, ids) }
 		generation.warmup = newGCStateWarmup(m, generation, generation.index)
