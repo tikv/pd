@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
@@ -161,24 +162,27 @@ func (m *RuleManager) loadRules() error {
 	err := m.storage.LoadRules(func(k, v string) {
 		r, err := NewRuleFromJSON([]byte(v))
 		if err != nil {
-			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
 		err = m.AdjustRule(r, "")
 		if err != nil {
-			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
+			if errs.ErrHexDecodingString.Equal(err) {
+				err = errors.New(logutil.RedactString(err.Error()))
+			}
+			log.Error("rule is in bad format", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
 			return
 		}
 		_, ok := m.ruleConfig.rules[r.Key()]
 		if ok {
-			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			log.Error("duplicated rule key", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if k != r.StoreKey() {
-			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			toSave = append(toSave, r)
 		}
@@ -313,7 +317,7 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
-	log.Info("placement rule updated", zap.String("rule", fmt.Sprint(rule)))
+	log.Info("placement rule updated", logutil.ZapRedactString("rule", fmt.Sprint(rule)))
 	return nil
 }
 
@@ -549,7 +553,7 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 		return err
 	}
 
-	log.Info("placement rules updated", zap.String("rules", fmt.Sprint(rules)))
+	log.Info("placement rules updated", logutil.ZapRedactString("rules", fmt.Sprint(rules)))
 	return nil
 }
 
@@ -612,7 +616,7 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 		return err
 	}
 
-	log.Info("placement rules updated", zap.String("batch", fmt.Sprint(todo)))
+	log.Info("placement rules updated", logutil.ZapRedactString("batch", fmt.Sprint(todo)))
 	return nil
 }
 
@@ -750,7 +754,7 @@ func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) er
 	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
-	log.Info("full config reset", zap.String("config", fmt.Sprint(groups)))
+	log.Info("full config reset", logutil.ZapRedactString("config", fmt.Sprint(groups)))
 	return nil
 }
 
@@ -781,7 +785,7 @@ func (m *RuleManager) SetGroupBundle(group GroupBundle) error {
 	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
-	log.Info("group is reset", zap.String("group", fmt.Sprint(group)))
+	log.Info("group is reset", logutil.ZapRedactString("group", fmt.Sprint(group)))
 	return nil
 }
 
