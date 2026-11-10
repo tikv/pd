@@ -83,6 +83,28 @@ func TestAskBatchSplitRejectsOversizedCountBeforeAllocation(t *testing.T) {
 	}
 }
 
+func TestAskBatchSplitRejectsIDCountOverflowBeforeAllocation(t *testing.T) {
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+	client := &splitScatterPDClient{next: 1000, allocErr: errors.New("unexpected split ID allocation")}
+	cluster.SwitchPDLeader(client)
+	region := newAffinitySplitTestRegion()
+	cluster.PutRegion(region)
+	peers := make([]*metapb.Peer, 32767)
+	for i := range peers {
+		peers[i] = &metapb.Peer{Id: uint64(i + 1), StoreId: uint64(i + 1)}
+	}
+	request := &schedulingpb.AskBatchSplitRequest{
+		Region:     region.Clone(core.SetPeers(peers)).GetMeta(),
+		SplitCount: core.MaxBatchSplitCount,
+	}
+	resp, err := svc.AskBatchSplit(t.Context(), request)
+	require.Zero(t, client.calls, "overflowing ID counts must not reach the PD allocator")
+	require.NoError(t, err)
+	require.Contains(t, resp.GetHeader().GetError().GetMessage(), "split ID count exceeds maximum")
+	require.Empty(t, resp.GetIds())
+	require.Equal(t, uint64(1000), client.next)
+}
+
 func TestBatchSplitIDCount(t *testing.T) {
 	for _, test := range []struct {
 		splits uint32

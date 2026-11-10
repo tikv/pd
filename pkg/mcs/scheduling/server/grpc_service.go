@@ -414,23 +414,23 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
+	requestIDCount, fits := batchSplitIDCount(splitCount, len(request.Region.Peers))
+	if !fits {
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN,
+				fmt.Sprintf("split ID count exceeds maximum %d", uint32(math.MaxUint32))),
+		}, nil
+	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 
-	requestIDCount, batch := batchSplitIDCount(splitCount, len(request.Region.Peers))
-	var id uint64
-	var count uint32
-	if batch {
-		id, count, err = c.AllocID(requestIDCount)
-		if err != nil {
-			return nil, err
-		}
-		batch = count == requestIDCount
+	id, count, err := c.AllocID(requestIDCount)
+	if err != nil {
+		return nil, err
 	}
 
-	// Use individual allocations when the total exceeds one uint32 batch or
-	// the PD leader does not support batch ID allocation.
-	if !batch {
+	// If the PD leader does not support batch ID allocation, allocate IDs individually.
+	if requestIDCount != count {
 		// use non batch way to split region
 		for range splitCount {
 			newRegionID, _, err := c.AllocID(1)
