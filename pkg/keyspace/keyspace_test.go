@@ -259,15 +259,16 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 		nextGenFlag      string
 		gcManagementType string
 		expect           string
+		expectErr        error
 	}
 
 	cases := []testCase{
-		{classic, "", ""},
-		{classic, UnifiedGC, UnifiedGC},
-		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
-		{nextGen, "", KeyspaceLevelGC},
-		{nextGen, UnifiedGC, UnifiedGC},
-		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
+		{classic, "", UnifiedGC, nil},
+		{classic, UnifiedGC, UnifiedGC, nil},
+		{classic, KeyspaceLevelGC, "", errs.ErrKeyspaceGCModeMismatch},
+		{nextGen, "", KeyspaceLevelGC, nil},
+		{nextGen, UnifiedGC, "", errs.ErrKeyspaceGCModeMismatch},
+		{nextGen, KeyspaceLevelGC, KeyspaceLevelGC, nil},
 	}
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
@@ -284,6 +285,10 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 			Config:     cfg,
 		}
 		created, err := manager.CreateKeyspace(req)
+		if tc.expectErr != nil {
+			re.ErrorIs(err, tc.expectErr)
+			continue
+		}
 		re.NoError(err)
 		loaded, err := manager.LoadKeyspaceByID(created.GetId())
 		re.NoError(err)

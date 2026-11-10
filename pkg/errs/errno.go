@@ -249,6 +249,14 @@ var (
 	ErrUnsupportedOperationInKeyspace = errors.Normalize("it's a unsupported operation", errors.RFCCodeText("PD:keyspace:ErrUnsupportedOperationInKeyspace"))
 	// ErrKeyspaceConfigPreconditionFailed is used to indicate the precondition for updating keyspace config is not met.
 	ErrKeyspaceConfigPreconditionFailed = errors.Normalize("keyspace config precondition failed, %s", errors.RFCCodeText("PD:keyspace:ErrKeyspaceConfigPreconditionFailed"))
+	// ErrKeyspaceGCConfigInvalid indicates an invalid GC mode in a write request.
+	ErrKeyspaceGCConfigInvalid = errors.Normalize("invalid gc_management_type %q: expected unified or keyspace_level", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGCConfigInvalid"))
+	// ErrKeyspaceGCModeMismatch indicates that a new keyspace's GC mode does not match its kernel.
+	ErrKeyspaceGCModeMismatch = errors.Normalize("gc management type %q is incompatible with kernel %s", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGCModeMismatch"))
+	// ErrKeyspaceGCModeImmutable indicates a prohibited effective GC mode change.
+	ErrKeyspaceGCModeImmutable = errors.Normalize("cannot change effective gc mode from %s to %s", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGCModeImmutable"))
+	// ErrKeyspaceLegacyGCConfigUnsupported indicates a write targeting the legacy GC field.
+	ErrKeyspaceLegacyGCConfigUnsupported = errors.Normalize("safe_point_version is no longer supported in write requests", errors.RFCCodeText("PD:keyspace:ErrKeyspaceLegacyGCConfigUnsupported"))
 	// ErrKeyspaceGroupPrimaryNotFound is used to indicate primary of target keyspace group does not exist.
 	ErrKeyspaceGroupPrimaryNotFound = errors.Normalize("primary of keyspace group does not exist", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupPrimaryNotFound"))
 	// ErrKeyspaceGroupNotExists is used to indicate target keyspace group does not exist.
