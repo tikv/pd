@@ -569,6 +569,9 @@ func (c *Cluster) updateScheduler() {
 			if shouldKeep {
 				continue
 			}
+			// TODO: Decouple runtime scheduler removal from watched config cleanup.
+			// A delayed removal can delete a recreated scheduler's latest cached config.
+			// See https://github.com/tikv/pd/issues/11562.
 			if err := schedulersController.RemoveScheduler(name); err != nil {
 				log.Error("failed to remove scheduler",
 					zap.String("scheduler-name", name),
