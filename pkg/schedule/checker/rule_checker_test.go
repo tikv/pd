@@ -2113,6 +2113,42 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvailableWitness() {
 	re.Equal("replace-rule-offline-peer", op.Desc())
 }
 
+func TestRuleCacheIgnoresDeletedPatrolRegions(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cache-enabled-%t", enabled), func(t *testing.T) {
+			re := require.New(t)
+			s := new(ruleCheckerTestSuite)
+			s.SetT(t)
+			s.SetupTest()
+			defer s.TearDownTest()
+			s.cluster.SetPlacementRulesCacheEnabled(enabled)
+			for id := uint64(1); id <= 3; id++ {
+				s.cluster.AddLeaderStore(id, 1)
+			}
+			retained := 0
+			for id := uint64(1); id <= 100; id++ {
+				s.cluster.AddLeaderRegionWithRange(id, "", "", 1, 2, 3)
+				region := s.cluster.GetRegion(id).Clone(core.WithIncConfVer(), core.WithIncVersion())
+				s.cluster.PutRegion(region)
+				re.Nil(s.rc.Check(region))
+				re.Equal(enabled, s.ruleManager.CheckIsCachedDirectly(id))
+
+				// A merge removes the region and its cache while a patrol worker
+				// still holds the snapshot dispatched before the merge.
+				s.cluster.RemoveRegion(region)
+				s.ruleManager.InvalidCache(id)
+				re.Nil(s.cluster.GetRegion(id))
+				re.Nil(s.rc.Check(region))
+				if s.ruleManager.CheckIsCachedDirectly(id) {
+					retained++
+				}
+			}
+			re.Zero(s.cluster.GetTotalRegionCount())
+			re.Zero(retained, "old patrol snapshots must not reinsert deleted regions")
+		})
+	}
+}
+
 func (suite *ruleCheckerTestSuite) TestRuleCache() {
 	re := suite.Require()
 	suite.cluster.SetPlacementRulesCacheEnabled(true)
