@@ -318,7 +318,6 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 // Close shuts down the TSO allocator updating daemon and waits for it to exit.
 func (am *AllocatorManager) Close() {
 	log.Info("closing the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
-	am.cancel()
 
 	if allocatorGroup, exist := am.getAllocatorGroup(GlobalDCLocation); exist {
 		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
@@ -330,6 +329,7 @@ func (am *AllocatorManager) Close() {
 		}
 	}
 
+	am.cancel()
 	am.svcLoopWG.Wait()
 
 	log.Info("closed the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
