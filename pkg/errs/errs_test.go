@@ -173,7 +173,7 @@ type causeOnlyError struct{ error }
 // Cause exposes the legacy error chain without implementing Unwrap.
 func (e causeOnlyError) Cause() error { return e.error }
 
-// TestHTTPError preserves the legacy constructors' metadata and nil-input contracts.
+// TestHTTPError checks HTTP codes, client data, stack traces, and nil inputs.
 func TestHTTPError(t *testing.T) {
 	original := stderrors.New("invalid request")
 	for _, tc := range []struct {
