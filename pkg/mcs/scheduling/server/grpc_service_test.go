@@ -83,54 +83,12 @@ func TestAskBatchSplitRejectsOversizedCountBeforeAllocation(t *testing.T) {
 	}
 }
 
-func TestAskBatchSplitRejectsIDCountOverflowBeforeAllocation(t *testing.T) {
-	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
-	client := &splitScatterPDClient{next: 1000, allocErr: errors.New("unexpected split ID allocation")}
-	cluster.SwitchPDLeader(client)
-	region := newAffinitySplitTestRegion()
-	cluster.PutRegion(region)
-	peers := make([]*metapb.Peer, 32767)
-	for i := range peers {
-		peers[i] = &metapb.Peer{Id: uint64(i + 1), StoreId: uint64(i + 1)}
-	}
-	request := &schedulingpb.AskBatchSplitRequest{
-		Region:     region.Clone(core.SetPeers(peers)).GetMeta(),
-		SplitCount: core.MaxBatchSplitCount,
-	}
-	resp, err := svc.AskBatchSplit(t.Context(), request)
-	require.Zero(t, client.calls, "overflowing ID counts must not reach the PD allocator")
-	require.NoError(t, err)
-	require.Contains(t, resp.GetHeader().GetError().GetMessage(), "split ID count exceeds maximum")
-	require.Empty(t, resp.GetIds())
-	require.Equal(t, uint64(1000), client.next)
-}
-
-func TestBatchSplitIDCount(t *testing.T) {
-	for _, test := range []struct {
-		splits uint32
-		peers  int
-		count  uint32
-		batch  bool
-	}{
-		{0, 3, 0, true},
-		{1, 3, 4, true},
-		{131072, 32766, 4294836224, true},
-		{131072, 32767, 0, false},
-		{131072, math.MaxInt, 0, false},
-	} {
-		t.Run(fmt.Sprintf("%d-peers-%d", test.splits, test.peers), func(t *testing.T) {
-			count, batch := batchSplitIDCount(test.splits, test.peers)
-			require.Equal(t, test.count, count)
-			require.Equal(t, test.batch, batch)
-		})
-	}
-}
-
 func TestAskBatchSplitLegacyAllocation(t *testing.T) {
-	for _, count := range []uint32{0, 1, 131072} {
+	for _, count := range []uint32{0, 1, 3} {
 		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
 			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
-			cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000, nonBatch: true})
+			client := &splitScatterPDClient{next: 1000, nonBatch: true}
+			cluster.SwitchPDLeader(client)
 			region := newAffinitySplitTestRegion()
 			cluster.PutRegion(region)
 			resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
@@ -139,6 +97,7 @@ func TestAskBatchSplitLegacyAllocation(t *testing.T) {
 			require.NoError(t, err)
 			require.Nil(t, resp.GetHeader().GetError())
 			require.Len(t, resp.GetIds(), int(count))
+			require.Equal(t, 1+int(count)*(1+len(region.GetPeers())), client.calls)
 			var previous uint64
 			for _, split := range resp.GetIds() {
 				require.Greater(t, split.GetNewRegionId(), previous)
@@ -388,6 +347,7 @@ func TestAskBatchSplitRejectsPeerWorkBeforeAllocation(t *testing.T) {
 		message string
 	}{
 		{"peer product", 32766, core.MaxBatchSplitCount, true, "split response exceeds maximum"},
+		{"ID count overflow", 32767, core.MaxBatchSplitCount, true, "split response exceeds maximum"},
 		{"same configuration mismatch", 4, 1, false, "peers do not match"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

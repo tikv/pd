@@ -230,10 +230,10 @@ func (s *TSODispatcher) processBatch(forwardStream stream, requests []Request, c
 func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) {
 	countSum := int64(0)
 	for i := range requests {
-		_, err := requests[i].postProcess(countSum, physical, firstLogical)
+		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
 		// The timestamps remain consumed even if this downstream stream closed.
 		// Only an upstream failure may tear down the shared forwarding queue.
-		countSum += int64(requests[i].getCount())
+		countSum = newCountSum
 		if err != nil {
 			log.Warn("send tso response to client failed", errs.ZapError(err))
 		}

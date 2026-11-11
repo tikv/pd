@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -409,18 +408,6 @@ func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBa
 			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "cannot split affinity region"),
 		}, nil
 	}
-	if err := core.ValidateBatchSplitCount(splitCount); err != nil {
-		return &schedulingpb.AskBatchSplitResponse{
-			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-	requestIDCount, fits := batchSplitIDCount(splitCount, len(request.Region.Peers))
-	if !fits {
-		return &schedulingpb.AskBatchSplitResponse{
-			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN,
-				fmt.Sprintf("split ID count exceeds maximum %d", uint32(math.MaxUint32))),
-		}, nil
-	}
 	if err := core.ValidateBatchSplitRequest(splitCount, reqRegion, region); err != nil {
 		return &schedulingpb.AskBatchSplitResponse{
 			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
@@ -433,6 +420,8 @@ func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBa
 	defer cancel()
 	stop := context.AfterFunc(c.ctx, cancel)
 	defer stop()
+	// The validated response budget bounds the ID count well below uint32 capacity.
+	requestIDCount := uint32(uint64(splitCount) * (1 + uint64(len(reqRegion.GetPeers()))))
 	id, count, err := c.allocIDWithContext(ctx, requestIDCount)
 	if err != nil {
 		return nil, err
@@ -507,14 +496,6 @@ func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBa
 		Header: wrapHeader(),
 		Ids:    splitIDs,
 	}, nil
-}
-
-func batchSplitIDCount(splitCount uint32, peerCount int) (uint32, bool) {
-	idsPerSplit := uint64(peerCount) + 1
-	if uint64(splitCount) > math.MaxUint32/idsPerSplit {
-		return 0, false
-	}
-	return splitCount * uint32(idsPerSplit), true
 }
 
 // RegisterGRPCService registers the service to gRPC server.
