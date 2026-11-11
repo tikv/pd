@@ -557,6 +557,9 @@ func (s *Server) Close() {
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager.Close()
 	}
+	if s.tsoAllocatorManager != nil {
+		s.tsoAllocatorManager.Close()
+	}
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {

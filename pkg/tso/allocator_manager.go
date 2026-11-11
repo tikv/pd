@@ -315,10 +315,10 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 	log.Info("exit allocator loop", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
 }
 
-// close is used to shutdown TSO Allocator updating daemon.
-// tso service call this function to shutdown the loop here, but pd manages its own loop.
-func (am *AllocatorManager) close() {
+// Close shuts down the TSO allocator updating daemon and waits for it to exit.
+func (am *AllocatorManager) Close() {
 	log.Info("closing the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+	am.cancel()
 
 	if allocatorGroup, exist := am.getAllocatorGroup(GlobalDCLocation); exist {
 		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
@@ -330,7 +330,6 @@ func (am *AllocatorManager) close() {
 		}
 	}
 
-	am.cancel()
 	am.svcLoopWG.Wait()
 
 	log.Info("closed the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
