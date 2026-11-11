@@ -86,6 +86,60 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeer() {
 	re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 }
 
+func (suite *ruleCheckerTestSuite) TestRecheckRegionAfterAddRulePeerSuccess() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", core.EngineKey: core.EngineTiFlash})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5", core.EngineKey: core.EngineTiFlash})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	err := suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "tiflash",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   2,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: core.EngineKey, Op: placement.In, Values: []string{core.EngineTiFlash}},
+		},
+	})
+	re.NoError(err)
+
+	// The rule requires two TiFlash learners, but one operator adds only one.
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+	addLearner := op.Step(0).(operator.AddLearner)
+	re.Empty(suite.rc.pendingProcessedRegions.GetAllID())
+
+	// The region is checked again soon after the operator succeeds.
+	suite.rc.RecordOpSuccess(op)
+	re.Equal([]uint64{1}, suite.rc.pendingProcessedRegions.GetAllID())
+
+	region := suite.cluster.GetRegion(1).Clone(
+		core.WithAddPeer(&metapb.Peer{
+			Id:      addLearner.PeerID,
+			StoreId: addLearner.ToStore,
+			Role:    metapb.PeerRole_Learner,
+		}),
+		core.WithIncConfVer(),
+	)
+	suite.cluster.PutRegion(region)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+	re.NotEqual(addLearner.ToStore, op.Step(0).(operator.AddLearner).ToStore)
+
+	// Other operators do not trigger a check.
+	suite.rc.pendingProcessedRegions.Clear()
+	op, err = operator.CreateRemovePeerOperator("remove-orphan-peer", suite.cluster, 0, suite.cluster.GetRegion(1), addLearner.ToStore)
+	re.NoError(err)
+	suite.rc.RecordOpSuccess(op)
+	re.Empty(suite.rc.pendingProcessedRegions.GetAllID())
+}
+
 func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevel() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})

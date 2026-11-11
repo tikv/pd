@@ -95,6 +95,11 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 				checker.RecordOpSuccess(op)
 			}
 		},
+		func(op *operator.Operator) {
+			if checker := checkers.GetRuleChecker(); checker != nil {
+				checker.RecordOpSuccess(op)
+			}
+		},
 	)
 
 	return &Coordinator{
