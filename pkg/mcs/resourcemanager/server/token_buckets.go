@@ -231,6 +231,8 @@ func (gts *GroupTokenBucketState) resetLoan() {
 	}
 }
 
+// balanceSlotTokens updates the requesting client's slot and splits the group's fill rate and burst limit
+// across the slots by each client's RU/s, then distributes tokensForBalance in the same ratio.
 func (gtb *GroupTokenBucket) balanceSlotTokens(
 	now time.Time,
 	clientUniqueID uint64,
@@ -361,7 +363,9 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		ruTracker := gtb.grt.getOrCreateRUTracker(id)
 		allocation := ruTracker.getRUPerSec()
 		// Decay only a slot that hasn't requested for a target period, and only for the time beyond it.
-		if cutoff := now.Add(-targetPeriod); adjustDemand && ts.lastReqTime.Before(cutoff) {
+		cutoff := now.Add(-targetPeriod)
+		overdue := adjustDemand && ts.lastReqTime.Before(cutoff)
+		if overdue {
 			allocation = ruTracker.getRUPerSecAt(cutoff)
 		}
 		// If the RU demand is greater than the basic fill rate, allocate the basic fill rate first.
@@ -372,9 +376,11 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 			extraDemandSlots[id] = extraDemand
 			// Allocate the basic fill rate.
 			allocation = basicFillRate
-		} else if !ruTracker.isInitialized() {
+		} else if !ruTracker.isInitialized() && !overdue {
 			// If the RU tracker is not initialized, just allocate the basic fill rate.
-			// This is to avoid that the new slot can't get any fill rate.
+			// This is to avoid that the new slot can't get any fill rate. The tracker is initialized
+			// by a client's second request, so an overdue slot that is still uninitialized has
+			// requested only once and keeps its zero RU/s.
 			allocation = basicFillRate
 		}
 		allocationMap[id] = allocation

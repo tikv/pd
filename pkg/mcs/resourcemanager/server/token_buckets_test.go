@@ -616,6 +616,7 @@ func TestGroupTokenBucketRequestUnlimitedFillRateLoan(t *testing.T) {
 	re.Equal(int64(5000), trickle)
 }
 
+// mockRUTracker sets a client's RU tracker as if it had last been sampled at ruPerSec at lastSampleTime.
 func mockRUTracker(gtb *GroupTokenBucket, clientUniqueID uint64, ruPerSec float64, lastSampleTime time.Time) {
 	rt := gtb.grt.getOrCreateRUTracker(clientUniqueID)
 	rt.initialized = true
@@ -623,6 +624,7 @@ func mockRUTracker(gtb *GroupTokenBucket, clientUniqueID uint64, ruPerSec float6
 	rt.lastEMA = ruPerSec
 }
 
+// An idle client that starts requesting next to busy clients gets the even share at once.
 func TestBalanceSlotTokensIdleSlotStartsRequesting(t *testing.T) {
 	re := require.New(t)
 	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
@@ -653,6 +655,7 @@ func TestBalanceSlotTokensIdleSlotStartsRequesting(t *testing.T) {
 	}
 }
 
+// The requester's floor comes only from the slots above the basic fill rate, in proportion to their excess.
 func TestBalanceSlotTokensRequesterFloorTakesFromSlotsAboveBasic(t *testing.T) {
 	re := require.New(t)
 	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
@@ -681,6 +684,8 @@ func TestBalanceSlotTokensRequesterFloorTakesFromSlotsAboveBasic(t *testing.T) {
 	re.InDelta(300.0, gtb.tokenSlots[3].fillRate, 1e-9)
 }
 
+// Overdue slots are decayed and an idle requester is floored only when the effective burst limit isn't
+// above the effective fill rate; otherwise the split is the RU/s-based one.
 func TestBalanceSlotTokensDecaysAndFloorsOnlyWithoutExtraBurst(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -730,6 +735,46 @@ func TestBalanceSlotTokensDecaysAndFloorsOnlyWithoutExtraBurst(t *testing.T) {
 	}
 }
 
+// A slot whose client requested once and then went quiet has an uninitialized RU tracker. Once it is
+// overdue it gets no fill rate, and its share goes to the busy slots.
+func TestBalanceSlotTokensOverdueUninitializedSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		burstLimit int64
+		lastReq    time.Duration
+		wantFill   [3]float64
+	}{
+		{"overdue", 2000, 20 * time.Second, [3]float64{1000, 1000, 0}},
+		// Within a target period the slot may still be ramping up, so it keeps the basic fill rate.
+		{"within a target period", 2000, 4 * time.Second, [3]float64{2000.0 / 3, 2000.0 / 3, 2000.0 / 3}},
+		// With a burst limit above the fill rate the split stays the current one.
+		{"burst limit above the fill rate", 4000, 20 * time.Second, [3]float64{2000.0 / 3, 2000.0 / 3, 2000.0 / 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: tc.burstLimit},
+			})
+			gtb.grt = newGroupRUTracker()
+			now := time.Now()
+			for clientID := uint64(1); clientID <= 2; clientID++ {
+				gtb.tokenSlots[clientID] = newTokenSlot(clientID, now)
+				mockRUTracker(gtb, clientID, 1000, now)
+			}
+			// The first sample only records the sample time, so the tracker stays uninitialized.
+			const quietClientID uint64 = 3
+			gtb.tokenSlots[quietClientID] = newTokenSlot(quietClientID, now.Add(-tc.lastReq))
+			gtb.grt.sample(quietClientID, now.Add(-tc.lastReq), 100)
+			re.False(gtb.grt.getOrCreateRUTracker(quietClientID).isInitialized())
+			gtb.balanceSlotTokens(now, 1, 1, 0, 5000)
+			for i, want := range tc.wantFill {
+				re.InDelta(want, gtb.tokenSlots[uint64(i+1)].fillRate, 1e-9, "client %d", i+1)
+			}
+		})
+	}
+}
+
+// Only a new requester, or one that hasn't requested for two target periods, is floored.
 func TestBalanceSlotTokensFloorsOnlyIdleRequester(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -766,6 +811,7 @@ func TestBalanceSlotTokensFloorsOnlyIdleRequester(t *testing.T) {
 	}
 }
 
+// A single slot gets the whole group, and clients with steady demand keep an even split.
 func TestBalanceSlotTokensSteadyDemand(t *testing.T) {
 	re := require.New(t)
 	targetPeriodMs := uint64((5 * time.Second) / time.Millisecond)
@@ -807,6 +853,7 @@ func TestBalanceSlotTokensSteadyDemand(t *testing.T) {
 	}
 }
 
+// The floor is the even share of the Service Limit budget, and the slots stay within that budget.
 func TestBalanceSlotTokensRequesterFloorWithinServiceLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -855,6 +902,7 @@ func TestBalanceSlotTokensRequesterFloorWithinServiceLimit(t *testing.T) {
 	}
 }
 
+// An idle requester that owes more than a target period of the basic fill rate isn't floored.
 func TestBalanceSlotTokensRequesterInDebtIsNotFloored(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -893,6 +941,7 @@ func TestBalanceSlotTokensRequesterInDebtIsNotFloored(t *testing.T) {
 	}
 }
 
+// A contended group with small steady clients grants at most its fill rate over an hour.
 func TestBalanceSlotTokensContendedGroupStaysWithinFillRate(t *testing.T) {
 	defer log.SetLevel(log.GetLevel())
 	log.SetLevel(zapcore.FatalLevel)
@@ -944,6 +993,7 @@ func TestBalanceSlotTokensContendedGroupStaysWithinFillRate(t *testing.T) {
 	re.LessOrEqual(excess(rounds)-excessAtHalfTime, fillRate*period.Seconds()/10)
 }
 
+// BenchmarkBalanceSlotTokens measures one balance round with every slot active or every slot overdue.
 func BenchmarkBalanceSlotTokens(b *testing.B) {
 	// Keep the per-slot RU tracker creation logs out of the benchmark output.
 	defer log.SetLevel(log.GetLevel())

@@ -550,7 +550,7 @@ func (rt *ruTracker) getRUPerSec() float64 {
 	return rt.lastEMA
 }
 
-// Get the RU/s EMA decayed to `t` as if nothing was sampled after the last sample.
+// getRUPerSecAt returns the RU/s EMA decayed to `t` as if nothing was sampled after the last sample.
 // The EMA only moves when the client samples, so without the decay a client that stops
 // requesting would keep its last RU/s until its next request.
 func (rt *ruTracker) getRUPerSecAt(t time.Time) float64 {
