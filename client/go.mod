@@ -1,10 +1,6 @@
 module github.com/tikv/pd/client
 
-<<<<<<< HEAD
-go 1.25.14
-=======
 go 1.27.3
->>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 
 require (
 	github.com/BurntSushi/toml v0.3.1

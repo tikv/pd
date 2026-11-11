@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-FROM golang:1.25-alpine as builder
-=======
 FROM golang:1.27-alpine as builder
->>>>>>> 6f57b959b1 (*: upgrade Go to 1.27.3 (#11363))
 
 RUN apk add --no-cache \
     make \
