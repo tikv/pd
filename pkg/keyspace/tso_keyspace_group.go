@@ -1255,6 +1255,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 	}
 
 	var callbackSucceeded bool
+	epoch := km.currentCacheEpoch()
 	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
 	// A definite failure means the transaction is known not to have
 	// committed, so the staged removals never actually happened - leave
@@ -1271,6 +1272,9 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 	// The commit result is either confirmed or genuinely ambiguous (for
 	// example a client-side timeout after etcd has committed), so
 	// conservatively invalidate every cache entry whose deletion was staged.
+	if err != nil {
+		km.markKeyspacesUncertain(epoch, removedIDs)
+	}
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
 		if len(removedIDs) > 0 {
@@ -1370,6 +1374,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 	}
 
 	var callbackSucceeded bool
+	epoch := km.currentCacheEpoch()
 	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
 	// See removeKeyspacesFromGroupSingleTxn: a definite failure means the
 	// staged removals never actually happened, so skip eviction entirely.
@@ -1381,6 +1386,9 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 	}
 	// Invalidate staged removals on a confirmed commit or a genuinely
 	// ambiguous one.
+	if err != nil {
+		km.markKeyspacesUncertain(epoch, removedIDs)
+	}
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
 		if len(removedIDs) > 0 {
@@ -1484,6 +1492,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
 	var callbackSucceeded bool
+	epoch := km.currentCacheEpoch()
 	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runBatch)
 	// See removeKeyspacesFromGroupSingleTxn: a definite failure means the
 	// staged removals never actually happened, so skip eviction entirely.
@@ -1495,6 +1504,9 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	}
 	// Invalidate staged removals on a confirmed commit or a genuinely
 	// ambiguous one.
+	if err != nil {
+		km.markKeyspacesUncertain(epoch, removedIDs)
+	}
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
 		if len(removedIDs) > 0 {
