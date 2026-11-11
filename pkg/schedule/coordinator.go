@@ -282,6 +282,12 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	if err != nil {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
+	// Schedulers that are not run are only registered as handlers, so they
+	// must remove themselves the same way.
+	removeSchedulerCb := c.schedulers.RemoveScheduler
+	if !needRun {
+		removeSchedulerCb = c.schedulers.RemoveSchedulerHandler
+	}
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
@@ -311,7 +317,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			continue
 		}
 		s, err := schedulers.CreateScheduler(types.ConvertOldStrToType[cfg.Type], c.opController,
-			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
+			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), removeSchedulerCb)
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
@@ -351,7 +357,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 
 		tp := types.ConvertOldStrToType[schedulerCfg.Type]
 		s, err := schedulers.CreateScheduler(tp, c.opController,
-			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), c.schedulers.RemoveScheduler)
+			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), removeSchedulerCb)
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type),
 				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
