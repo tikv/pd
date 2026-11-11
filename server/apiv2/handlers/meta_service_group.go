@@ -139,7 +139,7 @@ func PatchMetaServiceGroups(c *gin.Context) {
 	}, func() {
 		svr.UpdateKeyspaceConfig(newCfg)
 	}); err != nil {
-		if errors.Is(err, keyspace.ErrGroupHasAssignedKeyspaces) {
+		if errors.Is(err, keyspace.ErrGroupHasAssignedKeyspaces) || errors.Is(err, keyspace.ErrMetaServiceGroupUnhealthy) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}

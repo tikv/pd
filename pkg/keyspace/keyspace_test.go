@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
@@ -1181,7 +1182,7 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
 
 	// No groups available: assign=true (stale pre-check) must not fail creation.
-	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{})
+	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{}, nil)
 	managerNoGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, emptyMgm)
 	cfg := map[string]string{}
 	ks := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 100}, Name: "ks-stale-precheck", Config: cfg}
@@ -1193,7 +1194,7 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 
 	// A present, enabled group is still assigned. Groups are disabled by
 	// default, so it must be enabled before it is eligible for assignment.
-	mgm := NewMetaServiceGroupManager(store, map[string]string{"g1": "addr1"})
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"g1": "addr1"}, nil)
 	enabled := true
 	re.NoError(mgm.PatchStatus(ctx, "g1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
@@ -1204,7 +1205,7 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 
 	// A group that exists but is disabled must not fail creation: the keyspace is
 	// created without a meta-service group assignment instead.
-	disabledMgm := NewMetaServiceGroupManager(store, map[string]string{"g2": "addr2"})
+	disabledMgm := NewMetaServiceGroupManager(store, map[string]string{"g2": "addr2"}, nil)
 	managerDisabled := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, disabledMgm)
 	cfg3 := map[string]string{}
 	ks3 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 102}, Name: "ks-disabled-group", Config: cfg3}
@@ -1221,7 +1222,7 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	re.True(ok)
 	// Start without any group so creation never auto-assigns: meta-service groups
 	// are disabled by default, and this keeps the test independent of that.
-	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]string{})
+	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]string{}, nil)
 	manager.mgm.SetKeyspaceAssignmentCounter(manager.CountKeyspacesByMetaServiceGroup)
 
 	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
@@ -1295,4 +1296,167 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
+}
+
+func TestLoadKeyspaceByIDWithRevision(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	groups := NewMetaServiceGroupManager(store, map[string]string{"group1": "http://127.0.0.1:2379"}, nil)
+	defer func() { re.NoError(groups.Close()) }()
+	manager := &Manager{ctx: ctx, store: store, mgm: groups}
+	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 1}, Name: "revision-keyspace", Config: map[string]string{MetaServiceGroupIDKey: "group1"}}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error { return store.SaveKeyspaceMeta(txn, meta) }))
+	stored, err := client.Get(ctx, keypath.KeyspaceMetaPath(1))
+	re.NoError(err)
+	loaded, revision, err := manager.LoadKeyspaceByIDWithRevision(ctx, 1)
+	re.NoError(err)
+	re.Equal(meta.GetId(), loaded.GetId())
+	re.Equal(meta.Name, loaded.Name)
+	re.Equal("group1", loaded.Config[MetaServiceGroupIDKey])
+	re.Equal("http://127.0.0.1:2379", loaded.Config[MetaServiceGroupAddressesKey])
+	re.Equal(stored.Kvs[0].ModRevision, revision)
+	loaded, _, err = manager.LoadKeyspaceByIDWithRevision(ctx, 2)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	re.Nil(loaded)
+}
+
+type revisionedKeyspaceStorage struct {
+	endpoint.KeyspaceStorage
+	load func(context.Context, uint32) (*keyspacepb.KeyspaceMeta, int64, error)
+}
+
+func (s *revisionedKeyspaceStorage) LoadKeyspaceMetaWithRevision(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, int64, error) {
+	return s.load(ctx, id)
+}
+
+func TestLoadKeyspaceByIDWithRevisionCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		cancelManager bool
+		cancelBefore  bool
+	}{
+		{name: "caller-before", cancelBefore: true},
+		{name: "manager-before", cancelManager: true, cancelBefore: true},
+		{name: "caller-in-flight"},
+		{name: "manager-in-flight", cancelManager: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			callerCtx, cancelCaller := context.WithCancel(context.Background())
+			managerCtx, cancelManager := context.WithCancel(context.Background())
+			cancel := cancelCaller
+			if tc.cancelManager {
+				cancel = cancelManager
+			}
+			if tc.cancelBefore {
+				cancel()
+			}
+			started := make(chan error, 1)
+			abort := make(chan struct{})
+			manager := &Manager{
+				ctx: managerCtx,
+				store: &revisionedKeyspaceStorage{load: func(ctx context.Context, _ uint32) (*keyspacepb.KeyspaceMeta, int64, error) {
+					started <- ctx.Err()
+					select {
+					case <-ctx.Done():
+						return nil, 0, ctx.Err()
+					case <-abort:
+						return nil, 0, context.DeadlineExceeded
+					}
+				}},
+			}
+			var (
+				loaded   *keyspacepb.KeyspaceMeta
+				revision int64
+				err      error
+			)
+			done := make(chan struct{})
+			go func() {
+				loaded, revision, err = manager.LoadKeyspaceByIDWithRevision(callerCtx, 1)
+				close(done)
+			}()
+			t.Cleanup(func() {
+				cancelCaller()
+				cancelManager()
+				close(abort)
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Error("metadata lookup did not stop during cleanup")
+				}
+			})
+			select {
+			case errAtEntry := <-started:
+				if tc.cancelBefore {
+					re.ErrorIs(errAtEntry, context.Canceled)
+				} else {
+					re.NoError(errAtEntry)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("metadata lookup did not reach storage")
+			}
+			cancel()
+			select {
+			case <-done:
+				re.ErrorIs(err, context.Canceled)
+				re.Nil(loaded)
+				re.Zero(revision)
+			case <-time.After(5 * time.Second):
+				t.Fatal("metadata lookup did not stop after cancellation")
+			}
+		})
+	}
+}
+
+func TestLoadKeyspaceByIDWithRevisionContextCleanup(t *testing.T) {
+	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 1}, Name: "revision-keyspace"}
+	for _, tc := range []struct {
+		name       string
+		meta       *keyspacepb.KeyspaceMeta
+		storageErr error
+		wantErr    error
+	}{
+		{name: "success", meta: meta},
+		{name: "storage-error", storageErr: context.DeadlineExceeded, wantErr: context.DeadlineExceeded},
+		{name: "not-found", wantErr: errs.ErrKeyspaceNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			type valueKey struct{}
+			deadline := time.Now().Add(time.Minute)
+			callerCtx, cancelCaller := context.WithDeadline(context.WithValue(context.Background(), valueKey{}, "caller-value"), deadline)
+			defer cancelCaller()
+			managerCtx, cancelManager := context.WithCancel(context.Background())
+			defer cancelManager()
+			var loadCtx context.Context
+			manager := &Manager{
+				ctx: managerCtx,
+				store: &revisionedKeyspaceStorage{load: func(ctx context.Context, _ uint32) (*keyspacepb.KeyspaceMeta, int64, error) {
+					loadCtx = ctx
+					return tc.meta, 42, tc.storageErr
+				}},
+			}
+			loaded, revision, err := manager.LoadKeyspaceByIDWithRevision(callerCtx, 1)
+			if tc.wantErr != nil {
+				re.ErrorIs(err, tc.wantErr)
+				re.Nil(loaded)
+				re.Zero(revision)
+			} else {
+				re.NoError(err)
+				re.Equal(meta, loaded)
+				re.Equal(int64(42), revision)
+			}
+			re.NotNil(loadCtx)
+			re.Equal("caller-value", loadCtx.Value(valueKey{}))
+			loadDeadline, ok := loadCtx.Deadline()
+			re.True(ok)
+			re.Equal(deadline, loadDeadline)
+			re.ErrorIs(loadCtx.Err(), context.Canceled)
+			re.NoError(callerCtx.Err())
+			re.NoError(managerCtx.Err())
+		})
+	}
 }
