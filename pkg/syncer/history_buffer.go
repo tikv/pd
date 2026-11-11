@@ -305,6 +305,8 @@ func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	h.retains = nil
 	if h.capacity() > h.baseCapacity {
 		h.resizeLocked(h.baseCapacity)
+	} else {
+		clear(h.records)
 	}
 }
 
