@@ -53,8 +53,8 @@ const (
 	ScanRegionLimit = 1000
 	// batchSearchSize is the default size for the number of IDs/keys/prevKeys to search in a batch.
 	batchSearchSize = 128
-	// CollectFactor is the factor to collect the count of region.
-	CollectFactor = 0.9
+	// CollectFactor is the required fraction of regions collected before scheduling.
+	CollectFactor = 1.0
 )
 
 // errRegionIsStale is error info for region is stale.
@@ -1889,7 +1889,7 @@ func (r *RegionsInfo) GetNotFromStorageRegionsCntByStore(storeID uint64) int {
 }
 
 // IsStorePrepared checks if a store is prepared.
-// For each store, the number of active regions should be more than total region of the store * CollectFactor
+// For each store, the number of active regions must be at least its region count * CollectFactor.
 func (r *RegionsInfo) IsStorePrepared(storeID uint64) bool {
 	return float64(r.GetNotFromStorageRegionsCntByStore(storeID)) >= float64(r.GetStoreRegionCount(storeID))*CollectFactor
 }

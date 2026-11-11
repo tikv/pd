@@ -1168,8 +1168,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	re.False(prepareChecker2.IsPrepared())
 	re.False(coordinator2.ShouldRun())
 
-	// Send only a small number of region heartbeats (insufficient for prepare checker)
-	for i := uint64(1); i <= 50; i++ {
+	// Collecting 99% of regions must not prepare the new primary.
+	for i := uint64(1); i <= 99; i++ {
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 			Region: &metapb.Region{
@@ -1187,7 +1187,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	}
 
 	testutil.Eventually(re, func() bool {
-		return cluster2.GetNotFromStorageRegionsCnt() == 50
+		return cluster2.GetNotFromStorageRegionsCnt() == 99
 	})
 
 	// The prepare checker should still be checking and potentially not satisfied
@@ -1198,23 +1198,21 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	re.False(isPrepared)
 	re.False(shouldRun)
 
-	// Send enough regions to eventually satisfy the prepare checker
-	for i := uint64(51); i <= 100; i++ {
-		regionReq := &pdpb.RegionHeartbeatRequest{
-			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
-			Region: &metapb.Region{
-				Id:       i,
-				Peers:    peers,
-				StartKey: fmt.Appendf(nil, "k%03d", i),
-				EndKey:   fmt.Appendf(nil, "k%03d", i+1),
-			},
-			Leader:          leaderPeer,
-			ApproximateSize: 10 * units.MiB,
-			ApproximateKeys: 100,
-		}
-		err = stream.Send(regionReq)
-		re.NoError(err)
+	// Collect the last region to satisfy the prepare checker.
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region: &metapb.Region{
+			Id:       100,
+			Peers:    peers,
+			StartKey: []byte("k100"),
+			EndKey:   []byte("k101"),
+		},
+		Leader:          leaderPeer,
+		ApproximateSize: 10 * units.MiB,
+		ApproximateKeys: 100,
 	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
 
 	// Finally verify that once prepared, the coordinator should be ready to run
 	testutil.Eventually(re, func() bool {

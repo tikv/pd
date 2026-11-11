@@ -4751,7 +4751,8 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 		{6, false},
 		{7, false},
 		{8, false},
-		{9, true},
+		{9, false},
+		{10, true},
 	}
 
 	for _, testCase := range testCases {
@@ -4763,10 +4764,10 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	re.Equal(9, tc.GetNotFromStorageRegionsCnt())
+	re.Equal(10, tc.GetNotFromStorageRegionsCnt())
 
-	// Now, after server is prepared, there exist some regions with no leader.
-	re.Equal(uint64(0), tc.GetRegion(10).GetLeader().GetStoreId())
+	// Scheduling starts only after the last stored region has been collected.
+	re.Equal(uint64(1), tc.GetRegion(10).GetLeader().GetStoreId())
 }
 
 func TestAddScheduler(t *testing.T) {
