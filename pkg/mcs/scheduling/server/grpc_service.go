@@ -375,7 +375,7 @@ func (s *Service) GetOperator(_ context.Context, request *schedulingpb.GetOperat
 }
 
 // AskBatchSplit implements gRPC SchedulingServer.
-func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatchSplitRequest) (*schedulingpb.AskBatchSplitResponse, error) {
+func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBatchSplitRequest) (*schedulingpb.AskBatchSplitResponse, error) {
 	c := s.GetCluster()
 	if c == nil {
 		return &schedulingpb.AskBatchSplitResponse{Header: notBootstrappedHeader()}, nil
@@ -421,10 +421,19 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 				fmt.Sprintf("split ID count exceeds maximum %d", uint32(math.MaxUint32))),
 		}, nil
 	}
+	if err := core.ValidateBatchSplitRequest(splitCount, reqRegion, region); err != nil {
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 
-	id, count, err := c.AllocID(requestIDCount)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(c.ctx, cancel)
+	defer stop()
+	id, count, err := c.allocIDWithContext(ctx, requestIDCount)
 	if err != nil {
 		return nil, err
 	}
@@ -433,13 +442,13 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	if requestIDCount != count {
 		// use non batch way to split region
 		for range splitCount {
-			newRegionID, _, err := c.AllocID(1)
+			newRegionID, _, err := c.allocIDWithContext(ctx, 1)
 			if err != nil {
 				return nil, err
 			}
 			peerIDs := make([]uint64, len(request.Region.Peers))
 			for i := range peerIDs {
-				peerIDs[i], _, err = c.AllocID(1)
+				peerIDs[i], _, err = c.allocIDWithContext(ctx, 1)
 				if err != nil {
 					return nil, err
 				}

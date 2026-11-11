@@ -22,10 +22,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -93,7 +96,11 @@ func (s *raftClusterTestSuite) TestAskSplit() {
 }
 
 func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
+	oldLevel := log.GetLevel()
+	log.SetLevel(zapcore.ErrorLevel)
+	defer log.SetLevel(oldLevel)
 	env := tests.NewSchedulingTestEnvironment(s.T())
+	const responseLimit = 8 << 20
 	defer env.Cleanup()
 	env.RunTest(func(cluster *tests.TestCluster) {
 		re := s.Require()
@@ -101,6 +108,11 @@ func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
 		re.NoError(leader.GetServer().SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.BatchSplit).String()))
 		regions := leader.GetRegions()
 		re.NotEmpty(regions)
+		// Exercise ten-byte IDs and three peers, whose accepted boundary response
+		// exceeds the default gRPC receive limit when PD forwards to scheduling.
+		regions[0] = regions[0].Clone(core.SetPeers([]*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 33, StoreId: 3}}))
+		leader.GetRaftCluster().PutRegion(regions[0])
+		re.NoError(leader.GetAllocator().SetBase(1 << 63))
 		region := regions[0].GetMeta()
 		if primary := cluster.GetSchedulingPrimaryServer(); primary != nil {
 			primary.GetCluster().PutRegion(regions[0])
@@ -114,7 +126,7 @@ func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
 		for _, count := range []uint32{131073, math.MaxUint32} {
 			request.SplitCount = count
 			ctx, cancel := context.WithTimeout(s.T().Context(), 10*time.Second)
-			resp, err := client.AskBatchSplit(ctx, request)
+			resp, err := client.AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(responseLimit))
 			cancel()
 			re.NoError(err)
 			re.Contains(resp.GetHeader().GetError().GetMessage(), "exceeds maximum")
@@ -125,11 +137,15 @@ func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
 		for _, count := range []uint32{0, 100000, 131072, 1} {
 			request.SplitCount = count
 			ctx, cancel := context.WithTimeout(s.T().Context(), 30*time.Second)
-			resp, err := client.AskBatchSplit(ctx, request)
+			resp, err := client.AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(responseLimit))
 			cancel()
 			re.NoError(err)
 			re.Nil(resp.GetHeader().GetError())
 			re.Len(resp.GetIds(), int(count))
+			if count == core.MaxBatchSplitCount {
+				re.Greater(resp.Size(), 4<<20)
+				re.LessOrEqual(resp.Size(), responseLimit)
+			}
 			var previous uint64
 			for _, split := range resp.GetIds() {
 				re.Greater(split.GetNewRegionId(), previous)

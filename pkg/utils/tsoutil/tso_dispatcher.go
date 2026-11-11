@@ -139,6 +139,7 @@ func (s *TSODispatcher) dispatch(
 	requests := make([]Request, 0, maxMergeRequests+2)
 	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
 	noProxyRequestsTimer := time.NewTimer(tsoProxyStreamIdleTimeout)
+	defer noProxyRequestsTimer.Stop()
 	for {
 		noProxyRequestsTimer.Reset(tsoProxyStreamIdleTimeout)
 		failpoint.Inject("tsoProxyStreamIdleTimeout", func() {
@@ -182,17 +183,32 @@ func (s *TSODispatcher) dispatch(
 }
 
 func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) error {
-	// Merge the requests
-	count := uint64(0)
+	if len(requests) == 0 {
+		return ValidateTSOCount(0)
+	}
 	for _, request := range requests {
-		count += uint64(request.getCount())
+		if err := ValidateTSOCount(uint64(request.getCount())); err != nil {
+			return err
+		}
 	}
-	if err := ValidateTSOCount(count); err != nil {
-		return err
+	for len(requests) > 0 {
+		count := uint64(requests[0].getCount())
+		end := 1
+		for end < len(requests) && count+uint64(requests[end].getCount()) <= logicalBits {
+			count += uint64(requests[end].getCount())
+			end++
+		}
+		if err := s.processBatch(forwardStream, requests[:end], uint32(count)); err != nil {
+			return err
+		}
+		requests = requests[end:]
 	}
+	return nil
+}
 
+func (s *TSODispatcher) processBatch(forwardStream stream, requests []Request, count uint32) error {
 	start := time.Now()
-	resp, err := requests[0].process(forwardStream, uint32(count))
+	resp, err := requests[0].process(forwardStream, count)
 	if err != nil {
 		return err
 	}
@@ -207,19 +223,21 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
 	// count is 5, then the splitting results should be 5 and 10.
 	firstLogical := logical - int64(count)
-	return s.finishRequest(requests, physical, firstLogical)
+	s.finishRequest(requests, physical, firstLogical)
+	return nil
 }
 
-func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) error {
+func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) {
 	countSum := int64(0)
 	for i := range requests {
-		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
+		_, err := requests[i].postProcess(countSum, physical, firstLogical)
+		// The timestamps remain consumed even if this downstream stream closed.
+		// Only an upstream failure may tear down the shared forwarding queue.
+		countSum += int64(requests[i].getCount())
 		if err != nil {
-			return err
+			log.Warn("send tso response to client failed", errs.ZapError(err))
 		}
-		countSum = newCountSum
 	}
-	return nil
 }
 
 // clearPendingRequests clears all pending requests in the queue to prevent goroutine leakage.

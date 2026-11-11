@@ -287,3 +287,31 @@ func newSplitScatterIndexKey(suffix string) []byte {
 	key = append(key, suffix...)
 	return codec.EncodeBytes(key)
 }
+
+func TestHandleAskBatchSplitRejectsPeerWorkBeforeAllocation(t *testing.T) {
+	for _, peersCount := range []int{4, 32766} {
+		t.Run(strconv.Itoa(peersCount), func(t *testing.T) {
+			cluster, _ := newSplitScatterTestCluster(t)
+			allocator := &rejectedSplitIDAllocator{IDAllocator: mockid.NewIDAllocator()}
+			cluster.id = allocator
+			peers := make([]*metapb.Peer, peersCount)
+			for i := range peers {
+				peers[i] = &metapb.Peer{Id: uint64(i + 1), StoreId: uint64(i + 1)}
+			}
+			meta := cluster.GetRegion(100).Clone(core.SetPeers(peers)).GetMeta()
+			count := uint32(1)
+			message := "peers do not match"
+			if peersCount == 32766 {
+				meta.RegionEpoch.ConfVer++
+				count = core.MaxBatchSplitCount
+				message = "split response exceeds maximum"
+			}
+			request := &pdpb.AskBatchSplitRequest{Region: meta, SplitCount: count}
+			require.Less(t, request.Size(), 1<<20)
+			resp, err := cluster.HandleAskBatchSplit(request)
+			require.Zero(t, allocator.calls)
+			require.ErrorContains(t, err, message)
+			require.Nil(t, resp)
+		})
+	}
+}

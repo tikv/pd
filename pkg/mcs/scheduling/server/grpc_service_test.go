@@ -164,14 +164,23 @@ func (s *captureHeartbeatStream) Send(resp core.RegionHeartbeatResponse) error {
 
 type splitScatterPDClient struct {
 	pdpb.PDClient
-	next     uint64
-	nonBatch bool
-	allocErr error
-	calls    int
+	next        uint64
+	nonBatch    bool
+	allocErr    error
+	headerErr   *pdpb.Error
+	headerErrAt int
+	onAlloc     func(context.Context, int)
+	calls       int
 }
 
-func (c *splitScatterPDClient) AllocID(_ context.Context, req *pdpb.AllocIDRequest, _ ...grpc.CallOption) (*pdpb.AllocIDResponse, error) {
+func (c *splitScatterPDClient) AllocID(ctx context.Context, req *pdpb.AllocIDRequest, _ ...grpc.CallOption) (*pdpb.AllocIDResponse, error) {
 	c.calls++
+	if c.onAlloc != nil {
+		c.onAlloc(ctx, c.calls)
+	}
+	if c.headerErr != nil && c.calls == c.headerErrAt {
+		return &pdpb.AllocIDResponse{Header: &pdpb.ResponseHeader{Error: c.headerErr}}, nil
+	}
 	if c.allocErr != nil {
 		return nil, c.allocErr
 	}
@@ -368,4 +377,82 @@ func splitScatterPendingMetricValue(t *testing.T) float64 {
 	}
 	require.FailNow(t, "split scatter pending metric not found")
 	return 0
+}
+
+func TestAskBatchSplitRejectsPeerWorkBeforeAllocation(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		peers   int
+		count   uint32
+		newer   bool
+		message string
+	}{
+		{"peer product", 32766, core.MaxBatchSplitCount, true, "split response exceeds maximum"},
+		{"same configuration mismatch", 4, 1, false, "peers do not match"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			client := &splitScatterPDClient{next: 1000, allocErr: errors.New("allocator reached")}
+			cluster.SwitchPDLeader(client)
+			region := newAffinitySplitTestRegion()
+			cluster.PutRegion(region)
+			peers := make([]*metapb.Peer, test.peers)
+			for i := range peers {
+				peers[i] = &metapb.Peer{Id: uint64(i + 1), StoreId: uint64(i + 1)}
+			}
+			meta := region.Clone(core.SetPeers(peers)).GetMeta()
+			if test.newer {
+				meta.RegionEpoch.ConfVer++
+			}
+			request := &schedulingpb.AskBatchSplitRequest{Region: meta, SplitCount: test.count}
+			require.Less(t, request.Size(), 1<<20)
+			resp, err := svc.AskBatchSplit(t.Context(), request)
+			require.Zero(t, client.calls)
+			require.NoError(t, err)
+			require.Contains(t, resp.GetHeader().GetError().GetMessage(), test.message)
+			require.Empty(t, resp.GetIds())
+		})
+	}
+}
+
+func TestAskBatchSplitAllocationHeaderError(t *testing.T) {
+	for _, call := range []int{1, 2, 3} {
+		t.Run(strconv.Itoa(call), func(t *testing.T) {
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			client := &splitScatterPDClient{next: 1000, nonBatch: true, headerErr: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "id exhausted"}, headerErrAt: call}
+			cluster.SwitchPDLeader(client)
+			region := newAffinitySplitTestRegion()
+			cluster.PutRegion(region)
+			resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{Region: region.GetMeta(), SplitCount: 10})
+			require.ErrorContains(t, err, "id exhausted")
+			require.Nil(t, resp)
+			require.Equal(t, call, client.calls)
+		})
+	}
+}
+
+func TestAskBatchSplitAllocationCancellation(t *testing.T) {
+	for _, call := range []int{0, 1, 2, 3} {
+		t.Run(strconv.Itoa(call), func(t *testing.T) {
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if call == 0 {
+				cancel()
+			}
+			client := &splitScatterPDClient{next: 1000, nonBatch: true, onAlloc: func(ctx context.Context, n int) {
+				if n == call {
+					cancel()
+					<-ctx.Done()
+				}
+			}}
+			cluster.SwitchPDLeader(client)
+			region := newAffinitySplitTestRegion()
+			cluster.PutRegion(region)
+			resp, err := svc.AskBatchSplit(ctx, &schedulingpb.AskBatchSplitRequest{Region: region.GetMeta(), SplitCount: 10})
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, resp)
+			require.Equal(t, call, client.calls)
+		})
+	}
 }

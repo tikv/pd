@@ -45,24 +45,31 @@ type mockStream struct {
 }
 
 type countRecordingStream struct {
-	count uint32
-	calls int
+	count  uint32
+	calls  int
+	counts []uint32
 }
 
 func (s *countRecordingStream) process(_ uint64, count, _, _ uint32) (tsoResp, error) {
 	s.count = count
 	s.calls++
-	return &pdpb.TsoResponse{Timestamp: &pdpb.Timestamp{Physical: 1234, Logical: int64(count)}}, nil
+	s.counts = append(s.counts, count)
+	return &pdpb.TsoResponse{Timestamp: &pdpb.Timestamp{Physical: int64(1233 + s.calls), Logical: int64(count)}}, nil
 }
 
 type countResponseStream struct {
 	pdpb.PD_TsoServer
 	response *pdpb.TsoResponse
+	err      error
+	done     chan struct{}
 }
 
 func (s *countResponseStream) Send(response *pdpb.TsoResponse) error {
 	s.response = response
-	return nil
+	if s.done != nil {
+		close(s.done)
+	}
+	return s.err
 }
 
 func TestTSODispatcherCountValidation(t *testing.T) {
@@ -75,7 +82,6 @@ func TestTSODispatcherCountValidation(t *testing.T) {
 		{name: "largest batch", counts: []uint32{1, logicalBits - 1}, valid: true},
 		{name: "zero", counts: []uint32{0}},
 		{name: "logical overflow", counts: []uint32{logicalBits + 1}},
-		{name: "merged logical overflow", counts: []uint32{logicalBits, 1}},
 		{name: "uint32 overflow", counts: []uint32{math.MaxUint32, 2}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -186,7 +192,7 @@ func (m *mockStream) process(clusterID uint64, _ uint32, _ uint32, _ uint32) (ts
 }
 
 type mockProtoFactory struct {
-	stream *mockStream
+	stream stream
 }
 
 func (m *mockProtoFactory) createForwardStream(_ context.Context, _ *grpc.ClientConn) (stream, context.CancelFunc, error) {
@@ -302,4 +308,60 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 	re.Equal(int64(11000*20), reqDispatchCount.Load(), "The number of dispatched requests should match the total requests sent")
 
 	suite.dispatcher.Stop()
+}
+
+func TestTSODispatcherPartitionsValidRequests(t *testing.T) {
+	dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "partition_requests"}), nil)
+	counts := []uint32{logicalBits, 1, logicalBits - 1, logicalBits}
+	requests := make([]Request, 0, len(counts))
+	responses := make([]*countResponseStream, 0, len(counts))
+	for _, count := range counts {
+		response := &countResponseStream{}
+		responses = append(responses, response)
+		requests = append(requests, NewPDProtoRequest("host", nil, &pdpb.TsoRequest{Header: &pdpb.RequestHeader{ClusterId: 1}, Count: count}, response))
+	}
+	forward := &countRecordingStream{}
+	require.NoError(t, dispatcher.processRequests(forward, requests))
+	require.Equal(t, []uint32{logicalBits, logicalBits, logicalBits}, forward.counts)
+	var previous uint64
+	for i, response := range responses {
+		require.Equal(t, counts[i], response.response.GetCount())
+		ts := response.response.GetTimestamp()
+		last := ComposeTS(ts.GetPhysical(), ts.GetLogical())
+		require.Greater(t, last-uint64(counts[i])+1, previous)
+		previous = last
+	}
+}
+
+func TestTSODispatcherClosedStreamIsolation(t *testing.T) {
+	dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "closed_stream_isolation"}), nil)
+	ctx, cancel := context.WithCancelCause(t.Context())
+	queue := &tsoRequestProxyQueue{ctx: ctx, cancel: cancel, requestCh: make(chan Request, 3)}
+	dispatcher.dispatchChs.Store("host", queue)
+	closed := &countResponseStream{err: errors.New("client stream closed after invalid request")}
+	request := func(count uint32, response *countResponseStream) Request {
+		return NewPDProtoRequest("host", nil, &pdpb.TsoRequest{Header: &pdpb.RequestHeader{ClusterId: 1}, Count: count}, response)
+	}
+	require.Same(t, ctx, dispatcher.DispatchRequest(t.Context(), request(1, closed), nil))
+	require.Error(t, context.Cause(dispatcher.DispatchRequest(t.Context(), request(0, closed), nil)))
+	// A second request from the closed stream still consumes its timestamp range.
+	require.Same(t, ctx, dispatcher.DispatchRequest(t.Context(), request(2, closed), nil))
+	delivered := &countResponseStream{done: make(chan struct{})}
+	require.Same(t, ctx, dispatcher.DispatchRequest(t.Context(), request(1, delivered), nil))
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		dispatcher.dispatch(queue, &mockProtoFactory{stream: &countRecordingStream{}}, "host", nil, make(chan *TSDeadline, 4))
+	}()
+	// Canceling and joining the dispatcher also synchronizes access to responses.
+	t.Cleanup(func() { cancel(nil); <-finished })
+	select {
+	case <-delivered.done:
+		require.NoError(t, context.Cause(ctx))
+		require.Equal(t, int64(4), delivered.response.GetTimestamp().GetLogical())
+	case <-ctx.Done():
+		t.Fatalf("closed downstream stream canceled the shared queue: %v", context.Cause(ctx))
+	case <-time.After(5 * time.Second):
+		t.Fatal("other stream did not receive its response")
+	}
 }
