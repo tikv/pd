@@ -155,6 +155,10 @@ type ResourceGroupsController struct {
 	keyspaceID          uint32
 	configRevision      int64
 
+	// Order cold-cache publication with metadata changes without holding a lock across RPCs.
+	groupCacheMu         sync.Mutex
+	groupCacheGeneration uint64
+
 	loopCtx    context.Context
 	loopCancel func()
 
@@ -265,6 +269,13 @@ func (c *ResourceGroupsController) applyControllerConfig(config *Config) {
 }
 
 func (c *ResourceGroupsController) updateResourceGroup(group *rmpb.ResourceGroup) {
+	c.groupCacheMu.Lock()
+	defer c.groupCacheMu.Unlock()
+	c.groupCacheGeneration++
+	c.updateResourceGroupLocked(group)
+}
+
+func (c *ResourceGroupsController) updateResourceGroupLocked(group *rmpb.ResourceGroup) {
 	name := group.GetName()
 	gc, ok := c.loadGroupController(name)
 	if !ok {
@@ -296,14 +307,28 @@ func (c *ResourceGroupsController) reloadResourceGroups(ctx context.Context) (in
 		return 0, err
 	}
 	names := make(map[string]struct{}, len(groups))
+	var defaultGroup *rmpb.ResourceGroup
 	for _, group := range groups {
 		names[group.GetName()] = struct{}{}
-		c.updateResourceGroup(group)
+		if group.GetName() == defaultResourceGroupName {
+			defaultGroup = group
+		}
+	}
+	c.groupCacheMu.Lock()
+	defer c.groupCacheMu.Unlock()
+	c.groupCacheGeneration++
+	for _, group := range groups {
+		c.updateResourceGroupLocked(group)
+	}
+	if defaultGroup == nil {
+		if gc, ok := c.loadGroupController(defaultResourceGroupName); ok {
+			defaultGroup = gc.getMeta()
+		}
 	}
 	c.groupsController.Range(func(key, value any) bool {
 		name := key.(string)
 		if _, exists := names[name]; !exists && !value.(*groupCostController).tombstone.Load() {
-			c.tombstoneGroupCostController(name)
+			c.tombstoneGroupCostControllerLocked(name, defaultGroup)
 		}
 		return true
 	})
@@ -393,7 +418,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			}
 		})
 		var watchMetaChannel, watchConfigChannel chan *metastorage.WatchResponse
-		prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
+		prefix := append(pd.GroupSettingsPathPrefixBytes(c.keyspaceID), '/')
 		startMetaWatch := func() error {
 			var err error
 			if metaRevision == 0 {
@@ -516,7 +541,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						// A replayed delete can outlive its previous value's history.
 						// The key still identifies the deleted group in that case.
 						if item.PrevKv == nil {
-							if name, ok := strings.CutPrefix(string(item.Kv.Key), string(prefix)+"/"); ok && name != "" {
+							if name, ok := strings.CutPrefix(string(item.Kv.Key), string(prefix)); ok && name != "" {
 								c.tombstoneGroupCostController(name)
 							}
 							continue
@@ -672,18 +697,34 @@ func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName st
 func (c *ResourceGroupsController) tryGetResourceGroupController(
 	ctx context.Context, name string, useTombstone bool,
 ) (*groupCostController, error) {
-	// Get from the local cache first.
-	gc, ok := c.loadGroupController(name)
-	if ok {
-		if !useTombstone && gc.tombstone.Load() {
-			return nil, NewResourceGroupNotExistErr(name)
+	var (
+		group *rmpb.ResourceGroup
+		err   error
+	)
+	for {
+		// Get from the local cache first.
+		if gc, ok := c.loadGroupController(name); ok {
+			if !useTombstone && gc.tombstone.Load() {
+				return nil, NewResourceGroupNotExistErr(name)
+			}
+			return gc, nil
 		}
-		return gc, nil
-	}
 
+		c.groupCacheMu.Lock()
+		generation := c.groupCacheGeneration
+		c.groupCacheMu.Unlock()
+		group, err = c.provider.GetResourceGroup(ctx, name)
+		c.groupCacheMu.Lock()
+		if generation == c.groupCacheGeneration {
+			break
+		}
+		c.groupCacheMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	defer c.groupCacheMu.Unlock()
 	isUseDegradedResourceGroup := false
-	// Call gRPC to fetch the resource group info.
-	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
 		if c.shouldUseDegradedResourceGroup(err) {
 			isUseDegradedResourceGroup = true
@@ -696,13 +737,16 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return nil, NewResourceGroupNotExistErr(name)
 	}
 	// Check again to prevent initializing the same resource group concurrently.
-	if gc, ok = c.loadGroupController(name); ok {
+	if gc, ok := c.loadGroupController(name); ok {
+		if !useTombstone && gc.tombstone.Load() {
+			return nil, NewResourceGroupNotExistErr(name)
+		}
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err = newGroupCostController(
+	gc, err := newGroupCostController(
 		group,
-		c.ruConfig,
+		c.GetConfig(),
 		c.lowTokenNotifyChan,
 		c.tokenBucketUpdateChan,
 		c.getOrCreateRequestSourceMetricsState(name),
@@ -725,27 +769,40 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 // Do not delete the resource group immediately to prevent from interrupting the ongoing request,
 // mark it as tombstone and create a default resource group controller for it.
 func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
+	c.groupCacheMu.Lock()
+	c.groupCacheGeneration++
 	_, ok := c.loadGroupController(name)
-	if !ok {
+	c.groupCacheMu.Unlock()
+	if !ok || name == defaultResourceGroupName {
 		return
 	}
-	// The default resource group controller should never be deleted.
-	if name == defaultResourceGroupName {
-		return
-	}
-	// Try to get the default group meta first.
+	// Fetch the default outside the cache lock, then invalidate loads that raced with it.
 	defaultGC, err := c.tryGetResourceGroupController(c.loopCtx, defaultResourceGroupName, false)
+	var defaultGroup *rmpb.ResourceGroup
 	if err != nil || defaultGC == nil {
 		log.Warn("[resource group controller] get default resource group meta for tombstone failed",
 			zap.String("name", name), zap.Error(err))
-		// Directly delete the resource group controller if the default group is not available.
+	} else {
+		defaultGroup = defaultGC.getMeta()
+	}
+	c.groupCacheMu.Lock()
+	defer c.groupCacheMu.Unlock()
+	c.groupCacheGeneration++
+	c.tombstoneGroupCostControllerLocked(name, defaultGroup)
+}
+
+func (c *ResourceGroupsController) tombstoneGroupCostControllerLocked(name string, defaultGroup *rmpb.ResourceGroup) {
+	if _, ok := c.loadGroupController(name); !ok || name == defaultResourceGroupName {
+		return
+	}
+	if defaultGroup == nil {
 		c.cleanupRequestSourceMetricsState(name)
 		c.groupsController.Delete(name)
 		return
 	}
 	// Create a default resource group controller for the tombstone resource group independently.
 	gc, err := newGroupCostController(
-		defaultGC.getMeta(),
+		defaultGroup,
 		c.ruConfig,
 		c.lowTokenNotifyChan,
 		c.tokenBucketUpdateChan,

@@ -995,7 +995,7 @@ func TestResourceGroupWatchResumesAfterDisconnect(t *testing.T) {
 		ctx := t.Context()
 		provider := newWatchRecoveryProvider()
 		first, second := make(chan *metastorage.WatchResponse, 1), make(chan *metastorage.WatchResponse, 1)
-		prefix := pd.GroupSettingsPathPrefixBytes(constants.NullKeyspaceID)
+		prefix := append(pd.GroupSettingsPathPrefixBytes(constants.NullKeyspaceID), '/')
 		provider.On("Watch", mock.Anything, prefix, matchWatchRevision(11)).Return(first, nil).Once()
 		provider.On("Watch", mock.Anything, prefix, matchWatchRevision(13)).Return(second, nil).Once()
 		provider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, matchWatchRevision(11)).
@@ -1028,7 +1028,7 @@ func TestResourceGroupWatchResumesAfterDisconnect(t *testing.T) {
 		synctest.Wait()
 		second <- &metastorage.WatchResponse{Events: []*meta_storagepb.Event{{
 			Type: meta_storagepb.Event_DELETE,
-			Kv:   &meta_storagepb.KeyValue{Key: append(prefix, []byte("/"+group.Name)...), ModRevision: 14},
+			Kv:   &meta_storagepb.KeyValue{Key: append(prefix, []byte(group.Name)...), ModRevision: 14},
 			// etcd may have compacted the previous value while retaining this delete.
 		}}}
 		synctest.Wait()
@@ -1046,7 +1046,7 @@ func TestResourceGroupWatchReloadsAfterCompaction(t *testing.T) {
 		ctx := t.Context()
 		provider := newWatchRecoveryProvider()
 		first := make(chan *metastorage.WatchResponse, 1)
-		prefix := pd.GroupSettingsPathPrefixBytes(constants.NullKeyspaceID)
+		prefix := append(pd.GroupSettingsPathPrefixBytes(constants.NullKeyspaceID), '/')
 		provider.On("Watch", mock.Anything, prefix, matchWatchRevision(11)).Return(first, nil).Once()
 		provider.On("Watch", mock.Anything, prefix, matchWatchRevision(31)).
 			Return(make(chan *metastorage.WatchResponse), nil).Once()
@@ -1169,4 +1169,96 @@ func TestControllerStopCancelsWatches(t *testing.T) {
 		re.NoError(ctx.Err(), "the caller's context must remain usable after Stop")
 		provider.AssertExpectations(t)
 	})
+}
+
+func TestResourceGroupLoadDuringMetadataChange(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot bool
+		deleted  bool
+		canceled bool
+	}{
+		{name: "snapshot update", snapshot: true},
+		{name: "snapshot delete", snapshot: true, deleted: true},
+		{name: "watch update"},
+		{name: "watch delete", deleted: true},
+		{name: "cancel during snapshot", snapshot: true, canceled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				provider := newWatchRecoveryProvider()
+				started, release := make(chan struct{}), make(chan struct{})
+				oldGroup := watchRecoveryGroup("loading", 100)
+				newGroup := watchRecoveryGroup(oldGroup.Name, 200)
+				provider.On("GetResourceGroup", mock.Anything, oldGroup.Name, mock.Anything).
+					Run(func(mock.Arguments) {
+						close(started)
+						<-release
+					}).Return(oldGroup, nil).Once()
+				if !tc.canceled {
+					if tc.deleted {
+						provider.On("GetResourceGroup", mock.Anything, oldGroup.Name, mock.Anything).
+							Return(nil, NewResourceGroupNotExistErr(oldGroup.Name)).Once()
+					} else {
+						provider.On("GetResourceGroup", mock.Anything, oldGroup.Name, mock.Anything).
+							Return(newGroup, nil).Once()
+					}
+				}
+				controller, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID)
+				re.NoError(err)
+				type result struct {
+					group *groupCostController
+					err   error
+				}
+				done := make(chan result, 1)
+				go func() {
+					gc, err := controller.tryGetResourceGroupController(ctx, oldGroup.Name, false)
+					done <- result{group: gc, err: err}
+				}()
+				<-started
+				synctest.Wait()
+				// The RPC has read the old value, but has not published it to the cache.
+				if tc.snapshot {
+					var groups []*rmpb.ResourceGroup
+					if !tc.deleted {
+						groups = append(groups, newGroup)
+					}
+					provider.On("LoadResourceGroups", mock.Anything).Return(groups, int64(30), nil).Once()
+					revision, err := controller.reloadResourceGroups(ctx)
+					re.NoError(err)
+					re.Equal(int64(31), revision)
+				} else if tc.deleted {
+					controller.tombstoneGroupCostController(oldGroup.Name)
+				} else {
+					controller.updateResourceGroup(newGroup)
+				}
+				if tc.canceled {
+					cancel()
+				}
+				close(release)
+				got := <-done
+				if tc.canceled {
+					re.ErrorIs(got.err, context.Canceled)
+				} else if tc.deleted {
+					re.Error(got.err)
+					re.True(isResourceGroupNotFoundError(got.err))
+				} else {
+					re.NoError(got.err)
+					re.Equal(uint64(200), got.group.getMeta().GetRUSettings().GetRU().GetSettings().GetFillRate())
+				}
+				cached, ok := controller.loadGroupController(oldGroup.Name)
+				if tc.deleted || tc.canceled {
+					re.Nil(got.group)
+					re.False(ok, "a stale RPC must not restore a deleted or canceled group")
+				} else {
+					re.True(ok)
+					re.Same(got.group, cached)
+				}
+				provider.AssertExpectations(t)
+			})
+		})
+	}
 }
