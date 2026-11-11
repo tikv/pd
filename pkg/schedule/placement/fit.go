@@ -505,28 +505,26 @@ func unSelectPeers(selected []*fitPeer) {
 // Returns true if it replaces `bestFit` with a better alternative.
 func (w *fitWorker) compareBest(selected []*fitPeer, index int) bool {
 	rf := newRuleFit(w.rules[index], selected, w.supportWitness)
-	cmp := 1
 	if best := w.bestFit.RuleFits[index]; best != nil {
-		cmp = compareRuleFit(rf, best)
-	}
-
-	switch cmp {
-	case 1:
-		w.bestFit.RuleFits[index] = rf
-		// Reset previous result after position index.
+		switch compareRuleFit(rf, best) {
+		case -1:
+			return false
+		case 0:
+			if w.fitRule(index + 1) {
+				w.bestFit.RuleFits[index] = rf
+				return true
+			}
+			return false
+		}
+		// Only replacing an existing fit can invalidate later results.
 		for i := index + 1; i < len(w.rules); i++ {
 			w.bestFit.RuleFits[i] = nil
 		}
-		w.fitRule(index + 1)
-		w.updateOrphanPeers(index + 1)
-		return true
-	case 0:
-		if w.fitRule(index + 1) {
-			w.bestFit.RuleFits[index] = rf
-			return true
-		}
 	}
-	return false
+	w.bestFit.RuleFits[index] = rf
+	w.fitRule(index + 1)
+	w.updateOrphanPeers(index + 1)
+	return true
 }
 
 // determine the orphanPeers list based on fitPeer.selected flag.

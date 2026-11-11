@@ -208,6 +208,9 @@ func TestFitRegion(t *testing.T) {
 		{"1111_leader,2111,3111", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,3111/"},
 		{"1111_leader,2111,3111,4111", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,4111/3111"},
 		{"1111_leader,2111,3111,4111_learner", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,3111//4111"},
+		// Improving the first rule must discard the later rule's old assignment,
+		// even when no peer remains eligible for that later rule.
+		{"1111_learner,1112_leader", []string{"1/voter//", "1/voter/id=id2/"}, "1112//1111"},
 	}
 
 	for _, testCase := range testCases {
