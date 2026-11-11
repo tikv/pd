@@ -614,19 +614,12 @@ func (s *RegionSyncer) closeAllClient() {
 				},
 			},
 		}
-<<<<<<< HEAD
 		wg.Add(1)
 		go func(name string, sender *regionSyncStream, resp *pdpb.SyncRegionResponse) {
 			defer logutil.LogPanic()
 			defer wg.Done()
 			s.sendRegionSyncResponse(s.server.LoopContext(), name, sender, resp)
 		}(name, sender, resp)
-=======
-		sender.close()
-		if err := sender.send(resp); err != nil {
-			log.Warn("region syncer send close message meet error", errs.ZapError(errs.ErrGRPCSend, err))
-		}
->>>>>>> c5f7ded85f (syncer: adapt region history buffer size (#10712))
 	}
 	wg.Wait()
 }

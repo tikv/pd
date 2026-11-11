@@ -24,13 +24,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
-<<<<<<< HEAD
-func TestBufferSize(t *testing.T) {
-	re := require.New(t)
-	var regions []*core.RegionInfo
-	for i := 0; i <= 100; i++ {
-		regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: uint64(i)}, nil))
-=======
 func TestNormalizeHistoryBufferCapacity(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -43,7 +36,6 @@ func TestNormalizeHistoryBufferCapacity(t *testing.T) {
 		{name: "round-to-two-units", size: historyBufferCapacityUnit + 1, unit: historyBufferCapacityUnit, expected: 2 * historyBufferCapacityUnit},
 		{name: "round-to-four-units", size: 3 * historyBufferCapacityUnit, unit: historyBufferCapacityUnit, expected: 4 * historyBufferCapacityUnit},
 		{name: "test-unit", size: 3, unit: 1, expected: 4},
->>>>>>> c5f7ded85f (syncer: adapt region history buffer size (#10712))
 	}
 
 	for _, testCase := range testCases {
@@ -73,7 +65,7 @@ func TestHistoryBufferKeepsRingBehaviorWithoutRetain(t *testing.T) {
 func TestHistoryBufferRecordsAndFlushes(t *testing.T) {
 	re := require.New(t)
 	regions := make([]*core.RegionInfo, 0, 101)
-	for i := range 101 {
+	for i := 0; i <= 100; i++ {
 		regions = append(regions, newHistoryBufferTestRegion(uint64(i)))
 	}
 
