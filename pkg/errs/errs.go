@@ -80,7 +80,7 @@ func (e *httpError) legacyCodeValue() any { return e.legacyCode }
 
 // GetClientData preserves the original error data across HTTP error wrappers.
 func (e *httpError) GetClientData() any {
-	if nested := asHTTPError(e.err); nested != nil {
+	if nested := AsHTTPError(e.err); nested != nil {
 		return nested.GetClientData()
 	}
 	return e.err
@@ -99,7 +99,7 @@ func NewInvalidInputErr(err error) error {
 		panic("NewCodedError error is nil")
 	}
 	wrapped := &httpError{err: err, code: "input", statusCode: http.StatusBadRequest}
-	if httpErr := asHTTPError(err); httpErr != nil {
+	if httpErr := AsHTTPError(err); httpErr != nil {
 		wrapped.code, wrapped.statusCode = httpErr.Code(), httpErr.HTTPCode()
 		wrapped.legacyCode = legacyHTTPCodeValue(httpErr)
 	}
@@ -114,7 +114,7 @@ func NewInternalErr(err error) error {
 		panic("makeInternalStackCode error is nil")
 	}
 	wrapped := &httpError{err: err, code: "internal", statusCode: http.StatusInternalServerError}
-	if httpErr := asHTTPError(err); httpErr != nil && IsInternalHTTPError(httpErr) {
+	if httpErr := AsHTTPError(err); httpErr != nil && IsInternalHTTPError(httpErr) {
 		wrapped.code, wrapped.statusCode = httpErr.Code(), httpErr.HTTPCode()
 		wrapped.legacyCode = legacyHTTPCodeValue(httpErr)
 	}
@@ -133,12 +133,14 @@ func NewInternalErr(err error) error {
 func FindHTTPError(err error) HTTPError {
 	var code HTTPError
 	current := err
-	appendCode := func(next HTTPError) {
+	// Track traversal without comparing potentially non-comparable error values.
+	hasContext := false
+	appendCode := func(next HTTPError, withContext bool) {
 		original := error(next)
 		if legacy, ok := next.(*legacyHTTPError); ok {
 			original = legacy.err
 		}
-		if original != current {
+		if withContext {
 			next = &httpErrorContext{HTTPError: next, top: current}
 			original = next
 		}
@@ -150,9 +152,9 @@ func FindHTTPError(err error) HTTPError {
 		current = original
 	}
 	for err != nil {
-		if httpErr := asHTTPError(err); httpErr != nil {
+		if httpErr := AsHTTPError(err); httpErr != nil {
 			if code == nil || !sameHTTPErrorCode(code, httpErr) {
-				appendCode(httpErr)
+				appendCode(httpErr, hasContext)
 			}
 		} else if group, ok := err.(errors.ErrorGroup); ok {
 			var codes []HTTPError
@@ -173,10 +175,11 @@ func FindHTTPError(err error) HTTPError {
 					}
 					next = &httpErrorGroup{HTTPError: next, others: others}
 				}
-				appendCode(next)
+				appendCode(next, true)
 			}
 		}
 		err = unwrapError(err)
+		hasContext = true
 	}
 	return code
 }
@@ -204,9 +207,9 @@ func IsInternalHTTPError(err HTTPError) bool {
 	return err.Code() == "internal" || strings.HasPrefix(err.Code(), "internal.")
 }
 
-// asHTTPError adapts the legacy Code() errcode.Code signature without retaining
-// the errcode dependency. Native HTTP errors avoid reflection.
-func asHTTPError(err error) HTTPError {
+// AsHTTPError returns metadata for a native HTTPError or legacy errcode.ErrorCode
+// without traversing its error chain. Native HTTP errors avoid reflection.
+func AsHTTPError(err error) HTTPError {
 	if httpErr, ok := err.(HTTPError); ok {
 		return httpErr
 	}
@@ -219,6 +222,9 @@ func asHTTPError(err error) HTTPError {
 	}
 	type httpCoder interface{ HTTPCode() int }
 	codeType := method.Type().Out(0)
+	if codeType.PkgPath() != "github.com/pingcap/errcode" || codeType.Name() != "Code" {
+		return nil
+	}
 	name, ok := codeType.MethodByName("CodeStr")
 	if !ok || name.Type.NumIn() != 1 || name.Type.NumOut() != 1 || name.Type.Out(0).Kind() != reflect.String ||
 		!codeType.Implements(reflect.TypeFor[httpCoder]()) {
@@ -281,7 +287,7 @@ func (e *legacyHTTPError) Errors() []error {
 		result := make([]error, len(items))
 		for i, item := range items {
 			result[i] = item
-			if httpErr := asHTTPError(item); httpErr != nil {
+			if httpErr := AsHTTPError(item); httpErr != nil {
 				result[i] = httpErr
 			}
 		}

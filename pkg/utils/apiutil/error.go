@@ -49,7 +49,7 @@ func newHTTPErrorResponse(err errs.HTTPError) httpErrorResponse {
 		items := group.Errors()
 		if len(items) > 1 {
 			for _, item := range items[1:] {
-				if other, ok := item.(errs.HTTPError); ok {
+				if other := errs.AsHTTPError(item); other != nil {
 					response.Others = append(response.Others, newHTTPErrorResponse(other))
 				}
 			}
