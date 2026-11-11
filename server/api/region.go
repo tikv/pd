@@ -25,6 +25,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -150,6 +151,7 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	regions := rc.GetRegions()
+	failpoint.InjectCall("slowRequest", r.Context())
 	b, err := response.MarshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
