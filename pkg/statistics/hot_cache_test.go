@@ -15,10 +15,13 @@
 package statistics
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"testing"
+	"testing/synctest"
 	"time"
+	"weak"
 
 	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
@@ -36,6 +39,63 @@ func TestMain(m *testing.M) {
 	// Keep deadlock detection enabled without reusing timers across synctest bubbles.
 	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
+}
+
+func TestHotCacheReleasesConsumedTasks(t *testing.T) {
+	for _, kind := range []utils.RWType{utils.Read, utils.Write} {
+		t.Run(kind.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				cache := NewHotCache(ctx, core.NewBasicCluster())
+				peerCache, enqueue := cache.readCache, cache.CheckReadAsync
+				if kind == utils.Write {
+					peerCache, enqueue = cache.writeCache, cache.CheckWriteAsync
+				}
+				started, resume := make(chan struct{}), make(chan struct{})
+				re.True(enqueue(func(*HotPeerCache) {
+					close(started)
+					select {
+					case <-resume:
+					case <-ctx.Done():
+					}
+				}))
+				<-started
+
+				// Overflow Out into the ring buffer without growing it. Draining an
+				// initial-sized ring does not reset its consumed slots in chanx.
+				const taskCount = queueCap + 8
+				seen := make([]int, 0, taskCount)
+				meta := func() weak.Pointer[metapb.Region] {
+					region := &metapb.Region{Id: 1, StartKey: make([]byte, 1024)}
+					for i := range taskCount {
+						if i%queueCap == 0 {
+							synctest.Wait()
+						}
+						re.True(enqueue(func(c *HotPeerCache) {
+							if c == peerCache && region.GetId() == 1 {
+								seen = append(seen, i)
+							}
+						}))
+					}
+					return weak.Make(region)
+				}()
+				synctest.Wait()
+				re.Equal(8, peerCache.taskQueue.BufLen())
+				close(resume)
+				synctest.Wait()
+				re.Zero(peerCache.taskQueue.Len())
+				re.Len(seen, taskCount)
+				for i, value := range seen {
+					re.Equal(i, value)
+				}
+				runtime.GC()
+				re.Nil(meta.Value(), "consumed tasks must release their captured region")
+				runtime.KeepAlive(cache)
+			})
+		})
+	}
 }
 
 func TestIsHot(t *testing.T) {

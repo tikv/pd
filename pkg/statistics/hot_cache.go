@@ -28,6 +28,12 @@ import (
 
 const chanMaxLength = 6000000
 
+// hotCacheTask lets the consumer release a task's captures even while chanx's
+// ring buffer retains a pointer to the consumed entry.
+type hotCacheTask struct {
+	run func(*HotPeerCache)
+}
+
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx        context.Context
@@ -53,7 +59,7 @@ func (w *HotCache) CheckWriteAsync(task func(cache *HotPeerCache)) bool {
 		return false
 	}
 	select {
-	case w.writeCache.taskQueue.In <- task:
+	case w.writeCache.taskQueue.In <- &hotCacheTask{run: task}:
 		return true
 	default:
 		return false
@@ -66,7 +72,7 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 		return false
 	}
 	select {
-	case w.readCache.taskQueue.In <- task:
+	case w.readCache.taskQueue.In <- &hotCacheTask{run: task}:
 		return true
 	default:
 		return false
@@ -269,15 +275,20 @@ func ResetHotCacheStatusMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 
-func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], runTask func(task func(*HotPeerCache))) {
+func (w *HotCache) updateItems(queue *chanx.UnboundedChan[*hotCacheTask], runTask func(task func(*HotPeerCache))) {
 	defer logutil.LogPanic()
 
 	for {
 		select {
 		case <-w.ctx.Done():
 			return
-		case task := <-queue.Out:
-			runTask(task)
+		case task, ok := <-queue.Out:
+			if !ok {
+				return
+			}
+			run := task.run
+			task.run = nil
+			runTask(run)
 		}
 	}
 }
