@@ -141,7 +141,12 @@ func FindHTTPError(err error) HTTPError {
 			original = legacy.err
 		}
 		if withContext {
-			next = &httpErrorContext{HTTPError: next, top: current}
+			context := &httpErrorContext{HTTPError: next, top: current}
+			if group, ok := next.(errors.ErrorGroup); ok {
+				next = &httpErrorGroupContext{httpErrorContext: context, ErrorGroup: group}
+			} else {
+				next = context
+			}
 			original = next
 		}
 		if code == nil {
@@ -310,6 +315,12 @@ func (e *httpErrorContext) Cause() error {
 		return cause
 	}
 	return e.HTTPError
+}
+
+// httpErrorGroupContext retains group members when an error chain adds context.
+type httpErrorGroupContext struct {
+	*httpErrorContext
+	errors.ErrorGroup
 }
 
 type httpErrorGroup struct {

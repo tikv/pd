@@ -227,6 +227,9 @@ func TestCodedErrorResp(t *testing.T) {
 		{name: "preserve custom input code", err: errs.NewInvalidInputErr(missing), status: http.StatusNotFound, code: "missing"},
 		{name: "preserve internal child", err: errs.NewInternalErr(internal), status: http.StatusNotImplemented, code: "internal.unimplemented", stack: true},
 		{name: "group", err: codedResponseGroup{input, missing}, status: http.StatusBadRequest, code: "input", message: "request failed; request failed", others: []string{"missing"}},
+		{name: "annotated group", err: errors.Annotate(codedResponseGroup{input, missing}, "store"), status: http.StatusBadRequest, code: "input", message: "store: request failed; request failed", others: []string{"missing"}},
+		{name: "wrapped group", err: fmt.Errorf("store: %w", codedResponseGroup{input, missing}), status: http.StatusBadRequest, code: "input", message: "store: request failed; request failed", others: []string{"missing"}},
+		{name: "mixed group chain", err: fmt.Errorf("store: %w", errors.Annotate(codedResponseGroup{input, missing}, "update")), status: http.StatusBadRequest, code: "input", message: "store: update: request failed; request failed", others: []string{"missing"}},
 		{name: "overridden code", err: errs.NewInternalErr(input), status: http.StatusInternalServerError, code: "internal", message: "request failed; request failed; request failed", stack: true, others: []string{"internal", "input"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -276,9 +279,10 @@ func TestCodedErrorGroupMembers(t *testing.T) {
 	missing := &codedResponseError{code: codedResponseCode{"missing", http.StatusNotFound}, data: data}
 	plain := stderrors.New("uncoded member")
 	for _, tc := range []struct {
-		name    string
-		members []error
-		others  []string
+		name         string
+		members      []error
+		others       []string
+		otherMessage string
 	}{
 		{name: "empty"},
 		{name: "nil member", members: []error{nil}},
@@ -288,6 +292,10 @@ func TestCodedErrorGroupMembers(t *testing.T) {
 		{name: "uncoded before coded", members: []error{plain, missing}, others: []string{"missing"}},
 		{name: "nil before coded", members: []error{nil, missing}, others: []string{"missing"}},
 		{name: "uncoded between coded", members: []error{input, plain, missing}, others: []string{"missing"}},
+		{name: "annotated member", members: []error{input, errors.Annotate(missing, "store")}, others: []string{"missing"}, otherMessage: "store: request failed"},
+		{name: "wrapped member", members: []error{input, fmt.Errorf("store: %w", missing)}, others: []string{"missing"}, otherMessage: "store: request failed"},
+		{name: "mixed member chain", members: []error{input, fmt.Errorf("store: %w", errors.Annotate(missing, "update"))}, others: []string{"missing"}, otherMessage: "store: update: request failed"},
+		{name: "wrapped overridden member", members: []error{input, fmt.Errorf("store: %w", errs.NewInternalErr(missing))}, others: []string{"internal"}, otherMessage: "store: request failed; store: request failed; store: request failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -297,10 +305,14 @@ func TestCodedErrorGroupMembers(t *testing.T) {
 			re.Equal(http.StatusBadRequest, response.Code)
 			re.Equal("input", response.Header().Get("TiDB-Error-Code"))
 			var body struct {
-				Code   string                  `json:"code"`
-				Msg    string                  `json:"msg"`
-				Data   json.RawMessage         `json:"data"`
-				Others []struct{ Code string } `json:"others"`
+				Code   string          `json:"code"`
+				Msg    string          `json:"msg"`
+				Data   json.RawMessage `json:"data"`
+				Others []struct {
+					Code string          `json:"code"`
+					Msg  string          `json:"msg"`
+					Data json.RawMessage `json:"data"`
+				} `json:"others"`
 			}
 			re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
 			re.Equal("input", body.Code)
@@ -309,6 +321,12 @@ func TestCodedErrorGroupMembers(t *testing.T) {
 			var codes []string
 			for _, other := range body.Others {
 				codes = append(codes, other.Code)
+				message := tc.otherMessage
+				if message == "" {
+					message = missing.Error()
+				}
+				re.Equal(message, other.Msg)
+				re.JSONEq(`{"detail":"invalid store ID"}`, string(other.Data))
 			}
 			re.Equal(tc.others, codes)
 		})
@@ -396,12 +414,14 @@ func TestResponseErrorGroups(t *testing.T) {
 		members []error
 		status  int
 		code    string
+		others  []string
 	}{
 		{name: "empty", status: http.StatusInternalServerError},
 		{name: "uncoded", members: []error{plain}, status: http.StatusInternalServerError},
 		{name: "single coded", members: []error{input}, status: http.StatusBadRequest, code: "input"},
-		{name: "multiple coded", members: []error{input, missing}, status: http.StatusBadRequest, code: "input"},
-		{name: "mixed", members: []error{plain, input, missing}, status: http.StatusBadRequest, code: "input"},
+		{name: "multiple coded", members: []error{input, missing}, status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
+		{name: "mixed", members: []error{plain, input, missing}, status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
+		{name: "wrapped primary", members: []error{fmt.Errorf("store: %w", input), missing}, status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -421,7 +441,19 @@ func TestResponseErrorGroups(t *testing.T) {
 			re.JSONEq(`"input"`, string(body["code"]))
 			re.JSONEq(`"multiple errors"`, string(body["msg"]))
 			re.JSONEq(`{"detail":"invalid store ID"}`, string(body["data"]))
-			re.Len(body, 3)
+			if len(tc.others) == 0 {
+				re.Len(body, 3)
+				re.NotContains(body, "others")
+			} else {
+				re.Len(body, 4)
+				var others []struct{ Code string }
+				re.NoError(json.Unmarshal(body["others"], &others))
+				var codes []string
+				for _, other := range others {
+					codes = append(codes, other.Code)
+				}
+				re.Equal(tc.others, codes)
+			}
 		})
 	}
 	t.Run("public metadata", func(t *testing.T) {

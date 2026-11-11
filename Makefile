@@ -275,17 +275,23 @@ BASIC_TEST_PKGS := $(filter-out $(PD_PKG)/tests%,$(TEST_PKGS))
 SUBMODULES := $(filter $(shell find . -iname "go.mod" -exec dirname {} \;),\
 				$(filter-out .,$(shell find . -iname "Makefile" -exec dirname {} \;)))
 
-test: install-tools
+test: install-tools test-errcode-compatibility
 	# testing all pkgs...
 	@$(FAILPOINT_ENABLE)
 	CGO_ENABLED=1 go test -tags deadlock -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-basic-test: install-tools
+basic-test: install-tools test-errcode-compatibility
 	# testing basic pkgs...
 	@$(FAILPOINT_ENABLE)
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
+
+# Keep the legacy dependency confined to an isolated compatibility test module.
+test-errcode-compatibility:
+	cd pkg/errs/testdata/legacy && go test ./...
+
+.PHONY: test-errcode-compatibility
 
 # gotest runs a targeted go test with failpoints automatically enabled/disabled.
 # Usage: make gotest GOTEST_ARGS='./pkg/gctuner -run TestInitGCTuner -count=1'
