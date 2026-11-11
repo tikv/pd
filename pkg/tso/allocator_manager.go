@@ -335,10 +335,6 @@ func (am *AllocatorManager) Close() {
 	log.Info("closed the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
 }
 
-func (am *AllocatorManager) close() {
-	am.Close()
-}
-
 // GetMember returns the ElectionMember of this AllocatorManager.
 func (am *AllocatorManager) GetMember() ElectionMember {
 	return am.member
