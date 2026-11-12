@@ -131,7 +131,8 @@ func (l *StoreRateLimit) Reset(rate float64, typ Type) {
 
 // Refresh updates a rate from getRate, re-reading it under the reset lock so an
 // older configuration read cannot overwrite a concurrent Reset. getRate must
-// not access this limiter while the lock is held.
+// only read configuration snapshots, without writing configuration or acquiring
+// locks whose holders may access this limiter.
 func (l *StoreRateLimit) Refresh(typ Type, getRate func() float64) {
 	if typ == SendSnapshot {
 		return

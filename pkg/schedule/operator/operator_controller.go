@@ -1079,7 +1079,9 @@ func (oc *Controller) getOrCreateStoreLimit(storeID uint64, limitType storelimit
 	// The other limits do not need to update by config exclude StoreRateLimit.
 	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok {
 		limit.Refresh(limitType, func() float64 {
-			return oc.config.GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
+			// Refresh calls this under the limiter lock. A create-on-miss lookup
+			// could acquire the persistence lock and invert the store-lock order.
+			return oc.config.PeekStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 		})
 	}
 	return s.GetStoreLimit()

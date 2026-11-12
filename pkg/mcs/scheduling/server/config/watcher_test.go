@@ -34,8 +34,8 @@ type storeLimitReadHook struct {
 	afterRead func()
 }
 
-func (c *storeLimitReadHook) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
-	rate := c.SharedConfigProvider.GetStoreLimitByType(storeID, typ)
+func (c *storeLimitReadHook) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	rate := c.SharedConfigProvider.PeekStoreLimitByType(storeID, typ)
 	if afterRead := c.afterRead; afterRead != nil {
 		c.afterRead = nil
 		afterRead()
