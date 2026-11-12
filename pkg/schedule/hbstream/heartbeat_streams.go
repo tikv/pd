@@ -313,6 +313,17 @@ func (s *HeartbeatStreams) MsgLength() int {
 	return len(s.msgCh)
 }
 
+// PopMsg returns one queued message, or nil if the queue is empty.
+// For test only.
+func (s *HeartbeatStreams) PopMsg() core.RegionHeartbeatResponse {
+	select {
+	case msg := <-s.msgCh:
+		return msg
+	default:
+		return nil
+	}
+}
+
 // Drain consumes message from msgCh when disable background running.
 // For test only.
 func (s *HeartbeatStreams) Drain(count int) error {
