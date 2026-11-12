@@ -206,12 +206,18 @@ func TestAffinityCheckerLearnerSwapFallback(t *testing.T) {
 // learner moves to that store. While that store is busy, the move waits
 // instead of expiring the group.
 func TestAffinityCheckerLearnerMoveToRuleStore(t *testing.T) {
-	for _, kind := range []string{"label-constraint", "location-label", "location-label-less-regions"} {
+	for _, kind := range []string{"label-constraint", "location-label", "location-label-less-regions", "single-learner-isolation"} {
 		t.Run(kind, func(t *testing.T) {
 			re := require.New(t)
 			c, tc, _ := newLearnerConflictController(t)
 			rule := newLearnerRule("4", "5")
-			if kind != "label-constraint" {
+			switch kind {
+			case "single-learner-isolation":
+				rule.LocationLabels, rule.IsolationLevel = []string{"zone"}, "zone"
+				for id := uint64(1); id <= 5; id++ {
+					tc.SetStoreLabel(id, map[string]string{"ID": strconv.FormatUint(id, 10), "zone": strconv.FormatUint(id, 10)})
+				}
+			case "location-label", "location-label-less-regions":
 				// Store 5 is the only store in a zone that no target voter uses. While
 				// it is busy, the swap to store 3 and the move to store 6 fail the
 				// layout check only because store 5 is a better location.

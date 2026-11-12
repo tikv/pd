@@ -177,7 +177,7 @@ func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.
 			}
 			strategy := c.strategy(region, rf.Rule, false)
 			strategy.isolationLevel = ""
-			if len(rf.Rule.LocationLabels) > 0 && rf.Rule.IsolationLevel != "" {
+			if len(rf.Rule.LocationLabels) > 0 && rf.Rule.IsolationLevel != "" && len(isolationStores[rf.Rule]) > 0 {
 				strategy.extraFilters = append(strategy.extraFilters,
 					filter.NewIsolationFilter(c.Name(), rf.Rule.IsolationLevel, rf.Rule.LocationLabels, isolationStores[rf.Rule]))
 			}
