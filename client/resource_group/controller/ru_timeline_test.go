@@ -136,6 +136,67 @@ func TestRUTimelineLargeClockRollback(t *testing.T) {
 	re.Equal(gen+1, snapshotGen)
 }
 
+// clockAt is a clock that reads second.
+func clockAt(second int64) func() time.Time {
+	return func() time.Time { return time.Unix(second, 0) }
+}
+
+func TestRUTimelineStaleReading(t *testing.T) {
+	re := require.New(t)
+	const start int64 = 1800000000
+	tl := newRUTimeline(time.Unix(start, 0))
+	// A current reading is used as is; the clock is not read again.
+	tl.recordAt(time.Unix(start, 0), nil, 1, 0)
+	// Another caller read the clock in second start too, but locks only after
+	// a caller that read start+1.
+	tl.recordAt(time.Unix(start+1, 0), nil, 2, 0)
+	tl.recordAt(time.Unix(start, 999999999), clockAt(start+1), 4, 0)
+	sent := tl.snapshotLocked(time.Unix(start+2, 0))
+	re.Equal(start, sent.StartUnixSec)
+	re.Equal([]*rmpb.RUConsumptionBucket{{Rru: 1, Offset: 0}, {Rru: 6, Offset: 1}}, sent.Buckets)
+	tl.ack(sent.EndUnixSec, tl.gen)
+
+	// A reading taken before the report locks after it: the consumption lands
+	// in the open second, not in a reported one, and nothing is skipped.
+	tl.recordAt(time.Unix(start+1, 0), clockAt(start+2), 8, 0)
+	next := tl.snapshotLocked(time.Unix(start+3, 0))
+	re.Equal(start+2, next.StartUnixSec)
+	re.Equal([]*rmpb.RUConsumptionBucket{{Rru: 8, Offset: 0}}, next.Buckets)
+}
+
+func TestRUTimelineRecordClockRollback(t *testing.T) {
+	re := require.New(t)
+	const start int64 = 1800000000
+	for _, rolledBack := range []time.Time{
+		// Sub-second: the clock steps from start+11.1 back to start+10.9.
+		time.Unix(start+10, 900000000),
+		time.Unix(start+5, 0),
+	} {
+		tl := newRUTimeline(time.Unix(start, 0))
+		tl.recordAt(time.Unix(start+10, 0), nil, 1, 0)
+		tl.ack(tl.snapshotLocked(time.Unix(start+11, 0)).EndUnixSec, tl.gen)
+		// A reading behind the latest observed second is still behind when
+		// read again: a clock rollback, so the consumption is never reported,
+		// and neither is the reported second it may land in.
+		tl.recordAt(rolledBack, func() time.Time { return rolledBack }, 2, 0)
+		re.Equal(start+12, tl.from)
+		resumed := tl.snapshotLocked(time.Unix(start+13, 0))
+		re.Equal(start+12, resumed.StartUnixSec)
+		re.Empty(resumed.Buckets)
+	}
+
+	// A rollback past every retained second starts the timeline over.
+	const day = 86400
+	tl := newRUTimeline(time.Unix(start, 0))
+	tl.recordAt(time.Unix(start+day, 0), nil, 1, 0)
+	gen := tl.gen
+	tl.recordAt(time.Unix(start, 0), clockAt(start), 2, 0)
+	re.Equal(gen+1, tl.gen)
+	restarted := tl.snapshotLocked(time.Unix(start+1, 0))
+	re.Equal(start, restarted.StartUnixSec)
+	re.Equal([]*rmpb.RUConsumptionBucket{{Rru: 2, Offset: 0}}, restarted.Buckets)
+}
+
 func TestRUTimelineAck(t *testing.T) {
 	re := require.New(t)
 	const start int64 = 1800000000
@@ -204,6 +265,17 @@ func TestRUTimelineConcurrentRecording(t *testing.T) {
 		return reported == float64(recorded.Load())
 	}, time.Second+10*time.Millisecond, time.Millisecond)
 	re.Equal(float64(recorded.Load()), reported)
+}
+
+// BenchmarkRUTimelineRecord measures recording under contention, as every KV
+// request of a resource group does.
+func BenchmarkRUTimelineRecord(b *testing.B) {
+	tl := newRUTimeline(time.Now())
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			tl.record(1, 1)
+		}
+	})
 }
 
 func TestTrimRUTimelines(t *testing.T) {
