@@ -388,6 +388,7 @@ func (suite *regionTestSuite) TestTopN() {
 	}
 }
 
+// TestRegionsWithKillRequest verifies that an in-flight region request exits on cancellation.
 func TestRegionsWithKillRequest(t *testing.T) {
 	re := require.New(t)
 	svr, cleanup := mustNewServer(re)

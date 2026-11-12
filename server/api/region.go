@@ -143,6 +143,7 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 	}
 }
 
+// GetRegions writes all regions from the selected cluster.
 // @Tags     region
 // @Summary  List all regions in the cluster.
 // @Produce  json

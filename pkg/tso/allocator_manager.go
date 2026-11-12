@@ -191,6 +191,7 @@ type AllocatorManager struct {
 	localAllocatorConn struct {
 		syncutil.RWMutex
 		clientConns map[string]*grpc.ClientConn
+		closed      bool
 	}
 }
 
@@ -320,11 +321,17 @@ func (am *AllocatorManager) Close() {
 	log.Info("closing the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
 	am.cancel()
 
+	am.localAllocatorConn.Lock()
+	am.localAllocatorConn.closed = true
+	clientConns := am.localAllocatorConn.clientConns
+	am.localAllocatorConn.clientConns = nil
+	am.localAllocatorConn.Unlock()
+
 	if allocatorGroup, exist := am.getAllocatorGroup(GlobalDCLocation); exist {
 		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
 	}
 
-	for _, cc := range am.localAllocatorConn.clientConns {
+	for _, cc := range clientConns {
 		if err := cc.Close(); err != nil {
 			log.Error("failed to close allocator manager grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
@@ -403,6 +410,7 @@ func (am *AllocatorManager) GetClusterDCLocationsFromEtcd() (clusterDCLocations 
 	return am.getClusterDCLocationsFromEtcdWithContext(am.ctx)
 }
 
+// getClusterDCLocationsFromEtcdWithContext fetches dc-location topology using ctx.
 func (am *AllocatorManager) getClusterDCLocationsFromEtcdWithContext(ctx context.Context) (clusterDCLocations map[string][]uint64, err error) {
 	resp, err := etcdutil.EtcdKVGetWithContext(
 		ctx,
@@ -945,6 +953,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(ctx context.Context, dcLoc
 	return maxSuffix, nil
 }
 
+// getDCLocationSuffixMapFromEtcd fetches the persisted local TSO suffixes using ctx.
 func (am *AllocatorManager) getDCLocationSuffixMapFromEtcd(ctx context.Context) (map[string]int32, error) {
 	resp, err := etcdutil.EtcdKVGetWithContext(
 		ctx,
@@ -967,6 +976,7 @@ func (am *AllocatorManager) getDCLocationSuffixMapFromEtcd(ctx context.Context) 
 	return dcLocationSuffix, nil
 }
 
+// getMaxLocalTSOSuffix fetches the largest persisted local TSO suffix using ctx.
 func (am *AllocatorManager) getMaxLocalTSOSuffix(ctx context.Context) (int32, error) {
 	// Try to get the suffix from etcd
 	dcLocationSuffix, err := am.getDCLocationSuffixMapFromEtcd(ctx)
@@ -1235,6 +1245,7 @@ func (am *AllocatorManager) GetLocalAllocatorLeaders() (map[string]*pdpb.Member,
 	return localAllocatorLeaderMember, nil
 }
 
+// getOrCreateGRPCConn returns the cached connection for addr or creates one.
 func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	conn, ok := am.getGRPCConn(addr)
 	if ok {
@@ -1250,8 +1261,10 @@ func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string
 	if err != nil {
 		return nil, err
 	}
-	am.setGRPCConn(cc, addr)
-	conn, _ = am.getGRPCConn(addr)
+	conn, ok = am.setGRPCConn(cc, addr)
+	if !ok {
+		return nil, context.Canceled
+	}
 	return conn, nil
 }
 
@@ -1319,25 +1332,37 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 	return maxTSO, nil
 }
 
+// getGRPCConn returns the cached connection for addr unless the manager is closed.
 func (am *AllocatorManager) getGRPCConn(addr string) (*grpc.ClientConn, bool) {
 	am.localAllocatorConn.RLock()
 	defer am.localAllocatorConn.RUnlock()
+	if am.localAllocatorConn.closed {
+		return nil, false
+	}
 	conn, ok := am.localAllocatorConn.clientConns[addr]
 	return conn, ok
 }
 
-func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
+// setGRPCConn caches newConn or closes it if the manager is already closed.
+func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) (*grpc.ClientConn, bool) {
 	am.localAllocatorConn.Lock()
-	defer am.localAllocatorConn.Unlock()
-	if _, ok := am.localAllocatorConn.clientConns[addr]; ok {
+	if am.localAllocatorConn.closed {
+		am.localAllocatorConn.Unlock()
+		_ = newConn.Close()
+		return nil, false
+	}
+	if conn, ok := am.localAllocatorConn.clientConns[addr]; ok {
+		am.localAllocatorConn.Unlock()
 		newConn.Close()
 		log.Debug("use old connection",
 			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
 			zap.String("target", newConn.Target()),
 			zap.String("state", newConn.GetState().String()))
-		return
+		return conn, true
 	}
 	am.localAllocatorConn.clientConns[addr] = newConn
+	am.localAllocatorConn.Unlock()
+	return newConn, true
 }
 
 func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID uint64) error {
