@@ -101,13 +101,7 @@ require (
 	github.com/google/pprof v0.0.0-20211122183932-1daafda22083 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.7.4 // indirect
-<<<<<<< HEAD
-	github.com/gorilla/websocket v1.5.1 // indirect
-=======
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/grafana/pyroscope-go v1.2.0 // indirect
-	github.com/grafana/pyroscope-go/godeltaprof v0.1.8 // indirect
->>>>>>> 0595b8f876 (*: upgrade vulnerable third-party dependencies (#11558))
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
@@ -199,13 +193,8 @@ require (
 	golang.org/x/arch v0.22.0 // indirect
 	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2 // indirect
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
-	golang.org/x/image v0.43.0 // indirect
-<<<<<<< HEAD
-	golang.org/x/net v0.61.0 // indirect
-=======
-	golang.org/x/mod v0.42.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
->>>>>>> 0595b8f876 (*: upgrade vulnerable third-party dependencies (#11558))
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
