@@ -89,6 +89,9 @@ func (m *Manager) isSplitAllowed(region *core.RegionInfo, reason pdpb.SplitReaso
 // CheckSplit checks a split request and, if denied, notifies the Region leader
 // and remembers to restore auto-splitting when a later heartbeat allows it.
 func (m *Manager) CheckSplit(region *core.RegionInfo, reason pdpb.SplitReason, streams *hbstream.HeartbeatStreams) bool {
+	if reason == pdpb.SplitReason_ADMIN {
+		return true
+	}
 	m.splitMutex.Lock()
 	defer m.splitMutex.Unlock()
 	if m.AllowSplit(region, reason) {
