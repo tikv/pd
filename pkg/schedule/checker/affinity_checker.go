@@ -113,7 +113,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(region, true /* isExistingRegion */) {
+	fit := c.ruleManager.FitRegion(c.cluster, region)
+	if !c.isRegionFitAtBestLocation(region, fit) {
 		affinityCheckerAbnormalReplicaCounter.Inc()
 		return nil
 	}
@@ -163,7 +164,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// Create operator to adjust region according to affinity group
-	op := c.createAffinityOperator(region, group)
+	op := c.createAffinityOperator(region, group, fit)
 	if op != nil {
 		affinityCheckerNewOpCounter.Inc()
 		return []*operator.Operator{op}
@@ -181,7 +182,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 //
 // Note: This function assumes that regions passed to it already comply with placement rules.
 // The affinity checker focuses solely on adjusting voter peers according to affinity group configuration.
-func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group *affinity.GroupState) *operator.Operator {
+func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group *affinity.GroupState, fit *placement.RegionFit) *operator.Operator {
 	// Build expected voter stores set
 	expectedVoterStores := make(map[uint64]bool)
 	for _, storeID := range group.VoterStoreIDs {
@@ -233,7 +234,7 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 			roles[storeID] = placement.Learner
 		}
 	}
-	movedLearners, ok := c.moveConflictingLearners(region, group, roles)
+	movedLearners, ok := c.moveConflictingLearners(region, group, fit, roles)
 	if !ok {
 		return nil
 	}
@@ -519,7 +520,10 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 	} else {
 		fit = c.ruleManager.FitRegionWithoutCache(c.cluster, region)
 	}
+	return c.isRegionFitAtBestLocation(region, fit)
+}
 
+func (c *AffinityChecker) isRegionFitAtBestLocation(region *core.RegionInfo, fit *placement.RegionFit) bool {
 	// Check region is satisfied
 	if fit == nil || !fit.IsSatisfied() {
 		return false

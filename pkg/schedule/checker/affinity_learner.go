@@ -44,7 +44,7 @@ import (
 // temporarily unavailable, so that the learner is not taken for one that
 // cannot move. If no store fits, the group expires and first-win relearns a
 // target.
-func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group *affinity.GroupState,
+func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group *affinity.GroupState, fit *placement.RegionFit,
 	roles map[uint64]placement.PeerRoleType) (moved, ok bool) {
 	var conflicts []*metapb.Peer
 	var stores []uint64
@@ -57,7 +57,16 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 	if len(conflicts) == 0 {
 		return false, true
 	}
-	fit := c.ruleManager.FitRegion(c.cluster, region)
+	// Hard isolation follows each fitted rule's learners, including moves made
+	// earlier in the recursion, rather than the stores used for location ranking.
+	isolationStores := make(map[*placement.Rule][]*core.StoreInfo)
+	for _, rf := range fit.RuleFits {
+		for _, store := range rf.Stores {
+			if roles[store.GetID()] == placement.Learner {
+				isolationStores[rf.Rule] = append(isolationStores[rf.Rule], store)
+			}
+		}
+	}
 	temporary := false
 	accept := func(target map[uint64]placement.PeerRoleType) bool {
 		layout := regionWithRoles(region, group.LeaderStoreID, target)
@@ -68,7 +77,7 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 		return false
 	}
 	for _, swap := range []bool{true, false} {
-		target, swapped, blocked := c.placeLearners(region, fit, roles, conflicts, swap, accept)
+		target, swapped, blocked := c.placeLearners(region, fit, roles, isolationStores, conflicts, swap, accept)
 		temporary = temporary || blocked
 		if target != nil {
 			maps.Copy(roles, target)
@@ -129,7 +138,7 @@ func (c *AffinityChecker) waitsForBetterStore(region *core.RegionInfo) bool {
 // adds a learner. It also reports whether a learner took a voter store and
 // whether a store was temporarily unavailable.
 func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.RegionFit,
-	roles map[uint64]placement.PeerRoleType, conflicts []*metapb.Peer, swap bool,
+	roles map[uint64]placement.PeerRoleType, isolationStores map[*placement.Rule][]*core.StoreInfo, conflicts []*metapb.Peer, swap bool,
 	accept func(map[uint64]placement.PeerRoleType) bool) (target map[uint64]placement.PeerRoleType, swapped, temporary bool) {
 	if len(conflicts) == 0 {
 		if accept(roles) {
@@ -139,7 +148,8 @@ func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.
 	}
 	learner := conflicts[0]
 	rf := fit.GetRuleFit(learner.GetId())
-	if rf == nil || learner.GetIsWitness() {
+	learnerStore := c.cluster.GetStore(learner.GetStoreId())
+	if rf == nil || learner.GetIsWitness() || learnerStore == nil {
 		return nil, false, false
 	}
 	var storeIDs []uint64
@@ -154,12 +164,25 @@ func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.
 			var stores []*core.StoreInfo
 			for id := range roles {
 				used[id] = struct{}{}
-				if store := c.cluster.GetStore(id); store != nil && placement.MatchLabelConstraints(store, rf.Rule.LabelConstraints) {
-					stores = append(stores, store)
+				store := c.cluster.GetStore(id)
+				if store == nil || store.GetLabelValue(core.EngineKey) != learnerStore.GetLabelValue(core.EngineKey) {
+					continue
+				}
+				for _, rule := range fit.GetRules() {
+					if rule.Role == rf.Rule.Role && placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+						stores = append(stores, store)
+						break
+					}
 				}
 			}
+			strategy := c.strategy(region, rf.Rule, false)
+			strategy.isolationLevel = ""
+			if len(rf.Rule.LocationLabels) > 0 && rf.Rule.IsolationLevel != "" {
+				strategy.extraFilters = append(strategy.extraFilters,
+					filter.NewIsolationFilter(c.Name(), rf.Rule.IsolationLevel, rf.Rule.LocationLabels, isolationStores[rf.Rule]))
+			}
 			var blocked bool
-			storeID, blocked = c.strategy(region, rf.Rule, false).SelectStoreToAdd(stores, filter.NewExcludedFilter(c.Name(), nil, used))
+			storeID, blocked = strategy.SelectStoreToAdd(stores, filter.NewExcludedFilter(c.Name(), nil, used))
 			temporary = temporary || blocked
 			if storeID == 0 {
 				break
@@ -167,8 +190,13 @@ func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.
 		}
 		next := maps.Clone(roles)
 		next[storeID] = placement.Learner
+		previous := isolationStores[rf.Rule]
+		if store := c.cluster.GetStore(storeID); store != nil {
+			isolationStores[rf.Rule] = append(previous, store)
+		}
 		var nextSwapped, blocked bool
-		target, nextSwapped, blocked = c.placeLearners(region, fit, next, conflicts[1:], swap, accept)
+		target, nextSwapped, blocked = c.placeLearners(region, fit, next, isolationStores, conflicts[1:], swap, accept)
+		isolationStores[rf.Rule] = previous
 		swapped, temporary = swapped || nextSwapped, temporary || blocked
 		if target != nil {
 			return target, region.GetStoreVoter(storeID) != nil || nextSwapped, temporary

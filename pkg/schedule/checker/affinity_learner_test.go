@@ -15,6 +15,7 @@
 package checker
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -247,6 +248,66 @@ func TestAffinityCheckerLearnerMoveToRuleStore(t *testing.T) {
 			re.Equal(affinity.PhaseStable, state.Phase)
 			re.Equal(moves+1, promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter))
 			re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
+		})
+	}
+}
+
+func TestAffinityCheckerLearnerRuleLocations(t *testing.T) {
+	for _, kind := range []string{"cross-rule-location", "rule-isolation"} {
+		t.Run(kind, func(t *testing.T) {
+			re := require.New(t)
+			c, tc, _ := newLearnerConflictController(t)
+			tc.SetEnableUseJointConsensus(true)
+			tc.AddRegionStore(6, 0)
+			tc.AddRegionStore(7, 10)
+			zones := []string{"a", "b", "c", "d", "e", "e", "f"}
+			rule := newLearnerRule("4", "6", "7")
+			destination := uint64(7)
+			if kind == "rule-isolation" {
+				zones = []string{"a", "b", "c", "c", "d", "a", "b"}
+				rule = newLearnerRule("1", "4", "5", "6")
+				rule.Count, rule.IsolationLevel = 2, "zone"
+				destination = 6
+			} else {
+				other := newLearnerRule("5")
+				other.ID = "learner-b"
+				re.NoError(tc.GetRuleManager().SetRule(other))
+			}
+			for i, zone := range zones {
+				tc.SetStoreLabel(uint64(i+1), map[string]string{"ID": strconv.Itoa(i + 1), "zone": zone})
+			}
+			rule.LocationLabels = []string{"zone"}
+			re.NoError(tc.GetRuleManager().SetRule(rule))
+			putLearner(tc, 1, 4)
+			region := tc.GetRegion(1).Clone(core.WithAddPeer(&metapb.Peer{Id: 201, StoreId: 5, Role: metapb.PeerRole_Learner}))
+			tc.PutRegion(region)
+			manager := tc.GetAffinityManager()
+			const id = "learner-rule-locations"
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4},
+			}, region.GetStartKey(), region.GetEndKey()))
+			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(cloneRegionWithReplacePeerStores(region, 1, 1, 2, 4), false))
+			tc.SetStoreBusy(destination, true)
+			re.Empty(c.CheckRegion(region))
+			re.True(manager.GetAffinityGroupState(id).AffinitySchedulingAllowed, "a busy destination must not expire the group")
+			tc.SetStoreBusy(destination, false)
+			ops := c.CheckRegion(region)
+			re.Len(ops, 1)
+			moved := operator.ApplyOperatorStep(region, ops[0])
+			// ApplyOperatorStep does not simulate joint role changes.
+			moved = moved.Clone(core.WithRole(region.GetStoreLearner(4).GetId(), metapb.PeerRole_Voter),
+				core.WithRole(region.GetStoreVoter(3).GetId(), metapb.PeerRole_Learner))
+			tc.PutRegion(moved)
+			operator.ApplyOperator(tc, ops[0])
+			checkAndApply(c, tc, 1)
+			moved = tc.GetRegion(1)
+			re.NotNil(moved.GetStoreLearner(destination))
+			re.NotNil(moved.GetStoreLearner(5))
+			re.True(tc.GetRuleManager().FitRegionWithoutCache(tc, moved).IsSatisfied())
+			state := manager.GetAffinityGroupState(id)
+			re.Equal([]uint64{1, 2, 4}, state.VoterStoreIDs)
+			re.Equal(affinity.PhaseStable, state.Phase)
 		})
 	}
 }
