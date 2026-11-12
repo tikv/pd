@@ -186,6 +186,14 @@ func TestMetadataWatcherHandlePut(t *testing.T) {
 		re.Equal(float64(11), cachedGroup.RUConsumption.RRU)
 		re.Equal(float64(22), cachedGroup.RUConsumption.WRU)
 
+		krgm.getMutableResourceGroup("test_group").UpdateRUConsumption(&rmpb.Consumption{RRU: 1})
+		for range 2 {
+			re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/states/10/test_group", string(rawStates)))
+			cachedGroup = krgm.getResourceGroup("test_group", true)
+			re.Equal(12.0, cachedGroup.RUConsumption.RRU)
+			re.Equal(22.0, cachedGroup.RUConsumption.WRU)
+		}
+
 		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/states/99/ghost", string(rawStates)))
 
 		rawControllerConfig, err := json.Marshal(&ControllerConfig{

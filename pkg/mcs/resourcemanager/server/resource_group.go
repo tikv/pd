@@ -470,16 +470,36 @@ func (rg *ResourceGroup) GetGroupStates() *GroupStates {
 	return nil
 }
 
-// SetStatesIntoResourceGroup updates the state of resource group.
+// SetStatesIntoResourceGroup restores token state and merges cumulative consumption snapshots.
 func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
+	rg.Lock()
+	defer rg.Unlock()
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
 		if state := states.RU; state != nil {
 			rg.RUSettings.RU.setState(state)
 			log.Debug("update group token bucket state", zap.String("name", rg.Name), zap.Any("state", state))
 		}
-		if states.RUConsumption != nil {
-			rg.UpdateRUConsumption(states.RUConsumption)
+		if restored := states.RUConsumption; restored != nil {
+			if rg.RUConsumption == nil {
+				rg.RUConsumption = &rmpb.Consumption{}
+			}
+			// Settings and running state can contain overlapping cumulative snapshots
+			// saved at different times. Preserve the newest value of each counter.
+			current := rg.RUConsumption
+			current.RRU = max(current.RRU, restored.RRU)
+			current.WRU = max(current.WRU, restored.WRU)
+			current.ReadBytes = max(current.ReadBytes, restored.ReadBytes)
+			current.WriteBytes = max(current.WriteBytes, restored.WriteBytes)
+			current.TotalCpuTimeMs = max(current.TotalCpuTimeMs, restored.TotalCpuTimeMs)
+			current.SqlLayerCpuTimeMs = max(current.SqlLayerCpuTimeMs, restored.SqlLayerCpuTimeMs)
+			current.KvReadRpcCount = max(current.KvReadRpcCount, restored.KvReadRpcCount)
+			current.KvWriteRpcCount = max(current.KvWriteRpcCount, restored.KvWriteRpcCount)
+			current.ReadCrossAzTrafficBytes = max(current.ReadCrossAzTrafficBytes, restored.ReadCrossAzTrafficBytes)
+			current.WriteCrossAzTrafficBytes = max(current.WriteCrossAzTrafficBytes, restored.WriteCrossAzTrafficBytes)
+			current.TikvRUV2 = max(current.TikvRUV2, restored.TikvRUV2)
+			current.TidbRUV2 = max(current.TidbRUV2, restored.TidbRUV2)
+			current.TiflashRUV2 = max(current.TiflashRUV2, restored.TiflashRUV2)
 		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
