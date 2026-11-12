@@ -88,6 +88,8 @@ func (c *isolationReplacement) allow(target *core.StoreInfo) bool {
 // Force may relax leader/follower roles only when ordinary matching fails. It
 // still requires every peer to match a rule, including labels and witness state.
 // A normally satisfied target must pass isolation without role relaxation.
+// If store membership, peer roles and witness states are unchanged, only the
+// configured isolation levels are compared; a leader change may lower scores.
 func (f *RegionFit) IsTargetIsolationPreserved(stores StoreSet, target *core.RegionInfo, supportWitness, forceLeader bool) bool {
 	if !f.IsSatisfied() {
 		return false
@@ -105,7 +107,23 @@ func (f *RegionFit) checkTargetIsolation(stores []*core.StoreInfo, target *core.
 		worker.run()
 		after = &worker.bestFit
 	}
-	return after.IsSatisfied() && f.IsIsolationPreserved(after)
+	return after.IsSatisfied() && f.preservesIsolation(after, !f.hasSamePeers(target))
+}
+
+// hasSamePeers ignores peer IDs, which may not yet be allocated in a plan.
+// The source fit is complete, so its rule fits cover each source peer once.
+func (f *RegionFit) hasSamePeers(target *core.RegionInfo) bool {
+	count := 0
+	for _, rf := range f.RuleFits {
+		for _, peer := range rf.Peers {
+			count++
+			other := target.GetStorePeer(peer.GetStoreId())
+			if other == nil || peer.GetRole() != other.GetRole() || peer.GetIsWitness() != other.GetIsWitness() {
+				return false
+			}
+		}
+	}
+	return count == len(target.GetPeers())
 }
 
 // IsFinalIsolationPreserved checks the complete layout of an operator built

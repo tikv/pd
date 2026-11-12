@@ -1392,8 +1392,7 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 }
 
 func TestTransferLeaderIsolationTargets(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	tc.SetEnablePlacementRules(true)
 	for i, host := range []string{"a", "b", "a"} {

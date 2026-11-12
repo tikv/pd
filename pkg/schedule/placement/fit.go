@@ -201,6 +201,11 @@ func hasIsolationLevel(rules []*Rule) bool {
 	return false
 }
 
+// HasIsolationLevel reports whether this fit has an effective isolation level.
+func (f *RegionFit) HasIsolationLevel() bool {
+	return hasIsolationLevel(f.rules)
+}
+
 // IsIsolationSatisfied reports whether each pair of stores is separated at or
 // above the rule's configured isolation level. It does not impose a default
 // level or compare the weighted isolation score.

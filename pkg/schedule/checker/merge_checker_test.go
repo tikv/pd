@@ -711,8 +711,7 @@ func newRegionInfoWithBytes(id uint64, startKey, endKey []byte) *core.RegionInfo
 }
 
 func TestMergePreservesConfiguredIsolation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	tc.SetEnablePlacementRules(true)
 	tc.SetKeyType("raw")

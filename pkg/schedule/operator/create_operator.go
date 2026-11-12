@@ -105,6 +105,7 @@ func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *co
 			targetStoreID = targets[0]
 		}
 		targetStoreIDs = targets
+		builder.leaderIsolationChecked = true
 	}
 	return builder.SetLeader(targetStoreID).SetLeaders(targetStoreIDs).Build(kind)
 }

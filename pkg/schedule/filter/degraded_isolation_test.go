@@ -15,7 +15,6 @@
 package filter
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,8 +26,7 @@ import (
 )
 
 func TestPeerMoveDoesNotWorsenDegradedIsolation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	tc.SetEnablePlacementRules(true)
 	for i, path := range [][]string{{"A", "a"}, {"A", "a"}, {"A", "b"}, {"A", "c"}, {"B", "d"}, {"B", "d"}, {"A", "e"}} {
@@ -55,8 +53,7 @@ func TestPeerMoveDoesNotWorsenDegradedIsolation(t *testing.T) {
 }
 
 func TestLeaderTransferPreservesOtherRuleIsolation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	tc.SetEnablePlacementRules(true)
 	for i, host := range []string{"a", "b", "a"} {
