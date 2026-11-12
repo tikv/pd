@@ -318,6 +318,7 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 // Close shuts down the TSO allocator updating daemon and waits for it to exit.
 func (am *AllocatorManager) Close() {
 	log.Info("closing the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+	am.cancel()
 
 	if allocatorGroup, exist := am.getAllocatorGroup(GlobalDCLocation); exist {
 		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
@@ -329,7 +330,6 @@ func (am *AllocatorManager) Close() {
 		}
 	}
 
-	am.cancel()
 	am.svcLoopWG.Wait()
 
 	log.Info("closed the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
@@ -400,7 +400,12 @@ func (am *AllocatorManager) checkDCLocationUpperLimit(dcLocation string) error {
 
 // GetClusterDCLocationsFromEtcd fetches dcLocation topology from etcd
 func (am *AllocatorManager) GetClusterDCLocationsFromEtcd() (clusterDCLocations map[string][]uint64, err error) {
-	resp, err := etcdutil.EtcdKVGet(
+	return am.getClusterDCLocationsFromEtcd(am.ctx)
+}
+
+func (am *AllocatorManager) getClusterDCLocationsFromEtcd(ctx context.Context) (clusterDCLocations map[string][]uint64, err error) {
+	resp, err := etcdutil.EtcdKVGetWithContext(
+		ctx,
 		am.member.Client(),
 		am.member.GetDCLocationPathPrefix(),
 		clientv3.WithPrefix())
@@ -818,18 +823,28 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 // and stores them into the DCLocationInfo, then finally writes them into am.mu.clusterDCLocations.
 func (am *AllocatorManager) ClusterDCLocationChecker() {
 	defer logutil.LogPanic()
+	if am.ctx.Err() != nil {
+		return
+	}
 	// Wait for the group leader to be elected out.
 	if !am.member.IsLeaderElected() {
 		return
 	}
-	newClusterDCLocations, err := am.GetClusterDCLocationsFromEtcd()
+	newClusterDCLocations, err := am.getClusterDCLocationsFromEtcd(am.ctx)
 	if err != nil {
 		log.Error("get cluster dc-locations from etcd failed",
 			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
 			errs.ZapError(err))
 		return
 	}
+	if am.ctx.Err() != nil {
+		return
+	}
 	am.mu.Lock()
+	defer am.mu.Unlock()
+	if am.ctx.Err() != nil {
+		return
+	}
 	// Clean up the useless dc-locations
 	for dcLocation := range am.mu.clusterDCLocations {
 		if _, ok := newClusterDCLocations[dcLocation]; !ok {
@@ -851,10 +866,13 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 	// Only leader can write the TSO suffix to etcd in order to make it consistent in the cluster
 	if am.IsLeader() {
 		for dcLocation, info := range am.mu.clusterDCLocations {
+			if am.ctx.Err() != nil {
+				break
+			}
 			if info.Suffix > 0 {
 				continue
 			}
-			suffix, err := am.getOrCreateLocalTSOSuffix(dcLocation)
+			suffix, err := am.getOrCreateLocalTSOSuffix(am.ctx, dcLocation)
 			if err != nil {
 				log.Warn("get or create the local tso suffix failed",
 					logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
@@ -869,7 +887,7 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 		}
 	} else {
 		// Follower should check and update the am.mu.maxSuffix
-		maxSuffix, err := am.getMaxLocalTSOSuffix()
+		maxSuffix, err := am.getMaxLocalTSOSuffix(am.ctx)
 		if err != nil {
 			log.Error("get the max local tso suffix from etcd failed",
 				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
@@ -882,15 +900,14 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 			am.mu.maxSuffix = maxSuffix
 		}
 	}
-	am.mu.Unlock()
 }
 
 // getOrCreateLocalTSOSuffix will check whether we have the Local TSO suffix written into etcd.
 // If not, it will write a number into etcd according to the its joining order.
 // If yes, it will just return the previous persisted one.
-func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32, error) {
+func (am *AllocatorManager) getOrCreateLocalTSOSuffix(ctx context.Context, dcLocation string) (int32, error) {
 	// Try to get the suffix from etcd
-	dcLocationSuffix, err := am.getDCLocationSuffixMapFromEtcd()
+	dcLocationSuffix, err := am.getDCLocationSuffixMapFromEtcd(ctx)
 	if err != nil {
 		return -1, nil
 	}
@@ -909,7 +926,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 	localTSOSuffixKey := am.GetLocalTSOSuffixPath(dcLocation)
 	// The Local TSO suffix is determined by the joining order of this dc-location.
 	localTSOSuffixValue := strconv.FormatInt(int64(maxSuffix), 10)
-	txnResp, err := kv.NewSlowLogTxn(am.member.Client()).
+	txnResp, err := kv.NewSlowLogTxnWithContext(ctx, am.member.Client()).
 		If(clientv3.Compare(clientv3.CreateRevision(localTSOSuffixKey), "=", 0)).
 		Then(clientv3.OpPut(localTSOSuffixKey, localTSOSuffixValue)).
 		Commit()
@@ -928,8 +945,9 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 	return maxSuffix, nil
 }
 
-func (am *AllocatorManager) getDCLocationSuffixMapFromEtcd() (map[string]int32, error) {
-	resp, err := etcdutil.EtcdKVGet(
+func (am *AllocatorManager) getDCLocationSuffixMapFromEtcd(ctx context.Context) (map[string]int32, error) {
+	resp, err := etcdutil.EtcdKVGetWithContext(
+		ctx,
 		am.member.Client(),
 		am.GetLocalTSOSuffixPathPrefix(),
 		clientv3.WithPrefix())
@@ -949,9 +967,9 @@ func (am *AllocatorManager) getDCLocationSuffixMapFromEtcd() (map[string]int32, 
 	return dcLocationSuffix, nil
 }
 
-func (am *AllocatorManager) getMaxLocalTSOSuffix() (int32, error) {
+func (am *AllocatorManager) getMaxLocalTSOSuffix(ctx context.Context) (int32, error) {
 	// Try to get the suffix from etcd
-	dcLocationSuffix, err := am.getDCLocationSuffixMapFromEtcd()
+	dcLocationSuffix, err := am.getDCLocationSuffixMapFromEtcd(ctx)
 	if err != nil {
 		return -1, err
 	}
