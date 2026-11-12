@@ -182,6 +182,10 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			}
 			wg.Wait()
 			re.Equal(1, streams.MsgLength(), "concurrent heartbeats send one recovery notification")
+			msg, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+			re.True(ok)
+			re.NotNil(msg.GetChangeSplit())
+			re.True(msg.GetChangeSplit().GetAutoSplitEnabled())
 		})
 	}
 }
