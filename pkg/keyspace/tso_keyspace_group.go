@@ -1109,13 +1109,14 @@ func (m *GroupManager) runKeyspaceGroupRemovalTxn(
 //
 // A context error alone is not enough: m.store.RunInTxn ultimately calls
 // etcd's own client, whose errors surface as grpc/etcd status codes, not as
-// the bare context sentinels. codes.PermissionDenied/ResourceExhausted/
-// Unauthenticated are deliberately excluded even though
-// shouldAbortKeyspaceGroupReconcile treats them as abort-worthy for its own,
-// different purpose (whether to keep retrying a reconcile loop): etcd
-// rejects those at admission, before ever attempting the commit, so they are
-// definite failures here, not ambiguous ones.
+// the bare context sentinels. PermissionDenied and Unauthenticated are definite
+// admission rejections. ResourceExhausted alone does not determine the outcome:
+// etcd can return ErrNoSpace after applying a transaction, so classify that
+// error separately without treating every ResourceExhausted error as ambiguous.
 func commitResultIsAmbiguous(err error) bool {
+	if goerrors.Is(err, rpctypes.ErrNoSpace) || goerrors.Is(err, rpctypes.ErrGRPCNoSpace) {
+		return true
+	}
 	if goerrors.Is(err, context.DeadlineExceeded) || goerrors.Is(err, context.Canceled) {
 		return true
 	}
