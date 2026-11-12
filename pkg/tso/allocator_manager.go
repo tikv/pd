@@ -400,10 +400,10 @@ func (am *AllocatorManager) checkDCLocationUpperLimit(dcLocation string) error {
 
 // GetClusterDCLocationsFromEtcd fetches dcLocation topology from etcd
 func (am *AllocatorManager) GetClusterDCLocationsFromEtcd() (clusterDCLocations map[string][]uint64, err error) {
-	return am.getClusterDCLocationsFromEtcd(am.ctx)
+	return am.getClusterDCLocationsFromEtcdWithContext(am.ctx)
 }
 
-func (am *AllocatorManager) getClusterDCLocationsFromEtcd(ctx context.Context) (clusterDCLocations map[string][]uint64, err error) {
+func (am *AllocatorManager) getClusterDCLocationsFromEtcdWithContext(ctx context.Context) (clusterDCLocations map[string][]uint64, err error) {
 	resp, err := etcdutil.EtcdKVGetWithContext(
 		ctx,
 		am.member.Client(),
@@ -830,7 +830,7 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 	if !am.member.IsLeaderElected() {
 		return
 	}
-	newClusterDCLocations, err := am.getClusterDCLocationsFromEtcd(am.ctx)
+	newClusterDCLocations, err := am.getClusterDCLocationsFromEtcdWithContext(am.ctx)
 	if err != nil {
 		log.Error("get cluster dc-locations from etcd failed",
 			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
