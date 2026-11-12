@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
@@ -50,6 +51,8 @@ func (suite *operatorTestSuite) SetupSuite() {
 			conf.Replication.MaxReplicas = 2
 			conf.Replication.EnablePlacementRules = false
 			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
+			// The split-region case checks the keys in the operator description.
+			conf.Security.RedactInfoLog = logutil.RedactInfoLogOFF
 		},
 	)
 }

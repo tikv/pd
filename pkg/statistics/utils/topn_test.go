@@ -18,6 +18,7 @@ import (
 	"math/rand/v2"
 	"sort"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -252,60 +253,62 @@ func TestRemove(t *testing.T) {
 }
 
 func TestTTL(t *testing.T) {
-	re := require.New(t)
-	const Total, N = 1000, 50
-	tn := NewTopN(DimLen, 50, 900*time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		const Total, N = 1000, 50
+		tn := NewTopN(DimLen, 50, 900*time.Millisecond)
 
-	putPerm(re, tn, Total, func(x int) float64 {
-		return float64(-x)
-	}, false /*insert*/)
-	re.Len(tn.GetAll(), Total)
+		putPerm(re, tn, Total, func(x int) float64 {
+			return float64(-x)
+		}, false /*insert*/)
+		re.Len(tn.GetAll(), Total)
 
-	time.Sleep(900 * time.Millisecond)
-	{
-		item := &item{id: 0, values: []float64{100}}
-		for k := 1; k < DimLen; k++ {
-			item.values = append(item.values, rand.NormFloat64())
-		}
-		re.True(tn.Put(item))
-	}
-	re.Len(tn.RemoveExpired(), (Total-1)*DimLen)
-
-	for i := 3; i < Total; i += 3 {
-		item := &item{id: uint64(i), values: []float64{float64(-i) + 100}}
-		for k := 1; k < DimLen; k++ {
-			item.values = append(item.values, rand.NormFloat64())
-		}
-		re.False(tn.Put(item))
-	}
-
-	re.Equal(Total/3+1, tn.Len())
-	items := tn.GetAllTopN(0)
-	v := make([]float64, N)
-	for _, it := range items {
-		it := it.(*item)
-		re.Equal(uint64(0), it.id%3)
-		v[it.id/3] = it.values[0]
-	}
-	for i, x := range v {
-		re.Equal(float64(-i*3)+100, x)
-	}
-
-	{ // check all dimensions
-		for k := 1; k < DimLen; k++ {
-			topn := make([]float64, 0, N)
-			for _, it := range tn.GetAllTopN(k) {
-				topn = append(topn, it.(*item).values[k])
+		synctest.Sleep(900 * time.Millisecond)
+		{
+			item := &item{id: 0, values: []float64{100}}
+			for k := 1; k < DimLen; k++ {
+				item.values = append(item.values, rand.NormFloat64())
 			}
-			sort.Sort(sort.Reverse(sort.Float64Slice(topn)))
-
-			all := make([]float64, 0, Total/3+1)
-			for _, it := range tn.GetAll() {
-				all = append(all, it.(*item).values[k])
-			}
-			sort.Sort(sort.Reverse(sort.Float64Slice(all)))
-
-			re.Equal(all[:N], topn)
+			re.True(tn.Put(item))
 		}
-	}
+		re.Len(tn.RemoveExpired(), (Total-1)*DimLen)
+
+		for i := 3; i < Total; i += 3 {
+			item := &item{id: uint64(i), values: []float64{float64(-i) + 100}}
+			for k := 1; k < DimLen; k++ {
+				item.values = append(item.values, rand.NormFloat64())
+			}
+			re.False(tn.Put(item))
+		}
+
+		re.Equal(Total/3+1, tn.Len())
+		items := tn.GetAllTopN(0)
+		v := make([]float64, N)
+		for _, it := range items {
+			it := it.(*item)
+			re.Equal(uint64(0), it.id%3)
+			v[it.id/3] = it.values[0]
+		}
+		for i, x := range v {
+			re.Equal(float64(-i*3)+100, x)
+		}
+
+		{ // check all dimensions
+			for k := 1; k < DimLen; k++ {
+				topn := make([]float64, 0, N)
+				for _, it := range tn.GetAllTopN(k) {
+					topn = append(topn, it.(*item).values[k])
+				}
+				sort.Sort(sort.Reverse(sort.Float64Slice(topn)))
+
+				all := make([]float64, 0, Total/3+1)
+				for _, it := range tn.GetAll() {
+					all = append(all, it.(*item).values[k])
+				}
+				sort.Sort(sort.Reverse(sort.Float64Slice(all)))
+
+				re.Equal(all[:N], topn)
+			}
+		}
+	})
 }

@@ -228,8 +228,9 @@ func (s *tsoProxyTestSuite) TestTSOProxyRecvFromClientTimeout() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tsoProxyRecvFromClientTimeout", `return(1)`))
 	streams, cleanupFuncs, err := createTSOStreams(s.ctx, as, s.backendEndpoints, 1)
 	re.NoError(err)
-	// Sleep 2 seconds to make the TSO Proxy's grpc stream timeout on the server side.
-	time.Sleep(2 * time.Second)
+	// Receive the server's idle-stream termination before checking the next send.
+	_, err = streams[0].Recv()
+	re.Error(err)
 	err = streams[0].Send(s.defaultReq)
 	re.Error(err)
 	cleanupGRPCStreams(cleanupFuncs)

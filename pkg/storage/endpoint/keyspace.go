@@ -42,6 +42,7 @@ const (
 type KeyspaceStorage interface {
 	SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error
 	LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error)
+	LoadKeyspaceMetaWithRevision(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, int64, error)
 	SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
 	LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error)
 	RemoveKeyspace(txn kv.Txn, id uint32, name string) error
@@ -84,6 +85,23 @@ func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.Key
 		return nil, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return meta, nil
+}
+
+// LoadKeyspaceMetaWithRevision loads metadata and its modification revision in one linearizable read.
+// Missing or empty metadata returns nil, matching LoadKeyspaceMeta.
+func (se *StorageEndpoint) LoadKeyspaceMetaWithRevision(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, int64, error) {
+	value, revision, err := se.loadValueWithRevision(ctx, keypath.KeyspaceMetaPath(id))
+	if err != nil {
+		return nil, 0, err
+	}
+	if value == "" {
+		return nil, revision, nil
+	}
+	meta := &keyspacepb.KeyspaceMeta{}
+	if err := proto.Unmarshal([]byte(value), meta); err != nil {
+		return nil, 0, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return meta, revision, nil
 }
 
 // SaveKeyspaceID saves keyspace ID to the path specified by keyspace name.

@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -150,42 +151,49 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevelCaseInsensit
 	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 }
 
-func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWithIsolationLevel() {
-	re := suite.Require()
-	suite.cluster.SetMaxStoreDownTime(100 * time.Millisecond)
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2", "host": "h3"})
-	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "h4"})
-	suite.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3", "host": "h5"})
-	suite.cluster.AddLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h6"})
-	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 5)
-	err := suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:        placement.DefaultGroupID,
-		ID:             "test",
-		Index:          100,
-		Override:       true,
-		Role:           placement.Voter,
-		Count:          3,
-		LocationLabels: []string{"zone", "host"},
-		IsolationLevel: "zone",
+func TestReplaceDownPeerWithIsolationLevel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		suite := new(ruleCheckerTestSuite)
+		suite.SetT(t)
+		suite.SetupTest()
+		defer suite.TearDownTest()
+
+		re := suite.Require()
+		suite.cluster.SetMaxStoreDownTime(100 * time.Millisecond)
+		suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
+		suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
+		suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2", "host": "h3"})
+		suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "h4"})
+		suite.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3", "host": "h5"})
+		suite.cluster.AddLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h6"})
+		suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 5)
+		err := suite.ruleManager.SetRule(&placement.Rule{
+			GroupID:        placement.DefaultGroupID,
+			ID:             "test",
+			Index:          100,
+			Override:       true,
+			Role:           placement.Voter,
+			Count:          3,
+			LocationLabels: []string{"zone", "host"},
+			IsolationLevel: "zone",
+		})
+		re.NoError(err)
+		err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+		re.NoError(err)
+		op := suite.rc.Check(suite.cluster.GetRegion(1))
+		re.Nil(op)
+		region := suite.cluster.GetRegion(1)
+		downPeer := []*pdpb.PeerStats{
+			{Peer: region.GetStorePeer(5), DownSeconds: 6000},
+		}
+		region = region.Clone(core.WithDownPeers(downPeer))
+		suite.cluster.PutRegion(region)
+		suite.cluster.SetStoreDown(5)
+		suite.cluster.SetStoreDown(6)
+		synctest.Sleep(200 * time.Millisecond)
+		op = suite.rc.Check(suite.cluster.GetRegion(1))
+		re.Nil(op)
 	})
-	re.NoError(err)
-	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
-	re.NoError(err)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
-	re.Nil(op)
-	region := suite.cluster.GetRegion(1)
-	downPeer := []*pdpb.PeerStats{
-		{Peer: region.GetStorePeer(5), DownSeconds: 6000},
-	}
-	region = region.Clone(core.WithDownPeers(downPeer))
-	suite.cluster.PutRegion(region)
-	suite.cluster.SetStoreDown(5)
-	suite.cluster.SetStoreDown(6)
-	time.Sleep(200 * time.Millisecond)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
-	re.Nil(op)
 }
 
 func (suite *ruleCheckerTestSuite) TestFixPeer() {
@@ -244,6 +252,71 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeers() {
 	re.NotNil(op)
 	re.Equal("remove-orphan-peer", op.Desc())
 	re.Equal(uint64(4), op.Step(0).(operator.RemovePeer).FromStore)
+}
+
+func (suite *ruleCheckerTestSuite) TestFixManyMisplacedLearners() {
+	re := suite.Require()
+	const peerCount = 36
+	var learners []uint64
+	for id := uint64(1); id <= peerCount; id++ {
+		labels := map[string]string{
+			"zone": fmt.Sprintf("z%d", (id-1)%3),
+			"host": strconv.FormatUint(id, 10),
+		}
+		if id >= 4 && id <= 6 {
+			labels["engine"] = "tiflash"
+		}
+		suite.cluster.AddLabelsStore(id, 1, labels)
+		if id > 3 {
+			learners = append(learners, id)
+		}
+	}
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+	}))
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "tiflash",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   3,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "engine", Op: placement.In, Values: []string{"tiflash"}},
+		},
+		LocationLabels: []string{"zone", "host"},
+	}))
+	// Model the redundant TiKV learners left by #6662. Distinct hosts keep the
+	// candidates from being pruned as equivalent during placement fitting.
+	region := suite.cluster.AddRegionWithLearner(1, 1, []uint64{2, 3}, learners)
+	re.Len(region.GetPeers(), peerCount)
+	retainedPeers := make([]*metapb.Peer, 0, 6)
+	for id := uint64(1); id <= 6; id++ {
+		retainedPeers = append(retainedPeers, region.GetStorePeer(id))
+	}
+	leader := region.GetLeader()
+	for remaining := peerCount; remaining > len(retainedPeers); remaining-- {
+		op := suite.rc.Check(region)
+		re.NotNil(op)
+		re.Equal("remove-orphan-peer", op.Desc())
+		re.Equal(1, op.Len())
+		var remove operator.RemovePeer
+		re.IsType(remove, op.Step(0))
+		remove = op.Step(0).(operator.RemovePeer)
+		re.Greater(remove.FromStore, uint64(6))
+		re.NotNil(region.GetStorePeer(remove.FromStore))
+		region = region.Clone(core.WithRemoveStorePeer(remove.FromStore), core.WithIncConfVer())
+		suite.cluster.PutRegion(region)
+		re.Len(region.GetPeers(), remaining-1)
+		for _, peer := range retainedPeers {
+			re.Equal(peer, region.GetStorePeer(peer.GetStoreId()))
+		}
+		re.Equal(leader, region.GetLeader())
+	}
+	re.ElementsMatch(retainedPeers, region.GetPeers())
+	re.Nil(suite.rc.Check(region))
 }
 
 func (suite *ruleCheckerTestSuite) TestFixToManyOrphanPeers() {

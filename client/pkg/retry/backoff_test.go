@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -33,123 +34,125 @@ func TestMain(m *testing.M) {
 }
 
 func TestBackoffer(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	base := time.Second
-	max := 100 * time.Millisecond
-	total := time.Millisecond
-	// Test initial backoffer.
-	bo := InitialBackoffer(base, max, total)
-	// `bo.base` will be set to `bo.max` if `bo.base` is greater than `bo.max`.
-	re.Equal(max, bo.base)
-	re.Equal(max, bo.max)
-	// `bo.total` will be set to `bo.base` if `bo.total` is greater than `bo.base`.
-	re.Equal(bo.base, bo.total)
+		base := time.Second
+		max := 100 * time.Millisecond
+		total := time.Millisecond
+		// Test initial backoffer.
+		bo := InitialBackoffer(base, max, total)
+		// `bo.base` will be set to `bo.max` if `bo.base` is greater than `bo.max`.
+		re.Equal(max, bo.base)
+		re.Equal(max, bo.max)
+		// `bo.total` will be set to `bo.base` if `bo.total` is greater than `bo.base`.
+		re.Equal(bo.base, bo.total)
 
-	base = 100 * time.Millisecond
-	max = time.Second
-	total = base
-	// Test the same value of `bo.base` and `bo.total`.
-	bo = InitialBackoffer(base, max, total)
-	re.Equal(base, bo.base)
-	re.Equal(total, bo.total)
-	re.Equal(base, total)
-	var (
-		execCount   int
-		expectedErr = errors.New("test")
-	)
-	err := bo.Exec(ctx, func() error {
-		execCount++
-		return expectedErr
-	})
-	re.ErrorIs(err, expectedErr)
-	re.Equal(1, execCount)
-	re.True(isBackofferReset(bo))
+		base = 100 * time.Millisecond
+		max = time.Second
+		total = base
+		// Test the same value of `bo.base` and `bo.total`.
+		bo = InitialBackoffer(base, max, total)
+		re.Equal(base, bo.base)
+		re.Equal(total, bo.total)
+		re.Equal(base, total)
+		var (
+			execCount   int
+			expectedErr = errors.New("test")
+		)
+		err := bo.Exec(ctx, func() error {
+			execCount++
+			return expectedErr
+		})
+		re.ErrorIs(err, expectedErr)
+		re.Equal(1, execCount)
+		re.True(isBackofferReset(bo))
 
-	base = 100 * time.Millisecond
-	max = time.Second
-	total = time.Second
-	// Test the nextInterval function.
-	bo = InitialBackoffer(base, max, total)
-	re.Equal(bo.nextInterval(), base)
-	re.Equal(bo.nextInterval(), 2*base)
-	for range 10 {
-		re.LessOrEqual(bo.nextInterval(), max)
-	}
-	re.Equal(bo.nextInterval(), max)
-	bo.resetBackoff()
-	re.True(isBackofferReset(bo))
-
-	// Test the total time cost.
-	execCount = 0
-	var start time.Time
-	err = bo.Exec(ctx, func() error {
-		execCount++
-		if start.IsZero() {
-			start = time.Now()
+		base = 100 * time.Millisecond
+		max = time.Second
+		total = time.Second
+		// Test the nextInterval function.
+		bo = InitialBackoffer(base, max, total)
+		re.Equal(bo.nextInterval(), base)
+		re.Equal(bo.nextInterval(), 2*base)
+		for range 10 {
+			re.LessOrEqual(bo.nextInterval(), max)
 		}
-		return expectedErr
-	})
-	re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
-	re.ErrorContains(err, "test")
-	re.ErrorIs(err, expectedErr)
-	re.Equal(4, execCount)
-	re.True(isBackofferReset(bo))
+		re.Equal(bo.nextInterval(), max)
+		bo.resetBackoff()
+		re.True(isBackofferReset(bo))
 
-	// Test the error returned.
-	execCount = 0
-	err = bo.Exec(ctx, func() error {
-		execCount++
-		return fmt.Errorf("test %d", execCount)
-	})
-	re.Error(err)
-	re.Equal("test 4", err.Error())
-	re.Equal(4, execCount)
-	re.True(isBackofferReset(bo))
-	execCount = 0
-	err = bo.Exec(ctx, func() error {
-		if execCount == 1 {
-			return nil
+		// Test the total time cost.
+		execCount = 0
+		var start time.Time
+		err = bo.Exec(ctx, func() error {
+			execCount++
+			if start.IsZero() {
+				start = time.Now()
+			}
+			return expectedErr
+		})
+		re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
+		re.ErrorContains(err, "test")
+		re.ErrorIs(err, expectedErr)
+		re.Equal(4, execCount)
+		re.True(isBackofferReset(bo))
+
+		// Test the error returned.
+		execCount = 0
+		err = bo.Exec(ctx, func() error {
+			execCount++
+			return fmt.Errorf("test %d", execCount)
+		})
+		re.Error(err)
+		re.Equal("test 4", err.Error())
+		re.Equal(4, execCount)
+		re.True(isBackofferReset(bo))
+		execCount = 0
+		err = bo.Exec(ctx, func() error {
+			if execCount == 1 {
+				return nil
+			}
+			execCount++
+			return expectedErr
+		})
+		re.Equal(1, execCount)
+		re.NoError(err)
+		re.True(isBackofferReset(bo))
+
+		// Test the retryable checker.
+		execCount = 0
+		bo = InitialBackoffer(base, max, total)
+		retryableChecker := func(error) bool {
+			return execCount < 2
 		}
-		execCount++
-		return expectedErr
+		bo.SetRetryableChecker(retryableChecker, false)
+		execFunc := func() error {
+			execCount++
+			return expectedErr
+		}
+		err = bo.Exec(ctx, execFunc)
+		re.ErrorIs(err, expectedErr)
+		re.Equal(2, execCount)
+		re.True(isBackofferReset(bo))
+		// Test the retryable checker with overwrite.
+		execCount = 0
+		retryableChecker = func(error) bool {
+			return execCount < 4
+		}
+		bo.SetRetryableChecker(retryableChecker, false)
+		err = bo.Exec(ctx, execFunc)
+		re.ErrorIs(err, expectedErr)
+		re.Equal(2, execCount)
+		re.True(isBackofferReset(bo))
+		execCount = 0
+		bo.SetRetryableChecker(retryableChecker, true)
+		err = bo.Exec(ctx, execFunc)
+		re.ErrorIs(err, expectedErr)
+		re.Equal(4, execCount)
+		re.True(isBackofferReset(bo))
 	})
-	re.Equal(1, execCount)
-	re.NoError(err)
-	re.True(isBackofferReset(bo))
-
-	// Test the retryable checker.
-	execCount = 0
-	bo = InitialBackoffer(base, max, total)
-	retryableChecker := func(error) bool {
-		return execCount < 2
-	}
-	bo.SetRetryableChecker(retryableChecker, false)
-	execFunc := func() error {
-		execCount++
-		return expectedErr
-	}
-	err = bo.Exec(ctx, execFunc)
-	re.ErrorIs(err, expectedErr)
-	re.Equal(2, execCount)
-	re.True(isBackofferReset(bo))
-	// Test the retryable checker with overwrite.
-	execCount = 0
-	retryableChecker = func(error) bool {
-		return execCount < 4
-	}
-	bo.SetRetryableChecker(retryableChecker, false)
-	err = bo.Exec(ctx, execFunc)
-	re.ErrorIs(err, expectedErr)
-	re.Equal(2, execCount)
-	re.True(isBackofferReset(bo))
-	execCount = 0
-	bo.SetRetryableChecker(retryableChecker, true)
-	err = bo.Exec(ctx, execFunc)
-	re.ErrorIs(err, expectedErr)
-	re.Equal(4, execCount)
-	re.True(isBackofferReset(bo))
 }
 
 func isBackofferReset(bo *Backoffer) bool {
@@ -157,38 +160,40 @@ func isBackofferReset(bo *Backoffer) bool {
 }
 
 func TestBackofferWithLog(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
-	lg, err := newZapTestLogger(conf)
-	re.NoError(err)
-	log.ReplaceGlobals(lg.Logger, nil)
+		conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
+		lg, err := newZapTestLogger(conf)
+		re.NoError(err)
+		log.ReplaceGlobals(lg.Logger, nil)
 
-	bo := InitialBackoffer(time.Millisecond*10, time.Millisecond*100, time.Millisecond*1000, withMinLogInterval(time.Millisecond*100))
-	err = bo.Exec(ctx, testFn)
-	re.ErrorIs(err, errTest)
+		bo := InitialBackoffer(time.Millisecond*10, time.Millisecond*100, time.Millisecond*1000, withMinLogInterval(time.Millisecond*100))
+		err = bo.Exec(ctx, testFn)
+		re.ErrorIs(err, errTest)
 
-	ms := lg.Messages()
-	len1 := len(ms)
-	// 10 + 20 + 40 + 80(log) + 100(log) * 9 >= 1000, so log ten times.
-	re.Len(ms, 10)
-	// 10 + 20 + 40 + 80 + 100 * 9, 13 times retry.
-	rfc := `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=13] [error=test]`
-	re.Contains(ms[len(ms)-1], rfc)
-	// 10 + 20 + 40 + 80(log), 4 times retry.
-	rfc = `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=4] [error=test]`
-	re.Contains(ms[0], rfc)
+		ms := lg.Messages()
+		len1 := len(ms)
+		// 10 + 20 + 40 + 80(log) + 100(log) * 9 >= 1000, so log ten times.
+		re.Len(ms, 10)
+		// 10 + 20 + 40 + 80 + 100 * 9, 13 times retry.
+		rfc := `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=13] [error=test]`
+		re.Contains(ms[len(ms)-1], rfc)
+		// 10 + 20 + 40 + 80(log), 4 times retry.
+		rfc = `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=4] [error=test]`
+		re.Contains(ms[0], rfc)
 
-	err = bo.Exec(ctx, testFn)
-	re.ErrorIs(err, errTest)
+		err = bo.Exec(ctx, testFn)
+		re.ErrorIs(err, errTest)
 
-	ms = lg.Messages()
-	re.Len(ms, 20)
-	rfc = `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=13] [error=test]`
-	re.Contains(ms[len(ms)-1], rfc)
-	rfc = `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=4] [error=test]`
-	re.Contains(ms[len1], rfc)
+		ms = lg.Messages()
+		re.Len(ms, 20)
+		rfc = `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=13] [error=test]`
+		re.Contains(ms[len(ms)-1], rfc)
+		rfc = `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=4] [error=test]`
+		re.Contains(ms[len1], rfc)
+	})
 }
 
 var errTest = errors.New("test")

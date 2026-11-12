@@ -31,6 +31,11 @@ error = '''
 affinity internal error
 '''
 
+["PD:affinity:ErrAffinityLabelProtected"]
+error = '''
+affinity label rules must be changed through the affinity API
+'''
+
 ["PD:affinity:ErrEmptyRequest"]
 error = '''
 %s

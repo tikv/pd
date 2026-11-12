@@ -119,21 +119,14 @@ func TestGCStateLeadershipGatesBeforeReset(t *testing.T) {
 	m.mu.Lock()
 	done := make(chan struct{})
 	go func() { m.OnNodeBecomesLeader(); close(done) }()
-	gated := false
-	deadline := time.After(time.Second)
-	for !gated {
-		select {
-		case <-deadline:
-			goto checked
-		default:
-			gated = !m.nodeIsLeader()
-			time.Sleep(time.Millisecond)
-		}
-	}
-checked:
-	m.mu.Unlock()
-	<-done
-	require.True(t, gated, "cache eligibility must be disabled before waiting for the reset lock")
+	func() {
+		defer func() {
+			m.mu.Unlock()
+			<-done
+		}()
+		require.Eventually(t, func() bool { return !m.nodeIsLeader() }, time.Second, time.Millisecond,
+			"cache eligibility must be disabled before waiting for the reset lock")
+	}()
 }
 
 func gcStateLoadCandidates(ids ...uint32) func() (uint32, bool) {

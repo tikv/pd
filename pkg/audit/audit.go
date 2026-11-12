@@ -128,6 +128,17 @@ func (*LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	log.Info("audit log", zap.String("service-info", requestInfo.String()))
+	clientCN := ""
+	if r.TLS != nil && len(r.TLS.VerifiedChains) > 0 && len(r.TLS.VerifiedChains[0]) > 0 {
+		clientCN = r.TLS.VerifiedChains[0][0].Subject.CommonName
+	}
+	// Header-derived IP and caller ID in service-info are diagnostic claims.
+	// Keep the transport peer and verified certificate identity in separate fields
+	// so a caller cannot replace them with forwarding headers. Behind a proxy,
+	// these fields identify the proxy connection, not the original client.
+	log.Info("audit log",
+		zap.String("service-info", requestInfo.String()),
+		zap.String("remote-addr", r.RemoteAddr),
+		zap.String("tls-client-cn", clientCN))
 	return true
 }

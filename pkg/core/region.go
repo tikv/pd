@@ -678,9 +678,7 @@ func (r *RegionInfo) CompareAndSetReportBuckets(buckets *metapb.Buckets) bool {
 			return true
 		}
 	}
-	failpoint.Inject("concurrentBucketHeartbeat", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("concurrentBucketHeartbeat")
 	return atomic.CompareAndSwapPointer(&r.reportBuckets, unsafe.Pointer(old), unsafe.Pointer(buckets))
 }
 
