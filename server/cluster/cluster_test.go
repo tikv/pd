@@ -23,11 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-<<<<<<< HEAD
-=======
-	"strconv"
 	"strings"
->>>>>>> 6fd398ce93 (scheduler, evict-slow-store allow draining multiple store from AZ (#11047))
 	"sync"
 	"testing"
 	"time"

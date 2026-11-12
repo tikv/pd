@@ -15,7 +15,11 @@
 package schedulers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -23,10 +27,10 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -605,18 +609,13 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 	re.True(ok)
 	re.Empty(es2.conf.evictedStores())
 	// prepare with no evict store.
-	suite.es.PrepareConfig(suite.tc)
+	re.NoError(suite.es.PrepareConfig(suite.tc))
 
-<<<<<<< HEAD
-	es2.conf.setStoreAndPersist(1)
-	re.Equal(uint64(1), es2.conf.evictStore())
-=======
 	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{1}))
 	re.ElementsMatch([]uint64{1}, es2.conf.evictedStores())
->>>>>>> 6fd398ce93 (scheduler, evict-slow-store allow draining multiple store from AZ (#11047))
 	re.False(es2.conf.readyForRecovery())
 	// prepare with evict store.
-	suite.es.PrepareConfig(suite.tc)
+	re.NoError(suite.es.PrepareConfig(suite.tc))
 }
 
 // TestEvictSlowStorePrepareFailureUndoneByCleanConfig: PrepareConfig applies every mark it
@@ -634,15 +633,15 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepareFailureUndoneByCl
 	re.Error(suite.es.PrepareConfig(suite.tc))
 	re.True(suite.tc.GetStore(1).EvictedAsSlowStore())
 	re.True(suite.tc.GetStore(2).EvictedAsSlowStore())
-	re.False(suite.tc.GetStore(3).AllowLeaderTransferIn())
+	re.False(suite.tc.GetStore(3).AllowLeaderTransfer())
 
 	suite.es.CleanConfig(suite.tc)
 	requireSlowMarkCleared(re, suite.tc, 1, 2)
 	// The pause on store 3 is released exactly once.
-	re.True(suite.tc.GetStore(3).AllowLeaderTransferIn())
-	re.NoError(suite.tc.PauseLeaderTransfer(3, constant.In))
-	re.False(suite.tc.GetStore(3).AllowLeaderTransferIn())
-	suite.tc.ResumeLeaderTransfer(3, constant.In)
+	re.True(suite.tc.GetStore(3).AllowLeaderTransfer())
+	re.NoError(suite.tc.PauseLeaderTransfer(3))
+	re.False(suite.tc.GetStore(3).AllowLeaderTransfer())
+	suite.tc.ResumeLeaderTransfer(3)
 }
 
 // TestEvictSlowStoreCleanConfigReleasesMarksOnPersistFailure: the final cleanup releases
@@ -1733,7 +1732,7 @@ func TestEvictSlowStoreReloadReconcilesSlowMarks(t *testing.T) {
 	re.True(tc.GetStore(2).EvictedAsSlowStore())
 	re.True(tc.GetStore(3).EvictedAsSlowStore())
 	// Disk-evicted ids are not paused; only network slow stores are.
-	re.True(tc.GetStore(3).AllowLeaderTransferIn())
+	re.True(tc.GetStore(3).AllowLeaderTransfer())
 
 	// An added id that cannot be marked (store 999 is not in the cluster) is dropped and
 	// the applied set is persisted, so no id stays in the set without a mark.
@@ -1980,13 +1979,13 @@ func TestEvictSlowStoreHealthyDomainsUseLiveStores(t *testing.T) {
 	// The snapshot is taken first; store 4, the only store in z3, is then paused as network
 	// detection would do earlier in the same Schedule call. Only z2 can take leaders.
 	cache := newCacheCluster(tc)
-	re.NoError(tc.PauseLeaderTransfer(4, constant.In))
+	re.NoError(tc.PauseLeaderTransfer(4))
 	es.scheduleDiskSlowStore(cache)
 	re.Empty(es.conf.evictedStores())
 	re.False(tc.GetStore(1).EvictedAsSlowStore())
 
 	// With store 4 available again the same setup is admitted.
-	tc.ResumeLeaderTransfer(4, constant.In)
+	tc.ResumeLeaderTransfer(4)
 	es.scheduleDiskSlowStore(newCacheCluster(tc))
 	re.ElementsMatch([]uint64{1, 2}, es.conf.evictedStores())
 }
@@ -2060,13 +2059,13 @@ func TestEvictSlowStoreHealthyDomainsMatchVoterRule(t *testing.T) {
 	setStoreSlowScore(tc, 1, 100)
 	setStoreSlowScore(tc, 2, 100)
 
-	re.NoError(tc.PauseLeaderTransfer(4, constant.In))
+	re.NoError(tc.PauseLeaderTransfer(4))
 	es.scheduleDiskSlowStore(tc)
 	re.Empty(es.conf.evictedStores())
 	re.False(tc.GetStore(1).EvictedAsSlowStore())
 
 	// With z3 available again, z2 and z3 can take leaders and the drain is admitted.
-	tc.ResumeLeaderTransfer(4, constant.In)
+	tc.ResumeLeaderTransfer(4)
 	es.scheduleDiskSlowStore(tc)
 	re.ElementsMatch([]uint64{1, 2}, es.conf.evictedStores())
 }

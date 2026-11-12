@@ -17,6 +17,7 @@ package placement
 import (
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"

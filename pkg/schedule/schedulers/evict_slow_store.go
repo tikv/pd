@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -756,9 +757,6 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 // single-store behavior of up to batch operators per call. The next call resumes after
 // the last store that produced an operator, so every evicted store gets its turn.
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-<<<<<<< HEAD
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf)
-=======
 	stores := s.conf.getStores()
 	batch := s.conf.getBatch()
 	n := len(stores)
@@ -775,7 +773,7 @@ func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerClu
 			}
 			idx := (start + i) % n
 			before := len(ops)
-			ops = uniqueAppendOperator(ops, scheduleEvictLeaderOnce(s.GetName(), cluster,
+			ops = uniqueAppendOperator(ops, scheduleEvictLeaderOnce(s.R, s.GetName(), cluster,
 				singleEvictLeaderStore{evictSlowStoreSchedulerConfig: s.conf, storeID: stores[idx]})...)
 			if len(ops) > before {
 				progressed = true
@@ -798,7 +796,6 @@ type singleEvictLeaderStore struct {
 
 func (s singleEvictLeaderStore) getStores() []uint64 {
 	return []uint64{s.storeID}
->>>>>>> 6fd398ce93 (scheduler, evict-slow-store allow draining multiple store from AZ (#11047))
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
@@ -1174,7 +1171,10 @@ func isHealthyLeaderTarget(cluster sche.SchedulerCluster, store *core.StoreInfo,
 		TransferLeader: true,
 		OperatorLevel:  constant.Urgent,
 	}
-	if !stateFilter.Target(cluster.GetSchedulerConfig(), store).IsOK() || !store.IsTiKV() || store.IsSlow() {
+	if !stateFilter.Target(cluster.GetSchedulerConfig(), store).IsOK() || store.IsSlow() {
+		return false
+	}
+	if engine := store.GetLabelValue(core.EngineKey); engine != "" && engine != core.EngineTiKV {
 		return false
 	}
 	for _, constraints := range leaderConstraints {
