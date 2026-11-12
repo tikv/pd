@@ -113,7 +113,6 @@ type Manager struct {
 	keyspaceStateLookup  sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
 	cache                *Cache
 	gcBarrierInvalidator atomic.Pointer[func(uint32)]
-	gcDiagnostics        gcConfigDiagnostics
 }
 
 // SetGCBarrierInvalidator installs the GC observation lifecycle callback.
@@ -440,7 +439,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		if nameExists {
 			return errs.ErrKeyspaceExists
 		}
-		loadedMeta, err := manager.loadKeyspaceMeta(txn, id)
+		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
 			return err
 		}
@@ -568,7 +567,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		}
 		// Save keyspace meta.
 		// Check if keyspace with that id already exists.
-		loadedMeta, err := manager.loadKeyspaceMeta(txn, keyspace.GetId())
+		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.GetId())
 		if err != nil {
 			return err
 		}
@@ -763,24 +762,6 @@ func (manager *Manager) checkBound(key []byte) bool {
 	return true
 }
 
-func (manager *Manager) loadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
-	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
-	if err == nil {
-		manager.ObserveGCConfig(meta)
-	}
-	return meta, err
-}
-
-func (manager *Manager) loadRangeKeyspaceMeta(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
-	metas, err := manager.store.LoadRangeKeyspace(txn, startID, limit)
-	if err == nil {
-		for _, meta := range metas {
-			manager.ObserveGCConfig(meta)
-		}
-	}
-	return metas, err
-}
-
 // LoadKeyspace returns the keyspace specified by name.
 // It returns error if loading or unmarshalling met error or if keyspace does not exist.
 func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, error) {
@@ -793,7 +774,7 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		if !loaded {
 			return errs.ErrKeyspaceNotFound
 		}
-		meta, err = manager.loadKeyspaceMeta(txn, id)
+		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
 			return err
 		}
@@ -816,7 +797,7 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		err  error
 	)
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		meta, err = manager.loadKeyspaceMeta(txn, spaceID)
+		meta, err = manager.store.LoadKeyspaceMeta(txn, spaceID)
 		if err != nil {
 			return err
 		}
@@ -848,7 +829,6 @@ func (manager *Manager) LoadKeyspaceByIDWithRevision(ctx context.Context, spaceI
 	if meta == nil {
 		return nil, 0, errs.ErrKeyspaceNotFound
 	}
-	manager.ObserveGCConfig(meta)
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -983,7 +963,7 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 		manager.metaLock.Lock(id)
 		defer manager.metaLock.Unlock(id)
 		// Load keyspace by id.
-		meta, err = manager.loadKeyspaceMeta(txn, id)
+		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
 			return err
 		}
@@ -1081,7 +1061,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		manager.metaLock.Lock(id)
 		defer manager.metaLock.Unlock(id)
 		// Load keyspace by id.
-		meta, err = manager.loadKeyspaceMeta(txn, id)
+		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
 			return err
 		}
@@ -1173,7 +1153,7 @@ func (manager *Manager) removeKeyspaceMetadataIfEligible(
 		}
 		return "", false, false, newModifyProtectedKeyspaceError()
 	}
-	meta, err := manager.loadKeyspaceMeta(txn, id)
+	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
 	if err != nil {
 		return "", false, false, err
 	}
@@ -1224,7 +1204,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		manager.metaLock.Lock(id)
 		defer manager.metaLock.Unlock(id)
 		// Load keyspace by id.
-		meta, err = manager.loadKeyspaceMeta(txn, id)
+		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
 			return err
 		}
@@ -1324,7 +1304,7 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 		err       error
 	)
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		keyspaces, err = manager.loadRangeKeyspaceMeta(txn, startID, limit)
+		keyspaces, err = manager.store.LoadRangeKeyspace(txn, startID, limit)
 		return err
 	})
 	if err != nil {
@@ -1385,7 +1365,7 @@ func (manager *Manager) CountKeyspacesByMetaServiceGroup(groupIDs map[string]str
 		var keyspaces []*keyspacepb.KeyspaceMeta
 		if err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			var err error
-			keyspaces, err = manager.loadRangeKeyspaceMeta(txn, startID, etcdutil.MaxEtcdTxnOps)
+			keyspaces, err = manager.store.LoadRangeKeyspace(txn, startID, etcdutil.MaxEtcdTxnOps)
 			return err
 		}); err != nil {
 			return nil, err
@@ -1546,7 +1526,7 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 			if defaultKeyspaceGroup.IsMerging() {
 				return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(constant.DefaultKeyspaceGroupID)
 			}
-			keyspaces, err := manager.loadRangeKeyspaceMeta(txn, manager.nextPatrolStartID, etcdutil.MaxEtcdTxnOps)
+			keyspaces, err := manager.store.LoadRangeKeyspace(txn, manager.nextPatrolStartID, etcdutil.MaxEtcdTxnOps)
 			if err != nil {
 				return err
 			}

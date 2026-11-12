@@ -71,8 +71,6 @@ type enabledKeyspaceIndex struct {
 	// onRemoved is set before run and persists after initial load hooks end.
 	// It runs outside mu and owns its slice of IDs removed by a watch batch.
 	onRemoved func([]uint32)
-	// observeGCConfig receives complete metadata before filtering by state.
-	observeGCConfig func(*keyspacepb.KeyspaceMeta)
 
 	mu       sync.Mutex
 	entries  map[uint32]enabledKeyspace
@@ -338,11 +336,12 @@ func (i *enabledKeyspaceIndex) watch(ctx context.Context, nextRevision int64) er
 				pendingRevision = max(pendingRevision, event.Kv.ModRevision)
 				switch event.Type {
 				case mvccpb.PUT:
-					id, entry, enabled, err := i.decodeKeyspaceMeta(event.Kv.Key, event.Kv.Value)
+					meta, err := i.decodeKeyspaceMeta(event.Kv.Key, event.Kv.Value)
 					if err != nil {
 						return err
 					}
-					changes = append(changes, change{id: id, entry: entry, enabled: enabled})
+					entry := enabledKeyspace{id: meta.GetId(), gcManagementType: keyspace.EffectiveGCManagementType(meta.Config)}
+					changes = append(changes, change{id: entry.id, entry: entry, enabled: meta.State == keyspacepb.KeyspaceState_ENABLED})
 				case mvccpb.DELETE:
 					id, err := i.parseKeyspaceID(event.Kv.Key)
 					if err != nil {
@@ -377,22 +376,19 @@ func (i *enabledKeyspaceIndex) parseKeyspaceID(rawKey []byte) (uint32, error) {
 	return uint32(id64), nil
 }
 
-func (i *enabledKeyspaceIndex) decodeKeyspaceMeta(rawKey, rawValue []byte) (uint32, enabledKeyspace, bool, error) {
+func (i *enabledKeyspaceIndex) decodeKeyspaceMeta(rawKey, rawValue []byte) (*keyspacepb.KeyspaceMeta, error) {
 	id, err := i.parseKeyspaceID(rawKey)
 	if err != nil {
-		return 0, enabledKeyspace{}, false, err
+		return nil, err
 	}
 	meta := &keyspacepb.KeyspaceMeta{}
 	if err := proto.Unmarshal(rawValue, meta); err != nil {
-		return 0, enabledKeyspace{}, false, fmt.Errorf("decode keyspace metadata %q: %w", rawKey, err)
+		return nil, fmt.Errorf("decode keyspace metadata %q: %w", rawKey, err)
 	}
 	if meta.GetId() != id {
-		return 0, enabledKeyspace{}, false, fmt.Errorf("keyspace metadata %q contains ID %d", rawKey, meta.GetId())
+		return nil, fmt.Errorf("keyspace metadata %q contains ID %d", rawKey, meta.GetId())
 	}
-	if i.observeGCConfig != nil {
-		i.observeGCConfig(meta)
-	}
-	return id, enabledKeyspace{id: id, gcManagementType: keyspace.EffectiveGCManagementType(meta.Config)}, meta.State == keyspacepb.KeyspaceState_ENABLED, nil
+	return meta, nil
 }
 
 func sortedEnabledKeyspaces(entries map[uint32]enabledKeyspace) []enabledKeyspace {

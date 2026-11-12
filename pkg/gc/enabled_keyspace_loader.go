@@ -27,10 +27,13 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -43,6 +46,10 @@ const (
 // the producer and workers before discarding the partial result.
 func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKeyspace)) (entries map[uint32]enabledKeyspace, revision int64, err error) {
 	concurrency := i.getLoadConcurrency()
+	var diagnostics *gcConfigLoadDiagnostics
+	if kerneltype.IsNextGen() {
+		diagnostics = &gcConfigLoadDiagnostics{}
+	}
 	started := time.Now()
 	log.Info("start loading GC keyspace index", zap.String("prefix", i.prefix),
 		zap.Int("concurrency", concurrency), zap.Int("page-size", enabledKeyspacePageSize))
@@ -52,6 +59,8 @@ func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKe
 			message = "loading GC keyspace index canceled"
 		} else if err != nil {
 			message = "loading GC keyspace index failed"
+		} else {
+			diagnostics.report(revision)
 		}
 		log.Info(message, zap.String("prefix", i.prefix), zap.Int("concurrency", concurrency),
 			zap.Int64("revision", revision), zap.Int("enabled-keyspace-count", len(entries)),
@@ -76,7 +85,7 @@ func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKe
 		return nil, 0, errors.New("missing range response in initial keyspace metadata transaction")
 	}
 	revision = resp.Header.Revision
-	page, lastID, err := i.decodePage(first.Kvs, first.More, revision)
+	page, lastID, err := i.decodePage(first.Kvs, first.More, revision, diagnostics)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -155,7 +164,7 @@ func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKe
 					if !ok {
 						return nil
 					}
-					if err := i.loadRange(attemptCtx, task.start, task.end, revision, consume); err != nil {
+					if err := i.loadRange(attemptCtx, task.start, task.end, revision, consume, diagnostics); err != nil {
 						return err
 					}
 				}
@@ -171,7 +180,7 @@ func (i *enabledKeyspaceIndex) load(ctx context.Context, onPage func([]enabledKe
 	return entries, revision, nil
 }
 
-func (i *enabledKeyspaceIndex) loadRange(ctx context.Context, start, end string, revision int64, consume func([]enabledKeyspace)) error {
+func (i *enabledKeyspaceIndex) loadRange(ctx context.Context, start, end string, revision int64, consume func([]enabledKeyspace), diagnostics *gcConfigLoadDiagnostics) error {
 	for {
 		requestCtx, cancel := context.WithTimeout(ctx, enabledKeyspaceRequestTimeout)
 		resp, err := i.client.Get(requestCtx, start, clientv3.WithRange(end), clientv3.WithLimit(enabledKeyspacePageSize), clientv3.WithRev(revision))
@@ -179,7 +188,7 @@ func (i *enabledKeyspaceIndex) loadRange(ctx context.Context, start, end string,
 		if err != nil {
 			return err
 		}
-		page, _, err := i.decodePage(resp.Kvs, resp.More, revision)
+		page, _, err := i.decodePage(resp.Kvs, resp.More, revision, diagnostics)
 		if err != nil {
 			return err
 		}
@@ -195,7 +204,7 @@ func (i *enabledKeyspaceIndex) loadRange(ctx context.Context, start, end string,
 }
 
 // decodePage completes validation before exposing any entries to the caller.
-func (i *enabledKeyspaceIndex) decodePage(kvs []*mvccpb.KeyValue, more bool, revision int64) ([]enabledKeyspace, uint32, error) {
+func (i *enabledKeyspaceIndex) decodePage(kvs []*mvccpb.KeyValue, more bool, revision int64, diagnostics *gcConfigLoadDiagnostics) ([]enabledKeyspace, uint32, error) {
 	if more && len(kvs) == 0 {
 		return nil, 0, fmt.Errorf("empty keyspace metadata page at revision %d", revision)
 	}
@@ -205,13 +214,14 @@ func (i *enabledKeyspaceIndex) decodePage(kvs []*mvccpb.KeyValue, more bool, rev
 		if kv == nil {
 			return nil, 0, fmt.Errorf("missing keyspace metadata at revision %d", revision)
 		}
-		id, entry, enabled, err := i.decodeKeyspaceMeta(kv.Key, kv.Value)
+		meta, err := i.decodeKeyspaceMeta(kv.Key, kv.Value)
 		if err != nil {
 			return nil, 0, err
 		}
-		lastID = id
-		if enabled {
-			page = append(page, entry)
+		diagnostics.observe(meta)
+		lastID = meta.GetId()
+		if meta.State == keyspacepb.KeyspaceState_ENABLED {
+			page = append(page, enabledKeyspace{id: lastID, gcManagementType: keyspace.EffectiveGCManagementType(meta.Config)})
 		}
 	}
 	return page, lastID, nil

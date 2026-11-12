@@ -29,12 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -1519,34 +1516,6 @@ func TestGCConfigCreationRejectsBeforeSideEffects(t *testing.T) {
 	}
 }
 
-func TestObserveGCConfigBoundAndLegacy(t *testing.T) {
-	re := require.New(t)
-	core, logs := observer.New(zap.ErrorLevel)
-	restore := log.ReplaceGlobals(zap.New(core), nil)
-	defer restore()
-	m := &Manager{} // Observation works without storage or any other dependency.
-	m.ObserveGCConfig(nil)
-	m.ObserveGCConfig(&keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: constant.NullKeyspaceID}, Config: map[string]string{GCManagementType: "invalid"}})
-	legacy := "v1"
-	if kerneltype.IsNextGen() {
-		legacy = "v2"
-	}
-	m.ObserveGCConfig(&keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 1}, Config: map[string]string{"safe_point_version": legacy}})
-	re.Empty(logs.All(), "matching legacy metadata and NullKeyspace are not violations")
-	for id := uint32(1); id <= 4097; id++ {
-		meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id}, Config: map[string]string{GCManagementType: "invalid"}}
-		m.ObserveGCConfig(meta)
-		re.Equal(map[string]string{GCManagementType: "invalid"}, meta.Config)
-	}
-	re.Len(logs.All(), 4097)
-	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 4097}, Config: map[string]string{GCManagementType: "invalid"}}
-	m.ObserveGCConfig(meta)
-	re.Len(logs.All(), 4097, "the most recent violation remains suppressed")
-	meta.Keyspace = &keyspacepb.KeyspaceMeta_Id{Id: 1}
-	m.ObserveGCConfig(meta)
-	re.Len(logs.All(), 4098, "an evicted violation may be reported again")
-}
-
 // saveHistoricalGCConfig constructs persisted history without using a creation API.
 func (suite *keyspaceTestSuite) saveHistoricalGCConfig(id uint32, config map[string]string) *keyspacepb.KeyspaceMeta {
 	meta := &keyspacepb.KeyspaceMeta{
@@ -1734,106 +1703,6 @@ func (suite *keyspaceTestSuite) TestGCConfigReadsAndStateChangesPreserveHistory(
 		updated, err := suite.manager.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, 2)
 		re.NoError(err)
 		re.Equal(meta.Config, updated.Config)
-	}
-}
-
-func (suite *keyspaceTestSuite) TestGCConfigDiagnostics() {
-	re := suite.Require()
-	core, logs := observer.New(zap.ErrorLevel)
-	restore := log.ReplaceGlobals(zap.New(core), nil)
-	defer restore()
-	matching, mismatched := UnifiedGC, KeyspaceLevelGC
-	if kerneltype.IsNextGen() {
-		matching, mismatched = KeyspaceLevelGC, UnifiedGC
-	}
-	meta := suite.saveHistoricalGCConfig(3200, map[string]string{GCManagementType: mismatched})
-	// Concurrent observations must emit one error, including for disabled history.
-	meta.State = keyspacepb.KeyspaceState_DISABLED
-	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error { return suite.manager.store.SaveKeyspaceMeta(txn, meta) }))
-	wg := &sync.WaitGroup{}
-	start := make(chan struct{})
-	results := make(chan error, 50)
-	for range 50 {
-		wg.Go(func() {
-			<-start
-			_, err := suite.manager.LoadKeyspaceByID(meta.GetId())
-			results <- err
-		})
-	}
-	close(start)
-	wg.Wait()
-	close(results)
-	for err := range results {
-		re.NoError(err)
-	}
-	re.Len(logs.All(), 1)
-	fields := logs.All()[0].ContextMap()
-	re.Equal(meta.GetId(), fields["keyspace-id"])
-	re.Equal(meta.Name, fields["keyspace-name"])
-	re.Equal(mismatched, fields["effective-gc-mode"])
-	re.Equal(true, fields["gc-management-type-present"])
-	re.Equal(mismatched, fields["gc-management-type"])
-	re.Equal(false, fields["safe-point-version-present"])
-	re.Contains(fields, "kernel")
-	re.Contains(fields, "reason")
-	// Unrelated changes leave the diagnostic fingerprint unchanged.
-	_, err := suite.manager.UpdateKeyspaceConfig(meta.Name, []*Mutation{{Op: OpPut, Key: "unrelated", Value: "changed"}})
-	re.NoError(err)
-	re.Len(logs.All(), 1)
-	// A changed malformed representation logs again even if its effective mode is unchanged.
-	for _, value := range []string{"", "unknown"} {
-		meta.Config[GCManagementType] = value
-		re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error { return suite.manager.store.SaveKeyspaceMeta(txn, meta) }))
-		_, err = suite.manager.LoadKeyspace(meta.Name)
-		re.NoError(err)
-	}
-	re.Len(logs.All(), 3)
-	// A valid observation clears the entry, so recurrence can be reported.
-	meta.Config[GCManagementType] = matching
-	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error { return suite.manager.store.SaveKeyspaceMeta(txn, meta) }))
-	_, err = suite.manager.LoadRangeKeyspace(meta.GetId(), 1)
-	re.NoError(err)
-	meta.Config[GCManagementType] = "unknown"
-	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error { return suite.manager.store.SaveKeyspaceMeta(txn, meta) }))
-	_, err = suite.manager.LoadKeyspaceByID(meta.GetId())
-	re.NoError(err)
-	re.Len(logs.All(), 4)
-}
-
-func (suite *keyspaceTestSuite) TestGCConfigDiagnosticsDuringMaintenance() {
-	m := suite.manager
-	for i, path := range []string{"revision", "group-scan", "assignment-patrol", "removal"} {
-		suite.Run(path, func() {
-			re := suite.Require()
-			core, logs := observer.New(zap.ErrorLevel)
-			restore := log.ReplaceGlobals(zap.New(core), nil)
-			defer restore()
-			meta := suite.saveHistoricalGCConfig(uint32(3400+i), map[string]string{GCManagementType: "malformed", "safe_point_version": "v2"})
-			meta.State = keyspacepb.KeyspaceState_ARCHIVED
-			re.NoError(m.store.RunInTxn(suite.ctx, func(txn kv.Txn) error { return m.store.SaveKeyspaceMeta(txn, meta) }))
-			switch path {
-			case "revision":
-				base := m.store
-				m.store = &revisionedKeyspaceStorage{KeyspaceStorage: base, load: func(context.Context, uint32) (*keyspacepb.KeyspaceMeta, int64, error) { return meta, 123, nil }}
-				loaded, revision, err := m.LoadKeyspaceByIDWithRevision(suite.ctx, meta.GetId())
-				m.store = base
-				re.NoError(err)
-				re.Equal(int64(123), revision)
-				re.Equal(meta, loaded)
-			case "group-scan":
-				_, err := m.CountKeyspacesByMetaServiceGroup(map[string]struct{}{"group": {}})
-				re.NoError(err)
-			case "assignment-patrol":
-				re.NoError(m.PatrolKeyspaceAssignment(meta.GetId(), meta.GetId()))
-				loaded, err := m.LoadKeyspaceByID(meta.GetId())
-				re.NoError(err)
-				re.Equal("malformed", loaded.Config[GCManagementType])
-				re.Equal("v2", loaded.Config["safe_point_version"])
-			case "removal":
-				re.NoError(m.store.RunInTxn(suite.ctx, func(txn kv.Txn) error { return m.RemoveKeyspace(txn, meta.GetId()) }))
-			}
-			re.Len(logs.All(), 1, "each existing metadata read must observe archived history")
-		})
 	}
 }
 
