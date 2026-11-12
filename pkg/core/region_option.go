@@ -203,6 +203,13 @@ func SetCPUUsage(v uint64) RegionCreateOption {
 	}
 }
 
+// SetReadCPUUsage sets the unified-read CPU usage of the region in cpu_stats.
+func SetReadCPUUsage(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.cpuStats = &pdpb.CPUStats{UnifiedRead: v}
+	}
+}
+
 // SetWrittenBytes sets the written bytes for the region.
 func SetWrittenBytes(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {

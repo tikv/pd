@@ -434,6 +434,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 					"strict-picking-store":       "true",
 					"history-sample-duration":    "5m0s",
 					"history-sample-interval":    "30s",
+					"max-dst-store-cpu-usage":    0.0,
 				}
 				testutil.Eventually(re, func() bool {
 					re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))

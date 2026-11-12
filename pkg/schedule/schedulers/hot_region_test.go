@@ -210,6 +210,24 @@ func TestReloadConfigKeepsPendingWeightDefault(t *testing.T) {
 	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
 }
 
+func TestReloadConfigLoadsMaxDstStoreCPUUsage(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	re.Zero(hb.conf.getMaxDstStoreCPUUsage())
+
+	hb.conf.MaxDstStoreCPUUsage = 1100
+	re.NoError(hb.conf.save())
+	hb.conf.MaxDstStoreCPUUsage = 0
+	re.NoError(hb.ReloadConfig())
+	re.Equal(1100.0, hb.conf.getMaxDstStoreCPUUsage())
+}
+
 func TestCreateSchedulerRejectsPendingWeightBelowOne(t *testing.T) {
 	re := require.New(t)
 	cancel, _, _, oc := prepareSchedulersTest()
@@ -1604,6 +1622,252 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 		ops, _ = hb.Schedule(tc, false)
 		re.Empty(ops)
 	}
+}
+
+func TestHotReadSkipsDstStoreOverCPUUsage(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		maxDstCPUUsage float64
+		store5CPU      uint64
+		regionReadCPU  float64
+		skipStore5     bool
+	}{
+		{0, 1400, 0, false},
+		{1000, 1400, 0, true},
+		{1000, 950, 0, false},
+		// 950 plus the 100 read CPU the region brings reaches the cap.
+		{1000, 950, 100, true},
+	}
+	for _, testCase := range testCases {
+		cancel, _, tc, oc := prepareSchedulersTest()
+		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+		scheduler, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+		re.NoError(err)
+		hb := scheduler.(*hotScheduler)
+		hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+		hb.conf.setHistorySampleDuration(0)
+		hb.conf.MaxDstStoreCPUUsage = testCase.maxDstCPUUsage
+
+		tc.AddRegionStore(1, 3)
+		tc.AddRegionStore(2, 2)
+		tc.AddRegionStore(3, 2)
+		tc.AddRegionStore(4, 2)
+		tc.AddRegionStore(5, 0)
+		tc.UpdateStorageReadBytes(1, 7.5*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageReadBytes(2, 4.9*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageReadBytes(3, 3.7*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageReadBytes(4, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageReadBytes(5, 0)
+		// Store 5 serves no reads but burns CPU, e.g. on gRPC rejecting
+		// requests; the others burn 5 cores.
+		for _, storeID := range []uint64{1, 2, 3, 4} {
+			tc.UpdateStorageCPUUsage(storeID, 500)
+		}
+		tc.UpdateStorageCPUUsage(5, testCase.store5CPU)
+
+		reportInterval := float64(utils.StoreHeartBeatReportInterval)
+		for _, r := range []testRegionInfo{
+			{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
+			{2, []uint64{2, 1, 3}, 511 * units.KiB, 0, 0},
+			{3, []uint64{1, 2, 3}, 510 * units.KiB, 0, 0},
+		} {
+			tc.AddRegionWithReadCPUInfo(r.id, r.peers[0], uint64(r.byteRate*reportInterval),
+				uint64(testCase.regionReadCPU*reportInterval), uint64(reportInterval), r.peers[1:])
+		}
+		addRegionInfo(tc, utils.Read, []testRegionInfo{
+			{11, []uint64{1, 2, 3}, 7 * units.KiB, 0, 0},
+		})
+		testutil.Eventually(re, func() bool {
+			return tc.IsRegionHot(tc.GetRegion(1)) && !tc.IsRegionHot(tc.GetRegion(11))
+		})
+
+		ops, _ := hb.Schedule(tc, false)
+		re.Len(ops, 1)
+		if testCase.skipStore5 {
+			// Store 5 is skipped, so the next best plan is a leader transfer.
+			operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
+		} else {
+			operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 5)
+		}
+		cancel()
+	}
+}
+
+func TestHotReadLeaderSkipsDstStoreForLeaderReadCPU(t *testing.T) {
+	re := require.New(t)
+	for _, regionReadCPU := range []float64{0, 100} {
+		cancel, _, tc, oc := prepareSchedulersTest()
+		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+		scheduler, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+		re.NoError(err)
+		hb := scheduler.(*hotScheduler)
+		hb.types = []resourceType{readLeader}
+		hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+		hb.conf.setHistorySampleDuration(0)
+		hb.conf.MaxDstStoreCPUUsage = 1000
+
+		// Every store holds a peer of every region, so only leaders can move.
+		tc.AddRegionStore(1, 3)
+		tc.AddRegionStore(2, 2)
+		tc.AddRegionStore(3, 2)
+		tc.UpdateStorageReadBytes(1, 7.5*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageReadBytes(2, 4.9*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageReadBytes(3, 3.7*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageCPUUsage(1, 500)
+		tc.UpdateStorageCPUUsage(2, 1400)
+		tc.UpdateStorageCPUUsage(3, 950)
+
+		reportInterval := float64(utils.StoreHeartBeatReportInterval)
+		for _, r := range []testRegionInfo{
+			{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
+			{2, []uint64{2, 1, 3}, 511 * units.KiB, 0, 0},
+			{3, []uint64{1, 2, 3}, 510 * units.KiB, 0, 0},
+		} {
+			tc.AddRegionWithReadCPUInfo(r.id, r.peers[0], uint64(r.byteRate*reportInterval),
+				uint64(regionReadCPU*reportInterval), uint64(reportInterval), r.peers[1:])
+		}
+		addRegionInfo(tc, utils.Read, []testRegionInfo{
+			{11, []uint64{1, 2, 3}, 7 * units.KiB, 0, 0},
+		})
+		testutil.Eventually(re, func() bool {
+			return tc.IsRegionHot(tc.GetRegion(1)) && !tc.IsRegionHot(tc.GetRegion(11))
+		})
+
+		ops, _ := hb.Schedule(tc, false)
+		if regionReadCPU == 0 {
+			re.Len(ops, 1)
+			operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
+		} else {
+			// Store 3 already holds a follower; taking the leader brings its 100
+			// read CPU, which takes 950 to the cap.
+			re.Empty(ops)
+		}
+		cancel()
+	}
+}
+
+func TestHotWritePeerSkipsDstStoreForReadCPUOfPeer(t *testing.T) {
+	re := require.New(t)
+	for _, regionReadCPU := range []float64{0, 100} {
+		cancel, _, tc, oc := prepareSchedulersTest()
+		sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+		re.NoError(err)
+		hb := sche.(*hotScheduler)
+		hb.types = []resourceType{writePeer}
+		hb.conf.setDstToleranceRatio(0.0)
+		hb.conf.setSrcToleranceRatio(0.0)
+		hb.conf.setRankFormulaVersion("v1")
+		hb.conf.setHistorySampleDuration(0)
+		hb.conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
+		hb.conf.MaxDstStoreCPUUsage = 1000
+		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+		for storeID := uint64(1); storeID <= 5; storeID++ {
+			tc.AddRegionStore(storeID, 20)
+			tc.UpdateStorageCPUUsage(storeID, 500)
+		}
+		tc.UpdateStorageCPUUsage(5, 950)
+		tc.UpdateStorageWrittenStats(1, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenStats(2, 20*units.MiB*utils.StoreHeartBeatReportInterval, 14*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenStats(3, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenStats(4, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
+
+		// Region 6 is also read-hot, so its peer on store 2 serves reads that
+		// move with it.
+		reportInterval := uint64(utils.StoreHeartBeatReportInterval)
+		tc.AddRegionWithReadCPUInfo(6, 3, 512*units.KiB*reportInterval, uint64(regionReadCPU)*reportInterval, reportInterval, []uint64{2, 4})
+		testutil.Eventually(re, func() bool {
+			return len(tc.GetHotPeerStats(utils.Read)[2]) == 1
+		})
+		addRegionInfo(tc, utils.Write, []testRegionInfo{
+			{6, []uint64{3, 2, 4}, 3 * units.MiB, 1.8 * units.MiB, 0},
+			{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
+		})
+
+		ops, _ := hb.Schedule(tc, false)
+		if regionReadCPU == 0 {
+			re.Len(ops, 1)
+			operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+		} else {
+			// The peer's 100 read CPU takes store 5 from 950 to the cap.
+			re.Empty(ops)
+		}
+		cancel()
+	}
+}
+
+func TestIsDstCPUOverloadedCountsPendingCPU(t *testing.T) {
+	re := require.New(t)
+	var storeLoads statistics.StoreKindLoads
+	storeLoads[utils.StoreCPUUsage] = 950
+	newDetail := func(storeID uint64, pendingReadCPU, pendingWriteCPU float64) *statistics.StoreLoadDetail {
+		pending := &statistics.Influence{Loads: make([]float64, utils.RegionStatCount)}
+		pending.Loads[utils.RegionReadCPU], pending.Loads[utils.RegionWriteCPU] = pendingReadCPU, pendingWriteCPU
+		// LoadPred carries no CPU, as for a write solver, whose CPU dimension
+		// only holds pending write CPU.
+		load := statistics.StoreLoad{}
+		return &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo:  core.NewStoreInfo(&metapb.Store{Id: storeID}),
+				PendingSum: pending,
+			},
+			LoadPred: &statistics.StoreLoadPred{Current: load, Future: load},
+		}
+	}
+	bs := &balanceSolver{maxDstCPUUsage: 1000, storesLoads: map[uint64]statistics.StoreKindLoads{1: storeLoads}}
+	re.False(bs.isDstCPUOverloaded(newDetail(1, 20, 0), 0))
+	// 50 read CPU already moving in takes it to the threshold, for read and
+	// write solvers alike.
+	re.True(bs.isDstCPUOverloaded(newDetail(1, 50, 0), 0))
+	re.True(bs.isDstCPUOverloaded(newDetail(1, 30, 20), 0))
+	// A net outflow is floored at 0, so it does not lower the observed usage.
+	re.False(bs.isDstCPUOverloaded(newDetail(1, -100, 0), 0))
+	// No pending influence at all.
+	detail := newDetail(1, 0, 0)
+	detail.PendingSum = nil
+	re.False(bs.isDstCPUOverloaded(detail, 0))
+	// No CPU sample yet.
+	re.False(bs.isDstCPUOverloaded(newDetail(2, 2000, 0), 2000))
+	// The CPU of the peer about to move in counts too.
+	re.False(bs.isDstCPUOverloaded(newDetail(1, 0, 0), 30))
+	re.True(bs.isDstCPUOverloaded(newDetail(1, 0, 0), 50))
+	re.True(bs.isDstCPUOverloaded(newDetail(1, 20, 0), 30))
+	bs.maxDstCPUUsage = 0
+	re.False(bs.isDstCPUOverloaded(newDetail(1, 2000, 0), 2000))
+}
+
+func TestHotPeerCPU(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	hb.conf.MaxDstStoreCPUUsage = 1000
+	for storeID := uint64(1); storeID <= 3; storeID++ {
+		tc.AddRegionStore(storeID, 1)
+	}
+	reportInterval := uint64(utils.StoreHeartBeatReportInterval)
+	tc.AddRegionWithReadCPUInfo(1, 1, 512*units.KiB*reportInterval, 100*reportInterval, reportInterval, []uint64{2, 3})
+	testutil.Eventually(re, func() bool {
+		return len(tc.GetHotPeerStats(utils.Read)[1]) == 1
+	})
+
+	readPeer := &statistics.HotPeerStat{RegionID: 1, StoreID: 1, Loads: make([]float64, utils.DimLen)}
+	readPeer.Loads[utils.CPUDim] = 80
+	re.Equal(80.0, newBalanceSolver(hb, tc, utils.Read, transferLeader).hotPeerCPU(readPeer))
+
+	// A write peer takes the read CPU of the same peer along.
+	writeSolver := newBalanceSolver(hb, tc, utils.Write, transferLeader)
+	re.Equal(100.0, writeSolver.hotPeerCPU(&statistics.HotPeerStat{RegionID: 1, StoreID: 1}))
+	re.Zero(writeSolver.hotPeerCPU(&statistics.HotPeerStat{RegionID: 2, StoreID: 1}))
+	re.Zero(writeSolver.hotPeerCPU(nil))
+
+	hb.conf.MaxDstStoreCPUUsage = 0
+	writeSolver = newBalanceSolver(hb, tc, utils.Write, transferLeader)
+	re.Nil(writeSolver.readPeerCPU)
+	re.Zero(writeSolver.hotPeerCPU(&statistics.HotPeerStat{RegionID: 1, StoreID: 1}))
 }
 
 func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
@@ -3096,6 +3360,14 @@ func TestConfigValidation(t *testing.T) {
 	hc.SplitThresholds = 1.1
 	err = hc.validateLocked()
 	re.Error(err)
+	hc.SplitThresholds = 0.2
+
+	hc.MaxDstStoreCPUUsage = -1
+	err = hc.validateLocked()
+	re.Error(err)
+	hc.MaxDstStoreCPUUsage = 1100
+	err = hc.validateLocked()
+	re.NoError(err)
 }
 
 // ref https://github.com/tikv/pd/issues/5701

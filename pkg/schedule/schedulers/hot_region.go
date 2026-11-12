@@ -287,6 +287,7 @@ func (s *hotScheduler) ReloadConfig() error {
 	s.conf.SplitThresholds = newCfg.SplitThresholds
 	s.conf.HistorySampleDuration = newCfg.HistorySampleDuration
 	s.conf.HistorySampleInterval = newCfg.HistorySampleInterval
+	s.conf.MaxDstStoreCPUUsage = newCfg.MaxDstStoreCPUUsage
 	return nil
 }
 
