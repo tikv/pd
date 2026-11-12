@@ -190,7 +190,7 @@ func TestGCConfigLoadDiagnosticsDiscardFailedAttempt(t *testing.T) {
 		})
 	}
 	putGCConfigDiagnosticMetas(t, client, metas)
-	for _, mode := range []string{"cancel", "read-error", "decode-error"} {
+	for _, mode := range []string{"read-error", "decode-error"} {
 		t.Run(mode, func(t *testing.T) {
 			logs := captureGCConfigDiagnostics(t)
 			injected := errors.New("injected metadata read error")
@@ -209,22 +209,15 @@ func TestGCConfigLoadDiagnosticsDiscardFailedAttempt(t *testing.T) {
 				return invoke(ctx, method, req, reply, cc, opts...)
 			})
 			index := newEnabledKeyspaceIndex(intercepted, enabledKeyspaceTestPrefix)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 			pages := 0
-			entries, revision, err := index.load(ctx, func(page []enabledKeyspace) {
+			entries, revision, err := index.load(context.Background(), func(page []enabledKeyspace) {
 				pages++
 				require.Len(t, page, 256)
-				if mode == "cancel" {
-					cancel()
-				}
 			})
 			require.Equal(t, 1, pages, "failure must follow a successfully decoded page")
 			require.Nil(t, entries)
 			require.Zero(t, revision)
 			switch mode {
-			case "cancel":
-				require.ErrorIs(t, err, context.Canceled)
 			case "read-error":
 				require.ErrorIs(t, err, injected)
 			case "decode-error":

@@ -248,55 +248,6 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
 	}
 }
 
-func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
-	re := suite.Require()
-	manager := suite.manager
-
-	now := time.Now().Unix()
-	const classic = `return(false)`
-	const nextGen = `return(true)`
-
-	type testCase struct {
-		nextGenFlag      string
-		gcManagementType string
-		expect           string
-		expectErr        error
-	}
-
-	cases := []testCase{
-		{classic, "", UnifiedGC, nil},
-		{classic, UnifiedGC, UnifiedGC, nil},
-		{classic, KeyspaceLevelGC, "", errs.ErrKeyspaceGCModeMismatch},
-		{nextGen, "", KeyspaceLevelGC, nil},
-		{nextGen, UnifiedGC, "", errs.ErrKeyspaceGCModeMismatch},
-		{nextGen, KeyspaceLevelGC, KeyspaceLevelGC, nil},
-	}
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
-	}()
-	for idx, tc := range cases {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", tc.nextGenFlag))
-		cfg := make(map[string]string)
-		if tc.gcManagementType != "" {
-			cfg[GCManagementType] = tc.gcManagementType
-		}
-		req := &CreateKeyspaceRequest{
-			Name:       fmt.Sprintf("gc_mgmt_type_%d", idx),
-			CreateTime: now,
-			Config:     cfg,
-		}
-		created, err := manager.CreateKeyspace(req)
-		if tc.expectErr != nil {
-			re.ErrorIs(err, tc.expectErr)
-			continue
-		}
-		re.NoError(err)
-		loaded, err := manager.LoadKeyspaceByID(created.GetId())
-		re.NoError(err)
-		re.Equal(tc.expect, loaded.Config[GCManagementType])
-	}
-}
-
 func makeCreateKeyspaceByIDRequests(count int) []*CreateKeyspaceByIDRequest {
 	now := time.Now().Unix()
 	requests := make([]*CreateKeyspaceByIDRequest, count)
@@ -1493,29 +1444,6 @@ func TestEffectiveGCManagementType(t *testing.T) {
 	}
 }
 
-func TestGCConfigCreationRejectsBeforeSideEffects(t *testing.T) {
-	m := &Manager{} // Every external dependency is absent: rejection must precede IO.
-	opposite := KeyspaceLevelGC
-	if kerneltype.IsNextGen() {
-		opposite = UnifiedGC
-	}
-	for _, tc := range []struct {
-		config map[string]string
-		want   error
-	}{
-		{map[string]string{GCManagementType: ""}, errs.ErrKeyspaceGCConfigInvalid},
-		{map[string]string{GCManagementType: "unknown"}, errs.ErrKeyspaceGCConfigInvalid},
-		{map[string]string{GCManagementType: opposite}, errs.ErrKeyspaceGCModeMismatch},
-		{map[string]string{"safe_point_version": ""}, errs.ErrKeyspaceLegacyGCConfigUnsupported},
-	} {
-		_, err := m.CreateKeyspace(&CreateKeyspaceRequest{Name: "gc_rejected", Config: maps.Clone(tc.config)})
-		require.ErrorIs(t, err, tc.want)
-		id := uint32(123)
-		_, err = m.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: "gc_rejected", Config: maps.Clone(tc.config)})
-		require.ErrorIs(t, err, tc.want)
-	}
-}
-
 // saveHistoricalGCConfig constructs persisted history without using a creation API.
 func (suite *keyspaceTestSuite) saveHistoricalGCConfig(id uint32, config map[string]string) *keyspacepb.KeyspaceMeta {
 	meta := &keyspacepb.KeyspaceMeta{
@@ -1545,19 +1473,20 @@ func (suite *keyspaceTestSuite) TestGCConfigCreationPolicy() {
 		}
 		for _, byID := range []bool{false, true} {
 			cases := []struct {
-				name   string
-				config map[string]string
-				valid  bool
+				name    string
+				config  map[string]string
+				wantErr error
 			}{
-				{"nil", nil, true},
-				{"absent", map[string]string{"unrelated": "retained"}, true},
-				{"matching", map[string]string{GCManagementType: mode}, true},
-				{"mismatched", map[string]string{GCManagementType: incompatible}, false},
-				{"empty", map[string]string{GCManagementType: ""}, false},
-				{"unknown", map[string]string{GCManagementType: "other"}, false},
-				{"legacy-v2", map[string]string{"safe_point_version": "v2"}, false},
-				{"legacy-empty", map[string]string{"safe_point_version": ""}, false},
-				{"legacy-v1", map[string]string{GCManagementType: mode, "safe_point_version": "v1"}, false},
+				{"mismatched", map[string]string{GCManagementType: incompatible}, errs.ErrKeyspaceGCModeMismatch},
+				{"empty", map[string]string{GCManagementType: ""}, errs.ErrKeyspaceGCConfigInvalid},
+				{"unknown", map[string]string{GCManagementType: "other"}, errs.ErrKeyspaceGCConfigInvalid},
+				{"legacy-v2", map[string]string{"safe_point_version": "v2"}, errs.ErrKeyspaceLegacyGCConfigUnsupported},
+				{"legacy-empty", map[string]string{"safe_point_version": ""}, errs.ErrKeyspaceLegacyGCConfigUnsupported},
+				{"legacy-v1", map[string]string{GCManagementType: mode, "safe_point_version": "v1"}, errs.ErrKeyspaceLegacyGCConfigUnsupported},
+				// Successful requests also check that preceding rejections did not allocate IDs.
+				{"nil", nil, nil},
+				{"absent", map[string]string{"unrelated": "retained"}, nil},
+				{"matching", map[string]string{GCManagementType: mode}, nil},
 			}
 			for i, tc := range cases {
 				suite.Run(fmt.Sprintf("nextgen=%t/by-id=%t/%s", nextGen, byID, tc.name), func() {
@@ -1574,14 +1503,17 @@ func (suite *keyspaceTestSuite) TestGCConfigCreationPolicy() {
 					} else {
 						meta, err = suite.manager.CreateKeyspace(&CreateKeyspaceRequest{Name: name, Config: maps.Clone(tc.config)})
 					}
-					if !tc.valid {
-						re.Error(err)
+					if tc.wantErr != nil {
+						re.ErrorIs(err, tc.wantErr)
 						_, err = suite.manager.LoadKeyspace(name)
 						re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 						return
 					}
 					re.NoError(err)
 					re.Equal(mode, meta.Config[GCManagementType])
+					loaded, err := suite.manager.LoadKeyspaceByID(meta.GetId())
+					re.NoError(err)
+					re.Equal(meta.Config, loaded.Config)
 					if !byID {
 						allocated++
 						re.Equal(allocated, meta.GetId(), "rejected requests must not allocate IDs")
