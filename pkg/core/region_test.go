@@ -298,36 +298,6 @@ func TestInherit(t *testing.T) {
 		re.Equal(testCase.expectKeys, r.approximateKeys)
 	}
 
-	// case for the unknown size mark
-	unknownTestCases := []struct {
-		originExists   bool
-		originUnknown  bool
-		versionChanged bool
-		size           int64
-		expectUnknown  bool
-	}{
-		{false, false, false, 0, true}, // a new Region
-		{true, false, false, 0, false}, // the same range, e.g. after a leader transfer
-		{true, true, false, 0, true},   // still no size since the Region was added
-		{true, false, true, 0, true},   // the range changed, e.g. by a split
-		{true, true, true, 10, false},  // a reported size
-	}
-	for _, testCase := range unknownTestCases {
-		var origin *RegionInfo
-		if testCase.originExists {
-			origin = NewRegionInfo(&metapb.Region{Id: 100, RegionEpoch: &metapb.RegionEpoch{Version: 1}}, nil)
-			origin.approximateSize = 20
-			origin.approximateSizeUnknown = testCase.originUnknown
-		}
-		r := NewRegionInfo(&metapb.Region{Id: 100, RegionEpoch: &metapb.RegionEpoch{Version: 1}}, nil)
-		if testCase.versionChanged {
-			r = r.Clone(WithIncVersion())
-		}
-		r.approximateSize = testCase.size
-		r.Inherit(origin, false)
-		re.Equal(testCase.expectUnknown, r.IsApproximateSizeUnknown())
-	}
-
 	// bucket
 	data := []struct {
 		originBuckets *metapb.Buckets

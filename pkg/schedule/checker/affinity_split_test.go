@@ -83,7 +83,7 @@ func TestAffinitySplitBeforeMoveThresholds(t *testing.T) {
 		{name: "over keys", size: 1, keys: 160001, wantSplit: true},
 		{name: "at thresholds", size: 16, keys: 160000},
 		{name: "small", size: 1, keys: 10},
-		{name: "unknown size", size: 0, wantWait: true},
+		{name: "zero size", size: 0, wantWait: true},
 		{name: "large leader transfer", size: 64, keys: 320000, leaderOnly: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,100 +107,6 @@ func TestAffinitySplitBeforeMoveThresholds(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestAffinitySplitBeforeMoveUnreportedSize(t *testing.T) {
-	re := require.New(t)
-	cluster, checker := newAffinitySplitTest(t)
-	// A USEKEY split of the 64 MiB Region 1 adds Regions 2 and 3. TiKV does not
-	// share the parent's size with them, so a new Region reports 0 bytes until
-	// its first split check, and an empty Region reports 1 byte. Region 1 keeps
-	// its ID and reports 0 bytes as well if TiKV had no size for it before the
-	// split, for example right after a leader transfer.
-	parent := cluster.GetRegion(1)
-	regions := map[uint64]*core.RegionInfo{
-		1: parent.Clone(core.WithEndKey([]byte("g")), core.WithIncVersion()),
-		2: parent.Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("g")), core.WithEndKey([]byte("m")), core.WithIncVersion()),
-		3: parent.Clone(core.WithNewRegionID(3), core.WithStartKey([]byte("m")), core.WithIncVersion()),
-	}
-	// heartbeat handles a heartbeat as processRegionHeartbeat does and checks the Region.
-	heartbeat := func(id, size uint64) []*operator.Operator {
-		region := core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
-			Region: regions[id].GetMeta(), Leader: regions[id].GetLeader(), ApproximateSize: size,
-		}, 0)
-		origin := cluster.GetRegion(id)
-		region.Inherit(origin, false)
-		if _, saveCache, _, _ := core.GenerateRegionGuideFunc(false)(core.ContextTODO(), region, origin); saveCache {
-			cluster.PutRegion(region)
-		}
-		return checker.Check(cluster.GetRegion(id))
-	}
-	requireMove := func(ops []*operator.Operator) {
-		re.Len(ops, 1)
-		re.Equal("affinity-move-region", ops[0].Desc())
-	}
-	re.Empty(heartbeat(1, 0), "the size after the split is not reported yet")
-	re.Empty(heartbeat(2, 0), "the size is not reported yet")
-	re.Empty(heartbeat(2, 0), "the size is still not reported")
-	requireMove(heartbeat(2, 1))
-	requireMove(heartbeat(3, 1))
-}
-
-func TestAffinityMergeWaitsForUnreportedSize(t *testing.T) {
-	re := require.New(t)
-	opt := newAffinityTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(256)
-	cluster := mockcluster.NewCluster(t.Context(), opt)
-	for id := uint64(1); id <= 3; id++ {
-		cluster.AddRegionStore(id, 10)
-	}
-	group := &affinity.Group{ID: "merge_unknown_size", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-	re.NoError(createAffinityGroupForTest(cluster.GetAffinityManager(), group, []byte("a"), []byte("z")))
-	cluster.AddLeaderRegionWithRange(1, "a", "m", 1, 2, 3)
-	cluster.AddLeaderRegionWithRange(2, "m", "z", 1, 2, 3)
-	cluster.PutRegion(cluster.GetRegion(1).Clone(core.SetApproximateSize(200), core.SetSource(core.Heartbeat)))
-	cluster.PutRegion(cluster.GetRegion(2).Clone(core.SetApproximateSize(150), core.SetSource(core.Heartbeat)))
-	checker := newTestAffinityChecker(t.Context(), cluster, opt)
-	re.Empty(checker.Check(cluster.GetRegion(1)), "200 + 150 MiB exceeds the limit")
-
-	// A USEKEY split of Region 2 at the target, for example by SPLIT TABLE. Region 2
-	// keeps its ID and reports the size from before the split. The new Region 3 on
-	// its left reports 0 bytes until its first split check.
-	parent := cluster.GetRegion(2)
-	regions := map[uint64]*core.RegionInfo{
-		2: parent.Clone(core.WithStartKey([]byte("s")), core.WithIncVersion()),
-		3: parent.Clone(core.WithNewRegionID(3), core.WithEndKey([]byte("s")), core.WithIncVersion()),
-	}
-	// heartbeat handles a heartbeat as processRegionHeartbeat does.
-	heartbeat := func(id, size uint64) {
-		region := core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
-			Region: regions[id].GetMeta(), Leader: regions[id].GetLeader(), ApproximateSize: size,
-		}, 0)
-		origin := cluster.GetRegion(id)
-		region.Inherit(origin, false)
-		if _, saveCache, _, _ := core.GenerateRegionGuideFunc(false)(core.ContextTODO(), region, origin); saveCache {
-			cluster.PutRegion(region)
-		}
-	}
-	heartbeat(2, 150*units.MiB)
-	heartbeat(3, 0)
-	re.True(cluster.GetRegion(3).IsApproximateSizeUnknown())
-	re.Equal(int64(core.EmptyRegionApproximateSize), cluster.GetRegion(3).GetApproximateSize())
-	adjUnknown := promtestutil.ToFloat64(affinityMergeCheckerAdjUnknownSizeCounter)
-	unknown := promtestutil.ToFloat64(affinityMergeCheckerUnknownSizeCounter)
-	re.Empty(checker.Check(cluster.GetRegion(1)), "the size of the neighbor is not reported yet")
-	re.Equal(adjUnknown+1, promtestutil.ToFloat64(affinityMergeCheckerAdjUnknownSizeCounter))
-	re.Empty(checker.Check(cluster.GetRegion(3)), "the size of the Region is not reported yet")
-	re.Equal(unknown+1, promtestutil.ToFloat64(affinityMergeCheckerUnknownSizeCounter))
-
-	heartbeat(2, 75*units.MiB)
-	heartbeat(3, 75*units.MiB)
-	re.Empty(checker.Check(cluster.GetRegion(1)), "200 + 75 MiB exceeds the limit")
-	ops := checker.Check(cluster.GetRegion(3))
-	re.Len(ops, 2, "75 + 75 MiB fits in the limit")
-	re.Equal("affinity-merge-region", ops[0].Desc())
-	re.Equal(uint64(3), ops[0].RegionID())
-	re.Equal(uint64(2), ops[1].RegionID())
 }
 
 // ageAffinitySplitAttempt makes the first split of the attempt start wait ago.
@@ -254,21 +160,22 @@ func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
 }
 
 func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
-	for _, reason := range []string{"epoch", "expired", "evicted", "new target", "new move", "current target", "split succeeds", "unknown size"} {
+	for _, reason := range []string{"epoch", "expired", "evicted", "new target", "new move", "current target", "split succeeds", "zero size"} {
 		t.Run(reason, func(t *testing.T) {
 			re := require.New(t)
 			cluster, checker := newAffinitySplitTest(t)
 			checker.splitAttempts = cache.NewCache(2, cache.LRUCache)
 			region := cluster.GetRegion(1)
 			manager := cluster.GetAffinityManager()
-			if reason == "unknown size" {
+			if reason == "zero size" {
 				region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
 					Region: region.GetMeta(), Leader: region.GetLeader(),
 				}, 0)
-				region.Inherit(nil, false)
+				// A raw-zero heartbeat can inherit zero from a storage/sync origin.
+				origin := region.Clone(core.SetApproximateSize(0), core.SetSource(core.Storage))
+				region.Inherit(origin, false)
 				cluster.PutRegion(region)
-				re.True(region.IsApproximateSizeUnknown())
-				re.Equal(int64(core.EmptyRegionApproximateSize), region.GetApproximateSize())
+				re.Zero(region.GetApproximateSize())
 				re.Empty(checker.Check(region))
 				re.Empty(checker.Check(region), "a retry must still wait before the timeout")
 				originalTimeout := affinitySplitWaitTimeout
@@ -280,7 +187,7 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 					re.Len(ops, 1, "an unreported size must not block the move forever")
 					re.Equal("affinity-move-region", ops[0].Desc())
 				}
-				re.True(region.IsApproximateSizeUnknown())
+				re.Zero(region.GetApproximateSize())
 				re.Equal(fallbacks+2, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
 				region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
 					Region: region.GetMeta(), Leader: region.GetLeader(), ApproximateSize: 64 * units.MiB,
