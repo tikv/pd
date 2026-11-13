@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -976,5 +977,66 @@ func scheduleAndApplyOperator(tc *mockcluster.Cluster, hb Scheduler, count int) 
 			continue
 		}
 		operator.ApplyOperator(tc, ops[0])
+	}
+}
+
+func TestBalanceRegionSearchesAfterLeaderRejection(t *testing.T) {
+	for _, joint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("joint=%t", joint), func(t *testing.T) {
+			cancel, _, tc, oc := prepareSchedulersTest()
+			defer cancel()
+			tc.SetEnablePlacementRules(true)
+			tc.SetEnableUseJointConsensus(joint)
+			tc.SetTolerantSizeRatio(1)
+			for i, zone := range []string{"A", "B", "B", "A", "A"} {
+				count := 0
+				if i == 0 {
+					count = 100
+				}
+				tc.AddLabelsStore(uint64(i+1), count, map[string]string{"zone": zone})
+			}
+			tc.SetStoreEvictLeader(4, true)
+			rm := tc.GetRuleManager()
+			leader := rm.GetRule("pd", "default").Clone()
+			leader.Role, leader.Count = placement.Leader, 1
+			leader.LabelConstraints = []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}}
+			require.NoError(t, rm.SetRule(leader))
+			voters := leader.Clone()
+			voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+			voters.LabelConstraints = nil
+			require.NoError(t, rm.SetRule(voters))
+			region := tc.AddLeaderRegion(1, 1, 2, 3)
+			require.True(t, rm.FitRegion(tc, region).IsSatisfied())
+			op, err := operator.CreateMovePeerOperator("test", tc, region, operator.OpRegion, 1, &metapb.Peer{StoreId: 4})
+			require.ErrorIs(t, err, operator.ErrTargetRole)
+			require.Nil(t, op)
+			scheduler := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}).(*balanceRegionScheduler)
+			for _, candidates := range [][]uint64{{5}, {5, 4}, {4}} {
+				solver := newSolver(plan.NewBalanceSchedulerPlan(), constant.NewScheduleKind(constant.RegionKind, constant.BySize), tc, oc.GetOpInfluence(tc.GetBasicCluster()))
+				solver.Source, solver.Region = tc.GetStore(1), region
+				solver.fit = rm.FitRegion(tc, region)
+				solver.sourceScore = solver.sourceStoreScore(scheduler.GetName())
+				stores := make([]*core.StoreInfo, 0, len(candidates))
+				for _, id := range candidates {
+					stores = append(stores, tc.GetStore(id))
+				}
+				op = scheduler.transferPeer(solver, nil, stores, nil)
+				if candidates[0] == 4 {
+					require.Nil(t, op)
+					require.Zero(t, solver.Step)
+					continue
+				}
+				require.NotNil(t, op)
+				require.Equal(t, uint64(5), solver.Target.GetID())
+				require.Equal(t, 1, solver.Step)
+				lastLeader := uint64(0)
+				for i := range op.Len() {
+					if step, ok := op.Step(i).(operator.TransferLeader); ok {
+						lastLeader = step.ToStore
+					}
+				}
+				require.Equal(t, uint64(5), lastLeader)
+			}
+		})
 	}
 }

@@ -748,7 +748,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		for _, peer := range peers {
 			failpoint.InjectCall("scatterPeerOrder", &peer)
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
-				if collectLeaderCandidates && allowLeader(oldFit, peer) {
+				if collectLeaderCandidates && allowScatterLeader(oldFit, internalScatter, peer) {
 					leaderCandidateStores = append(leaderCandidateStores, peer.GetStoreId())
 				}
 				// It is both sourcePeer and targetPeer itself, no need to select.
@@ -779,7 +779,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 						moveScatterPeer(plannedRegion, peer.GetId(), newPeer.GetStoreId())
 						plannedFit = nil
 					}
-					if collectLeaderCandidates && allowLeader(oldFit, peer) {
+					if collectLeaderCandidates && allowScatterLeader(oldFit, internalScatter, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
@@ -797,9 +797,38 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		// leader candidates so leader selection still only considers ordinary stores.
 		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
 	}
+	if !scatterPeersValid(region, targetPeers) {
+		scatterFailCounter.Inc()
+		if state == nil {
+			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+			for _, peer := range region.GetPeers() {
+				currentPeers[peer.GetStoreId()] = peer
+			}
+			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
+		}
+		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
+	}
+
 	var readCPUByStore map[uint64]float64
 	readPoolThreadCount := uint64(0)
 	leaderBlockedByReadPoolPressure := false
+	// Validate internal scatter leaders against the complete planned membership.
+	// Admin scatter retains its force bypass for placement rules.
+	if internalScatter && r.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
+		rules := r.cluster.GetRuleManager().GetRulesForApplyRegion(region)
+		peers := make([]*metapb.Peer, 0, len(targetPeers))
+		for _, peer := range targetPeers {
+			peers = append(peers, peer)
+		}
+		roles := placement.NewRoleChecker(r.cluster, peers, rules, r.cluster.GetSharedConfig().IsWitnessAllowed())
+		allowed := leaderCandidateStores[:0]
+		for _, id := range leaderCandidateStores {
+			if roles.IsSatisfied(id) {
+				allowed = append(allowed, id)
+			}
+		}
+		leaderCandidateStores = allowed
+	}
 	if internalScatter {
 		var recentMaxProvider storeReadCPURecentMaxProvider
 		if provider, ok := r.cluster.(storeReadCPURecentMaxProvider); ok {
@@ -820,18 +849,6 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	if internalScatter && shouldSkipInternalScatterByBalancedReadCPU(region, targetLeader, readCPUByStore, readPoolThreadCount) {
 		scatterSkipBalancedReadCPUCounter.Inc()
 		return nil, retryInternalScatterLater(InternalScatterRetryBalancedReadCPU, ErrInternalScatterBalancedReadCPU)
-	}
-
-	if !scatterPeersValid(region, targetPeers) {
-		scatterFailCounter.Inc()
-		if state == nil {
-			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
-			for _, peer := range region.GetPeers() {
-				currentPeers[peer.GetStoreId()] = peer
-			}
-			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
-		}
-		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
@@ -902,6 +919,8 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 	}
 	regionReadCPU := float64(region.GetReadCPUUsage())
 	readPoolPressureFiltered := false
+	// Prepare once for this complete target membership, not once per candidate.
+	allowLeader := operator.NewLeaderTargetChecker(r.cluster, region, targetPeers)
 	for _, storeID := range candidateStores {
 		peer := targetPeers[storeID]
 		if peer == nil {
@@ -918,7 +937,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 			readPoolPressureFiltered = true
 			continue
 		}
-		if operator.IsAllowedLeaderTarget(r.cluster, region, peer) {
+		if allowLeader(peer) {
 			filtered = append(filtered, storeID)
 		}
 	}
@@ -981,23 +1000,21 @@ func (r *RegionScatterer) isAllowedLeaderSource(storeID uint64) bool {
 		Len() > 0
 }
 
-func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
-	switch peer.GetRole() {
-	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
+// Internal scatter does not fix a peer to its original RuleFit: complete target
+// matching decides which rule can own each peer. Admin scatter skips that
+// matching, so it keeps the original Leader/Voter RuleFit requirement.
+func allowScatterLeader(fit *placement.RegionFit, internalScatter bool, peer *metapb.Peer) bool {
+	if core.IsLearner(peer) || peer.GetRole() == metapb.PeerRole_DemotingVoter || peer.IsWitness {
 		return false
 	}
-	if peer.IsWitness {
-		return false
+	if internalScatter {
+		return true
 	}
 	peerFit := fit.GetRuleFit(peer.GetId())
 	if peerFit == nil || peerFit.Rule == nil || peerFit.Rule.IsWitness {
 		return false
 	}
-	switch peerFit.Rule.Role {
-	case placement.Voter, placement.Leader:
-		return true
-	}
-	return false
+	return peerFit.Rule.Role == placement.Voter || peerFit.Rule.Role == placement.Leader
 }
 
 // moveScatterPeer updates only the selected peer in a request-owned layout.
