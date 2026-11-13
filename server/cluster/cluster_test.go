@@ -3767,6 +3767,58 @@ func TestReplica(t *testing.T) {
 	waitNoResponse(re, stream)
 }
 
+func TestCheckRegionAgainAfterAddRulePeer(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
+	defer cleanup()
+	oc := co.GetOperatorController()
+	checker := co.GetCheckerController()
+
+	re.NoError(tc.addRegionStore(1, 1))
+	re.NoError(tc.addRegionStore(2, 1))
+	re.NoError(tc.addRegionStore(3, 1))
+	re.NoError(tc.addLabelsStore(4, map[string]string{core.EngineKey: core.EngineTiFlash}))
+	re.NoError(tc.addLabelsStore(5, map[string]string{core.EngineKey: core.EngineTiFlash}))
+	re.NoError(tc.GetRuleManager().SetRule(&placement.Rule{
+		GroupID: "tiflash",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   2,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: core.EngineKey, Op: placement.In, Values: []string{core.EngineTiFlash}},
+		},
+	}))
+	re.NoError(tc.addLeaderRegion(1, 1, 2, 3))
+
+	// The rule requires two TiFlash learners, but one operator adds only one.
+	checkRegionAndOperator(re, tc, co, 1, 1)
+	op := oc.GetOperator(1)
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+	addLearner := op.Step(0).(operator.AddLearner)
+	re.Empty(checker.GetPendingProcessedRegions())
+
+	// The region is checked again soon after the operator succeeds,
+	// instead of waiting for the next patrol round.
+	region := tc.GetRegion(1).Clone(
+		core.WithAddPeer(&metapb.Peer{
+			Id:      addLearner.PeerID,
+			StoreId: addLearner.ToStore,
+			Role:    metapb.PeerRole_Learner,
+		}),
+		core.WithIncConfVer(),
+	)
+	re.NoError(dispatchHeartbeat(co, region, mockhbstream.NewHeartbeatStream()))
+	re.Nil(oc.GetOperator(1))
+	re.Equal([]uint64{1}, checker.GetPendingProcessedRegions())
+	checkRegionAndOperator(re, tc, co, 1, 1)
+	op = oc.GetOperator(1)
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+	re.NotEqual(addLearner.ToStore, op.Step(0).(operator.AddLearner).ToStore)
+}
+
 func TestCheckCache(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		re := require.New(t)
