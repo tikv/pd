@@ -51,6 +51,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -5554,6 +5555,60 @@ func TestInterval(t *testing.T) {
 			re.Empty(sc.Schedule(false))
 		}
 		re.Less(sc.GetInterval(), time.Second*time.Duration(n/2))
+	}
+}
+
+func TestCheckStoresWithPartialRegionCollection(t *testing.T) {
+	for _, tc := range []struct {
+		collected int
+		state     metapb.NodeState
+	}{
+		{collected: 89, state: metapb.NodeState_Preparing},
+		{collected: 90, state: metapb.NodeState_Serving},
+		{collected: 99, state: metapb.NodeState_Serving},
+	} {
+		t.Run(strconv.Itoa(tc.collected), func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			cfg := opt.GetReplicationConfig()
+			cfg.EnablePlacementRules = false
+			cfg.MaxReplicas = 1
+			opt.SetReplicationConfig(cfg)
+			cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+			cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+			cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
+			now := time.Now()
+			for _, store := range newTestStores(2, "6.0.0") {
+				meta := store.GetMeta()
+				meta.StartTimestamp = now.Add(-time.Hour).Unix()
+				if meta.GetId() == 2 {
+					meta.NodeState = metapb.NodeState_Preparing
+				}
+				cluster.PutStore(core.NewStoreInfo(meta, core.SetLastHeartbeatTS(now), core.SetRegionSize(1000)))
+			}
+			for i := range 200 {
+				storeID := uint64(i/100 + 1)
+				peer := &metapb.Peer{Id: uint64(i + 1), StoreId: storeID}
+				meta := newTestRegionMeta(uint64(i + 1))
+				meta.Peers = []*metapb.Peer{peer}
+				source := core.Storage
+				if storeID == 2 || i < tc.collected {
+					source = core.Heartbeat
+				}
+				cluster.PutRegion(core.NewRegionInfo(meta, peer, core.SetSource(source), core.SetApproximateSize(10)))
+			}
+
+			// A missing heartbeat on a Serving store must not prevent another store
+			// with enough data from finishing preparation once 90% is collected.
+			re.Equal(100, cluster.GetStoreRegionCount(1))
+			re.Equal(tc.collected, cluster.GetNotFromStorageRegionsCntByStore(1))
+			re.False(cluster.IsPrepared())
+			re.Less(cluster.GetStore(2).GetUptime(), opt.GetMaxStorePreparingTime())
+			cluster.checkStores()
+			re.Equal(tc.state, cluster.GetStore(2).GetNodeState())
+		})
 	}
 }
 

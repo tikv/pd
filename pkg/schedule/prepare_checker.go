@@ -55,8 +55,8 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	if err != nil {
 		return false
 	}
-	// The number of active regions should be more than total region of all stores * core.CollectFactor
-	if float64(totalRegionCount)*core.CollectFactor > float64(notLoadedFromRegionsCnt) {
+	// Wait for all regions so incomplete leader counts do not trigger premature balancing.
+	if notLoadedFromRegionsCnt < totalRegionCount {
 		return false
 	}
 	for _, store := range c.GetStores() {
@@ -64,11 +64,9 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 			continue
 		}
 		storeID := store.GetID()
+		collected := c.GetNotFromStorageRegionsCntByStore(storeID)
 		// It is used to avoid sudden scheduling when scheduling service is just started.
-		if float64(store.GetStoreStats().GetRegionCount())*core.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
-			return false
-		}
-		if !c.IsStorePrepared(storeID) {
+		if collected < int(store.GetStoreStats().GetRegionCount()) || collected < c.GetStoreRegionCount(storeID) {
 			return false
 		}
 	}

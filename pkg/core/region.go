@@ -53,8 +53,8 @@ const (
 	ScanRegionLimit = 1000
 	// batchSearchSize is the default size for the number of IDs/keys/prevKeys to search in a batch.
 	batchSearchSize = 128
-	// CollectFactor is the required fraction of regions collected before scheduling.
-	CollectFactor = 1.0
+	// CollectFactor is the required fraction of collected regions for store preparation.
+	CollectFactor = 0.9
 )
 
 // errRegionIsStale is error info for region is stale.
