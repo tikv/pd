@@ -1951,6 +1951,20 @@ func (r *RegionsInfo) GetStoreLeaderCount(storeID uint64) int {
 	return r.leaders[storeID].length()
 }
 
+// IsRegionLeaderPrepared checks whether all cached regions have leaders and their subtrees are populated.
+func (r *RegionsInfo) IsRegionLeaderPrepared() bool {
+	totalRegionCount := r.GetTotalRegionCount()
+	r.st.RLock()
+	defer r.st.RUnlock()
+	count := 0
+	for _, leaders := range r.leaders {
+		count += leaders.length()
+	}
+	// The root tree and subtrees are updated asynchronously. Compare leaders
+	// with the same subtree snapshot so a pending merge cannot hide missing leaders.
+	return count == len(r.subRegions) && count >= totalRegionCount
+}
+
 // GetStoreFollowerCount get the total count of a store's follower RegionInfo
 func (r *RegionsInfo) GetStoreFollowerCount(storeID uint64) int {
 	r.st.RLock()

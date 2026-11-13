@@ -330,10 +330,28 @@ func TestFullSyncWithAddMember(t *testing.T) {
 		loadRegionLen = len(pd2.GetServer().GetBasicCluster().GetRegions())
 		return loadRegionLen == regionLen
 	})
+	// The restarted leader only has persisted metadata. Full sync must not
+	// make the follower ready while those regions still have no leaders.
+	testutil.Eventually(re, func() bool {
+		bc := pd2.GetServer().GetBasicCluster()
+		return bc.GetNotFromStorageRegionsCnt() == regionLen && bc.GetStoreLeaderCount(1) == 0
+	})
 	re.NoError(cluster.ResignLeader())
 	re.Equal("pd2", cluster.WaitLeader())
 	loadRegionLen = len(pd2.GetServer().GetRegions())
 	re.Equal(regionLen, loadRegionLen)
+	rc = pd2.GetServer().GetRaftCluster()
+	re.False(rc.GetCoordinator().ShouldRun())
+	re.False(rc.IsPrepared())
+	for _, region := range regions[:regionLen-1] {
+		re.NoError(rc.HandleRegionHeartbeat(region))
+	}
+	testutil.Eventually(re, func() bool {
+		return rc.GetStoreLeaderCount(1) == regionLen-1
+	})
+	re.False(rc.GetCoordinator().ShouldRun())
+	re.NoError(rc.HandleRegionHeartbeat(regions[regionLen-1]))
+	testutil.Eventually(re, rc.IsPrepared)
 }
 
 func TestPrepareChecker(t *testing.T) {

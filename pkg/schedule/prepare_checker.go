@@ -59,6 +59,10 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	if notLoadedFromRegionsCnt < totalRegionCount {
 		return false
 	}
+	// Synced regions may still lack leaders even when all metadata is collected.
+	if !c.IsRegionLeaderPrepared() {
+		return false
+	}
 	for _, store := range c.GetStores() {
 		if !store.IsPreparing() && !store.IsServing() {
 			continue
