@@ -55,9 +55,15 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni/v3 v3.1.1
+<<<<<<< HEAD
 	go.etcd.io/etcd/api/v3 v3.5.15
 	go.etcd.io/etcd/client/pkg/v3 v3.5.15
 	go.etcd.io/etcd/client/v3 v3.5.15
+=======
+	go.etcd.io/etcd/api/v3 v3.5.33
+	go.etcd.io/etcd/client/pkg/v3 v3.5.33
+	go.etcd.io/etcd/client/v3 v3.5.33
+>>>>>>> c53f0fec7c (*: align etcd API and client to v3.5.33 (#11587))
 	go.etcd.io/etcd/server/v3 v3.5.15
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
