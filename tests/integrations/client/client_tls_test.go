@@ -16,6 +16,7 @@ package client_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,12 +24,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"google.golang.org/grpc"
+
+	"github.com/pingcap/failpoint"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
@@ -307,6 +311,189 @@ func TestMultiCN(t *testing.T) {
 
 	// cn client is not allowed
 	re.Error(testAllowedCN(ctx, endpoints, testClientTLSInfo))
+}
+
+func TestClientCertAllowedCN(t *testing.T) {
+	re := require.New(t)
+	certPath := t.TempDir()
+	generateCerts(re, certPath)
+	serverTLSInfo := buildTLSInfo(certPath, "pd-server")
+
+	testCases := []struct {
+		name           string
+		legacyCNs      []string
+		clientCNs      []string
+		allowClient    bool
+		allowTiDB      bool
+		disableGateway bool
+	}{
+		{name: "legacy unrestricted", allowClient: true, allowTiDB: true},
+		{name: "legacy single CN", legacyCNs: []string{"pd-server"}, allowClient: true, allowTiDB: true},
+		{name: "explicit single CN", clientCNs: []string{"pd-server"}},
+		{name: "explicit overrides legacy", legacyCNs: []string{"pd-server", "client"}, clientCNs: []string{"pd-server"}},
+		{name: "explicit multiple CNs", legacyCNs: []string{"pd-server"}, clientCNs: []string{"pd-server", "tidb"}, allowTiDB: true},
+		{name: "explicit gateway disabled", clientCNs: []string{"pd-server"}, disableGateway: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+				conf.Security.TLSConfig = grpcutil.TLSConfig{
+					KeyPath:        serverTLSInfo.KeyFile,
+					CertPath:       serverTLSInfo.CertFile,
+					CAPath:         serverTLSInfo.TrustedCAFile,
+					CertAllowedCNs: testCase.legacyCNs,
+				}
+				conf.Security.ClientCertAllowedCNs = testCase.clientCNs
+				conf.EnableGRPCGateway = !testCase.disableGateway
+				conf.AdvertiseClientUrls = strings.ReplaceAll(conf.AdvertiseClientUrls, "http", "https")
+				conf.ClientUrls = strings.ReplaceAll(conf.ClientUrls, "http", "https")
+				conf.AdvertisePeerUrls = strings.ReplaceAll(conf.AdvertisePeerUrls, "http", "https")
+				conf.PeerUrls = strings.ReplaceAll(conf.PeerUrls, "http", "https")
+				conf.InitialCluster = strings.ReplaceAll(conf.InitialCluster, "http", "https")
+			})
+			re.NoError(err)
+			defer clus.Destroy()
+			var endpoints []string
+			for _, server := range clus.GetServers() {
+				endpoints = append(endpoints, server.GetConfig().AdvertiseClientUrls)
+			}
+			if testCase.name == "explicit single CN" {
+				starting, resume := make(chan struct{}), make(chan struct{})
+				re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/delayStartServer", func() {
+					close(starting)
+					<-resume
+				}))
+				runResult := make(chan error, 1)
+				go func() { runResult <- clus.RunInitialServers() }()
+				finish := sync.OnceFunc(func() {
+					close(resume)
+					re.NoError(<-runResult)
+					re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServer"))
+				})
+				defer finish()
+				select {
+				case <-starting:
+				case <-time.After(10 * time.Second):
+					t.Fatal("server did not reach the startup barrier")
+				}
+				tlsConfig, err := serverTLSInfo.ClientConfig()
+				re.NoError(err)
+				transport := &http.Transport{TLSClientConfig: tlsConfig}
+				defer transport.CloseIdleConnections()
+				httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
+				request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoints[0]+"/v3/kv/range", strings.NewReader(`{"key":"Zm9v"}`))
+				re.NoError(err)
+				response, err := httpClient.Do(request)
+				re.NoError(err)
+				re.NoError(response.Body.Close())
+				re.Equal(http.StatusOK, response.StatusCode)
+				finish()
+			} else {
+				re.NoError(clus.RunInitialServers())
+			}
+			clus.WaitLeader()
+
+			for _, phase := range []string{"initial", "restarted"} {
+				if phase == "restarted" {
+					server := clus.GetLeaderServer()
+					re.NoError(server.Stop())
+					re.NoError(server.Run())
+					clus.WaitLeader()
+				}
+				for _, client := range []struct {
+					name    string
+					allowed bool
+				}{
+					{name: "pd-server", allowed: true},
+					{name: "client", allowed: testCase.allowClient},
+					{name: "tidb-client", allowed: testCase.allowTiDB},
+				} {
+					t.Run(phase+"/"+client.name, func(t *testing.T) {
+						re := require.New(t)
+						clientTLSInfo := buildTLSInfo(certPath, client.name)
+						err := testAllowedCN(ctx, endpoints, clientTLSInfo)
+						if client.allowed {
+							re.NoError(err)
+						} else {
+							re.Error(err)
+						}
+
+						tlsConfig, err := clientTLSInfo.ClientConfig()
+						re.NoError(err)
+						transport := &http.Transport{TLSClientConfig: tlsConfig}
+						t.Cleanup(transport.CloseIdleConnections)
+						httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
+						for _, requestCase := range []struct {
+							method string
+							path   string
+							body   string
+						}{
+							{method: http.MethodGet, path: "/health"},
+							{method: http.MethodPost, path: "/v3/kv/range", body: `{"key":"Zm9v"}`},
+							{method: http.MethodPost, path: "/v3/cluster/member/list", body: `{}`},
+							{method: http.MethodPost, path: "/v3/maintenance/status", body: `{}`},
+						} {
+							request, err := http.NewRequestWithContext(ctx, requestCase.method, endpoints[0]+requestCase.path, strings.NewReader(requestCase.body))
+							re.NoError(err)
+							response, err := httpClient.Do(request)
+							if !client.allowed {
+								if response != nil {
+									re.NoError(response.Body.Close())
+								}
+								re.Error(err, requestCase.path)
+								continue
+							}
+							re.NoError(err, requestCase.path)
+							body, err := io.ReadAll(response.Body)
+							re.NoError(response.Body.Close())
+							re.NoError(err)
+							if testCase.disableGateway && requestCase.path != "/health" {
+								re.Equal(http.StatusNotFound, response.StatusCode)
+								continue
+							}
+							re.Equal(http.StatusOK, response.StatusCode, "%s: %s", requestCase.path, body)
+							if requestCase.path != "/health" {
+								var result struct {
+									Header json.RawMessage `json:"header"`
+								}
+								re.NoError(json.Unmarshal(body, &result))
+								re.NotEmpty(result.Header)
+							}
+						}
+					})
+				}
+			}
+			if testCase.name == "explicit single CN" {
+				etcdClient := clus.GetEtcdClient()
+				_, err := etcdClient.UserAdd(ctx, "root", "gateway-test")
+				re.NoError(err)
+				_, err = etcdClient.UserGrantRole(ctx, "root", "root")
+				re.NoError(err)
+				_, err = etcdClient.UserAdd(ctx, "pd-server", "gateway-test")
+				re.NoError(err)
+				_, err = etcdClient.UserGrantRole(ctx, "pd-server", "root")
+				re.NoError(err)
+				_, err = etcdClient.AuthEnable(ctx)
+				re.NoError(err)
+				tlsConfig, err := serverTLSInfo.ClientConfig()
+				re.NoError(err)
+				transport := &http.Transport{TLSClientConfig: tlsConfig}
+				t.Cleanup(transport.CloseIdleConnections)
+				httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
+				request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoints[0]+"/v3/kv/range", strings.NewReader(`{"key":"Zm9v"}`))
+				re.NoError(err)
+				response, err := httpClient.Do(request)
+				re.NoError(err)
+				body, err := io.ReadAll(response.Body)
+				re.NoError(response.Body.Close())
+				re.NoError(err)
+				re.Equal(http.StatusBadRequest, response.StatusCode)
+				re.Contains(string(body), "CommonName of client sending a request against gateway will be ignored")
+			}
+		})
+	}
 }
 
 func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInfo) error {

@@ -352,9 +352,28 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 	newCtx, cancel := context.WithTimeout(ctx, EtcdStartTimeout)
 	defer cancel()
 
+	var gateway *etcdGateway
+	if len(s.cfg.Security.ClientCertAllowedCNs) > 0 && s.cfg.EnableGRPCGateway {
+		// etcd's gateway clones the server TLS config, including its incoming CN
+		// check, for the internal client connection. Use a separate client config.
+		s.etcdCfg.EnableGRPCGateway = false
+		if s.etcdCfg.UserHandlers == nil {
+			s.etcdCfg.UserHandlers = make(map[string]http.Handler)
+		}
+		var err error
+		gateway, err = s.newEtcdGatewayHandler(s.etcdCfg)
+		if err != nil {
+			return err
+		}
+		s.etcdCfg.UserHandlers["/v3/"] = gateway
+	}
+
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
+	}
+	if gateway != nil {
+		gateway.etcd.Store(etcd)
 	}
 	cleanup := func() {
 		// NOTE: `embed.Etcd.Close()` can block for a long time in some failure paths
