@@ -16,6 +16,8 @@ package id
 
 import (
 	"context"
+	"math"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -26,12 +28,169 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
+}
+
+func TestBatchAllocation(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, err := client.Put(t.Context(), leaderPath, memberVal)
+	require.NoError(t, err)
+	alloc := NewAllocator(&AllocatorParams{Client: client, Member: memberVal, Label: DefaultLabel})
+	var last uint64
+	for _, count := range []uint32{0, 1, 998, 2, 5000, math.MaxUint32} {
+		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
+			before, err := client.Get(t.Context(), keypath.AllocIDPath())
+			require.NoError(t, err)
+			id, actual, err := alloc.Alloc(count)
+			require.NoError(t, err)
+			require.Equal(t, count, actual)
+			require.Equal(t, last+uint64(count), id)
+			last = id
+			after, err := client.Get(t.Context(), keypath.AllocIDPath())
+			require.NoError(t, err)
+			require.LessOrEqual(t, after.Header.Revision-before.Header.Revision, int64(1), "a batch must reserve its window in at most one transaction")
+			if count != 0 {
+				require.Len(t, after.Kvs, 1)
+				end, err := typeutil.BytesToUint64(after.Kvs[0].Value)
+				require.NoError(t, err)
+				require.GreaterOrEqual(t, end, id)
+			}
+		})
+	}
+}
+
+func TestBatchAllocationAcrossAllocators(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, err := client.Put(t.Context(), leaderPath, memberVal)
+	require.NoError(t, err)
+	params := &AllocatorParams{Client: client, Member: memberVal, Label: DefaultLabel}
+	first, second := NewAllocator(params), NewAllocator(params)
+	allocated := make(map[uint64]struct{})
+	for _, request := range []struct {
+		alloc Allocator
+		count uint32
+	}{{first, 3}, {second, 7}, {first, 1000}, {second, 1500}} {
+		last, count, err := request.alloc.Alloc(request.count)
+		require.NoError(t, err)
+		require.Equal(t, request.count, count)
+		for id := last - uint64(count) + 1; id <= last; id++ {
+			_, exists := allocated[id]
+			require.False(t, exists, "batch contains an ID returned by another allocator: %d", id)
+			allocated[id] = struct{}{}
+		}
+	}
+	persisted, err := client.Get(t.Context(), keypath.AllocIDPath())
+	require.NoError(t, err)
+	end, err := typeutil.BytesToUint64(persisted.Kvs[0].Value)
+	require.NoError(t, err)
+	restarted := NewAllocator(params)
+	require.NoError(t, restarted.Rebase())
+	last, count, err := restarted.Alloc(5)
+	require.NoError(t, err)
+	require.Equal(t, uint32(5), count)
+	require.Greater(t, last-uint64(count)+1, end)
+}
+
+func TestSetBaseRecovery(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, err := client.Put(t.Context(), leaderPath, memberVal)
+	require.NoError(t, err)
+	for _, label := range []label{DefaultLabel, KeyspaceLabel} {
+		t.Run(string(label), func(t *testing.T) {
+			params := &AllocatorParams{Client: client, Member: memberVal, Label: label}
+			alloc := NewAllocator(params)
+			key := keypath.AllocIDPath()
+			if label == KeyspaceLabel {
+				key = keypath.KeyspaceAllocIDPath()
+			}
+			// Each reset represents a coordinated recovery to the specified state.
+			for _, base := range []uint64{5000, 1000, 1000, 0, 5000, 5500, 10000} {
+				require.NoError(t, alloc.SetBase(base))
+				last, count, err := alloc.Alloc(3)
+				require.NoError(t, err)
+				require.Equal(t, uint32(3), count)
+				require.Equal(t, base+3, last, "recovery must honor the requested base")
+				persisted, err := client.Get(t.Context(), key)
+				require.NoError(t, err)
+				require.Len(t, persisted.Kvs, 1)
+				end, err := typeutil.BytesToUint64(persisted.Kvs[0].Value)
+				require.NoError(t, err)
+				require.Equal(t, base+DefaultAllocStep, end, "recovery must replace the persisted window")
+			}
+			// The earlier allocator is no longer used after recovery starts.
+			recovered := NewAllocator(params)
+			require.NoError(t, recovered.SetBase(1000))
+			last, count, err := recovered.Alloc(1)
+			require.NoError(t, err)
+			require.Equal(t, uint32(1), count)
+			require.Equal(t, uint64(1001), last)
+
+			restarted := NewAllocator(params)
+			require.NoError(t, restarted.Rebase())
+			last, _, err = restarted.Alloc(1)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1000)+DefaultAllocStep+1, last, "restart must use the recovered persisted window")
+		})
+	}
+}
+
+func TestBatchAllocationExhaustion(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, err := client.Put(t.Context(), leaderPath, memberVal)
+	require.NoError(t, err)
+	alloc := NewAllocator(&AllocatorParams{Client: client, Member: memberVal, Label: DefaultLabel})
+	require.NoError(t, alloc.SetBase(math.MaxUint64-5))
+	_, _, err = alloc.Alloc(6)
+	require.ErrorIs(t, err, errs.ErrIDExhausted)
+	last, count, err := alloc.Alloc(3)
+	require.NoError(t, err)
+	require.Equal(t, uint64(math.MaxUint64-2), last)
+	require.Equal(t, uint32(3), count)
+	last, count, err = alloc.Alloc(2)
+	require.NoError(t, err)
+	require.Equal(t, uint64(math.MaxUint64), last)
+	require.Equal(t, uint32(2), count)
+	_, _, err = alloc.Alloc(1)
+	require.ErrorIs(t, err, errs.ErrIDExhausted)
+	require.ErrorIs(t, alloc.Rebase(), errs.ErrIDExhausted)
+	require.NoError(t, alloc.SetBase(math.MaxUint64-10))
+	last, count, err = alloc.Alloc(1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(math.MaxUint64-9), last)
+	require.Equal(t, uint32(1), count)
+}
+
+func TestBatchAllocationLeaderChange(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, err := client.Put(t.Context(), leaderPath, memberVal)
+	require.NoError(t, err)
+	alloc := NewAllocator(&AllocatorParams{Client: client, Member: memberVal, Label: DefaultLabel})
+	last, _, err := alloc.Alloc(3)
+	require.NoError(t, err)
+	_, err = client.Put(t.Context(), leaderPath, "new-member")
+	require.NoError(t, err)
+	require.ErrorIs(t, alloc.SetBase(1), errs.ErrEtcdTxnConflict)
+	require.ErrorIs(t, alloc.SetBase(5000), errs.ErrEtcdTxnConflict)
+	_, _, err = alloc.Alloc(5000)
+	require.ErrorIs(t, err, errs.ErrEtcdTxnConflict)
+	_, err = client.Put(t.Context(), leaderPath, memberVal)
+	require.NoError(t, err)
+	next, count, err := alloc.Alloc(5000)
+	require.NoError(t, err)
+	require.Equal(t, uint32(5000), count)
+	require.Equal(t, last+5000, next, "failed reservation must leave the cached window unchanged")
 }
 
 const (

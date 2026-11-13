@@ -16,7 +16,10 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +40,47 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+type rejectedSplitIDAllocator struct {
+	*mockid.IDAllocator
+	calls int
+}
+
+func (a *rejectedSplitIDAllocator) Alloc(uint32) (uint64, uint32, error) {
+	a.calls++
+	return 0, 0, errors.New("unexpected split ID allocation")
+}
+
+func TestHandleAskBatchSplitRejectsOversizedCountBeforeAllocation(t *testing.T) {
+	for _, count := range []uint32{131073, math.MaxUint32} {
+		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
+			cluster, _ := newSplitScatterTestCluster(t)
+			original := cluster.id
+			allocator := &rejectedSplitIDAllocator{IDAllocator: mockid.NewIDAllocator()}
+			cluster.id = allocator
+			request := &pdpb.AskBatchSplitRequest{
+				Region: cluster.GetRegion(100).GetMeta(), SplitCount: count,
+			}
+			resp, err := cluster.HandleAskBatchSplit(request)
+			require.Zero(t, allocator.calls, "oversized requests must not reach the allocator")
+			require.ErrorContains(t, err, "exceeds maximum")
+			require.Nil(t, resp)
+
+			request.Region = cluster.GetRegion(100).Clone(core.SetRegionVersion(0)).GetMeta()
+			resp, err = cluster.HandleAskBatchSplit(request)
+			require.ErrorContains(t, err, "invalid region epoch")
+			require.Nil(t, resp)
+			require.Zero(t, allocator.calls, "region validation must precede count validation and allocation")
+
+			cluster.id = original
+			request.Region = cluster.GetRegion(100).GetMeta()
+			request.SplitCount = 1
+			resp, err = cluster.HandleAskBatchSplit(request)
+			require.NoError(t, err)
+			require.Len(t, resp.GetIds(), 1)
+		})
+	}
+}
 
 const (
 	// CPU usage is only populated to mimic load-split region heartbeat data.
@@ -242,4 +286,32 @@ func newSplitScatterIndexKey(suffix string) []byte {
 	key := codec.GenerateIndexKey(42, 7)
 	key = append(key, suffix...)
 	return codec.EncodeBytes(key)
+}
+
+func TestHandleAskBatchSplitRejectsPeerWorkBeforeAllocation(t *testing.T) {
+	for _, peersCount := range []int{4, 32766} {
+		t.Run(strconv.Itoa(peersCount), func(t *testing.T) {
+			cluster, _ := newSplitScatterTestCluster(t)
+			allocator := &rejectedSplitIDAllocator{IDAllocator: mockid.NewIDAllocator()}
+			cluster.id = allocator
+			peers := make([]*metapb.Peer, peersCount)
+			for i := range peers {
+				peers[i] = &metapb.Peer{Id: uint64(i + 1), StoreId: uint64(i + 1)}
+			}
+			meta := cluster.GetRegion(100).Clone(core.SetPeers(peers)).GetMeta()
+			count := uint32(1)
+			message := "peers do not match"
+			if peersCount == 32766 {
+				meta.RegionEpoch.ConfVer++
+				count = core.MaxBatchSplitCount
+				message = "split response exceeds maximum"
+			}
+			request := &pdpb.AskBatchSplitRequest{Region: meta, SplitCount: count}
+			require.Less(t, request.Size(), 1<<20)
+			resp, err := cluster.HandleAskBatchSplit(request)
+			require.Zero(t, allocator.calls)
+			require.ErrorContains(t, err, message)
+			require.Nil(t, resp)
+		})
+	}
 }

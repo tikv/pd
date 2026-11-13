@@ -1797,7 +1797,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		}
 		cli := forwardCli.getClient()
 		if cli != nil {
-			resp, err := cli.AskBatchSplit(ctx, newSchedulingAskBatchSplitRequest(request))
+			resp, err := cli.AskBatchSplit(ctx, newSchedulingAskBatchSplitRequest(request), grpc.MaxCallRecvMsgSize(core.MaxBatchSplitResponseSize))
 			if err != nil {
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
@@ -1807,7 +1807,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request)
+		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(core.MaxBatchSplitResponseSize))
 	}
 	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err

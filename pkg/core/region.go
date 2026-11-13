@@ -55,7 +55,63 @@ const (
 	batchSearchSize = 128
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
+	// MaxBatchSplitCount rounds the maximum normal batch of 100,000 new regions
+	// up to the next power of two, leaving headroom without accepting unbounded
+	// response construction, split bookkeeping, or ID allocation work.
+	MaxBatchSplitCount = 1 << 17
+	// MaxBatchSplitResponseSize bounds the encoded response and the region/peer
+	// ID work needed to construct it. Forwarding RPCs must accept this size.
+	MaxBatchSplitResponseSize = 8 << 20
 )
+
+// ValidateBatchSplitCount checks the supported batch size before allocating IDs
+// or response slices. Zero retains the existing empty-batch behavior.
+func ValidateBatchSplitCount(splitCount uint32) error {
+	if splitCount > MaxBatchSplitCount {
+		return errors.Errorf("split count %d exceeds maximum %d", splitCount, MaxBatchSplitCount)
+	}
+	return nil
+}
+
+// ValidateBatchSplitRequest bounds response construction even when the request
+// contains more peers than the cached region. A newer configuration may arrive
+// before its heartbeat, so compare peer sets only at the cached configuration.
+func ValidateBatchSplitRequest(splitCount uint32, region *metapb.Region, current *RegionInfo) error {
+	if err := ValidateBatchSplitCount(splitCount); err != nil {
+		return err
+	}
+	if splitCount == 0 {
+		return nil
+	}
+	// Charge ten bytes per uint64 varint, and eleven bytes for each field tag
+	// and length prefix: region ID, packed peer IDs, and enclosing SplitID.
+	// Reserve room for the response header as well. This also bounds the peer
+	// arrays; the count limit bounds the per-region objects and bookkeeping.
+	const payloadBudget = MaxBatchSplitResponseSize - 1024
+	peers := uint64(len(region.GetPeers()))
+	if peers > payloadBudget/10 || uint64(splitCount) > payloadBudget/(33+10*peers) {
+		return errors.Errorf("split response exceeds maximum %d bytes", MaxBatchSplitResponseSize)
+	}
+	if current == nil || current.GetID() != region.GetId() ||
+		current.GetRegionEpoch().GetConfVer() != region.GetRegionEpoch().GetConfVer() {
+		return nil
+	}
+	if len(current.GetPeers()) != len(region.GetPeers()) {
+		return errors.New("split region peers do not match current configuration")
+	}
+	remaining := make(map[uint64]*metapb.Peer, len(current.GetPeers()))
+	for _, peer := range current.GetPeers() {
+		remaining[peer.GetId()] = peer
+	}
+	for _, peer := range region.GetPeers() {
+		stored, ok := remaining[peer.GetId()]
+		if !ok || !proto.Equal(stored, peer) {
+			return errors.New("split region peers do not match current configuration")
+		}
+		delete(remaining, peer.GetId())
+	}
+	return nil
+}
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {

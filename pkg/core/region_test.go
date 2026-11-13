@@ -1729,3 +1729,74 @@ func BenchmarkQueryRegions(b *testing.B) {
 		}
 	}
 }
+
+func TestValidateBatchSplitRequest(t *testing.T) {
+	region := &metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1}, Peers: []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}}}
+	current := NewRegionInfo(region, region.Peers[0])
+	require.NoError(t, ValidateBatchSplitRequest(MaxBatchSplitCount, region, current))
+	require.NoError(t, ValidateBatchSplitRequest(0, region, current))
+	changed := current.Clone(SetPeers([]*metapb.Peer{{Id: 1, StoreId: 1}})).GetMeta()
+	require.ErrorContains(t, ValidateBatchSplitRequest(1, changed, current), "peers do not match")
+	changed.RegionEpoch = &metapb.RegionEpoch{ConfVer: 2}
+	require.NoError(t, ValidateBatchSplitRequest(1, changed, current), "a newer configuration can precede the heartbeat")
+
+	for _, test := range []struct {
+		name  string
+		peers []*metapb.Peer
+		valid bool
+	}{
+		{"reordered", []*metapb.Peer{region.Peers[2], region.Peers[0], region.Peers[1]}, true},
+		{"duplicate", []*metapb.Peer{region.Peers[0], region.Peers[0], region.Peers[2]}, false},
+		{"different store", []*metapb.Peer{{Id: 1, StoreId: 9}, region.Peers[1], region.Peers[2]}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := current.Clone(SetPeers(test.peers)).GetMeta()
+			err := ValidateBatchSplitRequest(1, request, current)
+			if test.valid {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "peers do not match")
+			}
+		})
+	}
+	for _, test := range []struct {
+		peers int
+		count uint32
+		valid bool
+	}{
+		{0, MaxBatchSplitCount, true},
+		{1, MaxBatchSplitCount, true},
+		{3, MaxBatchSplitCount, true},
+		{3, MaxBatchSplitCount + 1, false},
+		{5, 100000, true},
+		{5, MaxBatchSplitCount, false},
+		{9, 50000, true},
+		{9, 100000, false},
+		{100, 8000, true},
+		{32766, 0, true},
+		{32766, 25, true},
+		{32766, 26, false},
+	} {
+		t.Run(fmt.Sprintf("peers-%d-splits-%d", test.peers, test.count), func(t *testing.T) {
+			peers := make([]*metapb.Peer, test.peers)
+			ids := make([]uint64, test.peers)
+			for i := range peers {
+				peers[i] = &metapb.Peer{Id: uint64(i + 1)}
+				ids[i] = math.MaxUint64
+			}
+			request := &metapb.Region{Peers: peers}
+			err := ValidateBatchSplitRequest(test.count, request, nil)
+			if !test.valid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			split := &pdpb.SplitID{NewRegionId: math.MaxUint64, NewPeerIds: ids}
+			response := &pdpb.AskBatchSplitResponse{Header: &pdpb.ResponseHeader{ClusterId: math.MaxUint64}, Ids: make([]*pdpb.SplitID, test.count)}
+			for i := range response.Ids {
+				response.Ids[i] = split
+			}
+			require.LessOrEqual(t, response.Size(), MaxBatchSplitResponseSize)
+		})
+	}
+}
