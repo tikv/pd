@@ -52,3 +52,32 @@ func TestAdjustInvalidMasterKeyType(t *testing.T) {
 	config := &Config{MasterKey: MasterKeyConfig{Type: "unknown"}}
 	re.Error(config.Adjust())
 }
+
+func TestAdjustEncryptionMasterKey(t *testing.T) {
+	for _, method := range []string{"", methodPlaintext, methodAes128Ctr, methodAes192Ctr, methodAes256Ctr} {
+		for _, masterKeyType := range []string{"", masterKeyTypePlaintext, masterKeyTypeFile, masterKeyTypeKMS} {
+			t.Run(method+"/"+masterKeyType, func(t *testing.T) {
+				re := require.New(t)
+				config := &Config{
+					DataEncryptionMethod: method,
+					MasterKey: MasterKeyConfig{
+						Type:                masterKeyType,
+						MasterKeyFileConfig: MasterKeyFileConfig{FilePath: "/path/to/master-key"},
+						MasterKeyKMSConfig: MasterKeyKMSConfig{
+							KmsKeyID:  "test-key-id",
+							KmsRegion: "us-west-2",
+						},
+					},
+				}
+				err := config.Adjust()
+				if method != "" && method != methodPlaintext &&
+					(masterKeyType == "" || masterKeyType == masterKeyTypePlaintext) {
+					re.ErrorContains(err, "data encryption requires a file or KMS master key")
+					return
+				}
+				re.NoError(err)
+				re.NoError(config.Adjust())
+			})
+		}
+	}
+}

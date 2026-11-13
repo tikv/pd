@@ -633,6 +633,68 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	re.True(proto.Equal(loadedKeys, storedKeys))
 }
 
+func TestMigratePlaintextKeyDictionary(t *testing.T) {
+	re := require.New(t)
+	client := newTestEtcd(t)
+	leadership := newTestLeader(re, client)
+	keyFile := newTestKeyFile(t, re)
+	keys := &encryptionpb.KeyDictionary{
+		CurrentKeyId: 123,
+		Keys: map[uint64]*encryptionpb.DataKey{
+			123: {
+				Key:          getTestDataKey(re),
+				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
+				CreationTime: uint64(time.Now().Unix()),
+			},
+		},
+	}
+	plaintextMaster := &encryptionpb.MasterKey{
+		Backend: &encryptionpb.MasterKey_Plaintext{Plaintext: &encryptionpb.MasterKeyPlaintext{}},
+	}
+	re.NoError(saveKeys(leadership, plaintextMaster, keys, defaultKeyManagerHelper()))
+	re.True(keys.Keys[123].WasExposed)
+
+	config := &Config{
+		DataEncryptionMethod: methodAes128Ctr,
+		MasterKey: MasterKeyConfig{
+			Type:                masterKeyTypeFile,
+			MasterKeyFileConfig: MasterKeyFileConfig{FilePath: keyFile},
+		},
+	}
+	re.NoError(config.Adjust())
+	m, err := NewManager(client, config)
+	re.NoError(err)
+	oldKey, err := m.GetKey(123)
+	re.NoError(err)
+	re.True(proto.Equal(keys.Keys[123], oldKey))
+	re.NoError(m.SetLeadership(leadership))
+	currentID, currentKey, err := m.GetCurrentKey()
+	re.NoError(err)
+	re.NotEqual(uint64(123), currentID)
+	re.False(currentKey.WasExposed)
+
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	content := &encryptionpb.EncryptedContent{}
+	re.NoError(content.Unmarshal(resp.Kvs[0].Value))
+	re.Equal(keyFile, content.MasterKey.GetFile().GetPath())
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
+	re.NoError(err)
+	re.Equal(currentID, storedKeys.CurrentKeyId)
+	re.True(proto.Equal(keys.Keys[123], storedKeys.Keys[123]))
+
+	restarted, err := NewManager(client, config)
+	re.NoError(err)
+	oldKey, err = restarted.GetKey(123)
+	re.NoError(err)
+	re.True(proto.Equal(keys.Keys[123], oldKey))
+	keyID, key, err := restarted.GetCurrentKey()
+	re.NoError(err)
+	re.Equal(currentID, keyID)
+	re.True(proto.Equal(currentKey, key))
+}
+
 func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
