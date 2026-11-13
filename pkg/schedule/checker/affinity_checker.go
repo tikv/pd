@@ -49,6 +49,7 @@ type AffinityChecker struct {
 	affinityManager  *affinity.Manager
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
+	splitAttempts    cache.Cache
 	startTime        time.Time
 }
 
@@ -60,6 +61,7 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		affinityManager:  cluster.GetAffinityManager(),
 		conf:             conf,
 		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
+		splitAttempts:    cache.NewCache(affinitySplitCacheSize, cache.LRUCache),
 		startTime:        time.Now(),
 	}
 }
@@ -159,6 +161,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
+		// The move is done, so a later move of the Region tries to split it again.
+		c.splitAttempts.Remove(region.GetID())
 		return c.mergeCheck(region, group)
 	}
 
@@ -250,6 +254,10 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		}
 	} else {
 		return nil
+	}
+
+	if op, ready := c.prepareAffinityPeerMove(region, group); !ready {
+		return op
 	}
 
 	// Determine operator kind based on whether leader needs to change
