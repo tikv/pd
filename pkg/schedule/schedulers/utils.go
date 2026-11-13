@@ -90,6 +90,10 @@ func (p *solver) targetMetricLabel() string {
 }
 
 func (p *solver) sourceStoreScore(scheduleName string) float64 {
+	return p.sourceStoreScoreWithRegionDelta(scheduleName, p.getRegionScoreDelta())
+}
+
+func (p *solver) sourceStoreScoreWithRegionDelta(scheduleName string, regionDelta int64) float64 {
 	sourceID := p.Source.GetID()
 	tolerantResource := p.getTolerantResource()
 	// to avoid schedule too much, if A's core greater than B and C a little
@@ -109,7 +113,7 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 		sourceDelta := influence - tolerantResource
 		score = p.Source.LeaderScore(p.kind.Policy, sourceDelta)
 	case constant.RegionKind:
-		sourceDelta := influence*influenceAmp - p.getRegionScoreDelta()
+		sourceDelta := influence*influenceAmp - regionDelta
 		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
 	case constant.WitnessKind:
 		sourceDelta := influence - tolerantResource
@@ -119,6 +123,10 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 }
 
 func (p *solver) targetStoreScore(scheduleName string) float64 {
+	return p.targetStoreScoreWithRegionDelta(scheduleName, p.getRegionScoreDelta())
+}
+
+func (p *solver) targetStoreScoreWithRegionDelta(scheduleName string, regionDelta int64) float64 {
 	targetID := p.Target.GetID()
 	// to avoid schedule too much, if A's score less than B and C in small range,
 	// we want that A can be moved in one region not two
@@ -139,7 +147,7 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 		targetDelta := influence + tolerantResource
 		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
 	case constant.RegionKind:
-		targetDelta := influence*influenceAmp + p.getRegionScoreDelta()
+		targetDelta := influence*influenceAmp + regionDelta
 		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
 	case constant.WitnessKind:
 		targetDelta := influence + tolerantResource

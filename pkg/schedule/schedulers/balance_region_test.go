@@ -27,6 +27,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -409,6 +410,7 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 	checkBalanceRegionSchedule1(re, true /* enable placement rules */)
 }
 
+// checkBalanceRegionSchedule1 checks source selection, peer movement and replica mismatch diagnostics.
 func checkBalanceRegionSchedule1(re *require.Assertions, enablePlacementRules bool) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -442,12 +444,15 @@ func checkBalanceRegionSchedule1(re *require.Assertions, enablePlacementRules bo
 	// test region replicate not match
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
 	ops, plans := sb.Schedule(tc, true)
-	re.Len(plans, 101)
+	// One store-score plan and two rejected batches of ten region candidates.
+	re.Len(plans, 21)
 	re.Empty(ops)
+	status := plan.StatusRegionNotReplicated
 	if enablePlacementRules {
-		re.Equal(plan.StatusRegionNotMatchRule, int(plans[1].GetStatus().StatusCode))
-	} else {
-		re.Equal(plan.StatusRegionNotReplicated, int(plans[1].GetStatus().StatusCode))
+		status = plan.StatusRegionNotMatchRule
+	}
+	for _, candidatePlan := range plans[1:] {
+		re.Equal(status, int(candidatePlan.GetStatus().StatusCode))
 	}
 
 	tc.SetStoreOffline(1)
@@ -839,6 +844,7 @@ func TestBalanceRegionUnhealthySource(t *testing.T) {
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpKind(0), 1, 4)
 }
 
+// TestBalanceRegionEmptyRegion checks small keyed regions can move while empty regions and balanced stores stay put.
 func TestBalanceRegionEmptyRegion(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -878,9 +884,641 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 	// reject the empty regions if the cluster has more regions.
 	for i := uint64(10); i < 111; i++ {
 		tc.PutRegionStores(i, 1, 3, 4)
+		tc.PutRegion(tc.GetRegion(i).Clone(core.SetApproximateSize(1)))
 	}
 	operators, _ = sb.Schedule(tc, false)
 	re.Empty(operators)
+
+	// A small region with keys can still move to a store with fewer regions.
+	tc.UpdateStoreRegionSize(1, 104)
+	tc.UpdateStoreRegionSize(2, 101)
+	tc.UpdateStoreRegionSize(3, 103)
+	tc.UpdateStoreRegionSize(4, 103)
+	region = region.Clone(core.SetApproximateKeys(2000))
+	tc.PutRegion(region)
+	operators, _ = sb.Schedule(tc, false)
+	re.Len(operators, 1)
+	re.Equal(region.GetID(), operators[0].RegionID())
+	operatorutil.CheckTransferPeer(re, operators[0], operator.OpKind(0), 1, 2)
+
+	// Once the move finishes, the remaining size difference is within tolerance.
+	region = region.Clone(core.WithRemoveStorePeer(1), core.WithAddPeer(&metapb.Peer{Id: 9, StoreId: 2}))
+	tc.PutRegion(region)
+	tc.UpdateStoreRegionSize(1, 103)
+	tc.UpdateStoreRegionSize(2, 102)
+	operators, _ = sb.Schedule(tc, false)
+	re.Empty(operators)
+}
+
+// TestBalanceSmallRegionsAfterScaleOut checks small keyed peers converge after adding stores.
+func TestBalanceSmallRegionsAfterScaleOut(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest(false)
+	defer cancel()
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(false)
+	tc.SetMaxReplicasWithLabel(false, 3)
+
+	const regionCount = 500
+	for id := uint64(1); id <= 3; id++ {
+		tc.AddRegionStore(id, 0)
+	}
+	for id := uint64(1); id <= regionCount; id++ {
+		region := tc.AddLeaderRegion(id, 1, 2, 3)
+		tc.PutRegion(region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2000)))
+	}
+	for id := uint64(1); id <= 3; id++ {
+		tc.UpdateStoreStatus(id)
+	}
+	// Scale out only after every small region has peers on the original stores.
+	tc.AddRegionStore(4, 0)
+	tc.AddRegionStore(5, 0)
+	scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+	re.NoError(err)
+
+	var idle, moves int
+	for range regionCount * 4 {
+		ops, _ := scheduler.Schedule(tc, false)
+		if len(ops) == 0 {
+			idle++
+			if idle == 10 {
+				break
+			}
+			continue
+		}
+		idle = 0
+		operator.ApplyOperator(tc, ops[0])
+		moves++
+	}
+	re.Equal(10, idle, "balancing should converge instead of moving peers indefinitely")
+	var counts []int
+	for id := uint64(1); id <= 5; id++ {
+		count := tc.GetStoreRegionCount(id)
+		counts = append(counts, count)
+	}
+	t.Logf("peer counts after 3-to-5 scale-out: %v; completed moves: %d", counts, moves)
+	for _, count := range counts {
+		re.InDelta(regionCount*3/5, count, 5)
+	}
+}
+
+// TestBalanceRegionRejectedFollowerDoesNotBlockLeader checks hot or unmovable followers do not hide movable leaders.
+func TestBalanceRegionRejectedFollowerDoesNotBlockLeader(t *testing.T) {
+	for _, sizes := range []struct {
+		rejected, movable int64
+	}{{1, 1}, {1, 100}, {100, 1}, {100, 100}} {
+		for _, rejection := range []string{"hot", "no target"} {
+			for _, retryLimit := range []int{1, 10} {
+				for _, placementRules := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/retries=%d/placement=%t/rejected-size=%d/movable-size=%d", rejection, retryLimit, placementRules, sizes.rejected, sizes.movable), func(t *testing.T) {
+						re := require.New(t)
+						cancel, _, tc, oc := prepareSchedulersTest(false)
+						defer cancel()
+						tc.SetEnablePlacementRules(placementRules)
+						tc.SetMaxReplicasWithLabel(placementRules, 3)
+						for id := uint64(1); id <= 5; id++ {
+							tc.AddRegionStore(id, 0)
+						}
+						for id := uint64(1); id <= 4; id++ {
+							region := tc.AddLeaderRegion(id, 1, 2, 3)
+							tc.PutRegion(region.Clone(core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
+						}
+						movable := tc.GetRegion(1).Clone(core.SetApproximateSize(sizes.movable), core.SetApproximateKeys(2000))
+						tc.PutRegion(movable)
+						tc.AddLeaderRegionWithWriteInfo(5, 4, 1<<30, 100000, 0, 60, []uint64{1, 3}, 5)
+						rejected := tc.GetRegion(5).Clone(core.SetApproximateSize(sizes.rejected), core.SetApproximateKeys(2000))
+						tc.PutRegion(rejected)
+						// Keep the cluster beyond the empty-region initialization exception.
+						for id := uint64(10); id < 110; id++ {
+							region := tc.AddLeaderRegion(id, 2, 3, 4)
+							tc.PutRegion(region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0)))
+						}
+						for id := uint64(1); id <= 5; id++ {
+							tc.UpdateStoreStatus(id)
+						}
+						tc.SetStoreBusy(2, true)
+						tc.SetStoreBusy(3, true)
+						scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+							ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+						re.NoError(err)
+						sb := scheduler.(*balanceRegionScheduler)
+						cluster := &balanceRegionSampler{Cluster: tc, leaders: []*core.RegionInfo{movable}}
+
+						// First prove that the rejected follower is eligible and has a target.
+						tc.SetHotRegionCacheHitsThreshold(100)
+						re.False(tc.IsRegionHot(rejected))
+						ops, _ := sb.Schedule(cluster, false)
+						re.Len(ops, 1)
+						re.Equal(rejected.GetID(), ops[0].RegionID())
+						operatorutil.CheckTransferPeer(re, ops[0], 0, 1, 5)
+
+						if rejection == "hot" {
+							tc.SetHotRegionCacheHitsThreshold(3)
+							re.True(tc.IsRegionHot(rejected))
+						} else {
+							// Store 5 already holds a peer of the rejected region.
+							rejected = rejected.Clone(core.WithRemoveStorePeer(3), core.WithAddPeer(&metapb.Peer{Id: 9999, StoreId: 5}))
+							tc.PutRegion(rejected)
+							tc.UpdateStoreStatus(3)
+							tc.UpdateStoreStatus(5)
+							tc.SetStoreBusy(3, true)
+							// Another eligible target is already within balance tolerance.
+							// Only store 5 would improve the score for this region.
+							tc.AddRegionStore(6, 0)
+							tc.UpdateStoreRegionSize(6, tc.GetStoreRegionSize(1)-1)
+						}
+						// Include a source whose retry quota has already attenuated to one.
+						sb.limits[1] = retryLimit
+						ops, _ = sb.Schedule(cluster, false)
+						re.Len(ops, 1)
+						re.Equal(movable.GetID(), ops[0].RegionID())
+						operatorutil.CheckTransferPeer(re, ops[0], 0, 1, 5)
+					})
+				}
+			}
+		}
+	}
+}
+
+type balanceRegionSampler struct {
+	*mockcluster.Cluster
+	followers      []*core.RegionInfo
+	leaders        []*core.RegionInfo
+	hideFollowers  bool
+	batches        [][]*core.RegionInfo
+	calls, samples int
+	regionChecks   int
+}
+
+func (c *balanceRegionSampler) IsRegionHot(region *core.RegionInfo) bool {
+	c.regionChecks++
+	return c.Cluster.IsRegionHot(region)
+}
+
+func (c *balanceRegionSampler) RandLeaderRegions(id uint64, ranges []keyutil.KeyRange) []*core.RegionInfo {
+	if id == 1 && c.leaders != nil {
+		return c.leaders
+	}
+	return c.Cluster.RandLeaderRegions(id, ranges)
+}
+
+// RandFollowerRegions supplies controlled follower batches or counts real samples.
+func (c *balanceRegionSampler) RandFollowerRegions(id uint64, ranges []keyutil.KeyRange) []*core.RegionInfo {
+	if id != 1 {
+		return c.Cluster.RandFollowerRegions(id, ranges)
+	}
+	if c.hideFollowers {
+		return nil
+	}
+	regions := c.followers
+	if len(c.batches) > 0 {
+		regions = c.batches[min(c.calls, len(c.batches)-1)]
+	} else if regions == nil {
+		regions = c.Cluster.RandFollowerRegions(id, ranges)
+	}
+	c.calls++
+	c.samples += len(regions)
+	return regions
+}
+
+// TestBalanceRegionSampledFollowerFallback checks that late rejection preserves the rest of a sampled batch.
+func TestBalanceRegionSampledFollowerFallback(t *testing.T) {
+	for _, sizes := range []struct {
+		rejected, movable int64
+	}{{1, 1}, {1, 100}, {100, 1}, {100, 100}} {
+		for _, rejection := range []string{"hot", "no target"} {
+			for _, retryLimit := range []int{1, 10} {
+				for _, placementRules := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/retries=%d/placement=%t/rejected-size=%d/movable-size=%d", rejection, retryLimit, placementRules, sizes.rejected, sizes.movable), func(t *testing.T) {
+						re := require.New(t)
+						cancel, _, tc, oc := prepareSchedulersTest(false)
+						defer cancel()
+						tc.SetEnablePlacementRules(placementRules)
+						tc.SetMaxReplicasWithLabel(placementRules, 3)
+						tc.SetHotRegionCacheHitsThreshold(3)
+						for id := uint64(1); id <= 5; id++ {
+							tc.AddRegionStore(id, 0)
+						}
+						for id := uint64(1); id <= 4; id++ {
+							region := tc.AddLeaderRegion(id, 2, 1, 3)
+							tc.PutRegion(region.Clone(core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
+						}
+						tc.AddLeaderRegionWithWriteInfo(5, 4, 1<<30, 100000, 0, 60, []uint64{1, 3}, 5)
+						rejected := tc.GetRegion(5).Clone(core.SetApproximateSize(sizes.rejected), core.SetApproximateKeys(2000))
+						tc.PutRegion(rejected)
+						re.True(tc.IsRegionHot(rejected))
+						for id := uint64(10); id < 110; id++ {
+							region := tc.AddLeaderRegion(id, 2, 3, 4)
+							tc.PutRegion(region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0)))
+						}
+						movable := tc.GetRegion(1).Clone(core.SetApproximateSize(sizes.movable), core.SetApproximateKeys(2000))
+						tc.PutRegion(movable)
+						for id := uint64(1); id <= 5; id++ {
+							tc.UpdateStoreStatus(id)
+						}
+						tc.UpdateStoreRegionWeight(2, 1000)
+						tc.UpdateStoreRegionWeight(3, 1000)
+						cluster := &balanceRegionSampler{Cluster: tc, followers: []*core.RegionInfo{movable}}
+						scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+							ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+						re.NoError(err)
+						// Prove that the follower behind the rejected candidate can move.
+						ops, _ := scheduler.Schedule(cluster, false)
+						re.Len(ops, 1)
+						re.Equal(movable.GetID(), ops[0].RegionID())
+						operatorutil.CheckTransferPeer(re, ops[0], 0, 1, 5)
+						if rejection == "no target" {
+							tc.SetHotRegionCacheHitsThreshold(100)
+							rejected = rejected.Clone(core.WithRemoveStorePeer(3), core.WithAddPeer(&metapb.Peer{Id: 9999, StoreId: 5}))
+							tc.PutRegion(rejected)
+							tc.UpdateStoreStatus(3)
+							tc.UpdateStoreStatus(5)
+							for _, id := range []uint64{2, 3} {
+								// Exhaust receive capacity without preventing the leader from sending.
+								tc.SetStoreLimit(id, storelimit.AddPeer, 0.00006)
+								tc.ResetStoreLimit(id, storelimit.AddPeer, 0.000001)
+								re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Medium))
+								re.False(tc.GetStore(id).IsAvailable(storelimit.AddPeer, constant.Medium))
+							}
+							re.False(tc.IsRegionHot(rejected))
+							// An eligible but balanced target must not hide the movable follower.
+							tc.AddRegionStore(6, 0)
+							tc.UpdateStoreRegionSize(6, tc.GetStoreRegionSize(1)-1)
+						}
+						cluster.followers = nil
+						for range 5 {
+							cluster.followers = append(cluster.followers, rejected, movable)
+						}
+						cluster.calls, cluster.samples = 0, 0
+						scheduler.(*balanceRegionScheduler).limits[1] = retryLimit
+						ops, _ = scheduler.Schedule(cluster, false)
+						re.Len(ops, 1)
+						re.Equal(movable.GetID(), ops[0].RegionID())
+						operatorutil.CheckTransferPeer(re, ops[0], 0, 1, 5)
+						re.Equal(1, cluster.calls)
+					})
+				}
+			}
+		}
+	}
+}
+
+// TestBalanceRegionFilteredFollowerResampling checks that a missed follower gets another sampling opportunity within the quota.
+func TestBalanceRegionFilteredFollowerResampling(t *testing.T) {
+	for _, retryLimit := range []int{1, 2, 10} {
+		for _, placementRules := range []bool{false, true} {
+			t.Run(fmt.Sprintf("retries=%d/placement=%t", retryLimit, placementRules), func(t *testing.T) {
+				re := require.New(t)
+				cancel, _, tc, oc := prepareSchedulersTest(false)
+				defer cancel()
+				tc.SetEnablePlacementRules(placementRules)
+				tc.SetMaxReplicasWithLabel(placementRules, 3)
+				for id := uint64(1); id <= 5; id++ {
+					tc.AddRegionStore(id, 0)
+				}
+				for id := uint64(1); id <= 4; id++ {
+					region := tc.AddLeaderRegion(id, 1, 2, 3)
+					tc.PutRegion(region.Clone(core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
+				}
+				large := tc.AddLeaderRegion(5, 4, 1, 3).Clone(core.SetApproximateSize(100), core.SetApproximateKeys(1000))
+				tc.PutRegion(large)
+				for id := uint64(10); id < 110; id++ {
+					region := tc.AddLeaderRegion(id, 4, 1, 3)
+					tc.PutRegion(region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0)))
+				}
+				for id := uint64(1); id <= 5; id++ {
+					tc.UpdateStoreStatus(id)
+				}
+				tc.SetStoreBusy(2, true)
+				tc.SetStoreBusy(3, true)
+				cluster := &balanceRegionSampler{Cluster: tc, followers: []*core.RegionInfo{large}}
+				scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+					ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+				re.NoError(err)
+				// Prove that the follower is movable before controlling which batch contains it.
+				ops, _ := scheduler.Schedule(cluster, false)
+				re.Len(ops, 1)
+				re.Equal(large.GetID(), ops[0].RegionID())
+				var filtered []*core.RegionInfo
+				for range 10 {
+					filtered = append(filtered, tc.GetRegion(10))
+				}
+				cluster.batches = [][]*core.RegionInfo{filtered, {large}}
+				cluster.calls, cluster.samples = 0, 0
+				scheduler.(*balanceRegionScheduler).limits[1] = retryLimit
+				ops, _ = scheduler.Schedule(cluster, false)
+				re.Len(ops, 1)
+				if retryLimit == 1 {
+					re.LessOrEqual(ops[0].RegionID(), uint64(4))
+				} else {
+					re.Equal(large.GetID(), ops[0].RegionID())
+				}
+				operatorutil.CheckTransferPeer(re, ops[0], 0, 1, 5)
+				re.Equal(min(2, retryLimit), cluster.calls)
+			})
+		}
+	}
+}
+
+// TestBalanceRegionFilteredFollowerBatchCost bounds filtered sampling before falling back to leaders.
+func TestBalanceRegionFilteredFollowerBatchCost(t *testing.T) {
+	for _, placementRules := range []bool{false, true} {
+		for _, rejection := range []string{"empty", "hot", "no target"} {
+			t.Run(fmt.Sprintf("placement=%t/%s", placementRules, rejection), func(t *testing.T) {
+				re := require.New(t)
+				cancel, _, tc, oc := prepareSchedulersTest(false)
+				defer cancel()
+				tc.SetEnablePlacementRules(placementRules)
+				tc.SetMaxReplicasWithLabel(placementRules, 3)
+				tc.SetHotRegionCacheHitsThreshold(3)
+				for id := uint64(1); id <= 5; id++ {
+					tc.AddRegionStore(id, 0)
+				}
+				for id := uint64(1); id <= 4; id++ {
+					region := tc.AddLeaderRegion(id, 1, 2, 3)
+					tc.PutRegion(region.Clone(core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
+				}
+				for id := uint64(10); id < 110; id++ {
+					region := tc.AddLeaderRegion(id, 4, 1, 3)
+					tc.PutRegion(region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0)))
+				}
+				var rejected *core.RegionInfo
+				switch rejection {
+				case "hot":
+					tc.AddLeaderRegionWithWriteInfo(5, 4, 1<<30, 100000, 0, 60, []uint64{1, 3}, 5)
+					rejected = tc.GetRegion(5).Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2000))
+					tc.PutRegion(rejected)
+					re.True(tc.IsRegionHot(rejected))
+				case "no target":
+					rejected = tc.AddLeaderRegion(5, 4, 1, 5).Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2000))
+					tc.PutRegion(rejected)
+					re.False(tc.IsRegionHot(rejected))
+				}
+				for id := uint64(1); id <= 5; id++ {
+					tc.UpdateStoreStatus(id)
+				}
+				tc.SetStoreBusy(2, true)
+				tc.SetStoreBusy(3, true)
+				cluster := &balanceRegionSampler{Cluster: tc}
+				if rejected != nil {
+					for range 5 {
+						cluster.followers = append(cluster.followers, rejected, tc.GetRegion(10))
+					}
+				}
+				scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+					ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+				re.NoError(err)
+				// Every successful move resets the source quota, so verify repeated calls.
+				for _, retryLimit := range []int{1, 2, 10} {
+					for range 3 {
+						cluster.calls, cluster.samples = 0, 0
+						scheduler.(*balanceRegionScheduler).limits[1] = retryLimit
+						ops, _ := scheduler.Schedule(cluster, false)
+						re.Len(ops, 1)
+						re.LessOrEqual(ops[0].RegionID(), uint64(4))
+						re.Equal(min(2, retryLimit), cluster.calls, "retry quota: %d", retryLimit)
+						re.Equal(10*min(2, retryLimit), cluster.samples, "retry quota: %d", retryLimit)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestBalanceRegionIdleRetryQuota bounds candidate checks across batches and peer roles.
+func TestBalanceRegionIdleRetryQuota(t *testing.T) {
+	for _, placementRules := range []bool{false, true} {
+		for _, regionSizes := range [][]int64{{1}, {96}, {1, 96}} {
+			t.Run(fmt.Sprintf("placement=%t/sizes=%v", placementRules, regionSizes), func(t *testing.T) {
+				re := require.New(t)
+				cancel, _, tc, oc := prepareSchedulersTest(false)
+				defer cancel()
+				tc.SetEnablePlacementRules(placementRules)
+				tc.SetMaxReplicasWithLabel(placementRules, 3)
+				const storeCount = uint64(20)
+				for id := uint64(1); id <= storeCount; id++ {
+					tc.AddRegionStore(id, 0)
+				}
+				for id := range uint64(600) {
+					regionSize := regionSizes[id/storeCount%uint64(len(regionSizes))]
+					region := tc.AddLeaderRegion(id+1, id%storeCount+1, (id+1)%storeCount+1, (id+2)%storeCount+1)
+					tc.PutRegion(region.Clone(core.SetApproximateSize(regionSize), core.SetApproximateKeys(2000)))
+				}
+				for id := uint64(1); id <= storeCount; id++ {
+					tc.UpdateStoreStatus(id)
+					re.Equal(tc.GetStoreRegionSize(1), tc.GetStoreRegionSize(id))
+				}
+				cluster := &balanceRegionSampler{Cluster: tc}
+				scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+					ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+				re.NoError(err)
+				for _, retryLimit := range []int{1, 2, 10} {
+					for id := uint64(1); id <= storeCount; id++ {
+						scheduler.(*balanceRegionScheduler).limits[id] = retryLimit
+					}
+					cluster.regionChecks = 0
+					ops, _ := scheduler.Schedule(cluster, false)
+					re.Empty(ops)
+					re.Positive(cluster.regionChecks)
+					re.LessOrEqual(cluster.regionChecks, int(storeCount-1)*retryLimit)
+					t.Logf("retry quota: %d; candidates checked: %d", retryLimit, cluster.regionChecks)
+				}
+			})
+		}
+	}
+}
+
+// TestBalanceRegionCandidateRejectionFallback preserves candidates after score or operator rejection.
+func TestBalanceRegionCandidateRejectionFallback(t *testing.T) {
+	for _, rejection := range []struct {
+		name                      string
+		movableCount, emptyCount  uint64
+		movableSize, rejectedSize int64
+		emptyStore                uint64
+	}{
+		{"score", 110, 30, 1, 100, 5},
+		{"operator", 4, 100, 100, 1, 4},
+	} {
+		for _, placementRules := range []bool{false, true} {
+			for _, scoreVersion := range []string{"v1", "v2"} {
+				for _, sameRole := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/placement=%t/score=%s/same-role=%t", rejection.name, placementRules, scoreVersion, sameRole), func(t *testing.T) {
+						re := require.New(t)
+						cancel, _, tc, oc := prepareSchedulersTest(false)
+						defer cancel()
+						tc.SetEnablePlacementRules(placementRules)
+						tc.SetMaxReplicasWithLabel(placementRules, 3)
+						tc.SetTolerantSizeRatio(1)
+						tc.SetRegionScoreFormulaVersion(scoreVersion)
+						for id := uint64(1); id <= 5; id++ {
+							tc.AddRegionStore(id, 0)
+						}
+						for id := uint64(1); id <= rejection.movableCount; id++ {
+							region := tc.AddLeaderRegion(id, 1, 2, 3)
+							if sameRole && id == 1 {
+								region = tc.AddLeaderRegion(id, 4, 1, 3)
+							}
+							tc.PutRegion(region.Clone(core.SetApproximateSize(rejection.movableSize), core.SetApproximateKeys(2000)))
+						}
+						movable := tc.GetRegion(1)
+						rejectedID := rejection.movableCount + 1
+						rejected := tc.AddLeaderRegion(rejectedID, 4, 1, 3).Clone(core.SetApproximateSize(rejection.rejectedSize), core.SetApproximateKeys(2000))
+						if rejection.name == "operator" {
+							rejected = rejected.Clone(core.WithRole(rejected.GetStorePeer(1).GetId(), metapb.PeerRole_IncomingVoter))
+							re.True(core.IsInJointState(rejected.GetPeers()...))
+						}
+						tc.PutRegion(rejected)
+						for id := rejectedID + 1; id <= rejectedID+rejection.emptyCount; id++ {
+							region := tc.AddLeaderRegion(id, 2, 3, rejection.emptyStore)
+							tc.PutRegion(region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(0)))
+						}
+						for id := uint64(1); id <= 5; id++ {
+							tc.UpdateStoreStatus(id)
+						}
+						tc.SetStoreBusy(2, true)
+						tc.SetStoreBusy(3, true)
+						tc.SetStoreLimit(4, storelimit.AddPeer, 0.00006)
+						tc.ResetStoreLimit(4, storelimit.AddPeer, 0.000001)
+						re.True(tc.GetStore(4).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Medium))
+						re.False(tc.GetStore(4).IsAvailable(storelimit.AddPeer, constant.Medium))
+						tc.SetStoreOffline(5)
+						cluster := &balanceRegionSampler{Cluster: tc}
+						if sameRole {
+							cluster.followers = []*core.RegionInfo{rejected, movable}
+						}
+						scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+							ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+						re.NoError(err)
+						for range 4 {
+							ops, _ := scheduler.Schedule(cluster, false)
+							re.Empty(ops)
+						}
+						re.Equal(1, scheduler.(*balanceRegionScheduler).limits[1])
+						tc.SetStoreUp(5)
+						if !sameRole {
+							// The actual sampler encounters the sole rejected follower first.
+							re.Equal(rejectedID, tc.RandFollowerRegions(1, []keyutil.KeyRange{{}})[0].GetID())
+						}
+						if rejection.name == "operator" {
+							_, err = operator.CreateMovePeerOperator("test", tc, rejected, operator.OpRegion, 1,
+								&metapb.Peer{StoreId: 5, Role: metapb.PeerRole_IncomingVoter})
+							re.ErrorContains(err, "joint state")
+						}
+						probe, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+							ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+						re.NoError(err)
+						// A separate scheduler proves that the later candidates have a valid move.
+						if sameRole {
+							cluster.followers = []*core.RegionInfo{movable}
+						} else {
+							cluster.hideFollowers = true
+						}
+						ops, _ := probe.Schedule(cluster, false)
+						re.Len(ops, 1)
+						re.LessOrEqual(ops[0].RegionID(), rejection.movableCount)
+						operatorutil.CheckTransferPeer(re, ops[0], 0, 1, 5)
+						cluster.hideFollowers = false
+						if sameRole {
+							cluster.followers = []*core.RegionInfo{rejected, movable}
+						}
+						re.Equal(1, scheduler.(*balanceRegionScheduler).limits[1])
+						ops, plans := scheduler.Schedule(cluster, true)
+						re.Len(ops, 1)
+						re.LessOrEqual(ops[0].RegionID(), rejection.movableCount)
+						if sameRole {
+							re.Equal(movable.GetID(), ops[0].RegionID())
+						}
+						operatorutil.CheckTransferPeer(re, ops[0], 0, 1, 5)
+						sawRejection, sawMove := false, false
+						for _, p := range plans {
+							bp := p.(*plan.BalanceSchedulerPlan)
+							if bp.Region == nil || bp.Target == nil {
+								continue
+							}
+							if bp.Region.GetID() == rejectedID && bp.Target.GetID() == 5 {
+								if rejection.name == "operator" {
+									re.Equal(plan.StatusCreateOperatorFailed, int(bp.Status.StatusCode))
+									re.Equal(4, bp.Step)
+								} else {
+									re.Equal(plan.StatusStoreScoreDisallowed, int(bp.Status.StatusCode))
+									re.Equal(3, bp.Step)
+								}
+								sawRejection = true
+							}
+							if bp.Status.IsOK() {
+								re.Equal(ops[0].RegionID(), bp.Region.GetID())
+								re.Equal(4, bp.Step)
+								sawMove = true
+							}
+						}
+						re.True(sawRejection)
+						re.True(sawMove)
+					})
+				}
+			}
+		}
+	}
+}
+
+// TestBalanceRegionThrottledTargetRetryQuota bounds work until the receiver recovers.
+func TestBalanceRegionThrottledTargetRetryQuota(t *testing.T) {
+	for _, placementRules := range []bool{false, true} {
+		for _, regionSizes := range [][]int64{{1}, {96}, {1, 96}} {
+			t.Run(fmt.Sprintf("placement=%t/sizes=%v", placementRules, regionSizes), func(t *testing.T) {
+				re := require.New(t)
+				cancel, _, tc, oc := prepareSchedulersTest(false)
+				defer cancel()
+				tc.SetEnablePlacementRules(placementRules)
+				tc.SetMaxReplicasWithLabel(placementRules, 3)
+				const storeCount = uint64(20)
+				const targetID = storeCount + 1
+				for id := uint64(1); id <= targetID; id++ {
+					tc.AddRegionStore(id, 0)
+				}
+				for id := range uint64(600) {
+					size := regionSizes[id/storeCount%uint64(len(regionSizes))]
+					region := tc.AddLeaderRegion(id+1, id%storeCount+1, (id+1)%storeCount+1, (id+2)%storeCount+1)
+					tc.PutRegion(region.Clone(core.SetApproximateSize(size), core.SetApproximateKeys(2000)))
+				}
+				for id := uint64(1); id <= targetID; id++ {
+					tc.UpdateStoreStatus(id)
+				}
+				tc.SetStoreLimit(targetID, storelimit.AddPeer, 0.00006)
+				tc.ResetStoreLimit(targetID, storelimit.AddPeer, 0.000001)
+				re.True(tc.GetStore(targetID).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Medium))
+				re.False(tc.GetStore(targetID).IsAvailable(storelimit.AddPeer, constant.Medium))
+				cluster := &balanceRegionSampler{Cluster: tc}
+				scheduler, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+					ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+				re.NoError(err)
+				for range 4 {
+					ops, _ := scheduler.Schedule(cluster, false)
+					re.Empty(ops)
+				}
+				for id := uint64(1); id <= storeCount; id++ {
+					re.Equal(1, scheduler.(*balanceRegionScheduler).limits[id])
+				}
+				cluster.regionChecks = 0
+				ops, _ := scheduler.Schedule(cluster, false)
+				re.Empty(ops)
+				re.Positive(cluster.regionChecks)
+				re.LessOrEqual(cluster.regionChecks, int(storeCount))
+				t.Logf("candidate checks with throttled receiver and quota 1: %d", cluster.regionChecks)
+				// Recovery must remain effective even after the source quotas attenuate.
+				tc.SetStoreLimit(targetID, storelimit.AddPeer, 1000)
+				tc.ResetStoreLimit(targetID, storelimit.AddPeer, 1000)
+				re.True(tc.GetStore(targetID).IsAvailable(storelimit.AddPeer, constant.Medium))
+				ops, _ = scheduler.Schedule(cluster, false)
+				re.Len(ops, 1)
+				lastStep := ops[0].Step(ops[0].Len() - 1)
+				re.IsType(operator.RemovePeer{}, lastStep)
+				sourceID := lastStep.(operator.RemovePeer).FromStore
+				re.Positive(sourceID)
+				re.LessOrEqual(sourceID, storeCount)
+				operatorutil.CheckTransferPeer(re, ops[0], 0, sourceID, targetID)
+			})
+		}
+	}
 }
 
 func TestConcurrencyUpdateConfig(t *testing.T) {
