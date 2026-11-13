@@ -643,14 +643,21 @@ github.com/yusufpapurcu/wmi v1.2.2 h1:KBNDSne4vP5mbSWnJbO+51IMOXJB67QiYCSBrubbPR
 github.com/yusufpapurcu/wmi v1.2.2/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
 go.etcd.io/bbolt v1.3.10 h1:+BqfJTcCzTItrop8mq/lbzL8wSGtj94UO/3U31shqG0=
 go.etcd.io/bbolt v1.3.10/go.mod h1:bK3UQLPJZly7IlNmV7uVHJDxfe5aK9Ll93e/74Y9oEQ=
+<<<<<<< HEAD
 go.etcd.io/etcd/api/v3 v3.5.15 h1:3KpLJir1ZEBrYuV2v+Twaa/e2MdDCEZ/70H+lzEiwsk=
 go.etcd.io/etcd/api/v3 v3.5.15/go.mod h1:N9EhGzXq58WuMllgH9ZvnEr7SI9pS0k0+DHZezGp7jM=
 go.etcd.io/etcd/client/pkg/v3 v3.5.15 h1:fo0HpWz/KlHGMCC+YejpiCmyWDEuIpnTDzpJLB5fWlA=
 go.etcd.io/etcd/client/pkg/v3 v3.5.15/go.mod h1:mXDI4NAOwEiszrHCb0aqfAYNCrZP4e9hRca3d1YK8EU=
+=======
+go.etcd.io/etcd/api/v3 v3.5.33 h1:mUYXLPBlddsrnoJClluMOvUiamVfkHZrpjcGn0P/E7A=
+go.etcd.io/etcd/api/v3 v3.5.33/go.mod h1:HWqrOfdxawIb0emEazUt6pwL/dFYw5spr770r4qqPMM=
+go.etcd.io/etcd/client/pkg/v3 v3.5.33 h1:x9J84BdbVtb+47fQFsXniTA2sZEdy9S5+dQ9q5urpqM=
+go.etcd.io/etcd/client/pkg/v3 v3.5.33/go.mod h1:sngbNbeexiATS2+HxALIeJ7yoKofPzRDn5k9HqROgJ4=
+>>>>>>> c53f0fec7c (*: align etcd API and client to v3.5.33 (#11587))
 go.etcd.io/etcd/client/v2 v2.305.15 h1:VG2xbf8Vz1KJh65Ar2V5eDmfkp1bpzkSEHlhJM3usp8=
 go.etcd.io/etcd/client/v2 v2.305.15/go.mod h1:Ad5dRjPVb/n5yXgAWQ/hXzuXXkBk0Y658ocuXYaUU48=
-go.etcd.io/etcd/client/v3 v3.5.15 h1:23M0eY4Fd/inNv1ZfU3AxrbbOdW79r9V9Rl62Nm6ip4=
-go.etcd.io/etcd/client/v3 v3.5.15/go.mod h1:CLSJxrYjvLtHsrPKsy7LmZEE+DK2ktfd2bN4RhBMwlU=
+go.etcd.io/etcd/client/v3 v3.5.33 h1:Et6+4ObesJXc/MRMopKJn9/gM+gQiDl+tQvjC+vjoNE=
+go.etcd.io/etcd/client/v3 v3.5.33/go.mod h1:AX3e6c0oQib/7RC7EyFbJGUcJ+wO8VsyTEDsOHfw+EE=
 go.etcd.io/etcd/pkg/v3 v3.5.15 h1:/Iu6Sr3iYaAjy++8sIDoZW9/EfhcwLZwd4FOZX2mMOU=
 go.etcd.io/etcd/pkg/v3 v3.5.15/go.mod h1:e3Acf298sPFmTCGTrnGvkClEw9RYIyPtNzi1XM8rets=
 go.etcd.io/etcd/raft/v3 v3.5.15 h1:jOA2HJF7zb3wy8H/pL13e8geWqkEa/kUs0waUggZC0I=
