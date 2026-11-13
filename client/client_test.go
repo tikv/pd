@@ -18,20 +18,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
 	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 )
 
@@ -185,5 +193,141 @@ func TestIsKeyspaceUsingKeyspaceLevelGC(t *testing.T) {
 			// Then
 			require.Equal(t, test.want, got)
 		})
+	}
+}
+
+// attributionServer checks the actual QueryRegion wire metadata against the
+// component encoded in each test query, including batches of different kinds.
+type attributionServer struct {
+	pdpb.UnimplementedPDServer
+}
+
+func (*attributionServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if req.GetHeader().GetClusterId() != 0 || req.GetHeader().GetCallerId() != string(caller.GetCallerID()) {
+			return errors.New("incorrect cluster or caller ID")
+		}
+		component := req.GetHeader().GetCallerComponent()
+		resp := &pdpb.QueryRegionResponse{RegionsById: make(map[uint64]*pdpb.RegionResponse)}
+		for selector, keys := range [][][]byte{req.GetKeys(), req.GetPrevKeys()} {
+			components := [][]string{req.GetKeyCallerComponents(), req.GetPrevKeyCallerComponents()}[selector]
+			for i, key := range keys {
+				actual := component
+				if len(components) > 0 {
+					if len(components) != len(keys) {
+						return errors.New("incorrect key query component count")
+					}
+					actual = components[i]
+				}
+				if string(key) != actual {
+					return errors.New("incorrect key query component")
+				}
+			}
+		}
+		for i, id := range req.GetIds() {
+			actual := component
+			if components := req.GetIdCallerComponents(); len(components) > 0 {
+				if len(components) != len(req.GetIds()) {
+					return errors.New("incorrect ID query component count")
+				}
+				actual = components[i]
+			}
+			// Region ID 0 is invalid, so wrapper n queries region ID n+1.
+			expected := strconv.FormatUint(id-1, 10)
+			if id == 1 {
+				expected = ""
+			}
+			if actual != expected {
+				return errors.New("incorrect ID query component")
+			}
+		}
+		for range req.GetKeys() {
+			resp.KeyIdMap = append(resp.KeyIdMap, 42)
+		}
+		for range req.GetPrevKeys() {
+			resp.PrevKeyIdMap = append(resp.PrevKeyIdMap, 42)
+		}
+		for _, id := range append(req.GetIds(), 42) {
+			resp.RegionsById[id] = &pdpb.RegionResponse{Region: &metapb.Region{Id: id}, Leader: &metapb.Peer{Id: 1}}
+		}
+		if err := stream.Send(resp); err != nil {
+			return err
+		}
+	}
+}
+
+func TestRouterCallerAttribution(t *testing.T) {
+	re := require.New(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	server := grpc.NewServer()
+	pdpb.RegisterPDServer(server, &attributionServer{})
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		server.Stop()
+		re.NoError(<-serveErr)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	addr := "http://" + listener.Addr().String()
+	conn, err := grpcutil.GetClientConn(ctx, addr, nil)
+	re.NoError(err)
+	t.Cleanup(func() { re.NoError(conn.Close()) })
+	discovery := newTestServiceDiscovery(addr, conn)
+	option := opt.NewOption()
+	routerClient := router.NewClient(ctx, discovery, nil, option)
+	t.Cleanup(routerClient.Close)
+	cli := &client{callerComponent: "parent", inner: &innerClient{option: option}}
+	cli.inner.routerClient = routerClient
+
+	// Shared wrappers exercise all public APIs concurrently and repeatedly,
+	// including an empty component after requests have returned to the pool.
+	var wg sync.WaitGroup
+	results := make(chan error, 120)
+	for id := range uint64(4) {
+		component := caller.Component(strconv.FormatUint(id, 10))
+		if id == 0 {
+			component = ""
+		}
+		wrapped := cli.WithCallerComponent(component)
+		wg.Go(func() {
+			for range 10 {
+				for method := range 3 {
+					var region *router.Region
+					var err error
+					// An outer context must not override the wrapper's identity.
+					requestCtx := caller.WithComponent(ctx, "outer")
+					switch method {
+					case 0:
+						region, err = wrapped.GetRegion(requestCtx, []byte(component))
+					case 1:
+						region, err = wrapped.GetPrevRegion(requestCtx, []byte(component))
+					case 2:
+						region, err = wrapped.GetRegionByID(requestCtx, id+1)
+					}
+					expectedID := uint64(42)
+					if method == 2 {
+						expectedID = id + 1
+					}
+					if err == nil && (region == nil || region.Meta.GetId() != expectedID) {
+						err = errors.New("incorrect region result")
+					}
+					results <- err
+				}
+			}
+		})
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		re.NoError(err)
 	}
 }

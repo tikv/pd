@@ -1633,6 +1633,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 				resp := &pdpb.QueryRegionResponse{
 					Header: grpcutil.NotBootstrappedHeader(),
 				}
+				grpcutil.RecordQueryRegionRequestMetrics(request, resp.GetHeader().GetError(), regionRequestCounter)
 				if err = stream.Send(resp); err != nil {
 					return errors.WithStack(err)
 				}
@@ -1644,6 +1645,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 				resp := &pdpb.QueryRegionResponse{
 					Header: grpcutil.RegionNotFound(),
 				}
+				grpcutil.RecordQueryRegionRequestMetrics(request, resp.GetHeader().GetError(), regionRequestCounter)
 				if err = stream.Send(resp); err != nil {
 					return errors.WithStack(err)
 				}
@@ -1663,7 +1665,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		})
 		resp := grpcutil.QueryRegion(basicCluster, request)
 		queryRegionDuration.Observe(time.Since(start).Seconds())
-		grpcutil.RequestCounter("QueryRegion", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RecordQueryRegionRequestMetrics(request, resp.GetHeader().GetError(), regionRequestCounter)
 		if err := stream.Send(resp); err != nil {
 			return errors.WithStack(err)
 		}

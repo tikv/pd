@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -724,4 +725,66 @@ func TestRouterClientHeaderError(t *testing.T) {
 			re.Nil(r)
 		})
 	}
+}
+
+// TestQueryRegionHeaderErrorMetrics checks the early server response, which
+// bypasses region lookup, with mixed methods and repeated queries in one batch.
+func TestQueryRegionHeaderErrorMetrics(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	rpc, conn := testutil.MustNewGrpcClient(re, cluster.GetLeaderServer().GetAddr())
+	defer conn.Close()
+	stream, err := rpc.QueryRegion(ctx)
+	re.NoError(err)
+	defer func() { re.NoError(stream.CloseSend()) }()
+	// A test-specific caller isolates these series from other cluster tests.
+	callerID := t.Name()
+	snapshot := func() map[string]float64 {
+		values := make(map[string]float64)
+		families, err := prometheus.DefaultGatherer.Gather()
+		re.NoError(err)
+		for _, family := range families {
+			if family.GetName() != "pd_server_region_request_cnt" {
+				continue
+			}
+			for _, metric := range family.GetMetric() {
+				labels := make(map[string]string)
+				for _, label := range metric.GetLabel() {
+					labels[label.GetName()] = label.GetValue()
+				}
+				if labels["caller_id"] == callerID {
+					values[labels["request"]+"/"+labels["caller_component"]+"/"+labels["event"]] = metric.GetCounter().GetValue()
+				}
+			}
+		}
+		return values
+	}
+	before := snapshot()
+	re.NoError(stream.Send(&pdpb.QueryRegionRequest{
+		Header:                  &pdpb.RequestHeader{ClusterId: cluster.GetLeaderServer().GetClusterID(), CallerId: callerID},
+		Keys:                    [][]byte{[]byte("a"), []byte("a"), []byte("a")},
+		KeyCallerComponents:     []string{"a", "b", "a"},
+		PrevKeys:                [][]byte{[]byte("a")},
+		PrevKeyCallerComponents: []string{"b"},
+		Ids:                     []uint64{1},
+		IdCallerComponents:      []string{""},
+	}))
+	response, err := stream.Recv()
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, response.GetHeader().GetError().GetType())
+	after := snapshot()
+	for key, value := range before {
+		after[key] -= value
+	}
+	re.Equal(map[string]float64{
+		"GetRegion/a/failed":           2,
+		"GetRegion/b/failed":           1,
+		"GetPrevRegion/b/failed":       1,
+		"GetRegionByID/unknown/failed": 1,
+	}, after)
 }
