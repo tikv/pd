@@ -100,7 +100,7 @@ func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *co
 		}
 		if !targetAllowed {
 			if len(targets) == 0 {
-				return nil, errors.New("cannot transfer leader: target isolation would degrade")
+				return nil, errors.Wrap(ErrTargetIsolation, "cannot transfer leader")
 			}
 			targetStoreID = targets[0]
 		}

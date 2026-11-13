@@ -1429,7 +1429,7 @@ func TestTransferLeaderIsolationTargets(t *testing.T) {
 			op, err := CreateTransferLeaderOperator("test", tc, region, tt.preferred, input, OpLeader)
 			require.Equal(t, tt.targets, input)
 			if tt.wantLeader == 0 {
-				require.Error(t, err)
+				require.ErrorIs(t, err, ErrTargetIsolation)
 				require.Nil(t, op)
 				return
 			}
