@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -149,7 +148,7 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		unwritten.ID = "ordinary-rejected-batch"
 		protectedErrorChecks := []func([]byte, int, http.Header){
 			testutil.Status(re, http.StatusBadRequest),
-			testutil.WithHeader(re, "TiDB-Error-Code", errcode.InvalidInputCode.CodeStr().String()),
+			testutil.WithHeader(re, "TiDB-Error-Code", "input"),
 			func(body []byte, _ int, _ http.Header) {
 				var response struct {
 					Code string          `json:"code"`

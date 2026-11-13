@@ -39,7 +39,6 @@ import (
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
@@ -113,24 +112,65 @@ func TagJSONError(err error) error {
 	return err
 }
 
-// ErrorResp Respond to the client about the given error, integrating with errcode.ErrorCode.
-//
-// Important: if the `err` is just an error and not an errcode.ErrorCode (given by errors.Cause),
-// then by default an error is assumed to be a 500 Internal Error.
-//
-// If the error is nil, this also responds with a 500 and logs at the error level.
+// ErrorResp writes a structured response for native HTTP errors and legacy errcode values.
+// Other errors produce HTTP status 500 and a JSON string.
+// A nil error also produces HTTP status 500 and is logged at the error level.
 func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	if err == nil {
 		log.Error("nil is given to errorResp")
 		rd.JSON(w, http.StatusInternalServerError, "nil error")
 		return
 	}
-	if errCode := errcode.CodeChain(err); errCode != nil {
-		w.Header().Set("TiDB-Error-Code", errCode.Code().CodeStr().String())
-		rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
-	} else {
+	httpErr := errs.FindHTTPError(err)
+	if httpErr == nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
+	w.Header().Set("TiDB-Error-Code", httpErr.Code())
+	rd.JSON(w, httpErr.HTTPCode(), newHTTPErrorResponse(httpErr))
+}
+
+type httpErrorResponse struct {
+	Code      string              `json:"code"`
+	Msg       string              `json:"msg"`
+	Data      any                 `json:"data"`
+	Operation string              `json:"operation,omitempty"`
+	Stack     errors.StackTrace   `json:"stack,omitempty"`
+	Others    []httpErrorResponse `json:"others,omitempty"`
+}
+
+// newHTTPErrorResponse preserves the legacy JSON fields and additional-error order.
+func newHTTPErrorResponse(err errs.HTTPError) httpErrorResponse {
+	response := httpErrorResponse{Code: err.Code(), Msg: err.Error(), Data: err.GetClientData()}
+	for _, value := range []any{err, response.Data} {
+		if operation, ok := value.(interface{ GetOperation() string }); ok {
+			response.Operation = operation.GetOperation()
+			if response.Operation != "" {
+				break
+			}
+		}
+	}
+	if errs.IsInternalHTTPError(err) {
+		if tracer := errs.GetStackTracer(err); tracer != nil {
+			response.Stack = tracer.StackTrace()
+		}
+	}
+	if group, ok := err.(errors.ErrorGroup); ok {
+		items := group.Errors()
+		if len(items) > 1 {
+			for _, item := range items[1:] {
+				// Avoid collecting an already coded member's chain again.
+				other := errs.AsHTTPError(item)
+				if other == nil {
+					other = errs.FindHTTPError(item)
+				}
+				if other != nil {
+					response.Others = append(response.Others, newHTTPErrorResponse(other))
+				}
+			}
+		}
+	}
+	return response
 }
 
 // GetIPPortFromHTTPRequest returns http client host IP and port from context.
@@ -425,13 +465,13 @@ func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.Read
 	if err == nil {
 		return nil
 	}
-	var errCode errcode.ErrorCode
+	var responseErr error
 	if jsonErr, ok := errors.Cause(err).(JSONError); ok {
-		errCode = errcode.NewInvalidInputErr(jsonErr.Err)
+		responseErr = errs.NewInvalidInputErr(jsonErr.Err)
 	} else {
-		errCode = errcode.NewInternalErr(err)
+		responseErr = errs.NewInternalErr(err)
 	}
-	ErrorResp(rd, w, errCode)
+	ErrorResp(rd, w, responseErr)
 	return err
 }
 
