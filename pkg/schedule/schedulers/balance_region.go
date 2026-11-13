@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"errors"
 	"sort"
 	"strconv"
 
@@ -258,6 +259,10 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 			balanceRegionCreateOpFailCounter.Inc()
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
+			}
+			if errors.Is(err, operator.ErrTargetIsolation) {
+				solver.Step--
+				continue
 			}
 			return nil
 		}

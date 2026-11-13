@@ -81,10 +81,33 @@ func CreateRemovePeerOperator(desc string, ci sche.SharedCluster, kind OpKind, r
 
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
 func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
-	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck).
-		SetLeader(targetStoreID).
-		SetLeaders(targetStoreIDs).
-		Build(kind)
+	builder := NewBuilder(desc, ci, region, SkipOriginJointStateCheck)
+	// Some producers, including eviction, do not use a leader safeguard.
+	// Check every advertised target, not only the old-TiKV fallback target.
+	if fit := builder.originFit; builder.err == nil && fit != nil {
+		witness := ci.GetSharedConfig().IsWitnessAllowed()
+		// The preferred target can also appear in the list. Reuse its check.
+		targetAllowed := fit.IsLeaderIsolationPreserved(region, targetStoreID, witness)
+		targets := make([]uint64, 0, len(targetStoreIDs))
+		for _, id := range targetStoreIDs {
+			allowed := targetAllowed
+			if id != targetStoreID {
+				allowed = fit.IsLeaderIsolationPreserved(region, id, witness)
+			}
+			if allowed {
+				targets = append(targets, id)
+			}
+		}
+		if !targetAllowed {
+			if len(targets) == 0 {
+				return nil, errors.Wrap(ErrTargetIsolation, "cannot transfer leader")
+			}
+			targetStoreID = targets[0]
+		}
+		targetStoreIDs = targets
+		builder.leaderIsolationChecked = true
+	}
+	return builder.SetLeader(targetStoreID).SetLeaders(targetStoreIDs).Build(kind)
 }
 
 // CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.

@@ -667,12 +667,8 @@ func (f labelConstraintFilter) Target(_ config.SharedConfigProvider, store *core
 }
 
 type ruleFitFilter struct {
-	scope       string
-	cluster     *core.BasicCluster
-	ruleManager *placement.RuleManager
-	region      *core.RegionInfo
-	oldFit      *placement.RegionFit
-	srcStore    uint64
+	scope   string
+	replace func(*core.StoreInfo) bool
 }
 
 // newRuleFitFilter creates a filter that ensures after replace a peer with new
@@ -683,14 +679,7 @@ func newRuleFitFilter(scope string, cluster *core.BasicCluster, ruleManager *pla
 	if oldFit == nil {
 		oldFit = ruleManager.FitRegion(cluster, region)
 	}
-	return &ruleFitFilter{
-		scope:       scope,
-		cluster:     cluster,
-		ruleManager: ruleManager,
-		region:      region,
-		oldFit:      oldFit,
-		srcStore:    oldStoreID,
-	}
+	return &ruleFitFilter{scope: scope, replace: oldFit.NewReplacementChecker(oldStoreID)}
 }
 
 // Scope returns the scheduler or the checker which the filter acts on.
@@ -714,7 +703,7 @@ func (*ruleFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan
 // RegionA:[1,2,3], move peer1 --> peer2 will not allow, because it's count not match the rule.
 // but transfer role peer1 --> peer2, it will support.
 func (f *ruleFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	if f.oldFit.Replace(f.srcStore, store) {
+	if f.replace(store) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule
@@ -764,7 +753,7 @@ func (*ruleLeaderFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo)
 }
 
 // Target filters stores when select them as schedule target.
-func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *ruleLeaderFitFilter) Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	targetStoreID := store.GetID()
 	targetPeer := f.region.GetStorePeer(targetStoreID)
 	if targetPeer == nil && !f.allowMoveLeader {
@@ -774,7 +763,8 @@ func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.
 	if targetPeer != nil && targetPeer.IsWitness {
 		return statusStoreNotMatchRule
 	}
-	if f.oldFit.Replace(f.srcLeaderStoreID, store) {
+	if f.oldFit.Replace(f.srcLeaderStoreID, store) &&
+		(targetPeer == nil || f.oldFit.IsLeaderIsolationPreserved(f.region, targetStoreID, conf.IsWitnessAllowed())) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule
