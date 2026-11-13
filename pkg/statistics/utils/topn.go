@@ -114,6 +114,28 @@ func (tn *TopN) Put(item TopNItem) (isUpdate bool) {
 	return
 }
 
+// Replace updates an existing item without extending its TTL. rankChanged must
+// be true if the replacement changes the item's ordering in any dimension.
+// It returns false if the item is absent and does not insert it.
+func (tn *TopN) Replace(item TopNItem, rankChanged bool) bool {
+	tn.rw.Lock()
+	defer tn.rw.Unlock()
+	id := item.ID()
+	if tn.topns[0].get(id) == nil {
+		return false
+	}
+	for _, stn := range tn.topns {
+		if rankChanged {
+			stn.put(item)
+		} else if index, ok := stn.topn.index[id]; ok {
+			stn.topn.items[index] = item
+		} else {
+			stn.rest.items[stn.rest.index[id]] = item
+		}
+	}
+	return true
+}
+
 // RemoveExpired deletes all expired items.
 func (tn *TopN) RemoveExpired() []uint64 {
 	tn.rw.Lock()

@@ -88,6 +88,46 @@ func (it *item) Less(k int, than TopNItem) bool {
 	return it.values[k] < than.(*item).values[k]
 }
 
+func TestReplace(t *testing.T) {
+	re := require.New(t)
+	tn := NewTopN(2, 1, time.Hour)
+	first := &item{id: 1, values: []float64{1, 5}}
+	second := &item{id: 2, values: []float64{2, 4}}
+	tn.Put(first)
+	tn.Put(second)
+	expiration := tn.ttlLst.index[1].Value.(ttlItem)
+	position := tn.ttlLst.index[1]
+
+	metadata := &item{id: 1, values: []float64{1, 5}}
+	re.True(tn.Replace(metadata, false))
+	re.Same(metadata, tn.Get(1))
+	re.Same(second, tn.GetTopNMin(0))
+	re.Same(metadata, tn.GetTopNMin(1))
+	re.Contains(tn.GetAll(), metadata)
+	re.False(tn.Replace(&item{id: 3, values: []float64{10, 10}}, false))
+
+	replacement := &item{id: 1, values: []float64{3, 3}}
+	re.True(tn.Replace(replacement, true))
+	re.Same(replacement, tn.Get(1))
+	re.Same(replacement, tn.GetTopNMin(0))
+	re.Same(second, tn.GetTopNMin(1))
+	re.Same(position, tn.ttlLst.index[1])
+	re.Equal(expiration, tn.ttlLst.index[1].Value)
+	re.False(tn.Replace(&item{id: 3, values: []float64{10, 10}}, true))
+	re.Nil(tn.Get(3))
+	re.Equal(2, tn.Len())
+
+	// Make the original deadline expire without sleeping. A metadata replacement
+	// must neither move the TTL entry nor give an expired sample another lifetime.
+	expiration.expire = time.Now().Add(-time.Second)
+	position.Value = expiration
+	re.True(tn.Replace(first, true))
+	re.Contains(tn.RemoveExpired(), uint64(1))
+	re.Nil(tn.Get(1))
+	re.Same(second, tn.Get(2))
+	re.False(tn.Replace(replacement, true))
+}
+
 func TestPut(t *testing.T) {
 	re := require.New(t)
 	const Total, N = 10000, 50
