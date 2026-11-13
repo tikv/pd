@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -399,6 +400,13 @@ func isSatisfyRole(r core.Rule, role placement.PeerRoleType) bool {
 func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte, r core.Rule) float64 {
 	var storeCount float64
 	rules := c.GetRuleManager().GetRulesForApplyRange(startKey, endKey)
+	if r == core.LeaderScatter {
+		weight := rangeLeaderWeight(stores, store, rules, c.GetSchedulerConfig().IsWitnessAllowed())
+		if weight == 0 {
+			return 0
+		}
+		return float64(c.GetRegionCount(startKey, endKey)) * weight
+	}
 	for _, rule := range rules {
 		if !isSatisfyRole(r, rule.Role) {
 			continue
@@ -421,13 +429,8 @@ func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, stor
 			return 0.0
 		}
 		regionCount := c.GetRegionCount(startKey, endKey)
-		var weight float64
-		if r == core.LeaderScatter {
-			weight = 1.0 / float64(len(matchStores))
-		} else {
-			weight = core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
-			regionCount *= rule.Count
-		}
+		weight := core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
+		regionCount *= rule.Count
 		storeCount += float64(regionCount) * weight
 		log.Debug("calculate range result",
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
@@ -440,4 +443,48 @@ func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, stor
 		)
 	}
 	return storeCount
+}
+
+// rangeLeaderWeight distributes one leader demand across the union of eligible
+// stores. An explicit leader rule takes precedence over voter rules. Rule counts
+// describe replica demand, so they do not multiply or weight leader demand.
+// Witness rules exclude leader candidates only when witness support is enabled.
+func rangeLeaderWeight(stores []*core.StoreInfo, store *core.StoreInfo, rules []*placement.Rule, supportWitness bool) float64 {
+	role := placement.Voter
+	for _, rule := range rules {
+		if rule.Role == placement.Leader {
+			role = placement.Leader
+			break
+		}
+	}
+	// Most stores may be outside this rule range's leader targets. Skip the
+	// candidate scan for them before counting the matching stores.
+	if store.IsRemoving() || store.IsRemoved() || !slice.AnyOf(rules, func(i int) bool {
+		rule := rules[i]
+		return rule.Role == role && (!supportWitness || !rule.IsWitness) && placement.MatchLabelConstraints(store, rule.LabelConstraints)
+	}) {
+		return 0
+	}
+	count := 0
+	eligible := false
+	for _, candidate := range stores {
+		if candidate.IsRemoving() || candidate.IsRemoved() {
+			continue
+		}
+		for _, rule := range rules {
+			if rule.Role != role || (supportWitness && rule.IsWitness) || !placement.MatchLabelConstraints(candidate, rule.LabelConstraints) {
+				continue
+			}
+			count++
+			if candidate.GetID() == store.GetID() {
+				eligible = true
+			}
+			// A store that matches several rules still receives only one share.
+			break
+		}
+	}
+	if !eligible {
+		return 0
+	}
+	return 1 / float64(count)
 }
