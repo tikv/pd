@@ -300,7 +300,7 @@ func (m *GCStateManager) loadTxnSafePointKeyspace(ctx context.Context, keyspaceI
 }
 
 func gcKeyspaceScope(keyspaceID uint32, meta *keyspacepb.KeyspaceMeta, isUserAPI bool) (uint32, string, error) {
-	if meta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
+	if keyspace.EffectiveGCManagementType(meta.Config) != keyspace.KeyspaceLevelGC {
 		if isUserAPI {
 			// The user API is expected to always work. Operate on the state of unified GC instead.
 			return constant.NullKeyspaceID, "<null_keyspace>", nil
@@ -1210,7 +1210,7 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 		// the function, but it makes sure keyspaces that changed from keyspace-level GC to unified GC, the invalidated
 		// cached GC states (if any) are always overwritten by the unified GC ones.
 
-		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
+		if keyspace.EffectiveGCManagementType(keyspaceMeta.Config) != keyspace.KeyspaceLevelGC {
 			gcState := GCState{
 				KeyspaceID:      keyspaceMeta.GetId(),
 				IsKeyspaceLevel: false,

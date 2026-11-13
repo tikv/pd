@@ -2364,7 +2364,7 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 
 func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 	re := s.Require()
-	ks1, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks1, err := tests.CreateKeyspaceWithHistoricalGCMode(s.srv, &keyspace.CreateKeyspaceRequest{
 		Name:       "ks1",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),
@@ -2372,7 +2372,7 @@ func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 	re.NoError(err)
 	re.Equal(uint32(1), ks1.GetId())
 
-	ks2, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks2, err := tests.CreateKeyspaceWithHistoricalGCMode(s.srv, &keyspace.CreateKeyspaceRequest{
 		Name:       "ks2",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),
@@ -2838,7 +2838,7 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re := s.Require()
 	ctx := context.Background()
 	s.prepareKeyspacesForGCTest()
-	ks3, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks3, err := tests.CreateKeyspaceWithHistoricalGCMode(s.srv, &keyspace.CreateKeyspaceRequest{
 		Name:       "ks3",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.UnifiedGC},
 		CreateTime: time.Now().Unix(),

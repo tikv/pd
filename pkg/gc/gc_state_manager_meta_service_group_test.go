@@ -935,7 +935,7 @@ func TestTxnSafePointRoutingRevisionScopes(t *testing.T) {
 		mutated := false
 		re.NoError(failpoint.EnableCall(hook, func() {
 			mutated = true
-			_, err := manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: keyspace.GCManagementType, Value: keyspace.KeyspaceLevelGC}})
+			_, err := manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: "unrelated", Value: "updated"}})
 			re.NoError(err)
 		}))
 		defer func() { re.NoError(failpoint.Disable(hook)) }()
@@ -950,9 +950,6 @@ func TestTxnSafePointRoutingRevisionScopes(t *testing.T) {
 		revision, err := storage.Load(keypath.GCStateRevisionPath())
 		re.NoError(err)
 		re.Equal(beforeRevision, revision)
-		// Restore unified GC so the retry verifies redirected writes.
-		_, err = manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: keyspace.GCManagementType, Value: keyspace.UnifiedGC}})
-		re.NoError(err)
 		minimum, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
 		re.NoError(err)
 		re.True(updated)
