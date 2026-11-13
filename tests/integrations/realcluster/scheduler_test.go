@@ -39,7 +39,9 @@ type schedulerSuite struct {
 
 func TestScheduler(t *testing.T) {
 	suite.Run(t, &schedulerSuite{
-		suiteName: "scheduler",
+		clusterSuite: clusterSuite{
+			suiteName: "scheduler",
+		},
 	})
 }
 

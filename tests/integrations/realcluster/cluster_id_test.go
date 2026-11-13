@@ -31,7 +31,9 @@ type clusterIDSuite struct {
 
 func TestClusterID(t *testing.T) {
 	suite.Run(t, &clusterIDSuite{
-		suiteName: "cluster_id",
+		clusterSuite: clusterSuite{
+			suiteName: "cluster_id",
+		},
 	})
 }
 
