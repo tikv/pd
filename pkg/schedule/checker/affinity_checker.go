@@ -40,6 +40,14 @@ import (
 
 const recentMergeTTL = time.Minute
 
+type affinityPlacementStatus uint8
+
+const (
+	affinityPlacementReady affinityPlacementStatus = iota
+	affinityPlacementTemporary
+	affinityPlacementRejected
+)
+
 // AffinityChecker groups regions with affinity labels together by affinity group.
 // It ensures regions adhere to affinity group constraints by creating operators.
 type AffinityChecker struct {
@@ -113,7 +121,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(region, true /* isExistingRegion */) {
+	fit := c.ruleManager.FitRegion(c.cluster, region)
+	if c.checkRegionFitAtBestLocation(region, fit) != affinityPlacementReady {
 		affinityCheckerAbnormalReplicaCounter.Inc()
 		return nil
 	}
@@ -163,7 +172,18 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// Create operator to adjust region according to affinity group
-	op := c.createAffinityOperator(region, group)
+	op, relearn := c.createAffinityOperator(region, group, fit)
+	if relearn {
+		affinityCheckerLearnerPeerConflictCounter.Inc()
+		// Local learner placement is a heuristic. Relearn from this healthy
+		// Region now instead of letting the next Region restore the old target.
+		c.affinityManager.ExpireAffinityGroup(group.ID)
+		fresh := c.affinityManager.GetAffinityGroupState(group.ID)
+		c.affinityManager.ObserveAvailableRegion(region, fresh)
+		log.Debug("relearn affinity group after learner-voter conflict",
+			zap.Uint64("region-id", region.GetID()), zap.String("group-id", group.ID))
+		return nil
+	}
 	if op != nil {
 		affinityCheckerNewOpCounter.Inc()
 		return []*operator.Operator{op}
@@ -177,11 +197,12 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 // moving the region to match the expected configuration in one operation.
 //
 // This function preserves:
-// - Existing learner peers (e.g., TiFlash peers)
+// - Existing learner peers (e.g., TiFlash peers); moveConflictingLearners moves one off a target voter store
 //
 // Note: This function assumes that regions passed to it already comply with placement rules.
 // The affinity checker focuses solely on adjusting voter peers according to affinity group configuration.
-func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group *affinity.GroupState) *operator.Operator {
+// It requests relearning only when local learner placement fails without a temporary blocker.
+func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group *affinity.GroupState, fit *placement.RegionFit) (*operator.Operator, bool) {
 	// Build expected voter stores set
 	expectedVoterStores := make(map[uint64]bool)
 	for _, storeID := range group.VoterStoreIDs {
@@ -206,7 +227,7 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		}
 		if allMatch {
 			// No adjustment needed
-			return nil
+			return nil, false
 		}
 	}
 
@@ -225,31 +246,26 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 
 	// Preserve all existing learner peers
 	// Since regions that violate placement rules won't reach this function,
-	// we can safely assume all existing learners should be preserved
+	// the rules require these learners, and moveConflictingLearners moves the
+	// ones on target voter stores.
 	for _, learner := range region.GetLearners() {
 		storeID := learner.GetStoreId()
-		// Only add learner if it's not already in the voters list
-		// (in case there's a conflict, voters take precedence)
-		if existingRole, exists := roles[storeID]; !exists {
+		if _, exists := roles[storeID]; !exists {
 			roles[storeID] = placement.Learner
-		} else if existingRole != placement.Learner {
-			affinityCheckerLearnerPeerConflictCounter.Inc()
-			log.Debug("learner peer conflicts with affinity voter, voter takes precedence",
-				zap.Uint64("region-id", region.GetID()),
-				zap.String("group-id", group.ID),
-				zap.Uint64("store-id", storeID),
-				zap.String("conflicting-role", string(existingRole)))
-			return nil
 		}
+	}
+	movedLearners, status := c.moveConflictingLearners(region, group, fit, roles)
+	if status != affinityPlacementReady {
+		return nil, status == affinityPlacementRejected
 	}
 
 	// Skip building if target leader store currently disallows leader in (e.g., evict-leader / reject-leader).
 	if targetLeader := c.cluster.GetStore(group.LeaderStoreID); targetLeader != nil {
 		if !targetLeader.AllowLeaderTransferIn() || c.conf.CheckLabelProperty(config.RejectLeader, targetLeader.GetLabels()) {
-			return nil
+			return nil, false
 		}
 	} else {
-		return nil
+		return nil, false
 	}
 
 	// Determine operator kind based on whether leader needs to change
@@ -266,10 +282,13 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 			zap.String("group-id", group.ID),
 			errs.ZapError(err))
 		affinityCheckerCreateOpFailedCounter.Inc()
-		return nil
+		return nil, false
+	}
+	if movedLearners {
+		affinityCheckerLearnerMoveCounter.Inc()
 	}
 
-	return op
+	return op, false
 }
 
 // mergeCheck verifies if a region can be merged with its adjacent regions within the same affinity group.
@@ -521,12 +540,16 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 	} else {
 		fit = c.ruleManager.FitRegionWithoutCache(c.cluster, region)
 	}
+	return c.checkRegionFitAtBestLocation(region, fit) == affinityPlacementReady
+}
 
+func (c *AffinityChecker) checkRegionFitAtBestLocation(region *core.RegionInfo, fit *placement.RegionFit) affinityPlacementStatus {
 	// Check region is satisfied
 	if fit == nil || !fit.IsSatisfied() {
-		return false
+		return affinityPlacementRejected
 	}
 
+	status := affinityPlacementReady
 	// Check whether all peers covered by the rules are at the best isolation level.
 	// This logic is based on `RuleChecker.fixBetterLocation`.
 	for _, rf := range fit.RuleFits {
@@ -537,18 +560,22 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 		// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
 		strategy := c.strategy(region, rf.Rule, isWitness)
 		_, newStoreID, filterByTempState := strategy.getBetterLocation(c.cluster, region, fit, rf)
-		// filterByTempState being true means a better placement exists but is temporarily unschedulable.
-		// This is also considered not satisfied.
-		if newStoreID != 0 || filterByTempState {
-			return false
+		if newStoreID != 0 {
+			return affinityPlacementRejected
+		}
+		if filterByTempState {
+			// Recovery may also fix this rule's hard isolation. Keep checking
+			// the other rules: a definite rejection takes precedence over waiting.
+			status = affinityPlacementTemporary
+			continue
 		}
 		// If the isolation level does not meet the requirement, it is also considered not to be at the best location.
 		if !statistics.IsRegionLabelIsolationSatisfied(rf.Stores, rf.Rule.LocationLabels, rf.Rule.IsolationLevel) {
-			return false
+			return affinityPlacementRejected
 		}
 	}
 
-	return true
+	return status
 }
 
 func (c *AffinityChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
