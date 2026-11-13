@@ -167,13 +167,13 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 	if len(keys) > 0 {
 		hexKeys := make([]string, len(keys))
 		for i := range keys {
-			hexKeys[i] = core.HexRegionKeyStr(logutil.RedactBytes(keys[i]))
+			hexKeys[i] = logutil.RedactString(core.HexRegionKeyStr(keys[i]))
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
 	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind, region.GetApproximateSize(), step)
-	op.SetAdditionalInfo("region-start-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey())))
-	op.SetAdditionalInfo("region-end-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey())))
+	op.SetAdditionalInfo("region-start-key", logutil.RedactString(core.HexRegionKeyStr(region.GetStartKey())))
+	op.SetAdditionalInfo("region-end-key", logutil.RedactString(core.HexRegionKeyStr(region.GetEndKey())))
 	return op, nil
 }
 
