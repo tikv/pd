@@ -112,7 +112,7 @@ func TagJSONError(err error) error {
 	return err
 }
 
-// ErrorResp writes a structured response for errors implementing errs.HTTPError.
+// ErrorResp writes a structured response for native HTTP errors and legacy errcode values.
 // Other errors produce HTTP status 500 and a JSON string.
 // A nil error also produces HTTP status 500 and is logged at the error level.
 func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
