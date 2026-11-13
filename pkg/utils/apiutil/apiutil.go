@@ -130,6 +130,49 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	rd.JSON(w, httpErr.HTTPCode(), newHTTPErrorResponse(httpErr))
 }
 
+type httpErrorResponse struct {
+	Code      string              `json:"code"`
+	Msg       string              `json:"msg"`
+	Data      any                 `json:"data"`
+	Operation string              `json:"operation,omitempty"`
+	Stack     errors.StackTrace   `json:"stack,omitempty"`
+	Others    []httpErrorResponse `json:"others,omitempty"`
+}
+
+// newHTTPErrorResponse preserves the legacy JSON fields and additional-error order.
+func newHTTPErrorResponse(err errs.HTTPError) httpErrorResponse {
+	response := httpErrorResponse{Code: err.Code(), Msg: err.Error(), Data: err.GetClientData()}
+	for _, value := range []any{err, response.Data} {
+		if operation, ok := value.(interface{ GetOperation() string }); ok {
+			response.Operation = operation.GetOperation()
+			if response.Operation != "" {
+				break
+			}
+		}
+	}
+	if errs.IsInternalHTTPError(err) {
+		if tracer := errs.GetStackTracer(err); tracer != nil {
+			response.Stack = tracer.StackTrace()
+		}
+	}
+	if group, ok := err.(errors.ErrorGroup); ok {
+		items := group.Errors()
+		if len(items) > 1 {
+			for _, item := range items[1:] {
+				// Avoid collecting an already coded member's chain again.
+				other := errs.AsHTTPError(item)
+				if other == nil {
+					other = errs.FindHTTPError(item)
+				}
+				if other != nil {
+					response.Others = append(response.Others, newHTTPErrorResponse(other))
+				}
+			}
+		}
+	}
+	return response
+}
+
 // GetIPPortFromHTTPRequest returns http client host IP and port from context.
 // Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
 // so `X-Forwarded-For` has the higher priority than `X-Real-Ip`.

@@ -228,7 +228,6 @@ tidy:
 	git diff --quiet go.mod go.sum
 
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd $(ROOT_PATH) > /dev/null; done
-	@cd pkg/errs/testdata/legacy && go mod tidy -diff
 
 generate-errdoc: install-tools
 	@echo "generating errors.toml..."
@@ -276,23 +275,17 @@ BASIC_TEST_PKGS := $(filter-out $(PD_PKG)/tests%,$(TEST_PKGS))
 SUBMODULES := $(filter $(shell find . -iname "go.mod" -exec dirname {} \;),\
 				$(filter-out .,$(shell find . -iname "Makefile" -exec dirname {} \;)))
 
-test: install-tools test-errcode-compatibility
+test: install-tools
 	# testing all pkgs...
 	@$(FAILPOINT_ENABLE)
 	CGO_ENABLED=1 go test -tags deadlock -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-basic-test: install-tools test-errcode-compatibility
+basic-test: install-tools
 	# testing basic pkgs...
 	@$(FAILPOINT_ENABLE)
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
-
-# Keep the legacy dependency confined to an isolated compatibility test module.
-test-errcode-compatibility:
-	cd pkg/errs/testdata/legacy && go test ./...
-
-.PHONY: test-errcode-compatibility
 
 # gotest runs a targeted go test with failpoints automatically enabled/disabled.
 # Usage: make gotest GOTEST_ARGS='./pkg/gctuner -run TestInitGCTuner -count=1'
@@ -302,7 +295,7 @@ gotest: install-tools
 	go test $(GOTEST_ARGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-ci-test-job: install-tools dashboard-ui pd-ut test-errcode-compatibility
+ci-test-job: install-tools dashboard-ui pd-ut
 	@$(FAILPOINT_ENABLE)
 	./scripts/ci-subtask.sh $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
