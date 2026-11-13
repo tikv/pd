@@ -302,6 +302,11 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		}
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
+		if typ == types.BalanceRangeScheduler && c.schedulers.UsesPersistedBalanceRangeConfig() {
+			// MCS registers this scheduler after initialization using the latest
+			// watched jobs, not this possibly stale startup snapshot.
+			continue
+		}
 		var cfg sc.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
 			if c.Type == types.SchedulerTypeCompatibleMap[typ] {
@@ -357,6 +362,13 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		}
 
 		tp := types.ConvertOldStrToType[schedulerCfg.Type]
+		if tp == types.BalanceRangeScheduler && c.schedulers.UsesPersistedBalanceRangeConfig() {
+			// Keep the declaration even if its independent config has not arrived
+			// yet. The MCS config watcher will retry creation when it arrives.
+			scheduleCfg.Schedulers[k] = schedulerCfg
+			k++
+			continue
+		}
 		s, err := schedulers.CreateScheduler(tp, c.opController,
 			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), removeSchedulerCb)
 		if err != nil {

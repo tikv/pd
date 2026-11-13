@@ -227,6 +227,16 @@ func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) er
 	return nil
 }
 
+// PersistScheduleConfig persists the in-memory schedule config, including the
+// scheduler list, to the storage.
+func (h *Handler) PersistScheduleConfig() error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	return h.opt.Persist(c.GetStorage())
+}
+
 // RemoveScheduler removes a scheduler by name.
 func (h *Handler) RemoveScheduler(name string) error {
 	c, err := h.GetRaftCluster()

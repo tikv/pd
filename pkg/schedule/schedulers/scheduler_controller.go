@@ -58,6 +58,24 @@ type Controller struct {
 	// which will only be initialized and used in the microservice env now.
 	schedulerHandlers map[string]http.Handler
 	opController      *operator.Controller
+	// In MCS, PD owns the balance-range jobs. Creation must load the watched
+	// config instead of persisting a job reconstructed from scheduler args.
+	balanceRangeConfigFromStorage bool
+}
+
+// UsePersistedBalanceRangeConfig makes balance-range creation consume the
+// watched configuration without overwriting it. Call before initialization.
+func (c *Controller) UsePersistedBalanceRangeConfig() {
+	c.Lock()
+	defer c.Unlock()
+	c.balanceRangeConfigFromStorage = true
+}
+
+// UsesPersistedBalanceRangeConfig reports whether PD owns the balance-range jobs.
+func (c *Controller) UsesPersistedBalanceRangeConfig() bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.balanceRangeConfigFromStorage
 }
 
 // NewController creates a scheduler controller.
@@ -258,6 +276,15 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
+	loadWatchedConfig := c.balanceRangeConfigFromStorage && scheduler.GetType() == types.BalanceRangeScheduler
+	if loadWatchedConfig {
+		// Hold the same lock as UpdateSchedulerConfig through registration, so a
+		// concurrent watch event either precedes this load or reloads the instance
+		// after registration. Never write an empty or stale job list here.
+		if err := scheduler.ReloadConfig(); err != nil {
+			return err
+		}
+	}
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
 	// Run every step that can fail before registering and starting the
 	// scheduler, so a failure here never leaves a scheduler running (or
@@ -274,13 +301,15 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 			errs.ZapError(err))
 		// No need to return here, we still use the scheduler config to control the `disable` now.
 	}
-	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
-		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
-		// PrepareConfig above may already have taken effect (e.g. paused
-		// stores), so undo it before returning: this call must not leave
-		// the scheduler half set up.
-		scheduler.CleanConfig(c.cluster)
-		return err
+	if !loadWatchedConfig {
+		if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
+			log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+			// PrepareConfig above may already have taken effect (e.g. paused
+			// stores), so undo it before returning: this call must not leave
+			// the scheduler half set up.
+			scheduler.CleanConfig(c.cluster)
+			return err
+		}
 	}
 	c.wg.Add(1)
 	go c.runScheduler(s)
@@ -308,14 +337,19 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return err
 	}
 
-	// nolint:errcheck
-	// SetDisable will not work now, because the config is removed. We can't
-	// remove the config in the future, if we want to use `Disable` of independent
-	// config.
-	_ = s.SetDisable(true)
-	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
-		log.Error("can not remove the scheduler config", errs.ZapError(err))
-		return err
+	// MCS balance-range configs belong to the independent config watcher.
+	// Removing an old runtime must not overwrite or delete a replacement's
+	// configuration that the watcher has already cached.
+	if !c.balanceRangeConfigFromStorage || s.GetType() != types.BalanceRangeScheduler {
+		// nolint:errcheck
+		// SetDisable will not work now, because the config is removed. We can't
+		// remove the config in the future, if we want to use `Disable` of independent
+		// config.
+		_ = s.SetDisable(true)
+		if err := c.storage.RemoveSchedulerConfig(name); err != nil {
+			log.Error("can not remove the scheduler config", errs.ZapError(err))
+			return err
+		}
 	}
 
 	s.Stop()
@@ -353,6 +387,25 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 		sc.SetDelay(delayAt, delayUntil)
 	}
 	return err
+}
+
+// UpdateSchedulerConfig installs a watched config and reloads its scheduler under
+// the creation lock. It also caches configs received before scheduler creation.
+func (c *Controller) UpdateSchedulerConfig(name string, data []byte) error {
+	c.Lock()
+	defer c.Unlock()
+	if scheduler := c.schedulers[name]; scheduler != nil {
+		if balanceRange, ok := scheduler.Scheduler.(*balanceRangeScheduler); ok {
+			return balanceRange.updateConfig(c.storage, data)
+		}
+	}
+	if err := c.storage.SaveSchedulerConfig(name, data); err != nil {
+		return err
+	}
+	if scheduler := c.schedulers[name]; scheduler != nil {
+		return scheduler.ReloadConfig()
+	}
+	return nil
 }
 
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.

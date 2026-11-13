@@ -28,11 +28,13 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -216,6 +218,21 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		name := strings.TrimPrefix(key, cw.schedulerConfigPathPrefix)
 		log.Info("update scheduler config", zap.String("name", name),
 			zap.String("value", string(kv.Value)))
+		if name == types.BalanceRangeScheduler.String() {
+			failpoint.InjectCall("beforeUpdateBalanceRangeSchedulerConfig")
+			var err error
+			if sc := cw.getSchedulersController(); sc != nil {
+				err = sc.UpdateSchedulerConfig(name, kv.Value)
+			} else {
+				err = cw.storage.SaveSchedulerConfig(name, kv.Value)
+			}
+			if err == nil {
+				// The global scheduler list may have arrived first. Retry creation
+				// now that the jobs are available, even if that list did not change.
+				cw.tryNotifySchedulersUpdating()
+			}
+			return err
+		}
 		err := cw.storage.SaveSchedulerConfig(name, kv.Value)
 		if err != nil {
 			log.Warn("failed to save scheduler config",
