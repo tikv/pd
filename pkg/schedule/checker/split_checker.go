@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -58,6 +59,7 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 
 	start, end := region.GetStartKey(), region.GetEndKey()
+
 	// We may consider to merge labeler split keys and rule split keys together
 	// before creating operator. It can help to reduce operator count. However,
 	// handle them separately helps to understand the reason for the split.
@@ -67,6 +69,16 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if len(keys) == 0 && c.cluster.GetCheckerConfig().IsPlacementRulesEnabled() {
 		desc = "rule-split-region"
 		keys = c.ruleManager.GetSplitKeys(start, end)
+	}
+
+	if len(keys) == 0 {
+		desc = "keyspace-split-region"
+		var err error
+		keys, err = keyspace.GetKeyspaceSplitKeys(start, end, c.cluster.GetSharedConfig().GetKeyType(), c.cluster)
+		if err != nil {
+			log.Debug("skip keyspace split while metadata is unavailable", errs.ZapError(err))
+			return nil
+		}
 	}
 
 	if len(keys) == 0 {

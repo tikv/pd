@@ -17,6 +17,7 @@ package mockcluster
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -65,6 +66,7 @@ type Cluster struct {
 	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage
+	existingKeyspaces map[uint32]struct{}
 }
 
 // NewCluster creates a new Cluster
@@ -80,6 +82,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		KeyRangeManager:         keyrange.NewManager(),
 		pendingProcessedRegions: map[uint64]struct{}{},
 		Storage:                 storage.NewStorageWithMemoryBackend(),
+		existingKeyspaces:       map[uint32]struct{}{},
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
@@ -119,6 +122,44 @@ func (mc *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider {
 // GetSharedConfig returns the shared config.
 func (mc *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return mc.PersistOptions
+}
+
+// AddKeyspace registers the given keyspace IDs as existing, for tests whose
+// code path consults GetKeyspaceIDInRange/KeyspaceExist. No keyspace exists
+// by default.
+func (mc *Cluster) AddKeyspace(ids ...uint32) {
+	for _, id := range ids {
+		mc.existingKeyspaces[id] = struct{}{}
+	}
+}
+
+// GetKeyspaceIDInRange returns the keyspace IDs in the range [startKeyspaceID, endKeyspaceID] with a limit on the number of keyspace IDs returned.
+// No keyspace exists unless registered via AddKeyspace.
+func (mc *Cluster) GetKeyspaceIDInRange(startKeyspaceID uint32, endKeyspaceID uint32, limit int) ([]uint32, error) {
+	if startKeyspaceID > endKeyspaceID {
+		return nil, nil
+	}
+	ret := make([]uint32, 0, max(limit, 0))
+	// Wide region ranges can cover the entire 24-bit ID space. Iterate only
+	// registered IDs and match the real cache's descending range semantics.
+	for id := range mc.existingKeyspaces {
+		if id >= startKeyspaceID && id <= endKeyspaceID {
+			ret = append(ret, id)
+		}
+	}
+	slices.Sort(ret)
+	slices.Reverse(ret)
+	if limit > 0 && len(ret) > limit {
+		ret = ret[:limit]
+	}
+	return ret, nil
+}
+
+// KeyspaceExist checks if a keyspace exists by ID. No keyspace exists unless
+// registered via AddKeyspace.
+func (mc *Cluster) KeyspaceExist(id uint32) bool {
+	_, ok := mc.existingKeyspaces[id]
+	return ok
 }
 
 // GetStorage returns the storage.
