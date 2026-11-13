@@ -17,6 +17,7 @@ package checker
 import (
 	"context"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -300,6 +301,55 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	ops = affinityChecker.Check(tc.GetRegion(200))
 	re.True(affinityManager.GetAffinityGroupState("test_group").AffinitySchedulingAllowed)
 	re.Nil(ops, "Checker should not create operator for same peers")
+}
+
+type unresponsiveTargetWriter struct {
+	timeout time.Duration
+	calls   atomic.Int32
+}
+
+func (w *unresponsiveTargetWriter) WriteGroupTargets(ctx context.Context, _ []affinity.GroupTarget) ([]string, error) {
+	w.calls.Add(1)
+	reqCtx, cancel := context.WithTimeout(ctx, w.timeout)
+	defer cancel()
+	<-reqCtx.Done()
+	return nil, reqCtx.Err()
+}
+
+// Regression for discussion_r4465255434: an unresponsive PD must not block patrol.
+func TestAffinityCheckerFirstWinWithUnresponsivePD(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	opt := newAffinityTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	for storeID := uint64(1); storeID <= 3; storeID++ {
+		tc.AddRegionStore(storeID, 10)
+	}
+	regions := []*core.RegionInfo{
+		tc.AddLeaderRegion(100, 1, 2, 3),
+		tc.AddLeaderRegion(200, 2, 1, 3),
+		tc.AddLeaderRegion(300, 3, 1, 2),
+	}
+	affinityManager := tc.GetAffinityManager()
+	writer := &unresponsiveTargetWriter{timeout: 3 * time.Second}
+	affinityManager.SetTargetWriter(writer)
+	affinityChecker := newTestAffinityChecker(ctx, tc, opt)
+	re.NoError(createAffinityGroupForTest(affinityManager, &affinity.Group{ID: "g"}, []byte(""), []byte("")))
+
+	start := time.Now()
+	for range 2 {
+		for _, region := range regions {
+			re.Empty(affinityChecker.Check(region))
+		}
+	}
+	re.Less(time.Since(start), writer.timeout, "the checker must not wait for PD")
+	testutil.Eventually(re, func() bool { return writer.calls.Load() == 1 })
+
+	re.Equal(int32(1), writer.calls.Load())
+	group := affinityManager.GetAffinityGroupState("g")
+	re.Zero(group.LeaderStoreID)
+	re.False(group.AffinitySchedulingAllowed)
 }
 
 // TestAffinityAvailabilityCheckWithOfflineStore tests that groups are invalidated when stores go offline.

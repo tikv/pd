@@ -344,6 +344,18 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
 		}
+		if m.targetWriter != nil {
+			target := GroupTarget{Expected: group.Group, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
+			if sameStoredGroup(&target.Expected, target.result()) {
+				m.Lock()
+				m.setTargetAvailabilityLocked(m.groups[groupID])
+				m.resetCountLocked(m.groups[groupID])
+				m.Unlock()
+			} else {
+				m.sendObservedTarget(target)
+			}
+			return m.GetAffinityGroupState(groupID), nil
+		}
 	}
 
 	// Step 2: Save the Group in storage.
