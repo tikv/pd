@@ -15,6 +15,7 @@
 package balanceplan
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 
@@ -191,7 +192,12 @@ func TestLeaderChains(t *testing.T) {
 		{"cannot lead", func(g *Group) { g.CanLead = []bool{true, true, false} }, Score{27, 5}, StopGreedy, 0},
 		{"pinned", func(g *Group) { g.LeaderPinned = true }, Score{27, 5}, StopGreedy, 0},
 		{"placement check", func(g *Group) {
-			g.CheckTarget = func(_ []int, leader int) bool { return leader != 2 }
+			g.CheckTarget = func(_ []int, leader int, _ int64) TargetFeedback {
+				if leader == 2 {
+					return TargetFeedback{Status: TargetRejected}
+				}
+				return TargetFeedback{}
+			}
 		}, Score{27, 5}, StopGreedy, 0},
 		{"follower", func(g *Group) {
 			g.Rules = []*Rule{{Count: 1, Stores: []int{1}}, {Role: RoleFollower, Count: 1, Stores: []int{2}}}
@@ -469,10 +475,13 @@ func TestRejectedTargetsRespectStop(t *testing.T) {
 			g.RuleOf, g.Forced = []int{0, 1}, []int{0}
 			in.BaseVoters[1] = 5
 			rejected := false
-			g.CheckTarget = func(voters []int, leader int) bool {
+			g.CheckTarget = func(voters []int, leader int, _ int64) TargetFeedback {
 				ok := sameSet(voters, g.Voters) && leader == g.Leader
 				rejected = rejected || !ok
-				return ok
+				if ok {
+					return TargetFeedback{}
+				}
+				return TargetFeedback{Status: TargetRejected, Work: 1000}
 			}
 			opt := Options{Cancel: func() bool { return stop == StopCanceled && rejected }}
 			if stop == StopBudget {
@@ -483,7 +492,7 @@ func TestRejectedTargetsRespectStop(t *testing.T) {
 			re.Equal(stop, r.Stop)
 			re.Equal(r.Baseline, r.Score)
 			re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score)
-			re.LessOrEqual(r.Work, int64(1600))
+			re.LessOrEqual(r.Work, int64(1602))
 		})
 	}
 }
@@ -547,6 +556,180 @@ func BenchmarkPlan(b *testing.B) {
 			for i := 0; b.Loop(); i++ {
 				Plan(in, Options{Seed: uint64(i)})
 			}
+		})
+	}
+}
+
+func TestDirectedPlacementFeedback(t *testing.T) {
+	in := general(12, 9, 3, 1)
+	for i := range in.Groups {
+		in.Groups[i].Voters = []int{0, 1, 2}
+		in.Groups[i].Leader = 0
+		in.Groups[i].CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
+			if slices.Contains(voters, 3) {
+				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: 3, Candidates: []int{4, 5, 6, 7, 8}}}, Work: 9}
+			}
+			return TargetFeedback{Work: 9}
+		}
+	}
+	r := Plan(in, Options{Seed: 7})
+	require.Less(t, r.Score.Voter, r.Baseline.Voter)
+	require.Equal(t, StopGreedy, r.Stop)
+	for _, voters := range r.Voters {
+		require.NotContains(t, voters, 3)
+	}
+	require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score)
+	t.Logf("single-rule feedback: %v -> %v changed=%d stop=%s work=%d", r.Baseline, r.Score, r.Changed, r.Stop, r.Work)
+	for i := range in.Groups {
+		in.Groups[i].CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
+			if slices.Contains(voters, 3) {
+				return TargetFeedback{Status: TargetTemporarilyBlocked, Work: 9}
+			}
+			return TargetFeedback{Work: 9}
+		}
+	}
+	blocked := Plan(in, Options{Seed: 7})
+	require.True(t, blocked.TemporarilyBlocked)
+	require.Equal(t, blocked.Baseline.Voter, blocked.Score.Voter)
+	for i := range in.Groups {
+		in.Groups[i].CheckTarget = nil
+	}
+	recovered := Plan(in, Options{Seed: 7})
+	require.Less(t, recovered.Score.Voter, blocked.Score.Voter)
+	require.False(t, recovered.TemporarilyBlocked)
+	// No feedback was persisted in the input, including Exclude.
+	for _, g := range in.Groups {
+		require.Empty(t, g.Exclude)
+	}
+}
+
+func TestDirectedPlacementCycle(t *testing.T) {
+	for _, withReplacement := range []bool{false, true} {
+		t.Run(fmt.Sprintf("replacement=%v", withReplacement), func(t *testing.T) {
+			in := general(1, 5, 2, 1)
+			in.Groups[0].Forced = []int{0}
+			in.BaseVoters[1] = 5
+			calls := 0
+			in.Groups[0].CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
+				calls++
+				if sameSet(voters, in.Groups[0].Voters) {
+					return TargetFeedback{}
+				}
+				if !withReplacement {
+					return TargetFeedback{Status: TargetRejected, Work: 5}
+				}
+				old, next := 2, 3
+				if slices.Contains(voters, 3) {
+					old, next = 3, 2
+				}
+				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: old, Candidates: []int{next}}}, Work: 5}
+			}
+			r := Plan(in, Options{Seed: 7})
+			require.False(t, r.PlacementLimited)
+			require.False(t, r.TemporarilyBlocked)
+			require.Equal(t, r.Baseline, r.Score)
+			require.Less(t, calls, 10)
+			require.Empty(t, in.Groups[0].Exclude)
+		})
+	}
+}
+
+// A cheaper cyclic branch or a legal unchanged target must not hide its sibling.
+func TestDirectedRepairAlternative(t *testing.T) {
+	for _, next := range []int{1, 2} {
+		t.Run(fmt.Sprintf("rejected-branch-to=%d", next), func(t *testing.T) {
+			in := general(1, 5, 2, 1)
+			in.Groups[0].Forced = []int{0}
+			in.Groups[0].LeaderPinned = true
+			in.BaseVoters[1] = 5
+			calls := 0
+			in.Groups[0].CheckTarget = func(v []int, _ int, _ int64) TargetFeedback {
+				calls++
+				if slices.Contains(v, 2) {
+					return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: 2, Candidates: []int{3, 4}}}}
+				}
+				if slices.Contains(v, 3) {
+					return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: 3, Candidates: []int{next}}}}
+				}
+				return TargetFeedback{}
+			}
+			r := Plan(in, Options{Seed: 7})
+			require.True(t, r.Score.Less(r.Baseline))
+			require.Contains(t, r.Voters[0], 4)
+			require.Equal(t, 0, r.Leaders[0])
+			require.Less(t, calls, 20)
+		})
+	}
+}
+
+// Many equally cheap stores in a failed branch must not hide a direct repair.
+func TestDirectedRepairBreadth(t *testing.T) {
+	in := general(1, 70, 2, 1)
+	in.Groups[0].LeaderPinned = true
+	in.BaseVoters[1] = 5
+	calls := 0
+	in.Groups[0].CheckTarget = func(v []int, _ int, _ int64) TargetFeedback {
+		calls++
+		for _, s := range v {
+			if s == 2 {
+				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: s, Candidates: []int{3, 69}}}}
+			}
+			if s >= 3 && s < 69 {
+				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: s, Candidates: []int{s + 1}}}}
+			}
+		}
+		return TargetFeedback{}
+	}
+	r := Plan(in, Options{Seed: 7})
+	t.Logf("direct sibling versus long branch: score=%v voters=%v calls=%d limited=%v", r.Score, r.Voters, calls, r.PlacementLimited)
+	require.True(t, r.Score.Less(r.Baseline))
+	require.Contains(t, r.Voters[0], 69)
+	require.Less(t, calls, 10)
+	require.False(t, r.PlacementLimited)
+}
+
+func TestDirectedRepairStops(t *testing.T) {
+	for _, reason := range []string{"nodes", "budget", "canceled"} {
+		t.Run(reason, func(t *testing.T) {
+			in := general(1, 90, 2, 1)
+			in.Groups[0].LeaderPinned = true
+			in.BaseVoters[1] = 5
+			calls := 0
+			canceled := false
+			in.Groups[0].CheckTarget = func(v []int, _ int, _ int64) TargetFeedback {
+				calls++
+				if reason == "canceled" && calls == 2 {
+					canceled = true
+				}
+				if slices.Contains(v, 1) {
+					return TargetFeedback{}
+				}
+				for _, s := range v {
+					if s != 0 {
+						return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: s, Candidates: []int{s + 1}}}, Work: 90}
+					}
+				}
+				return TargetFeedback{}
+			}
+			opt := Options{Seed: 7, Cancel: func() bool { return canceled }}
+			if reason == "budget" {
+				opt.WorkBudget = 1000
+			}
+			r := Plan(in, opt)
+			t.Logf("repair cutoff reason=%s score=%v calls=%d work=%d stop=%s limited=%v", reason, r.Score, calls, r.Work, r.Stop, r.PlacementLimited)
+			require.Equal(t, r.Baseline, r.Score)
+			if reason != "budget" {
+				require.True(t, r.PlacementLimited)
+			}
+			require.False(t, r.TemporarilyBlocked)
+			require.LessOrEqual(t, calls, 66)
+			if reason == "budget" {
+				require.Equal(t, StopBudget, r.Stop)
+			}
+			if reason == "canceled" {
+				require.Equal(t, StopCanceled, r.Stop)
+			}
+			require.Empty(t, in.Groups[0].Exclude)
 		})
 	}
 }

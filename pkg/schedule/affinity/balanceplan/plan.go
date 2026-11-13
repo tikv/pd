@@ -75,10 +75,39 @@ type Group struct {
 	// Exclude lists stores this group must not use, such as stores that hold
 	// one of its learners.
 	Exclude []int
-	// CheckTarget applies placement checks not expressed by the abstract rules,
-	// such as isolation across rules with the same role. Nil skips this check.
-	// The current target must already pass; the callback must not modify voters.
-	CheckTarget func(voters []int, leader int) bool
+	// CheckTarget checks a complete candidate. A rejection may provide a
+	// replacement valid for this candidate only. Nil skips this check.
+	// The current target must pass; the callback must not modify voters.
+	// Stop between checks when Work reaches workLimit; a single check may overrun it.
+	CheckTarget func(voters []int, leader int, workLimit int64) TargetFeedback
+}
+
+// TargetStatus distinguishes a legal target from a rejected or temporarily blocked one.
+type TargetStatus uint8
+
+// Placement check results.
+const (
+	TargetSatisfied TargetStatus = iota
+	TargetRejected
+	TargetTemporarilyBlocked
+)
+
+// TargetFeedback preserves the placement decision and directed repair alternatives.
+// Replace is scoped to the checked combination, never a persistent store exclusion.
+// An offered replacement may still be rejected by another rule or Region.
+// Work charges the caller's candidate scans to the plan's shared budget.
+// This is a scan count, not a wall clock bound on placement fitting.
+type TargetFeedback struct {
+	Status  TargetStatus
+	Replace []StoreReplacement
+	Work    int64
+}
+
+// StoreReplacement offers best-location alternatives for one selected voter
+// with all other voters held fixed. Other rules and Regions may still reject them.
+type StoreReplacement struct {
+	Old        int
+	Candidates []int
 }
 
 // Input describes one table.
@@ -147,6 +176,10 @@ type Result struct {
 	Visits                int
 	Work                  int64
 	Changed               int
+	// TemporarilyBlocked reports a temporary placement rejection.
+	TemporarilyBlocked bool
+	// PlacementLimited reports that a directed repair reached a search limit.
+	PlacementLimited bool
 }
 
 type groupState struct {
@@ -161,21 +194,23 @@ type groupState struct {
 }
 
 type planner struct {
-	in      *Input
-	opt     Options
-	n       int
-	gs      []groupState
-	v, l    []int
-	otherV  []int
-	otherL  []int
-	work    int64
-	visits  int
-	stop    StopReason
-	pk      picker
-	parts   [maxDepth]partScratch
-	results [maxDepth + 1][2][]choice
-	candBuf []int
-	ruleIso map[*Rule]*isoTarget
+	in               *Input
+	opt              Options
+	n                int
+	gs               []groupState
+	v, l             []int
+	otherV           []int
+	otherL           []int
+	work             int64
+	visits           int
+	stop             StopReason
+	blocked          bool
+	placementLimited bool
+	pk               picker
+	parts            [maxDepth]partScratch
+	results          [maxDepth + 1][2][]choice
+	candBuf          []int
+	ruleIso          map[*Rule]*isoTarget
 }
 
 // Plan returns a layout that is never worse than the input.
@@ -204,6 +239,8 @@ func Plan(in *Input, opt Options) Result {
 	}
 	res.Voters, res.Leaders = p.expand(fastV, fastL)
 	res.Visits, res.Work = p.visits, p.work
+	res.TemporarilyBlocked = p.blocked
+	res.PlacementLimited = p.placementLimited
 	for i := range fastV {
 		if fastL[i] != origL[i] || !sameSet(fastV[i], origV[i]) {
 			res.Changed++
@@ -617,7 +654,7 @@ func (p *planner) visitLeader(g *groupState) bool {
 		if !slices.Contains(hosts, ri) || !p.leaderCapable(g, g.Rules[ri], s) {
 			continue
 		}
-		if a, b := key(s), key(best); slices.Compare(a[:], b[:]) < 0 && g.checkTarget(g.cur, s) {
+		if a, b := key(s), key(best); slices.Compare(a[:], b[:]) < 0 && p.checkTarget(g, g.cur, s).Status == TargetSatisfied {
 			best = s
 		}
 	}
@@ -626,8 +663,21 @@ func (p *planner) visitLeader(g *groupState) bool {
 	return best != old
 }
 
-func (g *groupState) checkTarget(voters []int, leader int) bool {
-	return g.CheckTarget == nil || g.CheckTarget(voters, leader)
+func (p *planner) checkTarget(g *groupState, voters []int, leader int) TargetFeedback {
+	if g.CheckTarget == nil {
+		return TargetFeedback{}
+	}
+	if p.stopped() {
+		return TargetFeedback{Status: TargetRejected}
+	}
+	feedback := g.CheckTarget(voters, leader, p.opt.WorkBudget-p.work)
+	p.work += max(1, feedback.Work)
+	if p.stopped() {
+		p.placementLimited = true
+		return TargetFeedback{Status: TargetRejected}
+	}
+	p.blocked = p.blocked || feedback.Status == TargetTemporarilyBlocked
+	return feedback
 }
 
 // revert restores the original target of every changed group whose change is
@@ -728,7 +778,7 @@ func (p *planner) chainLeaders(leaders []int) int64 {
 		}
 		hosts := p.leaderHosts(g)
 		for k, s := range g.cur {
-			if ri := g.curRule[k]; slices.Contains(hosts, ri) && p.leaderCapable(g, g.Rules[ri], s) && g.checkTarget(g.cur, s) {
+			if ri := g.curRule[k]; slices.Contains(hosts, ri) && p.leaderCapable(g, g.Rules[ri], s) && p.checkTarget(g, g.cur, s).Status == TargetSatisfied {
 				alt = append(alt, s)
 			}
 		}
