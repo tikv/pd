@@ -131,7 +131,7 @@ func (o *PersistOptions) UpdateScheduleConfig(
 // SetSchedulers replaces only the scheduler list on the latest schedule config.
 func (o *PersistOptions) SetSchedulers(schedulers sc.SchedulerConfigs) {
 	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.Schedulers = slices.Clone(schedulers)
+		next.Schedulers = schedulers.Clone()
 		if len(next.Schedulers) == 0 {
 			next.Schedulers = nil
 		}
