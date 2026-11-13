@@ -15,7 +15,10 @@
 package syncer
 
 import (
+	"fmt"
+	"runtime"
 	"testing"
+	"weak"
 
 	"github.com/stretchr/testify/require"
 
@@ -141,6 +144,54 @@ func TestHistoryBufferPersistsNextIndexOnly(t *testing.T) {
 	s, err := h2.kv.Load(historyKey)
 	re.NoError(err)
 	re.Equal("3", s)
+}
+
+func TestHistoryBufferResetReleasesRecords(t *testing.T) {
+	for _, expanded := range []bool{false, true} {
+		for _, persist := range []bool{false, true} {
+			t.Run(fmt.Sprintf("expanded-%t/persist-%t", expanded, persist), func(t *testing.T) {
+				re := require.New(t)
+				h := newTestHistoryBuffer(8)
+				if expanded {
+					h.observeRequiredWindow(3)
+				}
+				// Fill and wrap the ring, including the slot outside its logical
+				// window, so reset must release every retained reference.
+				refs := func() []weak.Pointer[core.RegionInfo] {
+					refs := make([]weak.Pointer[core.RegionInfo], 0, 2*h.size+1)
+					for id := range 2*h.size + 1 {
+						region := newHistoryBufferTestRegion(uint64(id + 1))
+						h.record(region)
+						refs = append(refs, weak.Make(region))
+					}
+					return refs
+				}()
+				re.Equal(h.capacity(), h.len())
+				if persist {
+					h.resetWithIndexAndPersist(100)
+					index, err := h.kv.Load(historyKey)
+					re.NoError(err)
+					re.Equal("100", index)
+				} else {
+					h.resetWithIndex(100)
+				}
+				re.Zero(h.len())
+				re.Equal(h.baseCapacity, h.capacity())
+				re.Equal(uint64(100), h.getFirstIndex())
+				re.Equal(uint64(100), h.getNextIndex())
+				runtime.GC()
+				for _, ref := range refs {
+					re.Nil(ref.Value(), "reset history must release old regions")
+				}
+				runtime.KeepAlive(h)
+
+				region := newHistoryBufferTestRegion(1000)
+				h.record(region)
+				re.Same(region, h.get(100))
+				re.Equal(uint64(101), h.getNextIndex())
+			})
+		}
+	}
 }
 
 func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {

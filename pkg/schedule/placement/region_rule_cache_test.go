@@ -15,6 +15,7 @@
 package placement
 
 import (
+	"fmt"
 	"testing"
 	"time"
 	"unsafe"
@@ -293,6 +294,50 @@ func TestSetCacheDoesNotPromoteStaleFitAfterStoreRemoval(t *testing.T) {
 	manager.SetCache(storeSet, region, fit) // stale pre-bury fit
 	cache, ok := manager.regionCaches[region.GetID()]
 	re.False(ok && cache.bestFit != nil)
+}
+
+func TestSetCacheRejectsRemovedRegion(t *testing.T) {
+	for _, warmup := range []int{0, 1, minHitCountToCacheHit + 1} {
+		t.Run(fmt.Sprintf("warmup-%d", warmup), func(t *testing.T) {
+			re := require.New(t)
+			manager := NewRegionRuleFitCacheManager()
+			cluster := core.NewBasicCluster()
+			stores := mockStores(3)
+			for _, store := range stores {
+				cluster.PutStore(store)
+			}
+			region := mockRegion(3, 0)
+			cluster.PutRegion(region)
+			rules := addExtraRules(0)
+			fit := fitRegion(stores, region, rules, false)
+			fit.regionStores, fit.rules = stores, rules
+			for range warmup {
+				manager.SetCache(cluster, region, fit)
+			}
+
+			// The root tree can lose the region before overlap cleanup runs.
+			cluster.RemoveRegion(region)
+			manager.SetCache(cluster, region, fit)
+			re.Empty(manager.regionCaches)
+			re.Empty(manager.storesOfRegion)
+			manager.Invalid(region.GetID())
+			manager.SetCache(cluster, region, fit)
+			re.Empty(manager.regionCaches)
+			re.Empty(manager.storesOfRegion)
+
+			// A later live region can still use the same stores and cache normally.
+			live := region.Clone(core.WithNewRegionID(region.GetID() + 1))
+			cluster.PutRegion(live)
+			liveFit := fitRegion(stores, live, rules, false)
+			liveFit.regionStores, liveFit.rules = stores, rules
+			for range minHitCountToCacheHit + 1 {
+				manager.SetCache(cluster, live, liveFit)
+			}
+			hit, cached := manager.CheckAndGetCache(live, rules, stores)
+			re.True(hit)
+			re.Same(liveFit, cached)
+		})
+	}
 }
 
 // buryAfterReadStoreSet wraps a *core.StoresInfo and buries the target store

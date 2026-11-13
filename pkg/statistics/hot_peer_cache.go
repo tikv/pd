@@ -130,7 +130,7 @@ type HotPeerCache struct {
 	coldPeersOfStore   map[uint64]map[uint64]*list.Element // storeID -> regionID -> sweep queue element
 	coldPeerSweepQueue list.List
 	topNTTL            time.Duration
-	taskQueue          *chanx.UnboundedChan[func(*HotPeerCache)]
+	taskQueue          *chanx.UnboundedChan[*hotCacheTask]
 	thresholdsOfStore  map[uint64]*thresholds                           // storeID -> thresholds
 	metrics            map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
 	lastGCTime         time.Time
@@ -145,7 +145,7 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
 		coldPeersOfStore:  make(map[uint64]map[uint64]*list.Element),
-		taskQueue:         chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
+		taskQueue:         chanx.NewUnboundedChan[*hotCacheTask](ctx, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
 		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
 		metrics:           make(map[uint64][utils.ActionTypeLen]prometheus.Gauge),
@@ -671,6 +671,9 @@ func (f *HotPeerCache) removeItem(item *HotPeerStat) {
 	}
 	if stores, ok := f.storesOfRegion[item.RegionID]; ok {
 		delete(stores, item.StoreID)
+		if len(stores) == 0 {
+			delete(f.storesOfRegion, item.RegionID)
+		}
 	}
 	if regions, ok := f.regionsOfStore[item.StoreID]; ok {
 		delete(regions, item.RegionID)
