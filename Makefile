@@ -228,6 +228,7 @@ tidy:
 	git diff --quiet go.mod go.sum
 
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd $(ROOT_PATH) > /dev/null; done
+	@cd pkg/errs/testdata/legacy && go mod tidy -diff
 
 generate-errdoc: install-tools
 	@echo "generating errors.toml..."
