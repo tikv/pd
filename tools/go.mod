@@ -31,7 +31,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
-	go.etcd.io/etcd/client/pkg/v3 v3.5.15
+	go.etcd.io/etcd/client/pkg/v3 v3.5.33
 	go.etcd.io/etcd/client/v3 v3.5.15
 	go.etcd.io/etcd/pkg/v3 v3.5.15
 	go.etcd.io/etcd/server/v3 v3.5.15
@@ -139,7 +139,7 @@ require (
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20261112114244-11a63e0aac21 // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20261113031952-f11b831d6480 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

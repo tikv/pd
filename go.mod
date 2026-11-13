@@ -37,7 +37,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20260526084754-39498d6b17fc
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20261112114244-11a63e0aac21
+	github.com/pingcap/tidb-dashboard v0.0.0-20261113031952-f11b831d6480
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/common v0.55.0
 	github.com/sasha-s/go-deadlock v0.3.6
@@ -53,7 +53,7 @@ require (
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni/v3 v3.1.1
 	go.etcd.io/etcd/api/v3 v3.5.15
-	go.etcd.io/etcd/client/pkg/v3 v3.5.15
+	go.etcd.io/etcd/client/pkg/v3 v3.5.33
 	go.etcd.io/etcd/client/v3 v3.5.15
 	go.etcd.io/etcd/server/v3 v3.5.15
 	go.uber.org/goleak v1.3.0
