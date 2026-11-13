@@ -53,7 +53,7 @@ require (
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni/v3 v3.1.1
 	go.etcd.io/etcd/api/v3 v3.5.15
-	go.etcd.io/etcd/client/pkg/v3 v3.5.15
+	go.etcd.io/etcd/client/pkg/v3 v3.5.33
 	go.etcd.io/etcd/client/v3 v3.5.15
 	go.etcd.io/etcd/server/v3 v3.5.15
 	go.uber.org/goleak v1.3.0
@@ -140,7 +140,11 @@ require (
 	github.com/joomcode/errorx v1.0.1 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+<<<<<<< HEAD
 	github.com/klauspost/compress v1.17.9 // indirect
+=======
+	github.com/klauspost/compress v1.20.2 // indirect
+>>>>>>> e8e66bb399 (*: upgrade compress, etcd client and x/image dependencies (#11582))
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
@@ -201,8 +205,14 @@ require (
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
+<<<<<<< HEAD
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/image v0.43.0 // indirect
+=======
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2 // indirect
+	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
+	golang.org/x/image v0.45.0 // indirect
+>>>>>>> e8e66bb399 (*: upgrade compress, etcd client and x/image dependencies (#11582))
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
