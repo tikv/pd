@@ -153,6 +153,11 @@ type ResourceGroupsController struct {
 	requestSourceStates sync.Map
 	ruConfig            *RUConfig
 	keyspaceID          uint32
+	configRevision      int64
+
+	// Order cold-cache publication with metadata changes without holding a lock across RPCs.
+	groupCacheMu         sync.Mutex
+	groupCacheGeneration uint64
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -198,7 +203,7 @@ func NewResourceGroupController(
 	keyspaceID uint32,
 	opts ...ResourceControlCreateOption,
 ) (*ResourceGroupsController, error) {
-	config, err := loadServerConfig(ctx, provider)
+	config, revision, err := loadServerConfig(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +216,7 @@ func NewResourceGroupController(
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
 		keyspaceID:            keyspaceID,
+		configRevision:        revision,
 		ruConfig:              ruConfig,
 		lowTokenNotifyChan:    make(chan notifyMsg, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
@@ -229,23 +235,104 @@ func NewResourceGroupController(
 	return controller, nil
 }
 
-func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Config, error) {
+func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Config, int64, error) {
 	resp, err := provider.Get(ctx, []byte(controllerConfigPath))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+	revision := resp.GetHeader().GetRevision()
 	config := DefaultConfig()
 	defer config.Adjust()
 	kvs := resp.GetKvs()
 	if len(kvs) == 0 {
 		log.Warn("[resource group controller] server does not save config, load config failed")
-		return config, nil
+		return config, revision, nil
 	}
 	err = json.Unmarshal(kvs[0].GetValue(), config)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return config, nil
+	return config, revision, nil
+}
+
+func (c *ResourceGroupsController) applyControllerConfig(config *Config) {
+	c.ruConfig = GenerateRUConfig(config)
+	// Stay compatible with serverless.
+	for _, opt := range c.opts {
+		opt(c)
+	}
+	copyCfg := *c.ruConfig
+	c.safeRuConfig.Store(&copyCfg)
+	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
+	c.updateRUVersionFromConfig(config)
+	log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
+}
+
+func (c *ResourceGroupsController) updateResourceGroup(group *rmpb.ResourceGroup) {
+	c.groupCacheMu.Lock()
+	defer c.groupCacheMu.Unlock()
+	c.groupCacheGeneration++
+	c.updateResourceGroupLocked(group)
+}
+
+func (c *ResourceGroupsController) updateResourceGroupLocked(group *rmpb.ResourceGroup) {
+	name := group.GetName()
+	gc, ok := c.loadGroupController(name)
+	if !ok {
+		return
+	}
+	if !gc.tombstone.Load() {
+		gc.modifyMeta(group)
+		return
+	}
+	// Re-create the controller when a deleted group has been created again.
+	newGC, err := newGroupCostController(
+		group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan,
+		c.getOrCreateRequestSourceMetricsState(name),
+	)
+	if err != nil {
+		log.Warn("[resource group controller] re-create resource group cost controller for tombstone failed",
+			zap.String("name", name), zap.Error(err))
+		return
+	}
+	if c.groupsController.CompareAndSwap(name, gc, newGC) {
+		log.Info("[resource group controller] re-create resource group cost controller for tombstone",
+			zap.String("name", name))
+	}
+}
+
+func (c *ResourceGroupsController) reloadResourceGroups(ctx context.Context) (int64, error) {
+	groups, revision, err := c.provider.LoadResourceGroups(ctx)
+	if err != nil {
+		return 0, err
+	}
+	names := make(map[string]struct{}, len(groups))
+	var defaultGroup *rmpb.ResourceGroup
+	for _, group := range groups {
+		names[group.GetName()] = struct{}{}
+		if group.GetName() == defaultResourceGroupName {
+			defaultGroup = group
+		}
+	}
+	c.groupCacheMu.Lock()
+	defer c.groupCacheMu.Unlock()
+	c.groupCacheGeneration++
+	for _, group := range groups {
+		c.updateResourceGroupLocked(group)
+	}
+	if defaultGroup == nil {
+		if gc, ok := c.loadGroupController(defaultResourceGroupName); ok {
+			defaultGroup = gc.getMeta()
+		}
+	}
+	c.groupsController.Range(func(key, value any) bool {
+		name := key.(string)
+		if _, exists := names[name]; !exists && !value.(*groupCostController).tombstone.Load() {
+			c.tombstoneGroupCostControllerLocked(name, defaultGroup)
+		}
+		return true
+	})
+	return revision + 1, nil
 }
 
 // GetConfig returns the config of controller.
@@ -321,11 +408,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
-		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
-		if err != nil {
-			log.Warn("load resource group revision failed", zap.Error(err))
-		}
-		cfgRevision := resp.GetHeader().GetRevision()
+		// Both prefixes share etcd's global revision. Anchor watches to the
+		// config snapshot loaded by the constructor, before any group is cached.
+		metaRevision, cfgRevision := c.configRevision+1, c.configRevision+1
 
 		failpoint.Inject("staleRevision", func(val failpoint.Value) {
 			if rev, ok := val.(int); ok {
@@ -333,17 +418,38 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			}
 		})
 		var watchMetaChannel, watchConfigChannel chan *metastorage.WatchResponse
+		prefix := append(pd.GroupSettingsPathPrefixBytes(c.keyspaceID), '/')
+		startMetaWatch := func() error {
+			var err error
+			if metaRevision == 0 {
+				metaRevision, err = c.reloadResourceGroups(c.loopCtx)
+				if err != nil {
+					return err
+				}
+			}
+			watchMetaChannel, err = c.provider.Watch(c.loopCtx, prefix, opt.WithPrefix(), opt.WithPrevKV(), opt.WithRev(metaRevision))
+			return err
+		}
+		startConfigWatch := func() error {
+			if cfgRevision == 0 {
+				config, revision, err := loadServerConfig(c.loopCtx, c.provider)
+				if err != nil {
+					return err
+				}
+				c.applyControllerConfig(config)
+				cfgRevision = revision + 1
+			}
+			var err error
+			watchConfigChannel, err = c.provider.Watch(c.loopCtx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
+			return err
+		}
 		if !c.ruConfig.isSingleGroupByKeyspace {
-			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-			prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
-			if err != nil {
+			if err := startMetaWatch(); err != nil {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
 		}
 
-		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
-		if err != nil {
+		if err := startConfigWatch(); err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
@@ -362,10 +468,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 			case <-watchRetryTimer.C:
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
-					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-					prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
-					if err != nil {
+					if err := startMetaWatch(); err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
 						failpoint.Inject("watchStreamError", func() {
@@ -374,8 +477,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 				}
 				if watchConfigChannel == nil {
-					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
-					if err != nil {
+					if err := startConfigWatch(); err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
@@ -421,48 +523,30 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
+				if resp.CompactRevision != 0 {
+					// The missing history must be replaced with a fresh snapshot.
+					metaRevision = 0
+					continue
+				}
 				for _, item := range resp.Events {
+					metaRevision = max(metaRevision, item.Kv.ModRevision+1)
 					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
-						if err = proto.Unmarshal(item.Kv.Value, group); err != nil {
+						if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
 							continue
 						}
-						name := group.GetName()
-						gc, ok := c.loadGroupController(name)
-						if !ok {
-							continue
-						}
-						if !gc.tombstone.Load() {
-							gc.modifyMeta(group)
-							continue
-						}
-						// If the resource group is marked as tombstone before, re-create the resource group controller.
-						newGC, err := newGroupCostController(
-							group,
-							c.ruConfig,
-							c.lowTokenNotifyChan,
-							c.tokenBucketUpdateChan,
-							c.getOrCreateRequestSourceMetricsState(name),
-						)
-						if err != nil {
-							log.Warn("[resource group controller] re-create resource group cost controller for tombstone failed",
-								zap.String("name", name), zap.Error(err))
-							continue
-						}
-						if c.groupsController.CompareAndSwap(name, gc, newGC) {
-							log.Info("[resource group controller] re-create resource group cost controller for tombstone",
-								zap.String("name", name))
-						}
+						c.updateResourceGroup(group)
 					case meta_storagepb.Event_DELETE:
-						// Prev-kv is compacted means there must have been a delete event before this event,
-						// which means that this is just a duplicated event, so we can just ignore it.
+						// A replayed delete can outlive its previous value's history.
+						// The key still identifies the deleted group in that case.
 						if item.PrevKv == nil {
-							log.Info("[resource group controller] previous key-value pair has been compacted",
-								zap.String("required-key", string(item.Kv.Key)), zap.String("value", string(item.Kv.Value)))
+							if name, ok := strings.CutPrefix(string(item.Kv.Key), string(prefix)); ok && name != "" {
+								c.tombstoneGroupCostController(name)
+							}
 							continue
 						}
-						if err = proto.Unmarshal(item.PrevKv.Value, group); err != nil {
+						if err := proto.Unmarshal(item.PrevKv.Value, group); err != nil {
 							continue
 						}
 						c.tombstoneGroupCostController(group.GetName())
@@ -477,30 +561,18 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
-				if resp.CompactRevision > cfgRevision {
-					cfgRevision = resp.CompactRevision
+				if resp.CompactRevision != 0 {
+					cfgRevision = 0
+					continue
 				}
 				for _, item := range resp.Events {
-					cfgRevision = item.Kv.ModRevision
+					cfgRevision = max(cfgRevision, item.Kv.ModRevision+1)
 					config := DefaultConfig()
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
 						continue
 					}
 					config.Adjust()
-					c.ruConfig = GenerateRUConfig(config)
-
-					// Stay compatible with serverless
-					for _, opt := range c.opts {
-						opt(c)
-					}
-					copyCfg := *c.ruConfig
-					c.safeRuConfig.Store(&copyCfg)
-					if enableControllerTraceLog.Load() != config.EnableControllerTraceLog {
-						enableControllerTraceLog.Store(config.EnableControllerTraceLog)
-					}
-					// Update ru version from the controller config RUVersionPolicy.
-					c.updateRUVersionFromConfig(config)
-					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
+					c.applyControllerConfig(config)
 				}
 			case gc := <-c.tokenBucketUpdateChan:
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
@@ -625,18 +697,34 @@ func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName st
 func (c *ResourceGroupsController) tryGetResourceGroupController(
 	ctx context.Context, name string, useTombstone bool,
 ) (*groupCostController, error) {
-	// Get from the local cache first.
-	gc, ok := c.loadGroupController(name)
-	if ok {
-		if !useTombstone && gc.tombstone.Load() {
-			return nil, NewResourceGroupNotExistErr(name)
+	var (
+		group *rmpb.ResourceGroup
+		err   error
+	)
+	for {
+		// Get from the local cache first.
+		if gc, ok := c.loadGroupController(name); ok {
+			if !useTombstone && gc.tombstone.Load() {
+				return nil, NewResourceGroupNotExistErr(name)
+			}
+			return gc, nil
 		}
-		return gc, nil
-	}
 
+		c.groupCacheMu.Lock()
+		generation := c.groupCacheGeneration
+		c.groupCacheMu.Unlock()
+		group, err = c.provider.GetResourceGroup(ctx, name)
+		c.groupCacheMu.Lock()
+		if generation == c.groupCacheGeneration {
+			break
+		}
+		c.groupCacheMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	defer c.groupCacheMu.Unlock()
 	isUseDegradedResourceGroup := false
-	// Call gRPC to fetch the resource group info.
-	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
 		if c.shouldUseDegradedResourceGroup(err) {
 			isUseDegradedResourceGroup = true
@@ -649,13 +737,16 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return nil, NewResourceGroupNotExistErr(name)
 	}
 	// Check again to prevent initializing the same resource group concurrently.
-	if gc, ok = c.loadGroupController(name); ok {
+	if gc, ok := c.loadGroupController(name); ok {
+		if !useTombstone && gc.tombstone.Load() {
+			return nil, NewResourceGroupNotExistErr(name)
+		}
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err = newGroupCostController(
+	gc, err := newGroupCostController(
 		group,
-		c.ruConfig,
+		c.GetConfig(),
 		c.lowTokenNotifyChan,
 		c.tokenBucketUpdateChan,
 		c.getOrCreateRequestSourceMetricsState(name),
@@ -678,27 +769,40 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 // Do not delete the resource group immediately to prevent from interrupting the ongoing request,
 // mark it as tombstone and create a default resource group controller for it.
 func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
+	c.groupCacheMu.Lock()
+	c.groupCacheGeneration++
 	_, ok := c.loadGroupController(name)
-	if !ok {
+	c.groupCacheMu.Unlock()
+	if !ok || name == defaultResourceGroupName {
 		return
 	}
-	// The default resource group controller should never be deleted.
-	if name == defaultResourceGroupName {
-		return
-	}
-	// Try to get the default group meta first.
+	// Fetch the default outside the cache lock, then invalidate loads that raced with it.
 	defaultGC, err := c.tryGetResourceGroupController(c.loopCtx, defaultResourceGroupName, false)
+	var defaultGroup *rmpb.ResourceGroup
 	if err != nil || defaultGC == nil {
 		log.Warn("[resource group controller] get default resource group meta for tombstone failed",
 			zap.String("name", name), zap.Error(err))
-		// Directly delete the resource group controller if the default group is not available.
+	} else {
+		defaultGroup = defaultGC.getMeta()
+	}
+	c.groupCacheMu.Lock()
+	defer c.groupCacheMu.Unlock()
+	c.groupCacheGeneration++
+	c.tombstoneGroupCostControllerLocked(name, defaultGroup)
+}
+
+func (c *ResourceGroupsController) tombstoneGroupCostControllerLocked(name string, defaultGroup *rmpb.ResourceGroup) {
+	if _, ok := c.loadGroupController(name); !ok || name == defaultResourceGroupName {
+		return
+	}
+	if defaultGroup == nil {
 		c.cleanupRequestSourceMetricsState(name)
 		c.groupsController.Delete(name)
 		return
 	}
 	// Create a default resource group controller for the tombstone resource group independently.
 	gc, err := newGroupCostController(
-		defaultGC.getMeta(),
+		defaultGroup,
 		c.ruConfig,
 		c.lowTokenNotifyChan,
 		c.tokenBucketUpdateChan,

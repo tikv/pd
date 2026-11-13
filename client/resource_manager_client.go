@@ -238,7 +238,7 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 
 // LoadResourceGroups implements the ResourceManagerClient interface.
 func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
-	prefix := GroupSettingsPathPrefixBytes(c.inner.keyspaceID)
+	prefix := append(GroupSettingsPathPrefixBytes(c.inner.keyspaceID), '/')
 	resp, err := c.Get(ctx, prefix, opt.WithPrefix())
 	if err != nil {
 		return nil, 0, err
