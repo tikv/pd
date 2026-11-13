@@ -603,6 +603,8 @@ func (c *Cli) tryCreateTSODispatcher() {
 }
 
 // DispatchRequest will send the TSO request to the corresponding TSO dispatcher.
+// A non-nil error means the caller must complete the request. A nil error means
+// push or the dispatcher owns completion, including cancellation and shutdown.
 func (c *Cli) DispatchRequest(request *Request) (bool, error) {
 	if c.getDispatcher() == nil {
 		err := errs.ErrClientGetTSO.FastGenByArgs("tso dispatcher is not ready")
@@ -629,17 +631,6 @@ func (c *Cli) DispatchRequest(request *Request) (bool, error) {
 			time.Sleep(time.Second)
 		})
 		c.getDispatcher().push(request)
-	}
-	// Check the contexts again to make sure the request is not been sent to a closed dispatcher.
-	// Never retry on these conditions to prevent unexpected data race.
-	select {
-	case <-request.requestCtx.Done():
-		return false, request.requestCtx.Err()
-	case <-request.clientCtx.Done():
-		return false, request.clientCtx.Err()
-	case <-c.ctx.Done():
-		return false, c.ctx.Err()
-	default:
 	}
 	return false, nil
 }
