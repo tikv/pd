@@ -777,7 +777,10 @@ func (f *ruleLeaderFitFilter) Target(conf config.SharedConfigProvider, store *co
 	if targetPeer != nil && targetPeer.IsWitness {
 		return statusStoreNotMatchRule
 	}
-	if !f.oldFit.Replace(f.srcLeaderStoreID, store) {
+	// A pure leader transfer can reassign existing peers across overlapping
+	// rules. Peer replacement and unfinished repairs keep the source-rule check.
+	replaceFits := f.oldFit.Replace(f.srcLeaderStoreID, store)
+	if !replaceFits && (targetPeer == nil || !f.oldFit.IsSatisfied()) {
 		return statusStoreNotMatchRule
 	}
 	// Preserve complete role matching for a previously satisfied layout.
@@ -802,8 +805,31 @@ func (f *ruleLeaderFitFilter) Target(conf config.SharedConfigProvider, store *co
 		if !roles.IsSatisfied(targetStoreID) {
 			return statusStoreNotMatchRule
 		}
+		if !replaceFits && !f.transferPreservesIsolation(targetPeer) {
+			return statusStoreNotMatchRule
+		}
 	}
 	return statusOK
+}
+
+// transferPreservesIsolation checks reassignments rejected by the source-rule
+// check. The common Replace path and rules without isolation scores need no fit.
+func (f *ruleLeaderFitFilter) transferPreservesIsolation(leader *metapb.Peer) bool {
+	if !slices.ContainsFunc(f.oldFit.RuleFits, func(rf *placement.RuleFit) bool { return rf.IsolationScore > 0 }) {
+		return true
+	}
+	target := f.region.Clone(core.WithLeader(leader))
+	fit := f.ruleManager.FitRegionWithoutCache(f.cluster, target)
+	if !fit.IsSatisfied() || len(fit.RuleFits) != len(f.oldFit.RuleFits) {
+		return false
+	}
+	for i, old := range f.oldFit.RuleFits {
+		next := fit.RuleFits[i]
+		if old.Rule.GroupID != next.Rule.GroupID || old.Rule.ID != next.Rule.ID || next.IsolationScore < old.IsolationScore {
+			return false
+		}
+	}
+	return true
 }
 
 // leaderRoleChecker holds immutable inputs and a matcher for one filter's peers.

@@ -198,3 +198,59 @@ func TestBuilderReusesOriginalRoleChecker(t *testing.T) {
 		require.NotSame(t, b.originRoleChecker, b.targetRoleChecker)
 	})
 }
+
+func TestMultiTargetLeaderTransferPreservesAllRules(t *testing.T) {
+	tc, region := newLeaderRuleTestCluster(t, false)
+	tc.PutStoreWithLabels(2, "zone", "A")
+	voters := tc.GetRuleManager().GetRule("pd", "voters").Clone()
+	voters.Count = 1
+	require.NoError(t, tc.GetRuleManager().SetRule(voters))
+	other := voters.Clone()
+	other.ID, other.LabelConstraints = "other", nil
+	require.NoError(t, tc.GetRuleManager().SetRule(other))
+	require.True(t, tc.GetRuleManager().FitRegion(tc, region).IsSatisfied())
+	require.True(t, IsAllowedLeaderTarget(tc, region, region.GetStorePeer(2)))
+	require.False(t, IsAllowedLeaderTarget(tc, region, region.GetStorePeer(3)))
+	op, err := CreateTransferLeaderOperator("test", tc, region, 2, []uint64{2, 3}, OpLeader)
+	require.NoError(t, err)
+	require.Equal(t, 1, op.Len())
+	step := op.Step(0).(TransferLeader)
+	require.Equal(t, uint64(2), step.ToStore)
+	require.Equal(t, []uint64{2}, step.ToStores)
+	op, err = CreateTransferLeaderOperator("test", tc, region, 3, []uint64{2, 3}, OpLeader)
+	require.NoError(t, err)
+	step = op.Step(0).(TransferLeader)
+	require.Equal(t, uint64(2), step.ToStore)
+	require.Equal(t, []uint64{2}, step.ToStores)
+}
+
+func TestMultiTargetLeaderTransferBuildBoundary(t *testing.T) {
+	tc, region := newLeaderRuleTestCluster(t, true)
+	for _, alternatives := range [][]uint64{{2}, {2, 3}} {
+		op, err := CreateTransferLeaderOperator("test", tc, region, 2, alternatives, OpLeader)
+		require.ErrorIs(t, err, ErrTargetRole)
+		require.Nil(t, op)
+	}
+	for _, b := range []*Builder{
+		NewBuilder("test", tc, region).SetLeader(2).SetLeaders([]uint64{2, 3}).EnableForceTargetLeader(),
+		NewBuilder("test", tc, region, SkipPlacementRulesCheck).SetLeader(2).SetLeaders([]uint64{2, 3}),
+		NewBuilder("test", tc, region.Clone(core.WithRemoveStorePeer(3))).SetLeader(2).SetLeaders([]uint64{2}),
+	} {
+		op, err := b.Build(OpLeader)
+		require.NoError(t, err)
+		require.NotEmpty(t, op.Step(0).(TransferLeader).ToStores)
+	}
+	b := NewBuilder("test", tc, region).SetLeader(2).SetLeaders([]uint64{2, 3}).EnableForceTargetLeader().RemovePeer(3)
+	op, err := b.Build(OpRegion)
+	require.NoError(t, err)
+	for i := range op.Len() {
+		if step, ok := op.Step(i).(TransferLeader); ok {
+			require.NotContains(t, step.ToStores, uint64(3))
+		}
+	}
+	tc.SetStoreEvictLeader(2, true)
+	op, err = CreateTransferLeaderOperator("test", tc, region, 2, nil, OpLeader)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrTargetRole)
+	require.Nil(t, op)
+}

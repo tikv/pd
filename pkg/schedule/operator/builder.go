@@ -32,6 +32,9 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
+// ErrTargetRole means complete placement roles reject an otherwise eligible leader.
+var ErrTargetRole = errors.New("target leader does not satisfy placement roles")
+
 // Builder is used to create operators. Usage:
 //
 //	op, err := NewBuilder(desc, cluster, region).
@@ -62,7 +65,7 @@ type Builder struct {
 	originLeaderStoreID  uint64
 	targetPeers          peersMap
 	targetLeaderStoreID  uint64
-	targetLeaderStoreIDs []uint64 // This field is only used during multi-target evict leader, and will not be filtered during `Build`.
+	targetLeaderStoreIDs []uint64 // Alternative destinations for multi-target evict leader.
 	err                  error
 
 	// skip check flags
@@ -445,7 +448,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	}
 
 	if !b.allowTargetLeader(b.targetPeers[b.currentLeaderStoreID]) {
-		return nil, errors.New("cannot create operator: final leader is not allowed")
+		return nil, b.targetLeaderError("cannot create operator: final leader is not allowed", b.targetPeers[b.currentLeaderStoreID])
 	}
 
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
@@ -551,10 +554,18 @@ func (b *Builder) prepareBuild() (string, error) {
 
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
 
+	b.targetLeaderStoreIDs = slices.DeleteFunc(b.targetLeaderStoreIDs, func(storeID uint64) bool {
+		return b.unhealthyPeers[storeID] != nil || !b.allowTargetLeader(b.targetPeers[storeID])
+	})
+
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
 		if !b.allowTargetLeader(targetLeader) {
-			return "", errors.New("cannot create operator: target leader is not allowed")
+			err := b.targetLeaderError("cannot create operator: target leader is not allowed", targetLeader)
+			if errors.Cause(err) != ErrTargetRole || len(b.targetLeaderStoreIDs) == 0 {
+				return "", err
+			}
+			b.targetLeaderStoreID = b.targetLeaderStoreIDs[0]
 		}
 	}
 
@@ -628,7 +639,13 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
-		return kind, errors.New("no valid leader")
+		peers := make([]*metapb.Peer, 0, len(b.targetPeers))
+		for id, peer := range b.targetPeers {
+			if b.expectedRoles[id] != placement.Follower {
+				peers = append(peers, peer)
+			}
+		}
+		return kind, b.targetLeaderError("no valid leader", peers...)
 	}
 
 	// Split `Remove Voter` to `Demote + Remove Learner`
@@ -946,6 +963,17 @@ func (b *Builder) execBatchSwitchWitnesses() {
 	b.toNonWitness = newPeersMap()
 
 	b.steps = append(b.steps, step)
+}
+
+// targetLeaderError classifies complete-role rejection only on a failed build.
+// Store-state failures and other construction errors keep their existing meaning.
+func (b *Builder) targetLeaderError(message string, peers ...*metapb.Peer) error {
+	for _, peer := range peers {
+		if peer != nil && b.allowLeader(peer, b.forceTargetLeader) && !b.allowTargetLeader(peer) {
+			return errors.Wrap(ErrTargetRole, message)
+		}
+	}
+	return errors.New(message)
 }
 
 // allowTargetLeader checks the final membership, separately from temporary
