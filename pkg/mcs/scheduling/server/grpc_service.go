@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
-	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -402,8 +401,8 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 		}, nil
 	}
 	region := c.GetRegion(reqRegion.GetId())
-	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.AllowSplit(region, request.GetReason()) {
-		c.GetCoordinator().GetHeartbeatStreams().SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+	// Unlike c.GetHeartbeatStreams, the coordinator's streams stay set after the cluster stops.
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.CheckSplit(region, request.GetReason(), c.GetCoordinator().GetHeartbeatStreams()) {
 		return &schedulingpb.AskBatchSplitResponse{
 			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "cannot split affinity region"),
 		}, nil
