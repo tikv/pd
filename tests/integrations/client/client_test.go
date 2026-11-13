@@ -24,16 +24,19 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -84,6 +87,375 @@ const (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
+}
+
+// TestMemberDiscoveryClientBurst measures discovery amplification against real
+// PD/etcd servers. Each client owns its connections and background workers.
+// PD_MEMBER_LOAD_CLIENTS and PD_MEMBER_LOAD_REPEATS expand the default CI case.
+func TestMemberDiscoveryClientBurst(t *testing.T) {
+	counts := []int{16}
+	if value := os.Getenv("PD_MEMBER_LOAD_CLIENTS"); value != "" {
+		counts = nil
+		for item := range strings.SplitSeq(value, ",") {
+			count, err := strconv.Atoi(item)
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, count, 1)
+			require.LessOrEqual(t, count, 1000)
+			counts = append(counts, count)
+		}
+	}
+	repeats := 1
+	if value := os.Getenv("PD_MEMBER_LOAD_REPEATS"); value != "" {
+		var err error
+		repeats, err = strconv.Atoi(value)
+		require.NoError(t, err)
+		require.Positive(t, repeats)
+		require.LessOrEqual(t, repeats, 10)
+	}
+
+	for _, count := range counts {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			re := require.New(t)
+			cluster, err := tests.NewTestCluster(t.Context(), 3)
+			re.NoError(err)
+			t.Cleanup(cluster.Destroy)
+			endpoints := runServer(re, cluster)
+			slices.Sort(endpoints)
+			foreground := setupCli(t.Context(), re, endpoints)
+			t.Cleanup(foreground.Close)
+			_, _, err = foreground.GetTS(t.Context())
+			re.NoError(err)
+
+			recorder := &memberLoadRecorder{blockedTarget: strings.TrimPrefix(endpoints[0], "http://")}
+			clients := make([]pd.Client, count)
+			t.Cleanup(func() {
+				memberLoadParallel(count, func(i int) {
+					if clients[i] != nil {
+						clients[i].Close()
+					}
+				})
+				require.Eventually(t, func() bool { return recorder.active.Load() == 0 },
+					sd.UpdateMemberTimeout, time.Millisecond, "membership probes did not stop after client close")
+			})
+			initErrors := make([]error, count)
+			memberLoadParallel(count, func(i int) {
+				clients[i], initErrors[i] = pd.NewClientWithContext(t.Context(), caller.TestComponent,
+					endpoints, pd.SecurityOption{}, opt.WithInitMetricsOption(false),
+					opt.WithGRPCDialOptions(grpc.WithChainUnaryInterceptor(recorder.unary)))
+				if initErrors[i] != nil {
+					return
+				}
+				// Warm every connection so connection setup is not mistaken for
+				// membership lookup cost in the burst measurements.
+				for _, endpoint := range endpoints {
+					conn, err := clients[i].GetServiceDiscovery().GetOrCreateGRPCConn(endpoint)
+					if err == nil {
+						ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+						_, err = pdpb.NewPDClient(conn).GetMembers(ctx, &pdpb.GetMembersRequest{})
+						cancel()
+					}
+					if err != nil {
+						initErrors[i] = err
+						return
+					}
+				}
+			})
+			for _, err := range initErrors {
+				re.NoError(err)
+			}
+
+			for sample := range repeats {
+				for _, scenario := range []string{"healthy-fast", "healthy-30ms", "healthy-300ms", "healthy-30ms-cold-cache", "leader-change-unresponsive-first"} {
+					t.Run(scenario+"/"+strconv.Itoa(sample), func(t *testing.T) {
+						re := require.New(t)
+						if scenario == "leader-change-unresponsive-first" {
+							oldLeader := cluster.GetLeader()
+							// Transfer to a different member before the discovery burst;
+							// all three etcd members remain available throughout.
+							re.NoError(cluster.GetServer(oldLeader).ResignLeaderWithRetry())
+							re.NotEmpty(cluster.WaitLeaderChange(oldLeader))
+							re.NoError(foreground.GetServiceDiscovery().CheckMemberChanged())
+						}
+						_, _, err := foreground.GetTS(t.Context())
+						re.NoError(err)
+						for _, server := range cluster.GetServers() {
+							_, err = server.GetServer().ReloadMembers()
+							re.NoError(err)
+						}
+						if scenario == "healthy-30ms-cold-cache" {
+							// The server cache TTL is one second. Wait for expiry
+							// without generating membership traffic during the wait.
+							timer := time.NewTimer(1100 * time.Millisecond)
+							defer timer.Stop()
+							select {
+							case <-timer.C:
+							case <-t.Context().Done():
+								t.Fatal(t.Context().Err())
+							}
+						}
+						mode := int32(0)
+						if strings.HasPrefix(scenario, "healthy-30ms") {
+							mode = 1
+						} else if scenario == "healthy-300ms" {
+							mode = 3
+						} else if scenario == "leader-change-unresponsive-first" {
+							mode = 2
+						}
+						recorder.mode.Store(mode)
+						recorder.calls.Store(0)
+						recorder.sent.Store(0)
+						recorder.peak.Store(0)
+						beforeRPCs := memberLoadRPCs(t)
+						re.Contains(beforeRPCs, "pdpb.PD/GetMembers")
+						re.Contains(beforeRPCs, "etcdserverpb.Cluster/MemberList")
+						beforeCPU := memberLoadCPU(t)
+						var beforeMem runtime.MemStats
+						runtime.ReadMemStats(&beforeMem)
+						recorder.enabled.Store(true)
+						start := make(chan struct{})
+						ready, finished := &sync.WaitGroup{}, &sync.WaitGroup{}
+						latencies := make([]time.Duration, count)
+						refreshErrors := make([]error, count)
+						var burst atomic.Bool
+						burst.Store(true)
+						for i, client := range clients {
+							ready.Add(1)
+							finished.Go(func() {
+								ready.Done()
+								<-start
+								begin := time.Now()
+								refreshErrors[i] = client.GetServiceDiscovery().CheckMemberChanged()
+								latencies[i] = time.Since(begin)
+							})
+						}
+						stopTSO := make(chan struct{})
+						tsoResults := make(chan memberLoadTSOResult, 4)
+						for range cap(tsoResults) {
+							go memberLoadTSO(t.Context(), foreground, start, stopTSO, &burst, tsoResults)
+						}
+						ready.Wait()
+						begin := time.Now()
+						window := time.NewTimer(3 * time.Second)
+						close(start)
+						finished.Wait()
+						burst.Store(false)
+						burstDuration := time.Since(begin)
+						<-window.C
+						// Drain in-flight calls before reusing the foreground client.
+						close(stopTSO)
+						var tso memberLoadTSOResult
+						for range cap(tsoResults) {
+							result := <-tsoResults
+							tso.latencies = append(tso.latencies, result.latencies...)
+							tso.burstLatencies = append(tso.burstLatencies, result.burstLatencies...)
+							tso.errors += result.errors
+							tso.nonMonotonic += result.nonMonotonic
+							tso.regressions = append(tso.regressions, result.regressions...)
+						}
+						recorder.enabled.Store(false)
+						cpuSeconds := memberLoadCPU(t) - beforeCPU
+						var afterMem runtime.MemStats
+						runtime.ReadMemStats(&afterMem)
+						afterRPCs := memberLoadRPCs(t)
+						var failures int
+						for _, err := range refreshErrors {
+							if err != nil {
+								failures++
+							}
+						}
+						row := map[string]any{
+							"clients": count, "scenario": scenario, "sample": sample,
+							"window_ms": time.Since(begin).Milliseconds(), "burst_ms": float64(burstDuration) / float64(time.Millisecond),
+							"discovery": memberLoadPercentiles(latencies), "discovery_errors": failures,
+							"probe_attempts": recorder.calls.Load(), "probe_invocations": recorder.sent.Load(), "peak_probes": recorder.peak.Load(),
+							"pd_get_members":      afterRPCs["pdpb.PD/GetMembers"] - beforeRPCs["pdpb.PD/GetMembers"],
+							"etcd_member_list":    afterRPCs["etcdserverpb.Cluster/MemberList"] - beforeRPCs["etcdserverpb.Cluster/MemberList"],
+							"process_cpu_seconds": cpuSeconds, "allocated_bytes": afterMem.TotalAlloc - beforeMem.TotalAlloc,
+							"heap_bytes": afterMem.HeapAlloc, "gc_cycles": afterMem.NumGC - beforeMem.NumGC,
+							"tso": memberLoadPercentiles(tso.latencies), "tso_during_burst": memberLoadPercentiles(tso.burstLatencies),
+							"tso_errors": tso.errors, "tso_non_monotonic": tso.nonMonotonic,
+							"tso_regression_examples": tso.regressions,
+						}
+						data, err := json.Marshal(row)
+						re.NoError(err)
+						t.Logf("member_load_sample=%s", data)
+						re.Zero(failures, "membership refreshes failed: %v", refreshErrors)
+						re.Zero(tso.errors)
+						re.Zero(tso.nonMonotonic)
+						for _, client := range clients {
+							re.Equal(cluster.GetLeaderServer().GetAddr(), client.GetServiceDiscovery().GetServingURL())
+						}
+					})
+				}
+			}
+		})
+	}
+}
+
+type memberLoadRecorder struct {
+	blockedTarget string
+	enabled       atomic.Bool
+	mode          atomic.Int32
+	calls         atomic.Uint64
+	sent          atomic.Uint64
+	active        atomic.Int64
+	peak          atomic.Int64
+}
+
+func (r *memberLoadRecorder) unary(ctx context.Context, method string, request, response any,
+	conn *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption,
+) error {
+	if method != "/pdpb.PD/GetMembers" || !r.enabled.Load() {
+		return invoke(ctx, method, request, response, conn, opts...)
+	}
+	r.calls.Add(1)
+	active := r.active.Add(1)
+	defer r.active.Add(-1)
+	for previous := r.peak.Load(); active > previous; previous = r.peak.Load() {
+		if r.peak.CompareAndSwap(previous, active) {
+			break
+		}
+	}
+	mode := r.mode.Load()
+	if mode == 2 && conn.Target() == r.blockedTarget {
+		// Drop this discovery path before it reaches PD. This leaves the real
+		// quorum intact and models a client-to-endpoint network blackhole.
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	r.sent.Add(1)
+	err := invoke(ctx, method, request, response, conn, opts...)
+	if (mode == 1 || mode == 3) && err == nil {
+		// Delay delivery of the actual server response, preserving real
+		// GetMembers, server caching and etcd calls underneath.
+		delay := 30 * time.Millisecond
+		if mode == 3 {
+			delay = 300 * time.Millisecond
+		}
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return err
+}
+
+func memberLoadParallel(count int, run func(int)) {
+	jobs := make(chan int, count)
+	for i := range count {
+		jobs <- i
+	}
+	close(jobs)
+	wg := &sync.WaitGroup{}
+	for range min(count, 16) {
+		wg.Go(func() {
+			for i := range jobs {
+				run(i)
+			}
+		})
+	}
+	wg.Wait()
+}
+
+func memberLoadRPCs(t *testing.T) map[string]float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	counts := make(map[string]float64)
+	for _, family := range families {
+		if family.GetName() != "grpc_server_started_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			var service, method string
+			for _, label := range metric.GetLabel() {
+				switch label.GetName() {
+				case "grpc_service":
+					service = label.GetValue()
+				case "grpc_method":
+					method = label.GetValue()
+				}
+			}
+			counts[service+"/"+method] += metric.GetCounter().GetValue()
+		}
+	}
+	return counts
+}
+
+func memberLoadCPU(t *testing.T) float64 {
+	t.Helper()
+	var usage syscall.Rusage
+	require.NoError(t, syscall.Getrusage(syscall.RUSAGE_SELF, &usage))
+	return float64(usage.Utime.Sec+usage.Stime.Sec) + float64(usage.Utime.Usec+usage.Stime.Usec)/1e6
+}
+
+func memberLoadPercentiles(latencies []time.Duration) map[string]float64 {
+	slices.Sort(latencies)
+	result := map[string]float64{"samples": float64(len(latencies))}
+	if len(latencies) > 0 {
+		for name, quantile := range map[string]float64{"p50_ms": 0.5, "p95_ms": 0.95, "p99_ms": 0.99, "max_ms": 1} {
+			i := int(math.Ceil(float64(len(latencies))*quantile)) - 1
+			result[name] = float64(latencies[i]) / float64(time.Millisecond)
+		}
+	}
+	return result
+}
+
+type memberLoadTSOResult struct {
+	latencies      []time.Duration
+	burstLatencies []time.Duration
+	errors         int
+	nonMonotonic   int
+	regressions    [][2]uint64
+}
+
+func memberLoadTSO(ctx context.Context, client pd.Client, start, stop <-chan struct{}, burst *atomic.Bool, results chan<- memberLoadTSOResult) {
+	var result memberLoadTSOResult
+	defer func() { results <- result }()
+	<-start
+	ticker := time.NewTicker(2 * time.Millisecond)
+	defer ticker.Stop()
+	var previous uint64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-ticker.C:
+		}
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		duringBurst := burst.Load()
+		begin := time.Now()
+		physical, logical, err := client.GetTS(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		elapsed := time.Since(begin)
+		result.latencies = append(result.latencies, elapsed)
+		if duringBurst {
+			result.burstLatencies = append(result.burstLatencies, elapsed)
+		}
+		if err != nil {
+			result.errors++
+			continue
+		}
+		ts := tsoutil.ComposeTS(physical, logical)
+		if ts <= previous {
+			if result.nonMonotonic == 0 {
+				result.regressions = append(result.regressions, [2]uint64{previous, ts})
+			}
+			result.nonMonotonic++
+		}
+		previous = ts
+	}
 }
 
 func TestClientLeaderChange(t *testing.T) {

@@ -71,6 +71,11 @@ type Client interface {
 	GetLocalTSAsync(ctx context.Context, _ string) TSFuture
 }
 
+type pendingStreamBuild struct {
+	url    string
+	cancel context.CancelFunc
+}
+
 // Cli is the implementation of the TSO client.
 type Cli struct {
 	ctx    context.Context
@@ -82,12 +87,12 @@ type Cli struct {
 	tsoStreamBuilderFactory
 	// leaderURL is the URL of the TSO leader.
 	leaderURL atomic.Value
-	// leaderSwitchedMu protects leaderSwitchedCh, which is closed and replaced after each
-	// update of leaderURL so that every goroutine waiting to reconnect wakes up at once.
-	leaderSwitchedMu sync.Mutex
-	leaderSwitchedCh chan struct{}
-	conCtxMgr        *cctx.Manager[*tsoStream]
-	updateConCtxsCh  chan struct{}
+	// leaderSwitchedMu protects the leader notification and pending stream builds.
+	leaderSwitchedMu    sync.Mutex
+	leaderSwitchedCh    chan struct{}
+	pendingStreamBuilds map[context.Context]pendingStreamBuild
+	conCtxMgr           *cctx.Manager[*tsoStream]
+	updateConCtxsCh     chan struct{}
 
 	// tsoReqPool is the pool to recycle `*tsoRequest`.
 	tsoReqPool *sync.Pool
@@ -238,8 +243,35 @@ func (c *Cli) updateTSOLeaderURL(url string) error {
 func (c *Cli) notifyLeaderSwitched() {
 	c.leaderSwitchedMu.Lock()
 	defer c.leaderSwitchedMu.Unlock()
+	leaderURL := c.getLeaderURL()
+	for _, build := range c.pendingStreamBuilds {
+		if build.url != leaderURL {
+			build.cancel()
+		}
+	}
 	close(c.leaderSwitchedCh)
 	c.leaderSwitchedCh = make(chan struct{})
+}
+
+func (c *Cli) trackStreamBuild(ctx context.Context, cancel context.CancelFunc, url string) bool {
+	c.leaderSwitchedMu.Lock()
+	defer c.leaderSwitchedMu.Unlock()
+	if c.getLeaderURL() != url {
+		return false
+	}
+	if c.pendingStreamBuilds == nil {
+		c.pendingStreamBuilds = make(map[context.Context]pendingStreamBuild)
+	}
+	c.pendingStreamBuilds[ctx] = pendingStreamBuild{url: url, cancel: cancel}
+	return true
+}
+
+func (c *Cli) finishStreamBuild(ctx context.Context) bool {
+	c.leaderSwitchedMu.Lock()
+	defer c.leaderSwitchedMu.Unlock()
+	build := c.pendingStreamBuilds[ctx]
+	delete(c.pendingStreamBuilds, ctx)
+	return ctx.Err() == nil && c.getLeaderURL() == build.url
 }
 
 // leaderSwitched returns a channel that is closed when the leader URL is updated next time.
@@ -367,7 +399,6 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		// The next attempt starts one interval after this one starts, or earlier if the leader
 		// switches, so a slow attempt does not add a full interval on top of itself.
 		timer.Reset(constants.RetryInterval)
-		c.svcDiscovery.ScheduleCheckMemberChanged()
 		leaderSwitched := c.leaderSwitched()
 		cc, url = c.getTSOLeaderClientConn()
 		if c.conCtxMgr.Exist(url) {
@@ -377,7 +408,20 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		}
 		if cc != nil {
 			cctx, cancel := context.WithCancel(ctx)
-			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
+			if c.trackStreamBuild(cctx, cancel, url) {
+				stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
+				if !c.finishStreamBuild(cctx) {
+					cancel()
+					stream = nil
+					// Keep the builder's gRPC status so connection timeouts still
+					// count as network errors when deciding whether to forward.
+					if err == nil {
+						err = context.Canceled
+					}
+				}
+			} else {
+				err = context.Canceled
+			}
 			failpoint.Inject("unreachableNetwork", func() {
 				stream = nil
 				err = status.New(codes.Unavailable, "unavailable").Err()
@@ -406,6 +450,9 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		} else {
 			networkErrNum++
 		}
+		// A usable stream needs no additional discovery. Refresh failed attempts
+		// before waiting so a leader change can interrupt the retry interval.
+		c.svcDiscovery.ScheduleCheckMemberChanged()
 		select {
 		case <-ctx.Done():
 			return err
