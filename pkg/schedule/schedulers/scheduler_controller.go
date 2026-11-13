@@ -336,14 +336,19 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return err
 	}
 
-	// nolint:errcheck
-	// SetDisable will not work now, because the config is removed. We can't
-	// remove the config in the future, if we want to use `Disable` of independent
-	// config.
-	_ = s.SetDisable(true)
-	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
-		log.Error("can not remove the scheduler config", errs.ZapError(err))
-		return err
+	// MCS balance-range configs belong to the independent config watcher.
+	// Removing an old runtime must not overwrite or delete a replacement's
+	// configuration that the watcher has already cached.
+	if !c.balanceRangeConfigFromStorage || s.GetType() != types.BalanceRangeScheduler {
+		// nolint:errcheck
+		// SetDisable will not work now, because the config is removed. We can't
+		// remove the config in the future, if we want to use `Disable` of independent
+		// config.
+		_ = s.SetDisable(true)
+		if err := c.storage.RemoveSchedulerConfig(name); err != nil {
+			log.Error("can not remove the scheduler config", errs.ZapError(err))
+			return err
+		}
 	}
 
 	s.Stop()
