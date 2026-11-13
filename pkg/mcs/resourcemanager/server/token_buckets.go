@@ -429,12 +429,14 @@ func NewGroupTokenBucket(resourceGroupName string, tokenBucket *rmpb.TokenBucket
 	}
 	settings := proto.Clone(tokenBucket.GetSettings()).(*rmpb.TokenLimitSettings)
 	return &GroupTokenBucket{
-		Settings:           settings,
-		Tokens:             tokenBucket.GetTokens(),
-		resourceGroupName:  resourceGroupName,
-		tokenSlots:         make(map[uint64]*tokenSlot),
-		overrideFillRate:   -1,
-		overrideBurstLimit: -1,
+		Settings: settings,
+		GroupTokenBucketState: GroupTokenBucketState{
+			Tokens:             tokenBucket.GetTokens(),
+			resourceGroupName:  resourceGroupName,
+			tokenSlots:         make(map[uint64]*tokenSlot),
+			overrideFillRate:   -1,
+			overrideBurstLimit: -1,
+		},
 	}
 }
 

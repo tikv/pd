@@ -72,9 +72,11 @@ func TestApplySettingsWithoutTokenPatch(t *testing.T) {
 					FillRate:   100,
 					BurstLimit: 200,
 				},
-				Tokens:             123.0,
-				overrideFillRate:   -1,
-				overrideBurstLimit: -1,
+				GroupTokenBucketState: GroupTokenBucketState{
+					Tokens:             123.0,
+					overrideFillRate:   -1,
+					overrideBurstLimit: -1,
+				},
 			},
 		},
 	}

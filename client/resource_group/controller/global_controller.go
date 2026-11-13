@@ -890,8 +890,8 @@ func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, 
 		return false
 	}
 
-	if _, after, ok := strings.CutLast(requestResource, "_"); ok {
-		return slices.Contains(bg.JobTypes, after)
+	if idx := strings.LastIndex(requestResource, "_"); idx != -1 {
+		return slices.Contains(bg.JobTypes, requestResource[idx+1:])
 	}
 
 	return false

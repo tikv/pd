@@ -605,8 +605,10 @@ type testResult struct {
 
 func (n *numa) runTestCase(pkg string, fn string) testResult {
 	res := testResult{
-		ClassName: filepath.Join(modulePath, pkg),
-		Name:      fn,
+		JUnitTestCase: JUnitTestCase{
+			ClassName: filepath.Join(modulePath, pkg),
+			Name:      fn,
+		},
 	}
 
 	var buf bytes.Buffer

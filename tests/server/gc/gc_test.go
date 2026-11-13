@@ -1712,8 +1712,8 @@ func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
 			streamCtx, cancelStream := context.WithTimeout(context.Background(), 30*time.Second)
 			streamCtx = metadata.NewIncomingContext(streamCtx, metadata.Pairs(grpcutil.ForwardMetadataKey, forwardedHost))
 			stream := &blockedWatchGCStatesServer{
-				ctx:         streamCtx,
-				sendStarted: make(chan struct{}), sendExited: make(chan struct{}),
+				failingWatchGCStatesServer: failingWatchGCStatesServer{ctx: streamCtx},
+				sendStarted:                make(chan struct{}), sendExited: make(chan struct{}),
 			}
 			handlerDone := make(chan struct{})
 			var handlerErr error

@@ -76,8 +76,10 @@ func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {
 		schedulerConfig:    &baseSchedulerConfig{},
 		evictCandidate:     slowCandidate{},
 		lastEvictCandidate: slowCandidate{},
-		RecoverySec:        defaultRecoverySec,
-		EvictedStores:      make([]uint64, 0),
+		evictSlowTrendSchedulerParam: evictSlowTrendSchedulerParam{
+			RecoverySec:   defaultRecoverySec,
+			EvictedStores: make([]uint64, 0),
+		},
 	}
 }
 

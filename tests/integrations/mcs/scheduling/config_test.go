@@ -111,8 +111,12 @@ func (suite *configTestSuite) TestConfigWatch() {
 		return watcher.GetScheduleConfig().SplitMergeInterval.Duration == 2*sc.DefaultSplitMergeInterval
 	})
 	persistOpts.SetStoreConfig(&sc.StoreConfig{
-		RegionMaxSize: "144MiB",
-		Engine:        sc.RaftstoreV2,
+		Coprocessor: sc.Coprocessor{
+			RegionMaxSize: "144MiB",
+		},
+		Storage: sc.Storage{
+			Engine: sc.RaftstoreV2,
+		},
 	})
 	persistConfig(re, suite.pdLeaderServer)
 	testutil.Eventually(re, func() bool {

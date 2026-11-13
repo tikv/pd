@@ -115,7 +115,8 @@ func newScatterRangeScheduler(opController *operator.Controller, config *scatter
 		balanceLeader: newBalanceLeaderScheduler(
 			opController,
 			&balanceLeaderSchedulerConfig{
-				Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("", "")},
+				balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
+					Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("", "")}},
 			},
 			// the name will not be persisted
 			WithBalanceLeaderName("scatter-range-leader"),

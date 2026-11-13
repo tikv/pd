@@ -59,8 +59,10 @@ func TestDefaultSchedulerConfig(t *testing.T) {
 	}
 
 	cfg := &testConfig{
-		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
-		Value:                      "test",
+		balanceLeaderSchedulerConfig: balanceLeaderSchedulerConfig{
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		},
+		Value: "test",
 	}
 	cfg.init("test", s, cfg)
 	require.False(t, cfg.isDisable())
@@ -68,7 +70,9 @@ func TestDefaultSchedulerConfig(t *testing.T) {
 	require.True(t, cfg.isDisable())
 
 	cfg2 := &testConfig{
-		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		balanceLeaderSchedulerConfig: balanceLeaderSchedulerConfig{
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		},
 	}
 	cfg2.init("test", s, cfg2)
 	require.True(t, cfg2.isDisable())
