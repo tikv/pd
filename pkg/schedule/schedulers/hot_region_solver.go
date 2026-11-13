@@ -87,6 +87,14 @@ type balanceSolver struct {
 	maxPeerNum    int
 	minHotDegree  int
 
+	// maxDstCPUUsage and storesLoads gate destinations on total store CPU;
+	// storesLoads is only taken when maxDstCPUUsage > 0. readPeerCPU holds the
+	// read CPU of read-hot peers, so a write solver can count the read CPU that
+	// moves with a write peer; it is only taken for write solvers.
+	maxDstCPUUsage float64
+	storesLoads    map[uint64]statistics.StoreKindLoads
+	readPeerCPU    map[regionStore]float64
+
 	rank
 }
 
@@ -129,6 +137,18 @@ func (bs *balanceSolver) init() {
 	bs.minHotDegree = bs.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.getGreatDecRatio(), bs.sche.conf.getMinorDecRatio()
+	bs.maxDstCPUUsage = bs.sche.conf.getMaxDstStoreCPUUsage()
+	if bs.maxDstCPUUsage > 0 {
+		bs.storesLoads = bs.GetStoresLoads()
+		if bs.rwTy == utils.Write {
+			bs.readPeerCPU = make(map[regionStore]float64)
+			for storeID, peers := range bs.GetHotPeerStats(utils.Read) {
+				for _, peer := range peers {
+					bs.readPeerCPU[regionStore{peer.RegionID, storeID}] = peer.GetLoad(utils.CPUDim)
+				}
+			}
+		}
+	}
 	rankFormulaVersion := bs.sche.conf.getRankFormulaVersion()
 	switch rankFormulaVersion {
 	case "v1":
@@ -329,6 +349,11 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
 							!allowRevertRegion(revertRegion, srcStoreID) ||
 							!bs.isRevertRegionValid(revertRegion, revertFit, revertLocationCache) {
+							continue
+						}
+						// The revert region moves into srcStore, so srcStore is its destination.
+						if bs.isDstCPUOverloaded(srcStore, bs.hotPeerCPU(revertPeerStat)) {
+							hotSchedulerResultCounter.WithLabelValues("revert-dst-store-cpu-overload-"+bs.resourceTy.String(), strconv.FormatUint(srcStoreID, 10)).Inc()
 							continue
 						}
 						if !affinityFilter.Select(revertRegion).IsOK() {
@@ -929,6 +954,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 	}
 	ret := make(map[uint64]*statistics.StoreLoadDetail, len(candidates))
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
+	incomingCPU := bs.hotPeerCPU(bs.cur.mainPeerStat)
 	for _, detail := range candidates {
 		store := detail.StoreInfo
 		if !detail.IsTiKV() {
@@ -941,6 +967,10 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		}
 		if filter.Target(bs.GetSchedulerConfig(), store, filters) {
 			id := store.GetID()
+			if bs.isDstCPUOverloaded(detail, incomingCPU) {
+				hotSchedulerResultCounter.WithLabelValues("dst-store-cpu-overload-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+				continue
+			}
 			if failure := bs.destinationStoreFailure(detail, bs.curScope, bs.dstToleranceRatio(detail)); failure != "" {
 				hotSchedulerResultCounter.WithLabelValues(failure+"-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
@@ -957,6 +987,7 @@ func (bs *balanceSolver) pickDstStoresDefault(filters []filter.Filter, candidate
 	ret := make(map[uint64]*statistics.StoreLoadDetail, len(candidates))
 	confDstToleranceRatio := bs.sche.conf.getDstToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
+	incomingCPU := bs.hotPeerCPU(bs.cur.mainPeerStat)
 	for _, detail := range candidates {
 		store := detail.StoreInfo
 		dstToleranceRatio := confDstToleranceRatio
@@ -971,6 +1002,10 @@ func (bs *balanceSolver) pickDstStoresDefault(filters []filter.Filter, candidate
 		}
 		if filter.Target(bs.GetSchedulerConfig(), store, filters) {
 			id := store.GetID()
+			if bs.isDstCPUOverloaded(detail, incomingCPU) {
+				hotSchedulerResultCounter.WithLabelValues("dst-store-cpu-overload-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+				continue
+			}
 			if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				hotSchedulerResultCounter.WithLabelValues("dst-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
@@ -985,6 +1020,57 @@ func (bs *balanceSolver) pickDstStoresDefault(filters []filter.Filter, candidate
 		}
 	}
 	return ret
+}
+
+// isDstCPUOverloaded reports whether the store's total CPU usage, in percent
+// of one core, plus the net CPU of hot peers already moving in, plus incomingCPU,
+// the CPU of the peer about to move in, reaches max-dst-store-cpu-usage.
+// A store with no CPU sample is not overloaded.
+func (bs *balanceSolver) isDstCPUOverloaded(detail *statistics.StoreLoadDetail, incomingCPU float64) bool {
+	if bs.maxDstCPUUsage <= 0 {
+		return false
+	}
+	loads, ok := bs.storesLoads[detail.GetID()]
+	if !ok {
+		return false
+	}
+	return loads[utils.StoreCPUUsage]+pendingCPU(detail)+incomingCPU >= bs.maxDstCPUUsage
+}
+
+// regionStore identifies a peer by its region and store.
+type regionStore struct {
+	regionID uint64
+	storeID  uint64
+}
+
+// hotPeerCPU returns the CPU a hot peer takes with it when it moves. For a read
+// peer it is the peer's read CPU. Write CPU is not reported per region, so for a
+// write peer it is the read CPU of the same peer, if that peer is read-hot.
+func (bs *balanceSolver) hotPeerCPU(peer *statistics.HotPeerStat) float64 {
+	if bs.maxDstCPUUsage <= 0 || peer == nil {
+		return 0
+	}
+	if bs.rwTy == utils.Read {
+		return peer.GetLoad(utils.CPUDim)
+	}
+	return bs.readPeerCPU[regionStore{peer.RegionID, peer.StoreID}]
+}
+
+// pendingCPU returns the net read and write CPU of hot peers moving into the
+// store: peers moving in minus peers moving out, floored at 0 so that a net
+// outflow does not lower the observed usage. Like all pending influence, it is
+// scaled by pending-weight. It reads the store's pending influence directly
+// rather than its LoadPred, whose CPU dimension only holds the solver's own
+// read or write CPU, so read and write solvers see the same value.
+func pendingCPU(detail *statistics.StoreLoadDetail) float64 {
+	if detail.StoreSummaryInfo == nil || detail.PendingSum == nil {
+		return 0
+	}
+	loads := detail.PendingSum.Loads
+	if int(utils.RegionWriteCPU) >= len(loads) {
+		return 0
+	}
+	return math.Max(0, loads[utils.RegionReadCPU]+loads[utils.RegionWriteCPU])
 }
 
 func (bs *balanceSolver) dstToleranceRatio(detail *statistics.StoreLoadDetail) float64 {

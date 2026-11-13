@@ -731,6 +731,7 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 		"split-thresholds":        0.2,
 		"history-sample-duration": "5m0s",
 		"history-sample-interval": "30s",
+		"max-dst-store-cpu-usage": 0.0,
 	}
 	checkHotSchedulerConfig := func(expect map[string]any) {
 		testutil.Eventually(re, func() bool {

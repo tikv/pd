@@ -124,6 +124,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerParam {
 		SplitThresholds:        conf.SplitThresholds,
 		HistorySampleDuration:  conf.HistorySampleDuration,
 		HistorySampleInterval:  conf.HistorySampleInterval,
+		MaxDstStoreCPUUsage:    conf.MaxDstStoreCPUUsage,
 	}
 }
 
@@ -169,6 +170,21 @@ type hotRegionSchedulerParam struct {
 
 	HistorySampleDuration typeutil.Duration `json:"history-sample-duration"`
 	HistorySampleInterval typeutil.Duration `json:"history-sample-interval"`
+
+	// MaxDstStoreCPUUsage caps the CPU usage of a destination store, in the unit
+	// of store_cpu_usage: the sum of every thread's CPU usage, where 100 is one
+	// fully busy core. For example, a 4-core store with 3 cores fully busy
+	// reports 300, and a 16-core store at 50% reports about 800.
+	//
+	// A store is skipped as a destination when its CPU usage, plus the net read
+	// CPU of hot regions already moving in (moving in minus moving out, not
+	// below 0), plus the read CPU of the candidate region reaches the cap. With
+	// the cap at 1000, a store at 900 with 50 already moving in rejects a
+	// candidate using 100 (900+50+100 >= 1000). The CPU already moving in is
+	// scaled by pending-weight, as all pending influence is; the example assumes
+	// the default weight of 1. The source store of a revert region is checked
+	// the same way. 0 disables the check.
+	MaxDstStoreCPUUsage float64 `json:"max-dst-store-cpu-usage"`
 }
 
 type hotRegionSchedulerConfig struct {
@@ -219,6 +235,12 @@ func (conf *hotRegionSchedulerConfig) setSrcToleranceRatio(tol float64) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.SrcToleranceRatio = tol
+}
+
+func (conf *hotRegionSchedulerConfig) getMaxDstStoreCPUUsage() float64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.MaxDstStoreCPUUsage
 }
 
 func (conf *hotRegionSchedulerConfig) getDstToleranceRatio() float64 {
@@ -471,6 +493,9 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 	}
 	if conf.SplitThresholds < 0.01 || conf.SplitThresholds > 1.0 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid split-thresholds, should be in range [0.01, 1.0]")
+	}
+	if conf.MaxDstStoreCPUUsage < 0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("invalid max-dst-store-cpu-usage, should not be negative")
 	}
 	return nil
 }
