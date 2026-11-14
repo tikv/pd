@@ -314,6 +314,11 @@ func (sc *schedulingController) GetStoresLoads() map[uint64]statistics.StoreKind
 	return sc.hotStat.GetStoresLoads()
 }
 
+// GetStoresLoadsTo writes Store load stats into the caller's reusable map.
+func (sc *schedulingController) GetStoresLoadsTo(dst map[uint64]statistics.StoreKindLoads) map[uint64]statistics.StoreKindLoads {
+	return sc.hotStat.GetStoresLoadsTo(dst)
+}
+
 // GetStoreReadCPURecentMax returns the recent max read CPU usage of a store.
 func (sc *schedulingController) GetStoreReadCPURecentMax(storeID uint64) float64 {
 	return sc.hotStat.GetStoreReadCPURecentMax(storeID)
