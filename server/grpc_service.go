@@ -451,7 +451,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 
 	var etcdLeader, pdLeader *pdpb.Member
 	leaderID := s.member.GetEtcdLeader()
-	leader := s.member.GetLeader()
+	leader := s.getTSOLeader()
 	etcdLeader, pdLeader = findLeadersInMembers(members, leaderID, leader)
 	if (pdLeader == nil && leader != nil) || (etcdLeader == nil && leaderID != 0) {
 		members, err = s.ReloadMembers()
@@ -459,7 +459,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 			return getMembersErrorResult(err)
 		}
 		leaderID = s.member.GetEtcdLeader()
-		leader = s.member.GetLeader()
+		leader = s.getTSOLeader()
 		etcdLeader, pdLeader = findLeadersInMembers(members, leaderID, leader)
 	}
 
@@ -576,7 +576,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		if !forwardedHostChecked {
-			if err := s.validatePDForwardedHost(forwardedHost); err != nil {
+			if err := validateForwardedHost(forwardedHost, s.getTSOLeader()); err != nil {
 				return errors.WithStack(err)
 			}
 			forwardedHostChecked = true

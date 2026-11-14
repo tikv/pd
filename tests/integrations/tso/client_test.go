@@ -603,53 +603,74 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 		[]string{pdLeader.GetAddr()}, pd.SecurityOption{})
 	re.NoError(err)
 	defer pdClient.Close()
-	memberIDs := make([]string, 0, len(cluster.GetServers()))
-	for _, server := range cluster.GetServers() {
+	servers := cluster.GetServers()
+	memberIDs := make([]string, 0, len(servers))
+	for _, server := range servers {
 		memberIDs = append(memberIDs, strconv.FormatUint(server.GetServerID(), 10))
 	}
 	memberIDList := strings.Join(memberIDs, ",")
 
+	const initializationHook = "github.com/tikv/pd/server/cluster/afterTSOInitialized"
+	initialized := make(chan *tests.TestServer, 1)
+	release := make(chan struct{})
+	var initializedOnce sync.Once
+	resume := sync.OnceFunc(func() { close(release) })
+	re.NoError(failpoint.EnableCall(initializationHook, func(id uint64) {
+		for _, server := range servers {
+			if server.GetServerID() == id {
+				initializedOnce.Do(func() { initialized <- server })
+				<-release
+				return
+			}
+		}
+	}))
+	defer func() {
+		resume()
+		re.NoError(failpoint.Disable(initializationHook))
+	}()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", fmt.Sprintf("return(\"%s\")", memberIDList)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", fmt.Sprintf("return(\"%s\")", memberIDList)))
-	leaderFailpointsDisabled := false
-	disableLeaderFailpoints := func() {
-		if leaderFailpointsDisabled {
-			return
-		}
-		leaderFailpointsDisabled = true
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
-	}
-	failpointsDisabled := false
-	disableFailpoints := func() {
-		if failpointsDisabled {
-			return
-		}
-		failpointsDisabled = true
+	disableFailpoints := sync.OnceFunc(func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
-		disableLeaderFailpoints()
-	}
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+	})
 	defer disableFailpoints()
-	// Exit the PD leader loop to trigger the rebase error without directly transferring etcd leadership.
-	// Trying to get TSO should fail with "not leader" error.
+	var initializingServer *tests.TestServer
+	select {
+	case initializingServer = <-initialized:
+	case <-time.After(30 * time.Second):
+		suite.T().Fatal("leader initialization did not reach the TSO checkpoint")
+	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+	svr := initializingServer.GetServer()
+	re.NotNil(svr.GetMember().GetLeadership().GetLease())
+	re.True(svr.GetTSOAllocator().IsInitialize())
+	re.False(svr.IsServing())
+	// The existing client may use the new term before ID rebasing completes.
 	getTSError := func() error {
 		_, _, err := pdClient.GetTS(ctx)
 		return err
 	}
 	testutil.Eventually(re, func() bool {
-		err := getTSError()
-		return err != nil && strings.Contains(err.Error(), "not leader")
-	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(20*time.Millisecond))
-	disableLeaderFailpoints()
+		return getTSError() == nil
+	}, testutil.WithWaitFor(5*time.Second))
+	// Let this term fail rebasing, but prevent another term from serving TSO
+	// during the rejection assertions below.
+	const campaignHook = "github.com/tikv/pd/server/leaderLoopCheckAgain"
+	re.NoError(failpoint.Enable(campaignHook, fmt.Sprintf("return(\"%s\")", memberIDList)))
+	defer func() { re.NoError(failpoint.Disable(campaignHook)) }()
+	resume()
+	testutil.Eventually(re, func() bool {
+		return svr.GetMember().GetLeadership().GetLease() == nil &&
+			!svr.GetTSOAllocator().IsInitialize()
+	})
 	for range 10 {
 		re.ErrorContains(getTSError(), "not leader")
 	}
 	disableFailpoints()
+	re.NoError(failpoint.Disable(campaignHook))
 	// The TSO should be eventually available.
 	testutil.Eventually(re, func() bool {
 		_, _, err := pdClient.GetTS(ctx)
