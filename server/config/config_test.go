@@ -59,6 +59,27 @@ func TestRedactInfoLogDefault(t *testing.T) {
 	}
 }
 
+func TestGRPCGatewayDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		setting  string
+		expected bool
+	}{
+		{name: "default"},
+		{name: "enabled", setting: "enable-grpc-gateway = true", expected: true},
+		{name: "disabled", setting: "enable-grpc-gateway = false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			meta, err := toml.Decode(tc.setting, cfg)
+			re.NoError(err)
+			re.NoError(cfg.Adjust(&meta, false))
+			re.Equal(tc.expected, cfg.EnableGRPCGateway)
+		})
+	}
+}
+
 func TestTLS(t *testing.T) {
 	re := require.New(t)
 	cfg := NewConfig()
