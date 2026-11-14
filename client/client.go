@@ -26,6 +26,8 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -679,6 +681,13 @@ func (c *client) getRouterClient() *router.Cli {
 	return c.inner.routerClient
 }
 
+// isQueryRegionUnimplemented checks whether the router client failed because the
+// PD server does not implement the QueryRegion RPC, e.g., an older PD during a
+// rolling upgrade. In this case, the caller should fall back to the unary RPCs.
+func isQueryRegionUnimplemented(err error) bool {
+	return status.Code(err) == codes.Unimplemented
+}
+
 // GetRegionFromMember implements the RPCClient interface.
 func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, _ ...opt.GetRegionOption) (*router.Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
@@ -730,7 +739,10 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	defer cancel()
 
 	if routerClient := c.getRouterClient(); routerClient != nil {
-		return routerClient.GetRegion(ctx, key, opts...)
+		region, err := routerClient.GetRegion(ctx, key, opts...)
+		if !isQueryRegionUnimplemented(err) {
+			return region, err
+		}
 	}
 	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
@@ -782,7 +794,10 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	defer cancel()
 
 	if routerClient := c.getRouterClient(); routerClient != nil {
-		return routerClient.GetPrevRegion(ctx, key, opts...)
+		region, err := routerClient.GetPrevRegion(ctx, key, opts...)
+		if !isQueryRegionUnimplemented(err) {
+			return region, err
+		}
 	}
 
 	option := &opt.GetRegionOp{}
@@ -833,7 +848,10 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	defer cancel()
 
 	if routerClient := c.getRouterClient(); routerClient != nil {
-		return routerClient.GetRegionByID(ctx, regionID, opts...)
+		region, err := routerClient.GetRegionByID(ctx, regionID, opts...)
+		if !isQueryRegionUnimplemented(err) {
+			return region, err
+		}
 	}
 
 	option := &opt.GetRegionOp{}
