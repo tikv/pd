@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -32,10 +33,10 @@ import (
 func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
 	router.Use(middlewares.BootstrapChecker())
-	router.POST("", PostAffinityGroups)
-	router.PATCH("", BatchModifyAffinityGroups)
-	router.PUT("/:group_id", UpdateAffinityGroupPeers)
-	router.DELETE("/:group_id", DeleteAffinityGroup)
+	router.POST("", middlewares.Audit("PostAffinityGroups", audit.LocalLogLabel), PostAffinityGroups)
+	router.PATCH("", middlewares.Audit("BatchModifyAffinityGroups", audit.LocalLogLabel), BatchModifyAffinityGroups)
+	router.PUT("/:group_id", middlewares.Audit("UpdateAffinityGroupPeers", audit.LocalLogLabel), UpdateAffinityGroupPeers)
+	router.DELETE("/:group_id", middlewares.Audit("DeleteAffinityGroup", audit.LocalLogLabel), DeleteAffinityGroup)
 	router.GET("", GetAllAffinityGroups)
 	router.GET("/:group_id", GetAffinityGroup)
 }
