@@ -18,10 +18,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -82,9 +85,69 @@ func (s *Service) checkServing() error {
 	return nil
 }
 
+// validateMetaStorageAccess confines requests to metadata used by microservice
+// discovery, resource groups, log backup, and Region Labels. Keys are literal etcd
+// keys, not paths. The latter two prefixes also cover their legacy prefix scans
+// without a trailing slash.
+func validateMetaStorageAccess(key, rangeEnd []byte) error {
+	start, end := string(key), string(rangeEnd)
+	var upper string
+	if strings.HasPrefix(start, "/pd/") {
+		prefix := strings.TrimSuffix(keypath.RegionLabelPathPrefix(), "/")
+		if strings.HasPrefix(start, prefix) {
+			if len(rangeEnd) == 0 {
+				return nil
+			}
+			upper = clientv3.GetPrefixRangeEnd(prefix)
+		}
+	} else {
+		// The fixed upper bounds are each prefix's lexicographic successor.
+		for _, scope := range [...]struct{ prefix, upper string }{
+			{"/ms/", "/ms0"},
+			{"resource_group/", "resource_group0"},
+			{"/tidb/br-stream", "/tidb/br-strean"},
+		} {
+			if strings.HasPrefix(start, scope.prefix) {
+				upper = scope.upper
+				break
+			}
+		}
+	}
+	if upper != "" {
+		if len(rangeEnd) == 0 {
+			return nil
+		}
+		// etcd ranges are half-open. A whole-prefix query ends at the prefix's
+		// successor, which need not itself start with the allowed prefix.
+		// The NUL sentinel means all keys from start onwards, beyond this prefix.
+		if end != "\x00" && end > start && end <= upper {
+			return nil
+		}
+	}
+	return status.Error(codes.PermissionDenied, "meta storage access is outside the allowed key prefixes")
+}
+
+// validateMetaStorageWriteAccess keeps persisted TSO windows under the control of
+// TSO storage while preserving the existing discovery reads and watches.
+func validateMetaStorageWriteAccess(key, rangeEnd []byte) error {
+	if err := validateMetaStorageAccess(key, rangeEnd); err != nil {
+		return err
+	}
+	if start := string(key); strings.HasPrefix(start, "/ms/") {
+		parts := strings.SplitN(start, "/", 8)
+		if len(parts) == 7 && parts[3] == "tso" && parts[5] == "gta" && parts[6] == "timestamp" {
+			return status.Error(codes.PermissionDenied, "meta storage cannot modify persisted TSO timestamps")
+		}
+	}
+	return nil
+}
+
 // Watch watches the key with a given prefix and revision.
 func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.MetaStorage_WatchServer) error {
 	if err := s.checkServing(); err != nil {
+		return err
+	}
+	if err := validateMetaStorageAccess(req.GetKey(), req.GetRangeEnd()); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithCancel(server.Context())
@@ -172,6 +235,9 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
+	if err := validateMetaStorageAccess(req.GetKey(), req.GetRangeEnd()); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var options []clientv3.OpOption
@@ -212,6 +278,9 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
+	if err := validateMetaStorageWriteAccess(req.GetKey(), nil); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var options []clientv3.OpOption
@@ -246,6 +315,9 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 // Delete deletes the key-value pair from meta storage.
 func (s *Service) Delete(ctx context.Context, req *meta_storagepb.DeleteRequest) (*meta_storagepb.DeleteResponse, error) {
 	if err := s.checkServing(); err != nil {
+		return nil, err
+	}
+	if err := validateMetaStorageWriteAccess(req.GetKey(), req.GetRangeEnd()); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
