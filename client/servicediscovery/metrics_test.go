@@ -1,0 +1,82 @@
+// Copyright 2026 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package servicediscovery
+
+import (
+	"flag"
+	"os"
+	"os/exec"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
+
+	clientmetrics "github.com/tikv/pd/client/metrics"
+)
+
+// TestServiceDiscoveryMetricsInitializationIsConcurrentSafe covers bundle
+// publication and direct observer access. It does not exercise the getMembers
+// or getClusterInfo request paths.
+func TestServiceDiscoveryMetricsInitializationIsConcurrentSafe(t *testing.T) {
+	// Metrics registration runs once per process, so each invocation needs a fresh process.
+	if os.Getenv("PD_CLIENT_METRICS_TEST") != t.Name() {
+		testBinary, err := os.Executable()
+		require.NoError(t, err)
+		// #nosec G204 -- Re-execute the current test binary without a shell.
+		cmd := exec.CommandContext(t.Context(), testBinary, "-test.run=^"+t.Name()+"$", "-test.count=1")
+		cmd.Env = append(os.Environ(), "PD_CLIENT_METRICS_TEST="+t.Name())
+		if coverDir := flag.Lookup("test.gocoverdir").Value.String(); coverDir != "" {
+			cmd.Args = append(cmd.Args, "-test.gocoverdir="+coverDir)
+		}
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		return
+	}
+
+	const producerCount = 32
+	before := loadServiceDiscoveryMetrics()
+	var (
+		ready sync.WaitGroup
+		wg    sync.WaitGroup
+		stop  atomic.Bool
+	)
+	t.Cleanup(func() {
+		stop.Store(true)
+		wg.Wait()
+	})
+	ready.Add(producerCount)
+	wg.Add(producerCount)
+	for range producerCount {
+		go func() {
+			defer wg.Done()
+			loadServiceDiscoveryMetrics().getMembers.Observe(0)
+			ready.Done()
+			for !stop.Load() {
+				loadServiceDiscoveryMetrics().getClusterInfo.Observe(0)
+				loadServiceDiscoveryMetrics().getMembers.Observe(0)
+			}
+		}()
+	}
+
+	ready.Wait()
+	clientmetrics.InitAndRegisterMetrics(prometheus.Labels{"instance": "test"})
+	stop.Store(true)
+	wg.Wait()
+
+	require.NotSame(t, before, loadServiceDiscoveryMetrics())
+	loadServiceDiscoveryMetrics().getMembers.Observe(0)
+}
