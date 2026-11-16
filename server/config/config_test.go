@@ -49,6 +49,27 @@ func TestSecurity(t *testing.T) {
 	re.Equal(logutil.RedactInfoLogOFF, cfg.Security.RedactInfoLog)
 }
 
+func TestGRPCGatewayDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		setting  string
+		expected bool
+	}{
+		{name: "default"},
+		{name: "enabled", setting: "enable-grpc-gateway = true", expected: true},
+		{name: "disabled", setting: "enable-grpc-gateway = false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			meta, err := toml.Decode(tc.setting, cfg)
+			re.NoError(err)
+			re.NoError(cfg.Adjust(&meta, false))
+			re.Equal(tc.expected, cfg.EnableGRPCGateway)
+		})
+	}
+}
+
 func TestTLS(t *testing.T) {
 	re := require.New(t)
 	cfg := NewConfig()
@@ -59,13 +80,20 @@ func TestTLS(t *testing.T) {
 
 func TestClientCertAllowedCNValidation(t *testing.T) {
 	testCases := []struct {
-		name       string
-		clientURLs string
-		clientCNs  string
-		missing    string
-		wantErr    string
+		name        string
+		clientURLs  string
+		clientCNs   string
+		gateway     bool
+		omitGateway bool
+		missing     string
+		wantErr     string
 	}{
 		{name: "https", clientURLs: "https://127.0.0.1:2379"},
+		{name: "default gateway disabled", clientURLs: "https://127.0.0.1:2379", omitGateway: true},
+		{name: "gateway enabled", clientURLs: "https://127.0.0.1:2379", gateway: true, wantErr: "requires enable-grpc-gateway = false"},
+		{name: "gateway enabled with multiple CNs", clientURLs: "https://127.0.0.1:2379", clientCNs: `["pd-server", "tidb"]`, gateway: true, wantErr: "requires enable-grpc-gateway = false"},
+		{name: "empty allowlist with gateway enabled", clientURLs: "https://127.0.0.1:2379", clientCNs: `[]`, gateway: true},
+		{name: "empty allowlist with gateway disabled", clientURLs: "https://127.0.0.1:2379", clientCNs: `[]`},
 		{name: "empty CN", clientURLs: "https://127.0.0.1:2379", clientCNs: `[""]`, wantErr: "must not contain empty CNs"},
 		{name: "mixed empty CN", clientURLs: "https://127.0.0.1:2379", clientCNs: `["pd-server", ""]`, wantErr: "must not contain empty CNs"},
 		{name: "missing ca", clientURLs: "https://127.0.0.1:2379", missing: "cacert-path", wantErr: "requires cacert-path, cert-path and key-path"},
@@ -82,7 +110,11 @@ func TestClientCertAllowedCNValidation(t *testing.T) {
 			if clientCNs == "" {
 				clientCNs = `["pd-server"]`
 			}
-			text := []string{fmt.Sprintf("client-urls = %q\n[security]\nclient-cert-allowed-cn = %s\n", testCase.clientURLs, clientCNs)}
+			text := []string{fmt.Sprintf("client-urls = %q\n", testCase.clientURLs)}
+			if !testCase.omitGateway {
+				text = append(text, fmt.Sprintf("enable-grpc-gateway = %t\n", testCase.gateway))
+			}
+			text = append(text, fmt.Sprintf("[security]\nclient-cert-allowed-cn = %s\n", clientCNs))
 			for _, key := range []string{"cacert-path", "cert-path", "key-path"} {
 				if key != testCase.missing {
 					text = append(text, fmt.Sprintf("%s = %q\n", key, "test.pem"))
@@ -101,7 +133,12 @@ func TestClientCertAllowedCNValidation(t *testing.T) {
 			re.NoError(logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog))
 			etcdCfg, err := cfg.GenEmbedEtcdConfig()
 			re.NoError(err)
-			re.Equal([]string{"pd-server"}, etcdCfg.ClientTLSInfo.AllowedCNs)
+			re.Equal(testCase.gateway, etcdCfg.EnableGRPCGateway)
+			if clientCNs == `[]` {
+				re.Empty(etcdCfg.ClientTLSInfo.AllowedCNs)
+			} else {
+				re.Equal([]string{"pd-server"}, etcdCfg.ClientTLSInfo.AllowedCNs)
+			}
 			re.Empty(etcdCfg.PeerTLSInfo.AllowedCNs)
 		})
 	}

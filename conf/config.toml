@@ -13,6 +13,9 @@
 ## if not set, use ${peer-urls}
 # advertise-peer-urls = ""
 
+## Enable the etcd HTTP/JSON gateway. Default: false.
+# enable-grpc-gateway = false
+
 ## The initial cluster configuration for bootstrapping.
 # initial-cluster = ""
 # initial-cluster-state = "new"
@@ -38,6 +41,7 @@
 ## A non-empty list is enforced even for a single CN and overrides cert-allowed-cn
 ## for the client port. Include the CN of PD's own certificate for internal requests.
 ## Requires cacert-path, cert-path, key-path and HTTPS client URLs. Restart to apply.
+## Also requires the top-level enable-grpc-gateway setting to be false.
 ## Leave empty to preserve the legacy cert-allowed-cn behavior.
 # client-cert-allowed-cn = ["pd-server"]
 ## Whether to enable the log redaction. It can be the following values:
