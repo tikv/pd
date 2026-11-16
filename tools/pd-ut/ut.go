@@ -50,10 +50,10 @@ const (
 )
 
 // initTags sets up the tags.
-func initTags() {
+func initTags(module string) {
 	tmpTags := []string{deadlockTag}
 
-	if isNextGenEnabled() {
+	if isNextGenEnabled() && module != "client" && module != "tools" {
 		tmpTags = append(tmpTags, nextGenTag)
 	}
 
@@ -124,6 +124,7 @@ var (
 	// runtime
 	parallel         int
 	workDir          string
+	repoRoot         string
 	coverFileTempDir string
 	// arguments
 	race         bool
@@ -131,6 +132,8 @@ var (
 	coverProfile string
 	ignoreDirs   string
 	cache        bool
+	packageList  string
+	durationFile string
 	// tags for tests
 	tags string = deadlockTag
 )
@@ -141,7 +144,8 @@ func main() {
 
 func run() (exitCode int) {
 	// Initialize tags
-	initTags()
+	module := stripFlag("--module")
+	initTags(module)
 
 	race = handleFlag("--race")
 	parallelStr := stripFlag("--parallel")
@@ -149,6 +153,8 @@ func run() (exitCode int) {
 	coverProfile = stripFlag("--coverprofile")
 	ignoreDirs = stripFlag("--ignore")
 	cache = handleFlag("--cache")
+	packageList = stripFlag("--packages")
+	durationFile = stripFlag("--test-durations")
 
 	if coverProfile != "" {
 		var err error
@@ -183,6 +189,17 @@ func run() (exitCode int) {
 	workDir, err = os.Getwd()
 	if err != nil {
 		fmt.Println("os.Getwd() error", err)
+	}
+	repoRoot = workDir
+	if module != "" && module != "." {
+		switch module {
+		case "client", "tools", "tests/integrations":
+			modulePath = filepath.Join("github.com", "tikv", "pd", module)
+			workDir = filepath.Join(repoRoot, module)
+		default:
+			fmt.Println("unsupported test module:", module)
+			return 1
+		}
 	}
 
 	srv := alloc.RunHTTPServer(context.Background())
@@ -330,6 +347,17 @@ func cmdRun(args ...string) bool {
 		fmt.Println("list packages error", err)
 		return false
 	}
+	if packageList != "" {
+		if len(args) != 0 {
+			fmt.Println("--packages cannot be combined with positional package filters")
+			return false
+		}
+		pkgs, err = selectPackages(pkgs, packageList)
+		if err != nil {
+			fmt.Println("select packages error:", err)
+			return false
+		}
+	}
 	tasks := make([]task, 0, 5000)
 	start := time.Now()
 
@@ -380,6 +408,12 @@ func cmdRun(args ...string) bool {
 
 	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", parallel*2, len(tasks), time.Since(start))
 
+	if durationFile == "" {
+		shuffle(tasks)
+	} else if err := orderTasks(tasks, durationFile); err != nil {
+		fmt.Println("load test durations error:", err)
+		return false
+	}
 	taskCh := make(chan task, 100)
 	works := make([]numa, parallel)
 	var wg sync.WaitGroup
@@ -387,8 +421,6 @@ func cmdRun(args ...string) bool {
 		wg.Add(1)
 		go works[i].worker(&wg, taskCh)
 	}
-
-	shuffle(tasks)
 
 	start = time.Now()
 	for _, task := range tasks {
@@ -568,7 +600,7 @@ func filterTestCases(tasks []task, arg1 string) ([]task, error) {
 
 func listPackages() ([]string, error) {
 	listPath := strings.Join([]string{".", "..."}, string(filepath.Separator))
-	cmd := goCommand("list", listPath)
+	cmd := goCommand("list", "-tags", tags, listPath)
 	cmd.Dir = workDir
 	ss, err := cmdToLines(cmd)
 	if err != nil {
@@ -580,7 +612,10 @@ func listPackages() ([]string, error) {
 		if !strings.HasPrefix(s, modulePath) {
 			continue
 		}
-		pkg := s[len(modulePath)+1:]
+		pkg := "."
+		if s != modulePath {
+			pkg = s[len(modulePath)+1:]
+		}
 		if skipDIR(pkg) {
 			continue
 		}
@@ -776,13 +811,8 @@ func generateBuildCache() error {
 	fmt.Println("generate build cache")
 	// cd cmd/pd-server && go test -tags=$(tags) -exec-=true -vet=off -toolexec=go-compile-without-link
 	cmd := goCommand("test", "-exec=true", "-vet", "off", "--tags="+tags)
-	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(workDir, "tools", "pd-ut", "go-compile-without-link.sh"))
-	cmd.Dir = filepath.Join(workDir, "cmd", "pd-server")
-	if strings.Contains(workDir, integrationsTestPath) {
-		cmd.Dir = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "cmd", "pd-server")
-		goCompileWithoutLink = fmt.Sprintf("-toolexec=%s", filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)],
-			"tools", "pd-ut", "go-compile-without-link.sh"))
-	}
+	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(repoRoot, "tools", "pd-ut", "go-compile-without-link.sh"))
+	cmd.Dir = filepath.Join(repoRoot, "cmd", "pd-server")
 	cmd.Args = append(cmd.Args, goCompileWithoutLink)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -802,10 +832,7 @@ func buildTestBinaryMulti(pkgs []string) (_ []byte, err error) {
 
 	// go test --exec=xprog --tags=$(tags) -vet=off --count=0 $(pkgs)
 	// workPath just like `/pd/tests/integrations`
-	xprogPath := filepath.Join(workDir, "bin", "xprog")
-	if strings.Contains(workDir, integrationsTestPath) {
-		xprogPath = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin", "xprog")
-	}
+	xprogPath := filepath.Join(repoRoot, "bin", "xprog")
 	packages := make([]string, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		packages = append(packages, filepath.Join(modulePath, pkg))
@@ -815,9 +842,13 @@ func buildTestBinaryMulti(pkgs []string) (_ []byte, err error) {
 	p := strconv.Itoa(parallel * 2)
 	cmd := goCommand("test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags="+tags)
 	if coverProfile != "" {
-		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
-		if strings.Contains(workDir, integrationsTestPath) {
-			coverPkg = filepath.Join("..", "..", "...")
+		root, err := filepath.Rel(workDir, repoRoot)
+		if err != nil {
+			return nil, err
+		}
+		coverPkg := filepath.Join(root, "...")
+		if root == "." {
+			coverPkg = "./..."
 		}
 		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))
 	}
@@ -880,6 +911,9 @@ func testBinaryExist(pkg string) (bool, error) {
 }
 
 func testFileName(pkg string) string {
+	if pkg == "." {
+		return filepath.Base(modulePath) + ".test.bin"
+	}
 	_, file := filepath.Split(pkg)
 	return file + ".test.bin"
 }

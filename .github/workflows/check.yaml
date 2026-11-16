@@ -16,6 +16,7 @@ jobs:
           check-latest: true
       - name: Make Check
         run: |
+          python3 -m unittest discover -s scripts -p test_ci_shard.py
           SWAGGER=1 make build
           make tools
           make check

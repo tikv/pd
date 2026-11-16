@@ -68,3 +68,63 @@ pd-ut run --race
 pd-ut run --coverprofile xxx
 go tool cover --func=xxx
 ```
+
+### Balance CI runners
+
+`make ci-test-job JOB_INDEX=1 JOB_COUNT=10` assigns each test package to one
+runner across the root, client, tools, and integration modules. All runners must
+use the same commit, layout, `JOB_COUNT`, and `NEXT_GEN` setting. Assignment uses
+the timing profile's fixed parallelism so different CPU quotas cannot produce
+different package ownership. `pd-ut` execution parallelism follows each runner's CPU
+quota and can be overridden with `--parallel`.
+The existing runner names and their allowed test scopes are recorded in
+`scripts/ci-test-groups.json`. Unit tests are balanced across runners 1–3,
+`tests/` packages across runners 4–5, and runners 6–10 retain their tools,
+client, TSO, and microservice scopes. Each package must match exactly one scope;
+a new integration category needs an explicit scope entry before it can run.
+
+The planner uses recorded test durations, the longest test in each package,
+and a small preference for keeping modules together to reduce repeated build
+setup. New packages are discovered with `go list` and receive a median package
+estimate. Package assignments are deterministic. Within root and integration
+modules, `pd-ut` starts tests with the longest recorded durations first. The
+client and tools modules retain their existing `go test` execution and
+package-level setup and cleanup. Duration estimates exclude the common
+installation and compilation steps, so CI completion times still need to be
+checked after CI runs with this change. The planner uses Python 3.6 or later
+and requires no third-party packages.
+
+```shell
+# Inspect every runner's packages without compiling or running tests.
+python3 scripts/ci-shard.py plan --count 10 --parallel 4
+
+# Refresh the committed estimates from downloaded test-results artifacts.
+python3 scripts/ci-shard.py update artifacts/*/junitfile
+
+# Run an exact package set; similar package names are not included.
+bin/pd-ut run --module tools --packages pd-ut,pd-ut/alloc --race
+```
+
+The planner merges module coverage and available JUnit reports into the existing
+`covprofile` and `junitfile` outputs. Test failures still return a nonzero exit
+code and their JUnit reports are retained. As before, native client and tools
+tests produce coverage without JUnit test cases. The committed timing snapshot
+comes from the CI run identified in `scripts/ci-test-durations.json`; refresh it when
+new reports show sustained runner imbalance. The `nextgen` layout preserves
+the current three Prow runner scopes: unit tests; `tests/` plus tools; and
+integration tests plus client. Each runner runs
+its complete package set together instead of executing several numbered jobs
+in sequence. Use `NEXT_GEN=1 JOB_LAYOUT=nextgen JOB_COUNT=3` with indices 1–3.
+The CI configuration must opt into that layout; existing callers keep the
+standard ten-runner layout.
+The client and tools modules retain their existing `deadlock` test tags in
+NextGen CI; the root and integration modules also use `nextgen`.
+
+Each runner prints its three slowest completed top-level tests or suites using
+actual elapsed times from that run, including when tests fail. Root and
+integration timings reuse the existing JUnit reports. Client and tools tests
+use `go test -json` with the same package-level test execution; successful test
+logs are suppressed and failure logs are retained. Subtests are excluded from
+the ranking so their time is not counted again with their parent suite.
+Cached native test results are also excluded; their recorded duration comes
+from a previous run. The test cache remains enabled as before.
