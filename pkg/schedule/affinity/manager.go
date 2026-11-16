@@ -208,7 +208,7 @@ func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule)
 		m.updateGroupLabelRuleLocked(group.ID, labelRules[i], false)
 	}
 	if m.hasRangeConflicts {
-		m.reconcileRangeConflictsLocked()
+		m.reconcileRangeConflictsLocked(m.collectRangeConflictsLocked())
 	}
 }
 
@@ -324,7 +324,7 @@ func (m *Manager) deleteGroups(groupIDs []string) {
 		m.deleteGroupLocked(groupID)
 	}
 	if m.hasRangeConflicts {
-		m.reconcileRangeConflictsLocked()
+		m.reconcileRangeConflictsLocked(m.collectRangeConflictsLocked())
 	}
 }
 
@@ -495,9 +495,10 @@ func (m *Manager) ReconcileRangeConflicts() {
 	if !m.rangeConflictsStale {
 		return
 	}
+	conflicts := m.collectRangeConflictsLocked()
 	m.Lock()
 	defer m.Unlock()
-	m.reconcileRangeConflictsLocked()
+	m.reconcileRangeConflictsLocked(conflicts)
 }
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
