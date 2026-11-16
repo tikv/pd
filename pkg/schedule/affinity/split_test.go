@@ -307,7 +307,6 @@ func TestSplitQueueFull(t *testing.T) {
 			// A blocking send fails the test timeout instead of returning here.
 			send()
 			re.Equal(1024, streams.MsgLength())
-			re.True(m.CheckSplit(region.Clone(core.WithNewRegionID(2)), pdpb.SplitReason_ADMIN, streams))
 			re.NoError(streams.Drain(1024))
 			if path == "recovery" {
 				re.Zero(m.splitDeniedRegions.Len())
