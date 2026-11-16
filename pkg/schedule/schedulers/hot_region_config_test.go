@@ -42,7 +42,6 @@ func TestHotRegionConfigRejectsUnsafeUpdates(t *testing.T) {
 		{`{"history-sample-duration":"-1m"}`, "history-sample-duration"},
 		{`{"history-sample-interval":"-1s"}`, "history-sample-interval"},
 		{`{"max-peer-number":-1}`, "max-peer-number"},
-		{`{"max-peer-number":0}`, "max-peer-number"},
 		{`{"max-zombie-rounds":-1}`, "max-zombie-rounds"},
 		{fmt.Sprintf(`{"max-zombie-rounds":%d}`, maxZombieRounds+1), "max-zombie-rounds"},
 		{`{"byte-rate-rank-step-ratio":0}`, "byte-rate-rank-step-ratio"},
@@ -117,7 +116,8 @@ func TestHotRegionConfigRestoresLegacyNumericValues(t *testing.T) {
 		{`{"history-sample-duration":"1h","history-sample-interval":"1s"}`, `{"history-sample-duration":"1h0m0s","history-sample-interval":"1s"}`},
 		{`{"history-sample-duration":"-1m"}`, `{"history-sample-duration":"0s"}`},
 		{`{"history-sample-interval":"-1s"}`, `{"history-sample-interval":"0s"}`},
-		{`{"max-peer-number":0}`, `{"max-peer-number":1000}`},
+		{`{"max-peer-number":-1}`, `{"max-peer-number":1000}`},
+		{`{"max-peer-number":0,"max-zombie-rounds":-1}`, `{"max-peer-number":0,"max-zombie-rounds":0}`},
 		{`{"max-zombie-rounds":-1}`, `{"max-zombie-rounds":0}`},
 		{fmt.Sprintf(`{"max-zombie-rounds":%d}`, maxZombieRounds+1), fmt.Sprintf(`{"max-zombie-rounds":%d}`, maxZombieRounds)},
 		{`{"byte-rate-rank-step-ratio":0,"count-rank-step-ratio":2}`, `{"byte-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01}`},
@@ -184,6 +184,7 @@ func TestHotRegionConfigNumericBoundaries(t *testing.T) {
 		`{"history-sample-duration":"0s"}`,
 		`{"history-sample-duration":"1ns","history-sample-interval":"1ns"}`,
 		`{"history-sample-duration":"1h","history-sample-interval":"1s"}`,
+		`{"max-peer-number":0,"max-zombie-rounds":0}`,
 		`{"max-peer-number":1,"max-zombie-rounds":0}`,
 		fmt.Sprintf(`{"max-zombie-rounds":%d}`, maxZombieRounds),
 		`{"byte-rate-rank-step-ratio":1,"key-rate-rank-step-ratio":1,"query-rate-rank-step-ratio":1,"cpu-rate-rank-step-ratio":1,"count-rank-step-ratio":1}`,
@@ -206,6 +207,7 @@ func TestHotRegionConfigPreservesCompatibleSettings(t *testing.T) {
 	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
 	for _, body := range []string{
+		`{"max-peer-number":0}`,
 		`{"history-sample-duration":"1h","history-sample-interval":"1s"}`,
 		`{"history-sample-duration":"2h","history-sample-interval":"1s"}`,
 		`{"history-sample-duration":"0s","history-sample-interval":"0s"}`,
@@ -235,9 +237,9 @@ func TestHotRegionConfigPreservesCompatibleSettings(t *testing.T) {
 
 			// A partial update must retain the compatible settings and unrelated tuning.
 			response = httptest.NewRecorder()
-			scheduler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(`{"max-peer-number":123}`)))
+			scheduler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(`{"max-zombie-rounds":7}`)))
 			re.Equal(http.StatusOK, response.Code, response.Body.String())
-			conf.MaxPeerNum = 123
+			conf.MaxZombieRounds = 7
 			expected, err := EncodeConfig(conf)
 			re.NoError(err)
 			persisted, err := store.LoadSchedulerConfig(scheduler.GetName())
@@ -253,7 +255,7 @@ func TestHotRegionConfigPreservesCompatibleSettings(t *testing.T) {
 			reloaded, err := hot.EncodeConfig()
 			re.NoError(err)
 			re.JSONEq(string(expected), string(reloaded))
-			restored, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigJSONDecoder([]byte(persisted)))
+			restored, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigJSONDecoderForRestore([]byte(persisted)))
 			re.NoError(err)
 			reloaded, err = restored.EncodeConfig()
 			re.NoError(err)

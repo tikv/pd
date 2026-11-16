@@ -444,8 +444,8 @@ func isPriorityValid(priorities []string) (map[string]bool, error) {
 }
 
 func (conf *hotRegionSchedulerParam) validateLocked() error {
-	if conf.MaxPeerNum <= 0 {
-		return errs.ErrSchedulerConfig.FastGenByArgs("max-peer-number should be positive")
+	if conf.MaxPeerNum < 0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("max-peer-number should be nonnegative")
 	}
 	// Region heartbeats have the longer interval, so this also bounds the store-stat lifetime.
 	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))
@@ -546,7 +546,7 @@ func (conf *hotRegionSchedulerConfig) adjustLegacyConfig() error {
 		return nil
 	}
 	defaults := initHotRegionScheduleConfig()
-	if conf.MaxPeerNum <= 0 {
+	if conf.MaxPeerNum < 0 {
 		conf.MaxPeerNum = defaults.MaxPeerNum
 	}
 	maxZombieRounds := int(math.MaxInt64 / (utils.RegionHeartBeatReportInterval * time.Second))

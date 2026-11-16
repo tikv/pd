@@ -4212,6 +4212,7 @@ func TestInitSchedulersNormalizesLegacyConfig(t *testing.T) {
 			`"history-sample-duration":"1h","history-sample-interval":"1s"`,
 			`"history-sample-duration":"-1m"`,
 			`"max-peer-number":0`,
+			`"max-peer-number":-1`,
 			`"max-zombie-rounds":-1`,
 			`"byte-rate-rank-step-ratio":0`,
 		} {
@@ -4246,6 +4247,7 @@ func TestInitSchedulersNormalizesLegacyConfig(t *testing.T) {
 						tc.storage, schedulers.ConfigJSONDecoder([]byte(saved)))
 					re.NoError(err)
 					var config struct {
+						MaxPeerNum            int      `json:"max-peer-number"`
 						MinHotByteRate        float64  `json:"min-hot-byte-rate"`
 						ReadPriorities        []string `json:"read-priorities"`
 						HistorySampleDuration string   `json:"history-sample-duration"`
@@ -4253,6 +4255,11 @@ func TestInitSchedulersNormalizesLegacyConfig(t *testing.T) {
 					}
 					re.NoError(json.Unmarshal([]byte(saved), &config))
 					re.Equal(float64(321), config.MinHotByteRate)
+					if strings.Contains(legacy, `"max-peer-number":0`) {
+						re.Equal(0, config.MaxPeerNum)
+					} else {
+						re.Equal(1000, config.MaxPeerNum)
+					}
 					re.Equal([]string{"key", "byte"}, config.ReadPriorities)
 					if strings.Contains(legacy, `"history-sample-interval":"1s"`) {
 						re.Equal("1h0m0s", config.HistorySampleDuration)

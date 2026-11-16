@@ -49,7 +49,7 @@ func TestLegacyHotRegionConfigRemainsEditableThroughAPI(t *testing.T) {
 		leader := cluster.GetLeaderServer()
 		store := leader.GetServer().GetStorage()
 		name := types.BalanceHotRegionScheduler.String()
-		legacy := []byte(`{"min-hot-byte-rate":321,"read-priorities":["key","byte"],"history-sample-duration":"1h","history-sample-interval":"1s"}`)
+		legacy := []byte(`{"max-peer-number":0,"min-hot-byte-rate":321,"read-priorities":["key","byte"],"history-sample-duration":"1h","history-sample-interval":"1s"}`)
 		re.NoError(store.SaveSchedulerConfig(name, legacy))
 		re.NoError(leader.BootstrapCluster())
 		rc := leader.GetRaftCluster()
@@ -64,6 +64,7 @@ func TestLegacyHotRegionConfigRemainsEditableThroughAPI(t *testing.T) {
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, configURL+"/list", nil,
 			testutil.StatusOK(re), testutil.ExtractJSON(re, &listed)))
 		re.Equal(float64(321), listed["min-hot-byte-rate"])
+		re.Equal(float64(0), listed["max-peer-number"])
 		re.Equal("1h0m0s", listed["history-sample-duration"])
 		re.Equal("1s", listed["history-sample-interval"])
 		// New invalid updates must preserve the existing configuration.
@@ -81,12 +82,14 @@ func TestLegacyHotRegionConfigRemainsEditableThroughAPI(t *testing.T) {
 		saved, err = store.LoadSchedulerConfig(name)
 		re.NoError(err)
 		var restored struct {
+			MaxPeerNum            int      `json:"max-peer-number"`
 			MinHotByteRate        float64  `json:"min-hot-byte-rate"`
 			ReadPriorities        []string `json:"read-priorities"`
 			HistorySampleDuration string   `json:"history-sample-duration"`
 			HistorySampleInterval string   `json:"history-sample-interval"`
 		}
 		re.NoError(json.Unmarshal([]byte(saved), &restored))
+		re.Equal(0, restored.MaxPeerNum)
 		re.Equal(float64(321), restored.MinHotByteRate)
 		re.Equal([]string{"key", "byte"}, restored.ReadPriorities)
 		re.Equal("1h0m0s", restored.HistorySampleDuration)

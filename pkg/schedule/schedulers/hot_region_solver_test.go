@@ -379,6 +379,13 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	st := &statistics.StoreLoadDetail{
 		HotPeers: hotPeers,
 	}
+	// Restoring the legacy zero limit must keep hot peers out of the candidate set.
+	restored, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigJSONDecoderForRestore([]byte(`{"max-peer-number":0}`)))
+	re.NoError(err)
+	zeroSolver := newBalanceSolver(restored.(*hotScheduler), tc, utils.Read, transferLeader)
+	re.Empty(zeroSolver.filterHotPeers(st))
+
 	leaderSolver.maxPeerNum = 1
 	u := leaderSolver.filterHotPeers(st)
 	checkSortResult(re, []uint64{1}, u)
