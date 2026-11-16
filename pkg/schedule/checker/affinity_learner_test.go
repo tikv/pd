@@ -61,10 +61,13 @@ func newLearnerRule(stores ...string) *placement.Rule {
 	return rule
 }
 
-func putLearner(tc *mockcluster.Cluster, regionID, storeID uint64) *core.RegionInfo {
-	region := tc.GetRegion(regionID).Clone(core.SetApproximateSize(1), core.WithAddPeer(&metapb.Peer{
-		Id: 100 + regionID, StoreId: storeID, Role: metapb.PeerRole_Learner,
-	}))
+func putLearners(tc *mockcluster.Cluster, regionID uint64, storeIDs ...uint64) *core.RegionInfo {
+	region := tc.GetRegion(regionID).Clone(core.SetApproximateSize(1))
+	for _, storeID := range storeIDs {
+		region = region.Clone(core.WithAddPeer(&metapb.Peer{
+			Id: 100*uint64(len(region.GetLearners())+1) + regionID, StoreId: storeID, Role: metapb.PeerRole_Learner,
+		}))
+	}
 	tc.PutRegion(region)
 	return region
 }
@@ -159,7 +162,7 @@ func TestAffinityCheckerLearnerSwap(t *testing.T) {
 			c, tc, _ := newLearnerConflictController(t)
 			tc.SetEnableUseJointConsensus(true)
 			re.NoError(tc.GetRuleManager().SetRule(newLearnerRule()))
-			region := putLearner(tc, 1, 4)
+			region := putLearners(tc, 1, 4)
 			manager := tc.GetAffinityManager()
 			const id = "learner-swap"
 			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
@@ -208,9 +211,7 @@ func TestAffinityCheckerLearnerSwapIsolation(t *testing.T) {
 	rule = newLearnerRule()
 	rule.Count, rule.LocationLabels, rule.IsolationLevel = 2, []string{"zone"}, "zone"
 	re.NoError(tc.GetRuleManager().SetRule(rule))
-	putLearner(tc, 1, 4)
-	region := tc.GetRegion(1).Clone(core.WithAddPeer(&metapb.Peer{Id: 201, StoreId: 5, Role: metapb.PeerRole_Learner}))
-	tc.PutRegion(region)
+	region := putLearners(tc, 1, 4, 5)
 	manager := tc.GetAffinityManager()
 	const id = "learner-swap-isolation"
 	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
@@ -240,9 +241,7 @@ func TestAffinityCheckerLearnerSwapFallback(t *testing.T) {
 	rule := newLearnerRule("2", "5")
 	rule.ID = "learner-2"
 	re.NoError(tc.GetRuleManager().SetRule(rule))
-	putLearner(tc, 1, 4)
-	region := tc.GetRegion(1).Clone(core.WithAddPeer(&metapb.Peer{Id: 201, StoreId: 5, Role: metapb.PeerRole_Learner}))
-	tc.PutRegion(region)
+	region := putLearners(tc, 1, 4, 5)
 	manager := tc.GetAffinityManager()
 	const id = "learner-swap-fallback"
 	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
@@ -270,11 +269,12 @@ func TestAffinityCheckerLearnerSwapFallback(t *testing.T) {
 // learner moves to that store. While that store is busy, the move waits
 // instead of expiring the group.
 func TestAffinityCheckerLearnerMoveToRuleStore(t *testing.T) {
-	for _, kind := range []string{"label-constraint", "location-label", "location-label-less-regions", "single-learner-isolation"} {
+	for _, kind := range []string{"label-constraint", "location-label", "location-label-less-regions", "single-learner-isolation", "cross-rule-location", "rule-isolation"} {
 		t.Run(kind, func(t *testing.T) {
 			re := require.New(t)
 			c, tc, _ := newLearnerConflictController(t)
 			rule := newLearnerRule("4", "5")
+			learnerStores, destination := []uint64{4}, uint64(5)
 			switch kind {
 			case "single-learner-isolation":
 				rule.LocationLabels, rule.IsolationLevel = []string{"zone"}, "zone"
@@ -294,18 +294,43 @@ func TestAffinityCheckerLearnerMoveToRuleStore(t *testing.T) {
 				}
 				rule = newLearnerRule()
 				rule.LocationLabels = []string{"zone"}
+			case "cross-rule-location", "rule-isolation":
+				tc.SetEnableUseJointConsensus(true)
+				tc.AddRegionStore(6, 0)
+				tc.AddRegionStore(7, 10)
+				zones := []string{"a", "b", "c", "d", "e", "e", "f"}
+				rule = newLearnerRule("4", "6", "7")
+				learnerStores, destination = []uint64{4, 5}, 7
+				if kind == "rule-isolation" {
+					zones = []string{"a", "b", "c", "c", "d", "a", "b"}
+					rule = newLearnerRule("1", "4", "5", "6")
+					rule.Count, rule.IsolationLevel = 2, "zone"
+					destination = 6
+				} else {
+					other := newLearnerRule("5")
+					other.ID = "learner-b"
+					re.NoError(tc.GetRuleManager().SetRule(other))
+				}
+				for i, zone := range zones {
+					tc.SetStoreLabel(uint64(i+1), map[string]string{"ID": strconv.Itoa(i + 1), "zone": zone})
+				}
+				rule.LocationLabels = []string{"zone"}
 			}
 			re.NoError(tc.GetRuleManager().SetRule(rule))
-			region := putLearner(tc, 1, 4)
+			region := putLearners(tc, 1, learnerStores...)
 			manager := tc.GetAffinityManager()
 			const id = "learner-move"
 			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
 				ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4},
 			}, region.GetStartKey(), region.GetEndKey()))
+			if len(learnerStores) > 1 {
+				re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+				re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(cloneRegionWithReplacePeerStores(region, 1, 1, 2, 4), false))
+			}
 			moves := promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter)
 			conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
 
-			tc.SetStoreBusy(5, true)
+			tc.SetStoreBusy(destination, true)
 			for range 3 {
 				re.Empty(c.CheckRegion(region))
 				state := manager.GetAffinityGroupState(id)
@@ -313,12 +338,18 @@ func TestAffinityCheckerLearnerMoveToRuleStore(t *testing.T) {
 				re.Equal([]uint64{1, 2, 4}, state.VoterStoreIDs)
 				re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
 			}
-			tc.SetStoreBusy(5, false)
-			checkAndApply(t, c, tc, 1, 1)
+			tc.SetStoreBusy(destination, false)
+			ops := c.CheckRegion(region)
+			re.Len(ops, 1)
+			applyLearnerOperator(t, tc, ops[0])
+			checkAndApply(t, c, tc, 1)
 			moved := tc.GetRegion(1)
 			state := manager.GetAffinityGroupState(id)
 			re.Equal([]uint64{1, 2, 4}, state.VoterStoreIDs, "the group keeps its target")
-			re.NotNil(moved.GetStoreLearner(5))
+			re.NotNil(moved.GetStoreLearner(destination))
+			for _, storeID := range learnerStores[1:] {
+				re.NotNil(moved.GetStoreLearner(storeID))
+			}
 			re.True(tc.GetRuleManager().FitRegionWithoutCache(tc, moved).IsSatisfied())
 			re.Equal(affinity.PhaseStable, state.Phase)
 			re.Equal(moves+1, promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter))
@@ -382,61 +413,6 @@ func TestAffinityCheckerLearnerBusyAndPinned(t *testing.T) {
 	}
 }
 
-func TestAffinityCheckerLearnerRuleLocations(t *testing.T) {
-	for _, kind := range []string{"cross-rule-location", "rule-isolation"} {
-		t.Run(kind, func(t *testing.T) {
-			re := require.New(t)
-			c, tc, _ := newLearnerConflictController(t)
-			tc.SetEnableUseJointConsensus(true)
-			tc.AddRegionStore(6, 0)
-			tc.AddRegionStore(7, 10)
-			zones := []string{"a", "b", "c", "d", "e", "e", "f"}
-			rule := newLearnerRule("4", "6", "7")
-			destination := uint64(7)
-			if kind == "rule-isolation" {
-				zones = []string{"a", "b", "c", "c", "d", "a", "b"}
-				rule = newLearnerRule("1", "4", "5", "6")
-				rule.Count, rule.IsolationLevel = 2, "zone"
-				destination = 6
-			} else {
-				other := newLearnerRule("5")
-				other.ID = "learner-b"
-				re.NoError(tc.GetRuleManager().SetRule(other))
-			}
-			for i, zone := range zones {
-				tc.SetStoreLabel(uint64(i+1), map[string]string{"ID": strconv.Itoa(i + 1), "zone": zone})
-			}
-			rule.LocationLabels = []string{"zone"}
-			re.NoError(tc.GetRuleManager().SetRule(rule))
-			putLearner(tc, 1, 4)
-			region := tc.GetRegion(1).Clone(core.WithAddPeer(&metapb.Peer{Id: 201, StoreId: 5, Role: metapb.PeerRole_Learner}))
-			tc.PutRegion(region)
-			manager := tc.GetAffinityManager()
-			const id = "learner-rule-locations"
-			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
-				ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4},
-			}, region.GetStartKey(), region.GetEndKey()))
-			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
-			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(cloneRegionWithReplacePeerStores(region, 1, 1, 2, 4), false))
-			tc.SetStoreBusy(destination, true)
-			re.Empty(c.CheckRegion(region))
-			re.True(manager.GetAffinityGroupState(id).AffinitySchedulingAllowed, "a busy destination must not expire the group")
-			tc.SetStoreBusy(destination, false)
-			ops := c.CheckRegion(region)
-			re.Len(ops, 1)
-			applyLearnerOperator(t, tc, ops[0])
-			checkAndApply(t, c, tc, 1)
-			moved := tc.GetRegion(1)
-			re.NotNil(moved.GetStoreLearner(destination))
-			re.NotNil(moved.GetStoreLearner(5))
-			re.True(tc.GetRuleManager().FitRegionWithoutCache(tc, moved).IsSatisfied())
-			state := manager.GetAffinityGroupState(id)
-			re.Equal([]uint64{1, 2, 4}, state.VoterStoreIDs)
-			re.Equal(affinity.PhaseStable, state.Phase)
-		})
-	}
-}
-
 // A blocked improvement can explain this rule's insufficient hard isolation,
 // but must not hide another rule's definite rejection, in either rule order.
 func TestAffinityCheckerPlacementTemporaryIsolation(t *testing.T) {
@@ -449,8 +425,7 @@ func TestAffinityCheckerPlacementTemporaryIsolation(t *testing.T) {
 	rule := newLearnerRule("4", "5", "6")
 	rule.Count, rule.LocationLabels, rule.IsolationLevel = 2, []string{"zone"}, "zone"
 	re.NoError(tc.GetRuleManager().SetRule(rule))
-	region := putLearner(tc, 1, 4).Clone(core.WithAddPeer(&metapb.Peer{Id: 201, StoreId: 5, Role: metapb.PeerRole_Learner}))
-	tc.PutRegion(region)
+	region := putLearners(tc, 1, 4, 5)
 	tc.SetStoreBusy(6, true)
 	fit := tc.GetRuleManager().FitRegionWithoutCache(tc, region)
 	re.True(fit.IsSatisfied())
@@ -507,11 +482,11 @@ func TestAffinityCheckerLearnerRelearn(t *testing.T) {
 			rule = newLearnerRule("5", "6")
 			rule.ID = "learner-b"
 			re.NoError(tc.GetRuleManager().SetRule(rule))
-			a := putLearner(tc, 1, 4).Clone(core.WithAddPeer(&metapb.Peer{Id: 201, StoreId: 5, Role: metapb.PeerRole_Learner}))
+			learnerStores := []uint64{4, 5}
 			if kind == "rule-refit" {
-				a = a.Clone(core.WithAddPeer(&metapb.Peer{Id: 301, StoreId: 6, Role: metapb.PeerRole_Learner}))
+				learnerStores = append(learnerStores, 6)
 			}
-			tc.PutRegion(a)
+			a := putLearners(tc, 1, learnerStores...)
 			b := regionWithRoles(a, 1, otherRoles).Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("b")), core.WithEndKey([]byte("c")))
 			peerIDs := make([]uint64, len(b.GetPeers()))
 			for i := range peerIDs {
@@ -593,8 +568,8 @@ func TestAffinityCheckerScatteredLearners(t *testing.T) {
 	tc.SetStoreOffline(5)
 	re.NoError(tc.GetRuleManager().SetRule(newLearnerRule()))
 	tc.AddLeaderRegionWithRange(2, "b", "c", 1, 2, 4)
-	putLearner(tc, 1, 4)
-	putLearner(tc, 2, 3)
+	putLearners(tc, 1, 4)
+	putLearners(tc, 2, 3)
 	manager := tc.GetAffinityManager()
 	const id = "learner-scattered"
 	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: id}, []byte("a"), []byte("c")))
@@ -632,7 +607,7 @@ func TestAffinityCheckerLearnerNotMoved(t *testing.T) {
 				rule = newLearnerRule()
 				rule.GroupID, rule.LabelConstraints = "tiflash", []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}
 				re.NoError(tc.GetRuleManager().SetRule(rule))
-				putLearner(tc, 1, 5)
+				putLearners(tc, 1, 5)
 			case "witness":
 				tc.SetEnableWitness(true)
 				rule := newLearnerRule()
@@ -643,7 +618,7 @@ func TestAffinityCheckerLearnerNotMoved(t *testing.T) {
 				})))
 			case "pinned":
 				re.NoError(tc.GetRuleManager().SetRule(newLearnerRule("4")))
-				putLearner(tc, 1, 4)
+				putLearners(tc, 1, 4)
 			}
 			manager := tc.GetAffinityManager()
 			const id = "learner-kept"
