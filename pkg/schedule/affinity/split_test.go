@@ -152,6 +152,34 @@ func newSplitRecoveryTestManager(t *testing.T) (*Manager, *serverconfig.PersistO
 	return manager, conf, region, streams
 }
 
+func TestCheckSplitWhenAffinityDisabled(t *testing.T) {
+	for _, disabled := range []string{"scheduling", "merging"} {
+		t.Run(disabled, func(t *testing.T) {
+			re := require.New(t)
+			m, conf, region, streams := newSplitRecoveryTestManager(t)
+			if disabled == "scheduling" {
+				conf.SetAffinityScheduleLimit(0)
+			} else {
+				conf.SetMaxAffinityMergeRegionSize(0)
+			}
+			var wg sync.WaitGroup
+			defer wg.Wait()
+			m.splitMutex.Lock()
+			defer m.splitMutex.Unlock()
+			done := make(chan bool, 1)
+			wg.Go(func() { done <- m.CheckSplit(region, pdpb.SplitReason_SIZE, streams) })
+			select {
+			case allowed := <-done:
+				re.True(allowed)
+			case <-time.After(time.Second):
+				t.Fatal("disabled affinity split waited for splitMutex")
+			}
+			re.Zero(streams.MsgLength())
+			re.Zero(m.splitDeniedRegions.Len())
+		})
+	}
+}
+
 // TestEnableSplitAfterAffinityChanges requires one recovery notification across
 // concurrent heartbeats, including when the previous policy was already cached.
 func TestEnableSplitAfterAffinityChanges(t *testing.T) {
@@ -168,6 +196,10 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 		}},
 		{"affinity scheduling disabled", func(_ *testing.T, _ *Manager, c *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
 			c.SetAffinityScheduleLimit(0)
+			return r
+		}},
+		{"affinity merging disabled", func(_ *testing.T, _ *Manager, c *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
+			c.SetMaxAffinityMergeRegionSize(0)
 			return r
 		}},
 		{"size reaches limit", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
