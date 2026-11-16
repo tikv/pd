@@ -146,7 +146,7 @@ func FindHTTPError(err error) HTTPError {
 		if withContext {
 			context := &httpErrorContext{HTTPError: next, top: current}
 			if group, ok := next.(errors.ErrorGroup); ok {
-				next = &httpErrorGroupContext{httpErrorContext: context, ErrorGroup: group}
+				next = &httpErrorGroupContext{HTTPError: context, ErrorGroup: group}
 			} else {
 				next = context
 			}
@@ -163,6 +163,11 @@ func FindHTTPError(err error) HTTPError {
 		if httpErr := AsHTTPError(err); httpErr != nil {
 			if code == nil || !sameHTTPErrorCode(code, httpErr) {
 				appendCode(httpErr, hasContext)
+			} else if _, grouped := code.(errors.ErrorGroup); !grouped {
+				// A same-code wrapper can hide group members while retaining the metadata.
+				if group, ok := httpErr.(errors.ErrorGroup); ok {
+					code = &httpErrorGroupContext{HTTPError: code, ErrorGroup: group}
+				}
 			}
 		} else if group, ok := err.(errors.ErrorGroup); ok {
 			var codes []HTTPError
@@ -176,7 +181,10 @@ func FindHTTPError(err error) HTTPError {
 				if len(codes) > 1 {
 					var others []error
 					if initial, ok := next.(errors.ErrorGroup); ok {
-						others = initial.Errors()
+						// The primary already comes from next; copy only additional members.
+						if members := initial.Errors(); len(members) > 1 {
+							others = append(others, members[1:]...)
+						}
 					}
 					for _, other := range codes[1:] {
 						others = append(others, errors.Errors(other)...)
@@ -316,8 +324,24 @@ func (e *httpErrorContext) Cause() error {
 
 // httpErrorGroupContext retains group members when an error chain adds context.
 type httpErrorGroupContext struct {
-	*httpErrorContext
+	HTTPError
 	errors.ErrorGroup
+}
+
+// Cause preserves the outer error's chain when group metadata is added.
+func (e *httpErrorGroupContext) Cause() error { return e.HTTPError }
+
+// Unwrap preserves standard-library error traversal.
+func (e *httpErrorGroupContext) Unwrap() error { return e.HTTPError }
+
+func (e *httpErrorGroupContext) legacyCodeValue() any { return legacyHTTPCodeValue(e.HTTPError) }
+
+// GetOperation preserves operation metadata from the outer HTTP error.
+func (e *httpErrorGroupContext) GetOperation() string {
+	if operation, ok := e.HTTPError.(interface{ GetOperation() string }); ok {
+		return operation.GetOperation()
+	}
+	return ""
 }
 
 type httpErrorGroup struct {

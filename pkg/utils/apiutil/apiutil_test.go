@@ -429,6 +429,11 @@ func TestCodedErrorResp(t *testing.T) {
 	withOperation.operation = "update store"
 	withDataOperation := coded("input", http.StatusBadRequest)
 	withDataOperation.data = operationResponseData{Detail: typed.Detail}
+	untracedInternal := coded("internal", http.StatusInternalServerError)
+	sameCodeGroupWrapper := coded("input", http.StatusBadRequest)
+	sameCodeGroupWrapper.cause = codedResponseGroup{input, missing}
+	sameCodeGroupWrapper.operation = "update store"
+	declaredGroup := &codedResponseMembers{codedResponseError: sameCodeGroupWrapper, members: []error{sameCodeGroupWrapper, serverState}}
 
 	for _, tc := range []struct {
 		name      string
@@ -458,6 +463,15 @@ func TestCodedErrorResp(t *testing.T) {
 		{name: "annotated group", err: errors.Annotate(codedResponseGroup{input, missing}, "store"), status: http.StatusBadRequest, code: "input", message: "store: request failed; request failed", others: []string{"missing"}},
 		{name: "wrapped group", err: fmt.Errorf("store: %w", codedResponseGroup{input, missing}), status: http.StatusBadRequest, code: "input", message: "store: request failed; request failed", others: []string{"missing"}},
 		{name: "mixed group chain", err: fmt.Errorf("store: %w", errors.Annotate(codedResponseGroup{input, missing}, "update")), status: http.StatusBadRequest, code: "input", message: "store: update: request failed; request failed", others: []string{"missing"}},
+		{name: "input constructor group", err: errs.NewInvalidInputErr(codedResponseGroup{input, missing}), status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
+		{name: "repeated input constructor group", err: errs.NewInvalidInputErr(errs.NewInvalidInputErr(codedResponseGroup{input, missing})), status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
+		{name: "wrapped input constructor group", err: fmt.Errorf("store: %w", errs.NewInvalidInputErr(codedResponseGroup{input, missing})), status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
+		{name: "annotated input constructor group", err: errors.Annotate(errs.NewInvalidInputErr(codedResponseGroup{input, missing}), "store"), status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
+		{name: "internal constructor group", err: errs.NewInternalErr(codedResponseGroup{internal, missing}), status: http.StatusNotImplemented, code: "internal.unimplemented", stack: true, others: []string{"missing"}},
+		{name: "internal constructor group with new stack", err: errs.NewInternalErr(codedResponseGroup{untracedInternal, missing}), status: http.StatusInternalServerError, code: "internal", stack: true, others: []string{"missing"}},
+		{name: "input constructor internal group", err: errs.NewInvalidInputErr(codedResponseGroup{internal, missing}), status: http.StatusNotImplemented, code: "internal.unimplemented", stack: true, others: []string{"missing"}},
+		{name: "same-code wrapper group", err: sameCodeGroupWrapper, status: http.StatusBadRequest, code: "input", operation: "update store", others: []string{"missing"}},
+		{name: "outer group members", err: declaredGroup, status: http.StatusBadRequest, code: "input", operation: "update store", others: []string{"state.unavailable"}},
 		{name: "overridden code", err: errs.NewInternalErr(input), status: http.StatusInternalServerError, code: "internal", message: "request failed; request failed; request failed", stack: true, others: []string{"internal", "input"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -636,6 +650,7 @@ func TestResponseErrorGroups(t *testing.T) {
 	data := &responseTestError{Detail: "invalid store ID"}
 	input := &codedResponseError{code: codedResponseCode{"input", http.StatusBadRequest}, data: data}
 	missing := &codedResponseError{code: codedResponseCode{"missing", http.StatusNotFound}, data: data}
+	forbidden := &codedResponseError{code: codedResponseCode{"auth.forbidden", http.StatusForbidden}, data: data}
 	plain := stderrors.New("uncoded member")
 	for _, tc := range []struct {
 		name    string
@@ -650,6 +665,13 @@ func TestResponseErrorGroups(t *testing.T) {
 		{name: "multiple coded", members: []error{input, missing}, status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
 		{name: "mixed", members: []error{plain, input, missing}, status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
 		{name: "wrapped primary", members: []error{fmt.Errorf("store: %w", input), missing}, status: http.StatusBadRequest, code: "input", others: []string{"missing"}},
+		{name: "nested coded primary", members: []error{codedResponseGroup{input, missing}, forbidden}, status: http.StatusBadRequest, code: "input", others: []string{"missing", "auth.forbidden"}},
+		{name: "wrapped nested primary", members: []error{fmt.Errorf("store: %w", codedResponseGroup{input, missing}), forbidden}, status: http.StatusBadRequest, code: "input", others: []string{"missing", "auth.forbidden"}},
+		{name: "annotated nested primary", members: []error{errors.Annotate(codedResponseGroup{input, missing}, "store"), forbidden}, status: http.StatusBadRequest, code: "input", others: []string{"missing", "auth.forbidden"}},
+		{name: "nested uncoded primary", members: []error{&responseErrorGroup{members: []error{input, missing}}, forbidden}, status: http.StatusBadRequest, code: "input", others: []string{"missing", "auth.forbidden"}},
+		{name: "nested additional group", members: []error{input, &responseErrorGroup{members: []error{missing, forbidden}}}, status: http.StatusBadRequest, code: "input", others: []string{"missing", "auth.forbidden"}},
+		{name: "nested empty coded primary", members: []error{&codedResponseMembers{codedResponseError: input}, forbidden}, status: http.StatusBadRequest, code: "input", others: []string{"auth.forbidden"}},
+		{name: "nested nil primary slot", members: []error{&codedResponseMembers{codedResponseError: input, members: []error{nil, missing}}, forbidden}, status: http.StatusBadRequest, code: "input", others: []string{"missing", "auth.forbidden"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -684,6 +706,23 @@ func TestResponseErrorGroups(t *testing.T) {
 			}
 		})
 	}
+	t.Run("group members unchanged", func(t *testing.T) {
+		re := require.New(t)
+		members := []error{input, missing, plain}
+		nested := &codedResponseMembers{codedResponseError: input, members: members[:2]}
+		group := &responseErrorGroup{members: []error{nested, forbidden}}
+		ErrorResp(render.New(), httptest.NewRecorder(), group)
+		re.Equal([]error{input, missing, plain}, members)
+	})
+	t.Run("constructor group error chain", func(t *testing.T) {
+		re := require.New(t)
+		group := &codedResponseGroup{input, missing}
+		wrapped := errs.NewInvalidInputErr(group)
+		found := errs.FindHTTPError(wrapped)
+		re.NotNil(found)
+		re.ErrorIs(found, group)
+		re.Same(input, errors.Cause(found))
+	})
 	t.Run("public metadata", func(t *testing.T) {
 		re := require.New(t)
 		original := &nativeResponseError{responseTestError: data, code: "quota.exceeded", status: http.StatusTooManyRequests}
