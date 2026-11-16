@@ -16,8 +16,11 @@ package client_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"sort"
 	"strings"
@@ -30,7 +33,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/unrolled/render"
 
+	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -40,6 +45,7 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -47,6 +53,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -55,6 +62,79 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
+
+func TestLegacyHTTPErrorResponse(t *testing.T) {
+	input := errcode.NewInvalidInputErr(errors.New("invalid"))
+	missing := errcode.NewNotFoundErr(errors.New("missing"))
+	group := errcode.Combine(input, missing)
+	internal := errcode.NewInternalErr(errors.New("failed"))
+	tests := []struct {
+		name      string
+		err       error
+		status    int
+		body      string
+		withStack bool
+	}{
+		{
+			name: "input", err: input, status: http.StatusBadRequest,
+			body: `{"code":"input","msg":"invalid","data":{}}`,
+		},
+		{
+			name: "not found", err: missing, status: http.StatusNotFound,
+			body: `{"code":"missing","msg":"missing","data":{}}`,
+		},
+		{
+			name: "operation", err: errcode.Op("read region").AddTo(missing), status: http.StatusNotFound,
+			body: `{"code":"missing","msg":"read region: missing","data":{},"operation":"read region"}`,
+		},
+		{
+			name: "annotated", err: errors.Annotate(input, "outer"), status: http.StatusBadRequest,
+			body: `{"code":"input","msg":"outer: invalid","data":{}}`,
+		},
+		{
+			name: "fmt wrapped", err: fmt.Errorf("outer: %w", missing), status: http.StatusNotFound,
+			body: `{"code":"missing","msg":"outer: missing","data":{}}`,
+		},
+		{
+			name: "group", err: &group, status: http.StatusBadRequest,
+			body: `{"code":"input","msg":"invalid; missing","data":{},"others":[{"code":"missing","msg":"missing","data":{}}]}`,
+		},
+		{
+			name: "wrapped group", err: errors.Annotate(&group, "outer"), status: http.StatusBadRequest,
+			body: `{"code":"input","msg":"outer: invalid; missing","data":{},"others":[{"code":"missing","msg":"missing","data":{}}]}`,
+		},
+		{
+			name: "same-code group", err: errs.NewInvalidInputErr(&group), status: http.StatusBadRequest,
+			body: `{"code":"input","msg":"invalid; missing","data":{},"others":[{"code":"missing","msg":"missing","data":{}}]}`,
+		},
+		{
+			name: "group operation", err: errcode.Op("validate").AddTo(&group), status: http.StatusBadRequest,
+			body: `{"code":"input","msg":"validate: invalid; missing","data":{},"operation":"validate","others":[{"code":"missing","msg":"missing","data":{}}]}`,
+		},
+		{
+			name: "internal", err: internal, status: http.StatusInternalServerError,
+			body: `{"code":"internal","msg":"failed","data":{}}`, withStack: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			response := httptest.NewRecorder()
+			apiutil.ErrorResp(render.New(), response, tt.err)
+			re.Equal(tt.status, response.Code)
+			var body map[string]any
+			re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
+			re.Equal(body["code"], response.Header().Get("TiDB-Error-Code"))
+			if tt.withStack {
+				re.NotEmpty(body["stack"])
+				delete(body, "stack")
+			}
+			encoded, err := json.Marshal(body)
+			re.NoError(err)
+			re.JSONEq(tt.body, string(encoded))
+		})
+	}
+}
 
 type httpClientTestSuite struct {
 	suite.Suite
