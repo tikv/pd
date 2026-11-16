@@ -146,6 +146,10 @@ func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
 			re.True(ok)
 			re.Equal(firstAttempt.(affinitySplitAttempt).startedAt, retried.(affinitySplitAttempt).startedAt,
 				"retrying the same epoch must not reset the wait")
+			retry := retried.(affinitySplitAttempt).split
+			re.True(retry.Start())
+			retry.SetStatusReachTime(operator.STARTED, time.Now().Add(-affinitySplitWaitTimeout/2-time.Second))
+			re.True(retry.CheckTimeout(), "a retry only has the remaining attempt budget")
 
 			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
 			// A peer configuration change does not change the split epoch version.
@@ -387,4 +391,32 @@ func TestAffinitySplitBeforeMoveController(t *testing.T) {
 	cluster.PutRegion(parent)
 	cluster.PutRegion(other)
 	re.Empty(controller.CheckRegion(other))
+}
+
+func TestAffinitySplitBeforeMoveControllerTimeout(t *testing.T) {
+	re := require.New(t)
+	cluster, _ := newAffinitySplitTest(t)
+	stream := hbstream.NewTestHeartbeatStreams(t.Context(), cluster, false)
+	t.Cleanup(stream.Close)
+	ops := operator.NewController(t.Context(), cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	controller := NewController(t.Context(), cluster, cluster.GetCheckerConfig(), ops)
+	controller.GetAffinityChecker().startTime = time.Now().Add(-2 * time.Minute)
+	region := cluster.GetRegion(1).Clone(core.SetApproximateSize(1315))
+	cluster.PutRegion(region)
+	controller.tryAddOperators(region)
+	split := ops.GetOperator(region.GetID())
+	requireAffinitySplit(t, []*operator.Operator{split})
+	split.SetStatusReachTime(operator.STARTED, time.Now().Add(-affinitySplitWaitTimeout+time.Second))
+	ops.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
+	re.Same(split, ops.GetOperator(region.GetID()))
+	controller.tryAddOperators(region)
+	re.Same(split, ops.GetOperator(region.GetID()))
+	split.SetStatusReachTime(operator.STARTED, time.Now().Add(-affinitySplitWaitTimeout-time.Second))
+	ops.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
+	re.Equal(operator.TIMEOUT, split.Status())
+	re.Nil(ops.GetOperator(region.GetID()))
+	controller.tryAddOperators(region)
+	move := ops.GetOperator(region.GetID())
+	re.NotNil(move)
+	re.Equal("affinity-move-region", move.Desc())
 }
