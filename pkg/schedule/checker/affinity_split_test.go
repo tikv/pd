@@ -71,6 +71,12 @@ func requireAffinitySplit(t *testing.T, ops []*operator.Operator) {
 	re.Empty(step.SplitKeys)
 }
 
+func requireAffinityMove(t *testing.T, ops []*operator.Operator) {
+	t.Helper()
+	require.Len(t, ops, 1)
+	require.Equal(t, "affinity-move-region", ops[0].Desc())
+}
+
 func TestAffinitySplitBeforeMoveThresholds(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -101,8 +107,7 @@ func TestAffinitySplitBeforeMoveThresholds(t *testing.T) {
 			} else if tc.wantSplit {
 				requireAffinitySplit(t, ops)
 			} else {
-				re.Len(ops, 1)
-				re.Equal("affinity-move-region", ops[0].Desc())
+				requireAffinityMove(t, ops)
 				re.Zero(ops[0].Kind() & operator.OpSplit)
 			}
 		})
@@ -156,8 +161,7 @@ func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
 			region = region.Clone(core.WithIncConfVer())
 			cluster.PutRegion(region)
 			ops := checker.Check(region)
-			re.Len(ops, 1)
-			re.Equal("affinity-move-region", ops[0].Desc())
+			requireAffinityMove(t, ops)
 			re.Zero(ops[0].Kind() & operator.OpSplit)
 		})
 	}
@@ -188,8 +192,7 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 				fallbacks := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
 				for range 2 {
 					ops := checker.Check(region)
-					re.Len(ops, 1, "an unreported size must not block the move forever")
-					re.Equal("affinity-move-region", ops[0].Desc())
+					requireAffinityMove(t, ops)
 				}
 				re.Zero(region.GetApproximateSize())
 				re.Equal(fallbacks+2, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
@@ -212,8 +215,7 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 			} else {
 				for range 2 {
 					ops := checker.Check(region)
-					re.Len(ops, 1)
-					re.Equal("affinity-move-region", ops[0].Desc())
+					requireAffinityMove(t, ops)
 				}
 			}
 			switch reason {
@@ -258,8 +260,7 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 				for _, child := range []*core.RegionInfo{left, right} {
 					cluster.PutRegion(child)
 					ops := checker.Check(child)
-					re.Len(ops, 1)
-					re.Equal("affinity-move-region", ops[0].Desc())
+					requireAffinityMove(t, ops)
 				}
 				return
 			}
@@ -272,8 +273,7 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 			re.True(attempt.startedAt.IsZero(), "a new attempt must start a fresh wait")
 			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
 			ops := checker.Check(region)
-			re.Len(ops, 1)
-			re.Equal("affinity-move-region", ops[0].Desc())
+			requireAffinityMove(t, ops)
 			re.NoError(manager.DeleteAffinityGroups([]string{"split_before_move"}, true))
 			re.Empty(checker.Check(region))
 		})
@@ -298,35 +298,42 @@ func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
 	// The controller starts an operator when it admits it and sends the request.
 	re.True(ops[0].Start())
 	ops = checker.Check(region)
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
+	requireAffinityMove(t, ops)
 }
 
-func TestAffinitySplitBeforeMoveFallbackKeepsGates(t *testing.T) {
-	for _, reason := range []string{"recent merge", "startup"} {
-		t.Run(reason, func(t *testing.T) {
-			re := require.New(t)
-			cluster, checker := newAffinitySplitTest(t)
-			region := cluster.GetRegion(1)
-			requireAffinitySplit(t, checker.Check(region))
-			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
-			switch reason {
-			case "recent merge":
-				checker.recentMergeCache.Put(region.GetID(), nil)
-			case "startup":
-				checker.startTime = time.Now()
-			}
-			re.Empty(checker.Check(region))
+func TestAffinitySplitBeforeMoveCooldown(t *testing.T) {
+	for _, scenario := range []string{"small", "fallback"} {
+		t.Run(scenario, func(t *testing.T) {
+			for _, reason := range []string{"recent merge", "startup"} {
+				t.Run(reason, func(t *testing.T) {
+					re := require.New(t)
+					cluster, checker := newAffinitySplitTest(t)
+					region := cluster.GetRegion(1)
+					if scenario == "fallback" {
+						requireAffinitySplit(t, checker.Check(region))
+						ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+					} else {
+						region = region.Clone(core.SetApproximateSize(16))
+						cluster.PutRegion(region)
+					}
+					switch reason {
+					case "recent merge":
+						checker.recentMergeCache.PutWithTTL(region.GetID(), nil, recentMergeTTL)
+					case "startup":
+						checker.startTime = time.Now()
+					}
+					re.Empty(checker.Check(region))
 
-			switch reason {
-			case "recent merge":
-				checker.recentMergeCache.Remove(region.GetID())
-			case "startup":
-				checker.startTime = time.Now().Add(-2 * recentMergeTTL)
+					switch reason {
+					case "recent merge":
+						checker.recentMergeCache.Remove(region.GetID())
+					case "startup":
+						checker.startTime = time.Now().Add(-2 * recentMergeTTL)
+					}
+					ops := checker.Check(region)
+					requireAffinityMove(t, ops)
+				})
 			}
-			ops := checker.Check(region)
-			re.Len(ops, 1)
-			re.Equal("affinity-move-region", ops[0].Desc())
 		})
 	}
 }
@@ -347,38 +354,25 @@ func TestAffinitySplitBeforeMoveChecksEachRegion(t *testing.T) {
 		cluster.PutRegion(region)
 	}
 	ops := checker.Check(small)
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
+	requireAffinityMove(t, ops)
 	requireAffinitySplit(t, checker.Check(large))
 	re.Empty(checker.Check(unreported))
 }
 
-func TestAffinitySplitBeforeMoveCooldown(t *testing.T) {
-	for _, reason := range []string{"recent merge", "startup"} {
-		t.Run(reason, func(t *testing.T) {
-			re := require.New(t)
-			cluster, checker := newAffinitySplitTest(t)
-			region := cluster.GetRegion(1).Clone(core.SetApproximateSize(16))
-			switch reason {
-			case "recent merge":
-				checker.recentMergeCache.PutWithTTL(region.GetID(), nil, recentMergeTTL)
-			case "startup":
-				checker.startTime = time.Now()
-			}
-			cluster.PutRegion(region)
-			re.Empty(checker.Check(region))
-		})
-	}
+func newAffinitySplitControllerTest(t *testing.T) (*mockcluster.Cluster, *Controller, *operator.Controller) {
+	t.Helper()
+	cluster, _ := newAffinitySplitTest(t)
+	stream := hbstream.NewTestHeartbeatStreams(t.Context(), cluster, false)
+	t.Cleanup(stream.Close)
+	ops := operator.NewController(t.Context(), cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	controller := NewController(t.Context(), cluster, cluster.GetCheckerConfig(), ops)
+	controller.GetAffinityChecker().startTime = time.Now().Add(-2 * recentMergeTTL)
+	return cluster, controller, ops
 }
 
 func TestAffinitySplitBeforeMoveController(t *testing.T) {
 	re := require.New(t)
-	cluster, _ := newAffinitySplitTest(t)
-	stream := hbstream.NewTestHeartbeatStreams(t.Context(), cluster, false)
-	t.Cleanup(stream.Close)
-	opController := operator.NewController(t.Context(), cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
-	controller := NewController(t.Context(), cluster, cluster.GetCheckerConfig(), opController)
-	controller.GetAffinityChecker().startTime = time.Now().Add(-2 * time.Minute)
+	cluster, controller, opController := newAffinitySplitControllerTest(t)
 	parent := cluster.GetRegion(1)
 	controller.tryAddOperators(parent)
 	op := opController.GetOperator(parent.GetID())
@@ -395,12 +389,7 @@ func TestAffinitySplitBeforeMoveController(t *testing.T) {
 
 func TestAffinitySplitBeforeMoveControllerTimeout(t *testing.T) {
 	re := require.New(t)
-	cluster, _ := newAffinitySplitTest(t)
-	stream := hbstream.NewTestHeartbeatStreams(t.Context(), cluster, false)
-	t.Cleanup(stream.Close)
-	ops := operator.NewController(t.Context(), cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
-	controller := NewController(t.Context(), cluster, cluster.GetCheckerConfig(), ops)
-	controller.GetAffinityChecker().startTime = time.Now().Add(-2 * time.Minute)
+	cluster, controller, ops := newAffinitySplitControllerTest(t)
 	region := cluster.GetRegion(1).Clone(core.SetApproximateSize(1315))
 	cluster.PutRegion(region)
 	controller.tryAddOperators(region)
