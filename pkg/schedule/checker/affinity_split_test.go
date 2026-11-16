@@ -101,9 +101,12 @@ func TestAffinitySplitBeforeMoveThresholds(t *testing.T) {
 			}
 			region := cluster.GetRegion(1).Clone(core.SetApproximateSize(tc.size), core.SetApproximateKeys(tc.keys))
 			cluster.PutRegion(region)
+			unknownWait := checkerCounter.WithLabelValues(affinityChecker, "wait-unknown-size")
+			before := promtestutil.ToFloat64(unknownWait)
 			ops := checker.Check(region)
 			if tc.wantWait {
 				re.Empty(ops)
+				re.Equal(before+1, promtestutil.ToFloat64(unknownWait))
 			} else if tc.wantSplit {
 				requireAffinitySplit(t, ops)
 			} else {
@@ -282,23 +285,36 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 
 func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
 	originalTimeout := affinitySplitWaitTimeout
-	// Without a wait, the move is allowed as soon as a split has started.
+	// A zero budget exposes premature fallback when no split has started.
 	affinitySplitWaitTimeout = 0
 	t.Cleanup(func() { affinitySplitWaitTimeout = originalTimeout })
 
 	re := require.New(t)
-	cluster, checker := newAffinitySplitTest(t)
+	cluster, controller, opController := newAffinitySplitControllerTest(t)
+	checker := controller.GetAffinityChecker()
 	region := cluster.GetRegion(1)
-	requireAffinitySplit(t, checker.Check(region))
-	// The operator controller did not start the split, for example because its
-	// waiting queue was full, so it sent no split request and the next patrol
-	// requests the split again.
+	cfg := cluster.GetScheduleConfig().Clone()
+	waitingLimit := cfg.SchedulerMaxWaitingOperator
+	cfg.SchedulerMaxWaitingOperator = 0
+	cluster.SetScheduleConfig(cfg)
+	for range 2 {
+		ops := checker.Check(region)
+		requireAffinitySplit(t, ops)
+		re.Zero(opController.AddWaitingOperator(ops...))
+		re.Equal(operator.CANCELED, ops[0].Status())
+		re.True(ops[0].GetStartTime().IsZero())
+		re.Nil(opController.GetOperator(region.GetID()))
+	}
+	cfg = cluster.GetScheduleConfig().Clone()
+	cfg.SchedulerMaxWaitingOperator = waitingLimit
+	cluster.SetScheduleConfig(cfg)
 	ops := checker.Check(region)
 	requireAffinitySplit(t, ops)
-	// The controller starts an operator when it admits it and sends the request.
-	re.True(ops[0].Start())
-	ops = checker.Check(region)
-	requireAffinityMove(t, ops)
+	re.Equal(1, opController.AddWaitingOperator(ops...))
+	re.False(ops[0].GetStartTime().IsZero())
+	opController.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
+	re.Nil(opController.GetOperator(region.GetID()))
+	requireAffinityMove(t, checker.Check(region))
 }
 
 func TestAffinitySplitBeforeMoveCooldown(t *testing.T) {
@@ -322,7 +338,10 @@ func TestAffinitySplitBeforeMoveCooldown(t *testing.T) {
 					case "startup":
 						checker.startTime = time.Now()
 					}
+					cooldownWait := checkerCounter.WithLabelValues(affinityChecker, "wait-recent-merge-or-startup")
+					before := promtestutil.ToFloat64(cooldownWait)
 					re.Empty(checker.Check(region))
+					re.Equal(before+1, promtestutil.ToFloat64(cooldownWait))
 
 					switch reason {
 					case "recent merge":
@@ -332,6 +351,7 @@ func TestAffinitySplitBeforeMoveCooldown(t *testing.T) {
 					}
 					ops := checker.Check(region)
 					requireAffinityMove(t, ops)
+					re.Equal(before+1, promtestutil.ToFloat64(cooldownWait))
 				})
 			}
 		})
