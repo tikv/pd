@@ -65,6 +65,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	}
 
 	wait := func(reason string) (*operator.Operator, bool) {
+		checkerCounter.WithLabelValues(affinityChecker, "wait-"+reason).Inc()
 		log.Debug("wait before affinity peer move", zap.Uint64("region-id", region.GetID()),
 			zap.String("group-id", group.ID), zap.String("reason", reason))
 		return nil, false
