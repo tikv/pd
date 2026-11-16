@@ -104,19 +104,7 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 
 	svc, cluster, stream := newTestSchedulingServiceForSplit(t)
 
-	region := newAffinitySplitTestRegion()
-	cluster.PutRegion(region)
-	err := cluster.GetAffinityManager().CreateAffinityGroups([]affinity.GroupKeyRanges{
-		{
-			GroupID: "g1",
-			KeyRanges: []keyutil.KeyRange{
-				{StartKey: []byte("a"), EndKey: []byte("z")},
-			},
-		},
-	})
-	re.NoError(err)
-	_, err = cluster.GetAffinityManager().UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
-	re.NoError(err)
+	region := putAffinitySplitTestGroup(t, cluster)
 	hbStreams := cluster.GetCoordinator().GetHeartbeatStreams()
 	hbStreams.BindStream(1, stream)
 	waitHeartbeatStreamBound(t, hbStreams, region, stream)
@@ -151,8 +139,6 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
 }
 
-// TestAskBatchSplitRecordsSplitScatterInSchedulingService keeps split-scatter
-// tracking in the scheduling service that owns the split request's lifecycle.
 func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re := require.New(t)
 
