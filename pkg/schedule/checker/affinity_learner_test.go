@@ -195,6 +195,68 @@ func TestAffinityCheckerLearnerSwap(t *testing.T) {
 	}
 }
 
+func TestAffinityCheckerLearnerPreservesWitness(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		stores      []string
+		destination uint64
+		joint       bool
+	}{
+		{"swap", []string{"3", "4"}, 3, false},
+		{"swap-joint", []string{"3", "4"}, 3, true},
+		{"move", []string{"4", "5"}, 5, false},
+		{"move-joint", []string{"4", "5"}, 5, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			c, tc, _ := newLearnerConflictController(t)
+			tc.SetEnableUseJointConsensus(tt.joint)
+			tc.SetEnableWitness(true)
+			rule := tc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+			rule.Count = 2
+			re.NoError(tc.GetRuleManager().SetRule(rule))
+			re.NoError(tc.GetRuleManager().SetRule(&placement.Rule{
+				GroupID: placement.DefaultGroupID, ID: "pinned-witness", Role: placement.Voter, Count: 1, IsWitness: true,
+				LabelConstraints: []placement.LabelConstraint{{Key: "ID", Op: placement.In, Values: []string{"2"}}},
+			}))
+			re.NoError(tc.GetRuleManager().SetRule(newLearnerRule(tt.stores...)))
+			region := putLearners(tc, 1, 4)
+			region = region.Clone(core.WithWitness(region.GetStorePeer(2).GetId()))
+			tc.PutRegion(region)
+			manager := tc.GetAffinityManager()
+			const id = "learner-retained-witness"
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4},
+			}, region.GetStartKey(), region.GetEndKey()))
+			fit := tc.GetRuleManager().FitRegionWithoutCache(tc, region)
+			re.True(fit.IsSatisfied())
+			group := manager.GetAffinityGroupState(id)
+			var op *operator.Operator
+			// Repeated builds exercise the roles map's varying iteration order.
+			for range 32 {
+				var relearn bool
+				op, relearn = c.affinityChecker.createAffinityOperator(region, group, fit)
+				re.False(relearn)
+				re.NotNil(op)
+				for i := range op.Len() {
+					switch step := op.Step(i).(type) {
+					case operator.BecomeWitness, operator.BecomeNonWitness, operator.BatchSwitchWitness:
+						t.Fatalf("unexpected witness change: %s", step)
+					}
+				}
+			}
+			moved := applyLearnerOperator(t, tc, op)
+			re.Equal(region.GetStorePeer(2), moved.GetStorePeer(2))
+			re.NotNil(moved.GetStoreLearner(tt.destination))
+			re.True(tc.GetRuleManager().FitRegionWithoutCache(tc, moved).IsSatisfied())
+			re.Empty(c.CheckRegion(moved))
+			state := manager.GetAffinityGroupState(id)
+			re.Equal([]uint64{1, 2, 4}, state.VoterStoreIDs)
+			re.Equal(affinity.PhaseStable, state.Phase)
+		})
+	}
+}
+
 // The target drops the voters on stores 1 and 3. A learner on store 1 would
 // share a zone with the learner on store 5, so the learner on store 4 takes
 // store 3 instead, although store 1 comes first.
