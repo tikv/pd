@@ -564,6 +564,39 @@ func TestSyncOverlappingAffinityRanges(t *testing.T) {
 	}
 }
 
+func TestReconcileRangeConflictsAllowsLookups(t *testing.T) {
+	re := require.New(t)
+	store := storage.NewStorageWithMemoryBackend()
+	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(t.Context(), store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	ranges := createGroupForTest(re, manager, "unrelated", 1)
+	region := generateRegionForTest(1, []uint64{1}, ranges[0])
+	manager.SyncGroupFromEtcd(&Group{ID: "changed"})
+
+	const hook = "github.com/tikv/pd/pkg/schedule/affinity/beforeRangeConflictScan"
+	lookedUp := make(chan *GroupState, 1)
+	re.NoError(failpoint.EnableCall(hook, func() {
+		go func() {
+			// A failed try-lock proves the scan would block the lookup without
+			// leaving a goroutine waiting for the paused reconciliation.
+			if !manager.TryRLock() {
+				lookedUp <- nil
+				return
+			}
+			manager.RUnlock()
+			group, _ := manager.GetRegionAffinityGroupState(region)
+			lookedUp <- group
+		}()
+		group := <-lookedUp
+		re.NotNil(group, "unrelated Region lookups must finish while the conflict scan is paused")
+		re.Equal("unrelated", group.ID)
+	}))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
+	manager.ReconcileRangeConflicts()
+}
+
 // TestDeleteGroupClearsCache verifies that deleting a group clears all related region caches.
 func TestDeleteGroupClearsCache(t *testing.T) {
 	re := require.New(t)

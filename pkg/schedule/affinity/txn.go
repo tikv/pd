@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -778,7 +779,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	m.updateGroupLabelRulesLocked(newAddedLabelRules, false)
 	m.updateGroupLabelRulesLocked(newRemovedLabelRules, true)
 	if m.hasRangeConflicts {
-		m.reconcileRangeConflictsLocked()
+		m.reconcileRangeConflictsLocked(m.collectRangeConflictsLocked())
 	}
 	return err
 }
@@ -961,10 +962,12 @@ type flattenKeyRange struct {
 // Uses in-memory keyRanges cache to avoid repeated labeler access and reduce lock contention.
 // Complexity: O(M log M) where M is the total number of ranges (new + existing).
 func (m *Manager) validateNoOverlapLocked(newRanges []GroupKeyRanges) error {
-	if err := validateNoOverlap(newRanges); err != nil {
-		return err
-	}
 	added := flattenRanges(newRanges)
+	for i := range len(added) - 1 {
+		if checkKeyRangesOverlap(added[i].StartKey, added[i].EndKey, added[i+1].StartKey, added[i+1].EndKey) {
+			return overlapError(added[i], added[i+1])
+		}
+	}
 	existing := flattenRanges(slices.Collect(maps.Values(m.keyRanges)))
 	// Persisted conflicts must not block changes to unrelated ranges. Only
 	// compare new ranges with old ones, not old ranges with each other.
@@ -976,19 +979,6 @@ func (m *Manager) validateNoOverlapLocked(newRanges []GroupKeyRanges) error {
 			i++
 		} else {
 			j++
-		}
-	}
-	return nil
-}
-
-// validateNoOverlap validates that ranges in the given slice don't overlap with each other.
-// This is a pure function that doesn't access any manager state.
-// Complexity: O(M log M) where M is the total number of ranges.
-func validateNoOverlap(ranges []GroupKeyRanges) error {
-	allRanges := flattenRanges(ranges)
-	for i := range len(allRanges) - 1 {
-		if checkKeyRangesOverlap(allRanges[i].StartKey, allRanges[i].EndKey, allRanges[i+1].StartKey, allRanges[i+1].EndKey) {
-			return overlapError(allRanges[i], allRanges[i+1])
 		}
 	}
 	return nil
@@ -1021,13 +1011,9 @@ func flattenRanges(ranges []GroupKeyRanges) []flattenKeyRange {
 	return allRanges
 }
 
-// reconcileRangeConflictsLocked preserves the raw ranges for administrative
-// repairs, but excludes every conflicting group from affinity scheduling. It
-// logs the groups that start or stop conflicting, at the error level if any
-// group starts conflicting.
-// Both metaMutex and the manager write lock must be held.
-func (m *Manager) reconcileRangeConflictsLocked() {
-	m.rangeConflictsStale = false
+// collectRangeConflictsLocked requires metaMutex, but not the manager write lock.
+func (m *Manager) collectRangeConflictsLocked() map[string]struct{} {
+	failpoint.InjectCall("beforeRangeConflictScan")
 	ranges := flattenRanges(slices.Collect(maps.Values(m.keyRanges)))
 	conflicts := make(map[string]struct{})
 	if len(ranges) > 0 {
@@ -1044,6 +1030,16 @@ func (m *Manager) reconcileRangeConflictsLocked() {
 			}
 		}
 	}
+	return conflicts
+}
+
+// reconcileRangeConflictsLocked preserves the raw ranges for administrative
+// repairs, but excludes every conflicting group from affinity scheduling. It
+// logs the groups that start or stop conflicting, at the error level if any
+// group starts conflicting.
+// Both metaMutex and the manager write lock must be held.
+func (m *Manager) reconcileRangeConflictsLocked(conflicts map[string]struct{}) {
+	m.rangeConflictsStale = false
 	m.hasRangeConflicts = len(conflicts) > 0
 	var conflicting, resolved []string
 	for id, group := range m.groups {
@@ -1110,7 +1106,7 @@ func (m *Manager) loadRegionLabel() {
 		return true
 	})
 
-	m.reconcileRangeConflictsLocked()
+	m.reconcileRangeConflictsLocked(m.collectRangeConflictsLocked())
 
 	log.Info("rebuilt group-label mapping",
 		zap.Int("total-groups", len(m.keyRanges)),
