@@ -24,8 +24,8 @@ require (
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	github.com/unrolled/render v1.0.1
-	go.etcd.io/etcd/client/pkg/v3 v3.5.15
-	go.etcd.io/etcd/client/v3 v3.5.15
+	go.etcd.io/etcd/client/pkg/v3 v3.5.33
+	go.etcd.io/etcd/client/v3 v3.5.33
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.83.2
@@ -130,7 +130,7 @@ require (
 	github.com/google/pprof v0.0.0-20211122183932-1daafda22083 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.7.4 // indirect
-	github.com/gorilla/websocket v1.5.1 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grafana/pyroscope-go v1.2.0 // indirect
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.8 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
@@ -147,7 +147,7 @@ require (
 	github.com/joomcode/errorx v1.0.1 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.17.9 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
@@ -193,7 +193,7 @@ require (
 	github.com/swaggo/files v0.0.0-20210815190702-a29dd2bc99b2 // indirect
 	github.com/swaggo/http-swagger v1.2.6 // indirect
 	github.com/swaggo/swag v1.16.6 // indirect
-	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965 // indirect
+	github.com/syndtr/goleveldb v1.0.1-0.20210305035536-64b5b1c73954 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.127 // indirect
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.74 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
@@ -209,7 +209,7 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.etcd.io/bbolt v1.3.10 // indirect
-	go.etcd.io/etcd/api/v3 v3.5.15 // indirect
+	go.etcd.io/etcd/api/v3 v3.5.33 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.15 // indirect
 	go.etcd.io/etcd/pkg/v3 v3.5.15 // indirect
 	go.etcd.io/etcd/raft/v3 v3.5.15 // indirect
@@ -228,11 +228,11 @@ require (
 	go.uber.org/fx v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2 // indirect
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
-	golang.org/x/image v0.43.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/mod v0.42.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect

@@ -197,11 +197,50 @@ func newKeyManagerImpl(
 		helper:                helper,
 	}
 	// Load encryption keys from storage.
-	err = m.loadKeys()
+	if method != encryptionpb.EncryptionMethod_PLAINTEXT && masterKeyMeta.GetPlaintext() != nil {
+		err = m.loadLegacyPlaintextKeys()
+	} else {
+		err = m.loadKeys()
+	}
 	if err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+// loadLegacyPlaintextKeys permits upgrades of clusters already using AES with an
+// unprotected key dictionary. Validate and load the same etcd revision.
+func (m *Manager) loadLegacyPlaintextKeys() error {
+	invalidConfig := errs.ErrEncryptionInvalidConfig.GenWithStack(
+		"data encryption requires a file or KMS master key unless an active legacy plaintext key dictionary exists")
+	resp, err := etcdutil.EtcdKVGet(m.etcdClient, EncryptionKeysPath)
+	if err != nil {
+		return err
+	}
+	if resp == nil || len(resp.Kvs) == 0 {
+		return invalidConfig
+	}
+	kv := resp.Kvs[0]
+	content := &encryptionpb.EncryptedContent{}
+	if err := content.Unmarshal(kv.Value); err != nil {
+		return errs.ErrProtoUnmarshal.Wrap(err).GenWithStack("fail to unmarshal encrypted encryption keys")
+	}
+	if content.MasterKey.GetPlaintext() == nil {
+		return invalidConfig
+	}
+	keys, err := m.loadKeysFromKV(kv)
+	if err != nil {
+		return err
+	}
+	currentKey := keys.Keys[keys.CurrentKeyId]
+	if keys.CurrentKeyId == disableEncryptionKeyID || currentKey == nil {
+		return invalidConfig
+	}
+	if err := CheckEncryptionMethodSupported(currentKey.Method); err != nil {
+		return invalidConfig
+	}
+	log.Warn("using a legacy plaintext encryption key dictionary; configure a file or KMS master key on all PD members before migrating")
+	return nil
 }
 
 func (m *Manager) keysRevision() int64 {
