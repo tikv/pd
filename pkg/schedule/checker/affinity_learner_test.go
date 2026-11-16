@@ -327,6 +327,61 @@ func TestAffinityCheckerLearnerMoveToRuleStore(t *testing.T) {
 	}
 }
 
+func TestAffinityCheckerLearnerBusyAndPinned(t *testing.T) {
+	for _, kind := range []string{"pinned-last", "pinned-first", "temporary"} {
+		t.Run(kind, func(t *testing.T) {
+			re := require.New(t)
+			c, tc, _ := newLearnerConflictController(t)
+			tc.SetEnableUseJointConsensus(true)
+			tc.AddRegionStore(6, 10)
+			tc.AddRegionStore(7, 10)
+			re.NoError(tc.GetRuleManager().SetRule(newLearnerRule("4", "6")))
+			rule := newLearnerRule("5")
+			if kind == "temporary" {
+				rule = newLearnerRule("5", "7")
+			}
+			rule.ID = "learner-2"
+			re.NoError(tc.GetRuleManager().SetRule(rule))
+			learnerStores := []uint64{4, 5}
+			if kind == "pinned-first" {
+				slices.Reverse(learnerStores)
+			}
+			region := tc.GetRegion(1)
+			for i, storeID := range learnerStores {
+				region = region.Clone(core.WithAddPeer(&metapb.Peer{Id: uint64(101 + i), StoreId: storeID, Role: metapb.PeerRole_Learner}))
+			}
+			tc.PutRegion(region)
+			re.Equal(learnerStores[0], region.GetLearners()[0].GetStoreId())
+			manager := tc.GetAffinityManager()
+			const id = "learner-busy-pinned"
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 4, 5},
+			}, region.GetStartKey(), region.GetEndKey()))
+			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(cloneRegionWithReplacePeerStores(region, 1, 1, 4, 5), false))
+			tc.SetStoreBusy(6, true)
+			tc.SetStoreBusy(7, true)
+			wantTarget := []uint64{1, 2, 3}
+			if kind == "temporary" {
+				wantTarget = []uint64{1, 4, 5}
+			}
+			for range 3 {
+				re.Empty(c.CheckRegion(region))
+				state := manager.GetAffinityGroupState(id)
+				re.True(state.AffinitySchedulingAllowed)
+				re.Equal(wantTarget, state.VoterStoreIDs)
+			}
+			tc.SetStoreBusy(6, false)
+			tc.SetStoreBusy(7, false)
+			checkAndApply(t, c, tc, 1, 1)
+			re.True(tc.GetRuleManager().FitRegionWithoutCache(tc, tc.GetRegion(1)).IsSatisfied())
+			state := manager.GetAffinityGroupState(id)
+			re.Equal(wantTarget, state.VoterStoreIDs)
+			re.Equal(affinity.PhaseStable, state.Phase)
+		})
+	}
+}
+
 func TestAffinityCheckerLearnerRuleLocations(t *testing.T) {
 	for _, kind := range []string{"cross-rule-location", "rule-isolation"} {
 		t.Run(kind, func(t *testing.T) {

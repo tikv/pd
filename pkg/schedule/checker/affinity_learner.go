@@ -81,6 +81,15 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 		return true, affinityPlacementReady
 	}
 	if temporary {
+		// A busy learner may stop the search before another learner is checked.
+		// Wait only if each learner has a destination when considered alone.
+		for i := range conflicts {
+			target, blocked := c.placeLearners(region, fit, roles, isolationStores, conflicts[i:i+1],
+				func(map[uint64]placement.PeerRoleType) affinityPlacementStatus { return affinityPlacementReady })
+			if target == nil && !blocked {
+				return false, affinityPlacementRejected
+			}
+		}
 		return false, affinityPlacementTemporary
 	}
 	return false, affinityPlacementRejected
