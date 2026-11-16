@@ -30,9 +30,8 @@ import (
 )
 
 const (
-	// SplitRegion.Timeout is max(60s, 0.6s * size in MiB). The checker skips
-	// Regions with an operator, so a 1 GiB Region may wait about 10 minutes
-	// for its split operator to time out. We intentionally do not cancel it early.
+	// Cap each split operator by the remaining wait budget so an unsuccessful
+	// split cannot hold the move beyond the fallback window.
 	defaultAffinitySplitWaitTimeout = 5 * time.Minute
 	affinitySplitCacheSize          = 10000
 	// Expire idle attempts on access. Active retries refresh this TTL without
@@ -121,6 +120,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 					zap.String("group-id", group.ID), errs.ZapError(err))
 				return nil, false
 			}
+			op.LimitTimeout(affinitySplitWaitTimeout - splitWait)
 			attempt.split = op
 			c.splitAttempts.Put(region.GetID(), attempt)
 			return op, false
