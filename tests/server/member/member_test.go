@@ -798,59 +798,79 @@ func TestPDLeaderPublishesIdentityLastOnStepUp(t *testing.T) {
 // on a stalled volume. With the two reversed, the reset line is already on
 // disk by the time the resign has cleared the leader.
 func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
+	for _, early := range []bool{false, true} {
+		name := "PD ready"
+		if early {
+			name = "PD initialization paused"
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			cluster, err := tests.NewTestCluster(ctx, 1)
+			re.NoError(err)
+			t.Cleanup(cluster.Destroy)
+			re.NoError(cluster.RunInitialServers())
 
-	leaderName := cluster.WaitLeader()
-	re.NotEmpty(leaderName)
-	svr := cluster.GetServer(leaderName).GetServer()
+			leaderName := cluster.WaitLeader()
+			re.NotEmpty(leaderName)
+			leader := cluster.GetServer(leaderName)
+			svr := leader.GetServer()
+			if early {
+				wait, _ := pauseAfterTSOInitialization(t, leader.GetServerID())
+				leader.ResetPDLeader()
+				wait()
+				re.False(svr.IsServing())
+			}
+			client := earlyTSOClient(t, leader)
+			stream := earlyTSOStream(t, client, "")
+			requestEarlyTSO(t, stream, leader.GetClusterID())
 
-	oldLease := svr.GetMember().GetLeadership().GetLease()
-	re.NotNil(oldLease)
-	re.NotEqual(clientv3.NoLease, oldLease.GetID())
+			oldLease := svr.GetMember().GetLeadership().GetLease()
+			re.NotNil(oldLease)
+			re.NotEqual(clientv3.NoLease, oldLease.GetID())
 
-	// Capture the log the same way TestPDLeaderResignsBeforeLoggingStepDown
-	// does, and for the same reasons.
-	fname := testutil.InitTempFileLogger(t, "info")
+			// Capture the log the same way TestPDLeaderResignsBeforeLoggingStepDown
+			// does, and for the same reasons.
+			fname := testutil.InitTempFileLogger(t, "info")
 
-	const resetMsg = "reset the timestamp in memory"
+			const resetMsg = "reset the timestamp in memory"
 
-	// Hold the resign open inside Lease.Close, so that there is a window in
-	// which it has started but not finished.
-	waitClose, resumeClose := pauseLeaseClose(t, oldLease)
-	defer resumeClose()
-	// Fail the periodic TSO update while the lease is still valid: that hands
-	// the step-down to the allocator rather than to the campaign loop, which is
-	// the path under test.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"))
-	}()
+			// Hold the resign open inside Lease.Close, so that there is a window in
+			// which it has started but not finished.
+			waitClose, resumeClose := pauseLeaseClose(t, oldLease)
+			defer resumeClose()
+			// Fail the periodic TSO update while the lease is still valid: that hands
+			// the step-down to the allocator rather than to the campaign loop, which is
+			// the path under test.
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp", `return(true)`))
+			defer func() {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"))
+			}()
 
-	// The allocator's resign has started - the leader and the published lease
-	// are gone while cleanup of the captured old lease is still blocked.
-	waitClose()
-	m := svr.GetMember()
-	re.Nil(m.GetLeader())
-	re.False(m.GetLeadership().Check())
-	re.Nil(m.GetLeadership().GetLease())
+			// The allocator's resign has started - the leader and the published lease
+			// are gone while cleanup of the captured old lease is still blocked.
+			waitClose()
+			m := svr.GetMember()
+			re.Nil(m.GetLeader())
+			re.False(m.GetLeadership().Check())
+			re.Nil(m.GetLeadership().GetLease())
+			re.True(svr.GetTSOAllocator().IsInitialize())
+			requireEarlyTSORejected(t, stream, leader.GetClusterID())
 
-	// And the reset has not logged yet: the identity cleared first. With the
-	// resign after resetTimestamp, the line is already here.
-	content, err := os.ReadFile(fname)
-	re.NoError(err)
-	re.NotContains(string(content), resetMsg)
+			// And the reset has not logged yet: the identity cleared first. With the
+			// resign after resetTimestamp, the line is already here.
+			content, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.NotContains(string(content), resetMsg)
 
-	// The line does arrive once the blocked close returns, which is what keeps
-	// the assertion above from passing merely because nothing was captured.
-	resumeClose()
-	testutil.Eventually(re, func() bool {
-		content, err := os.ReadFile(fname)
-		re.NoError(err)
-		return strings.Contains(string(content), resetMsg)
-	}, testutil.WithWaitFor(30*time.Second))
+			// The line does arrive once the blocked close returns, which is what keeps
+			// the assertion above from passing merely because nothing was captured.
+			resumeClose()
+			testutil.Eventually(re, func() bool {
+				content, err := os.ReadFile(fname)
+				re.NoError(err)
+				return strings.Contains(string(content), resetMsg)
+			}, testutil.WithWaitFor(30*time.Second))
+		})
+	}
 }

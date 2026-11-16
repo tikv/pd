@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -127,6 +128,21 @@ func requireEarlyTSORejected(t *testing.T, stream pdpb.PD_TsoClient, clusterID u
 }
 
 func TestEarlyTSORejectsBeforeInitialization(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		failSave bool
+	}{
+		{name: "initialization paused"},
+		{name: "timestamp persistence failed", failSave: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkEarlyTSOInitialization(t, tc.failSave)
+		})
+	}
+}
+
+func checkEarlyTSOInitialization(t *testing.T, failSave bool) {
+	t.Helper()
 	re := require.New(t)
 	cluster := newEarlyTSOCluster(t, 1)
 	leader := cluster.GetLeaderServer()
@@ -136,6 +152,8 @@ func TestEarlyTSORejectsBeforeInitialization(t *testing.T) {
 	leader.ResetPDLeader()
 	wait()
 	re.False(leader.GetServer().IsServing())
+	lease := leader.GetServer().GetMember().GetLeadership().GetLease()
+	re.NotNil(lease)
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
@@ -150,8 +168,22 @@ func TestEarlyTSORejectsBeforeInitialization(t *testing.T) {
 	// initialization retry loop. Return the leader-change error immediately.
 	re.ErrorContains(err, errs.NotLeaderErr)
 
+	const saveHook = "github.com/tikv/pd/pkg/tso/failedToSaveTimestamp"
+	if failSave {
+		re.NoError(failpoint.Enable(saveHook, "return(true)"))
+		t.Cleanup(func() { re.NoError(failpoint.Disable(saveHook)) })
+	}
 	resume()
 	testutil.Eventually(re, leader.GetServer().IsServing)
+	if failSave {
+		// Full PD readiness proves the first initialization attempt returned.
+		// A live lease must still not authorize an uninitialized allocator.
+		re.False(leader.GetServer().GetTSOAllocator().IsInitialize())
+		requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+		re.NoError(failpoint.Disable(saveHook))
+		testutil.Eventually(re, leader.GetServer().GetTSOAllocator().IsInitialize)
+	}
+	re.Same(lease, leader.GetServer().GetMember().GetLeadership().GetLease())
 	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 	re.Negative(tsoutil.CompareTimestamp(previous, next))
 }
@@ -262,6 +294,67 @@ func TestEarlyTSOStopsWhenLeaseExpires(t *testing.T) {
 	})
 	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 	re.Negative(tsoutil.CompareTimestamp(previous, next))
+}
+
+func TestEarlyTSOStopsAfterPeerPartition(t *testing.T) {
+	re := require.New(t)
+	cluster := newEarlyTSOCluster(t, 3)
+	oldLeader := cluster.GetLeaderServer()
+	target := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(target)
+	wait, resume := pauseAfterTSOInitialization(t, target.GetServerID())
+	re.NoError(oldLeader.MoveEtcdLeader(oldLeader.GetServerID(), target.GetServerID()))
+	wait()
+	re.False(target.GetServer().IsServing())
+	client := earlyTSOClient(t, target)
+	stream := earlyTSOStream(t, client, "")
+	previous := requestEarlyTSO(t, stream, target.GetClusterID())
+	lease := target.GetServer().GetMember().GetLeadership().GetLease()
+	re.NotNil(lease)
+
+	// Isolate raft traffic while leaving the old owner's client endpoint open.
+	for _, peer := range cluster.GetServers() {
+		if peer != target {
+			target.GetServer().GetMember().Etcd().Server.CutPeer(etcdtypes.ID(peer.GetServerID()))
+			peer.GetServer().GetMember().Etcd().Server.CutPeer(etcdtypes.ID(target.GetServerID()))
+		}
+	}
+	heal := sync.OnceFunc(func() {
+		for _, peer := range cluster.GetServers() {
+			if peer != target {
+				target.GetServer().GetMember().Etcd().Server.MendPeer(etcdtypes.ID(peer.GetServerID()))
+				peer.GetServer().GetMember().Etcd().Server.MendPeer(etcdtypes.ID(target.GetServerID()))
+			}
+		}
+	})
+	t.Cleanup(heal)
+	var successor *tests.TestServer
+	testutil.Eventually(re, func() bool {
+		for _, server := range cluster.GetServers() {
+			if server != target && server.IsLeader() {
+				successor = server
+				return true
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(30*time.Second))
+	re.True(lease.IsExpired())
+	requireEarlyTSORejected(t, stream, target.GetClusterID())
+	requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), target.GetClusterID())
+	successorClient := earlyTSOClient(t, successor)
+	next := requestEarlyTSO(t, earlyTSOStream(t, successorClient, ""), successor.GetClusterID())
+	re.Negative(tsoutil.CompareTimestamp(previous, next))
+
+	// Restoring connectivity must not revive the obsolete initialization.
+	heal()
+	requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), target.GetClusterID())
+	resume()
+	testutil.Eventually(re, func() bool {
+		return target.GetLeader().GetMemberId() == successor.GetServerID() && !target.IsLeader()
+	})
+	requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), target.GetClusterID())
+	final := requestEarlyTSO(t, earlyTSOStream(t, successorClient, ""), successor.GetClusterID())
+	re.Negative(tsoutil.CompareTimestamp(next, final))
 }
 
 func TestEarlyTSOInitializationFailureResignsBeforeCleanup(t *testing.T) {
