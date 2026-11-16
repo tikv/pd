@@ -29,6 +29,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+const testLeaseInSeconds = 2
+
 func TestRegister(t *testing.T) {
 	re := require.New(t)
 	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
@@ -53,9 +55,10 @@ func TestRegister(t *testing.T) {
 	re.Empty(resp.Kvs)
 
 	// Test the case that keepalive is failed when the etcd is restarted.
-	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
+	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", testLeaseInSeconds)
 	err = sr.Register()
 	re.NoError(err)
+	defer sr.cancel()
 	fname := testutil.InitTempFileLogger(t, "info")
 	for i := range 3 {
 		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(ctx, re, client, sr.key))
@@ -76,8 +79,10 @@ func TestRegister(t *testing.T) {
 		re.NoError(err)
 		<-etcd.Server.ReadyNotify()
 		testutil.Eventually(re, func() bool {
-			return getKeyAfterLeaseExpired(ctx, re, client, sr.key) == "127.0.0.1:2"
+			resp, err := client.Get(ctx, sr.key)
+			return err == nil && len(resp.Kvs) == 1 && string(resp.Kvs[0].Value) == "127.0.0.1:2"
 		})
+		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(ctx, re, client, sr.key))
 	}
 	// Close the last restarted etcd instance
 	etcd.Server.HardStop()
@@ -131,7 +136,7 @@ func TestRegisterLeaseExpiresWithoutDeregister(t *testing.T) {
 	defer clean()
 
 	ctx := t.Context()
-	sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance", DefaultLeaseInSeconds)
+	sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance", testLeaseInSeconds)
 	defer sr.cancel()
 	re.NoError(sr.Register())
 	resp, err := client.Get(ctx, sr.key)
@@ -404,9 +409,16 @@ func TestRegisterRetriesAfterPromotionFollowingTTLObservation(t *testing.T) {
 }
 
 func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
-	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
-	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
 	resp, err := client.Get(ctx, key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	lease, err := client.TimeToLive(ctx, clientv3.LeaseID(resp.Kvs[0].Lease))
+	re.NoError(err)
+	re.Positive(lease.GrantedTTL)
+	// Leader promotion can extend the remaining TTL beyond the granted TTL.
+	// Allow for TTL rounding and etcd's expired-lease cleanup interval.
+	time.Sleep(time.Duration(max(lease.TTL, lease.GrantedTTL)+1)*time.Second + 500*time.Millisecond)
+	resp, err = client.Get(ctx, key)
 	re.NoError(err)
 	if len(resp.Kvs) == 0 {
 		return ""
