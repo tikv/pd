@@ -13,6 +13,9 @@
 ## if not set, use ${peer-urls}
 # advertise-peer-urls = ""
 
+## Enable the etcd HTTP/JSON gateway. Default: false.
+# enable-grpc-gateway = false
+
 ## The initial cluster configuration for bootstrapping.
 # initial-cluster = ""
 # initial-cluster-state = "new"

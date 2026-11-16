@@ -58,7 +58,7 @@ type Config struct {
 	Name              string `toml:"name" json:"name"`
 	DataDir           string `toml:"data-dir" json:"data-dir"`
 	ForceNewCluster   bool   `json:"force-new-cluster"`
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
+	EnableGRPCGateway bool   `toml:"enable-grpc-gateway" json:"enable-grpc-gateway"`
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
@@ -221,7 +221,7 @@ const (
 	DefaultGCStateCacheWarmupConcurrency = 4
 	maxGCStateCacheWarmupConcurrency     = 16
 
-	defaultEnableGRPCGateway   = true
+	defaultEnableGRPCGateway   = false
 	defaultDisableErrorVerbose = true
 
 	defaultDashboardAddress = "auto"
