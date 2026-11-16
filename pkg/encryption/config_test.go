@@ -69,13 +69,8 @@ func TestAdjustEncryptionMasterKey(t *testing.T) {
 						},
 					},
 				}
-				err := config.Adjust()
-				if method != "" && method != methodPlaintext &&
-					(masterKeyType == "" || masterKeyType == masterKeyTypePlaintext) {
-					re.ErrorContains(err, "data encryption requires a file or KMS master key")
-					return
-				}
-				re.NoError(err)
+				// Master-key safety depends on the persisted dictionary at manager startup.
+				re.NoError(config.Adjust())
 				re.NoError(config.Adjust())
 			})
 		}

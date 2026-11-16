@@ -623,6 +623,68 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	re.True(proto.Equal(loadedKeys, storedKeys))
 }
 
+func TestPlaintextMasterKeyStartupCompatibility(t *testing.T) {
+	re := require.New(t)
+	client := newTestEtcd(t)
+	leadership := newTestLeader(re, client)
+	keyFile := newTestKeyFile(t, re)
+	plaintextMaster := &encryptionpb.MasterKey{
+		Backend: &encryptionpb.MasterKey_Plaintext{Plaintext: &encryptionpb.MasterKeyPlaintext{}},
+	}
+	for _, method := range []string{methodAes128Ctr, methodAes192Ctr, methodAes256Ctr} {
+		for _, masterType := range []string{"", masterKeyTypePlaintext} {
+			for _, state := range []string{"missing", "empty", "disabled", "missing-current", "plaintext-current", "active-aes", "protected-aes"} {
+				t.Run(method+"/"+masterType+"/"+state, func(t *testing.T) {
+					re := require.New(t)
+					_, err := client.Delete(t.Context(), EncryptionKeysPath)
+					re.NoError(err)
+					if state != "missing" {
+						keys := &encryptionpb.KeyDictionary{
+							CurrentKeyId: 123,
+							Keys: map[uint64]*encryptionpb.DataKey{
+								123: {Key: getTestDataKey(re), Method: encryptionpb.EncryptionMethod_AES128_CTR, WasExposed: true},
+							},
+						}
+						switch state {
+						case "empty":
+							keys = &encryptionpb.KeyDictionary{}
+						case "disabled":
+							keys.CurrentKeyId = disableEncryptionKeyID
+						case "missing-current":
+							keys.CurrentKeyId = 456
+						case "plaintext-current":
+							keys.Keys[123].Method = encryptionpb.EncryptionMethod_PLAINTEXT
+						}
+						meta := plaintextMaster
+						if state == "protected-aes" {
+							meta = newTestMasterKey(keyFile)
+						}
+						re.NoError(saveKeys(leadership, meta, keys, defaultKeyManagerHelper()))
+					}
+					before, err := etcdutil.GetValue(client, EncryptionKeysPath)
+					re.NoError(err)
+					config := &Config{DataEncryptionMethod: method, MasterKey: MasterKeyConfig{Type: masterType}}
+					re.NoError(config.Adjust())
+					m, err := NewManager(client, config)
+					if state == "active-aes" {
+						re.NoError(err)
+						id, key, err := m.GetCurrentKey()
+						re.NoError(err)
+						re.Equal(uint64(123), id)
+						re.Equal(getTestDataKey(re), key.Key)
+					} else {
+						re.ErrorContains(err, "data encryption requires a file or KMS master key")
+						re.Nil(m)
+					}
+					after, err := etcdutil.GetValue(client, EncryptionKeysPath)
+					re.NoError(err)
+					re.Equal(before, after)
+				})
+			}
+		}
+	}
+}
+
 func TestMigratePlaintextKeyDictionary(t *testing.T) {
 	re := require.New(t)
 	client := newTestEtcd(t)
@@ -643,6 +705,21 @@ func TestMigratePlaintextKeyDictionary(t *testing.T) {
 	}
 	re.NoError(saveKeys(leadership, plaintextMaster, keys, defaultKeyManagerHelper()))
 	re.True(keys.Keys[123].WasExposed)
+
+	// Upgrade with the unchanged legacy config before introducing a protected master key.
+	legacyConfig := &Config{DataEncryptionMethod: methodAes128Ctr}
+	re.NoError(legacyConfig.Adjust())
+	legacy, err := NewManager(client, legacyConfig)
+	re.NoError(err)
+	re.NoError(legacy.SetLeadership(leadership))
+	legacyID, legacyKey, err := legacy.GetCurrentKey()
+	re.NoError(err)
+	re.True(legacyKey.WasExposed)
+	restartedLegacy, err := NewManager(client, legacyConfig)
+	re.NoError(err)
+	key, err := restartedLegacy.GetKey(legacyID)
+	re.NoError(err)
+	re.True(proto.Equal(legacyKey, key))
 
 	config := &Config{
 		DataEncryptionMethod: methodAes128Ctr,
@@ -683,6 +760,12 @@ func TestMigratePlaintextKeyDictionary(t *testing.T) {
 	re.NoError(err)
 	re.Equal(currentID, keyID)
 	re.True(proto.Equal(currentKey, key))
+	legacyKeyAfterMigration, err := restarted.GetKey(legacyID)
+	re.NoError(err)
+	re.True(proto.Equal(legacyKey, legacyKeyAfterMigration))
+	// A stale plaintext config must not undo the master-key migration on restart.
+	_, err = NewManager(client, legacyConfig)
+	re.ErrorContains(err, "data encryption requires a file or KMS master key")
 }
 
 func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {

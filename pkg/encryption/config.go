@@ -73,10 +73,6 @@ func (c *Config) Adjust() error {
 	} else if _, err := c.GetMasterKeyMeta(); err != nil {
 		return err
 	}
-	if c.DataEncryptionMethod != methodPlaintext && c.MasterKey.Type == masterKeyTypePlaintext {
-		return errs.ErrEncryptionInvalidConfig.GenWithStack(
-			"data encryption requires a file or KMS master key")
-	}
 	return nil
 }
 
