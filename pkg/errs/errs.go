@@ -137,7 +137,10 @@ func FindHTTPError(err error) HTTPError {
 	hasContext := false
 	appendCode := func(next HTTPError, withContext bool) {
 		original := error(next)
-		if legacy, ok := next.(*legacyHTTPError); ok {
+		switch legacy := next.(type) {
+		case *legacyHTTPError:
+			original = legacy.err
+		case *legacyHTTPErrorGroup:
 			original = legacy.err
 		}
 		if withContext {
@@ -240,12 +243,16 @@ func AsHTTPError(err error) HTTPError {
 	if code.Comparable() {
 		legacyCode = code.Interface()
 	}
-	return &legacyHTTPError{httpError: &httpError{
+	adapted := &legacyHTTPError{httpError: &httpError{
 		err:        err,
 		code:       code.MethodByName("CodeStr").Call(nil)[0].String(),
 		statusCode: code.Interface().(httpCoder).HTTPCode(),
 		legacyCode: legacyCode,
 	}}
+	if group, ok := err.(errors.ErrorGroup); ok {
+		return &legacyHTTPErrorGroup{legacyHTTPError: adapted, ErrorGroup: group}
+	}
+	return adapted
 }
 
 // legacyHTTPCodeValue retains the original code identity through local wrappers.
@@ -285,12 +292,10 @@ func (e *legacyHTTPError) GetOperation() string {
 	return ""
 }
 
-// Errors preserves group members for adaptation by the response renderer.
-func (e *legacyHTTPError) Errors() []error {
-	if group, ok := e.err.(errors.ErrorGroup); ok {
-		return group.Errors()
-	}
-	return []error{e.err}
+// legacyHTTPErrorGroup preserves group membership without making single errors groups.
+type legacyHTTPErrorGroup struct {
+	*legacyHTTPError
+	errors.ErrorGroup
 }
 
 type httpErrorContext struct {
