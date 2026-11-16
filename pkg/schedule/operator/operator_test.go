@@ -657,7 +657,6 @@ func (suite *operatorTestSuite) TestRecord() {
 	re := suite.Require()
 	operator := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
 	now := time.Now()
-	time.Sleep(time.Second)
 	ob := operator.Record(now)
 	re.Equal(now, ob.FinishTime)
 	re.Greater(ob.duration.Seconds(), time.Second.Seconds())

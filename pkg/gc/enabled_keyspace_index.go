@@ -68,6 +68,9 @@ type enabledKeyspaceIndex struct {
 	prefix             string
 	watcherFactory     func(*clientv3.Client) clientv3.Watcher
 	getLoadConcurrency func() int
+	// onRemoved is set before run and persists after initial load hooks end.
+	// It runs outside mu and owns its slice of IDs removed by a watch batch.
+	onRemoved func([]uint32)
 
 	mu       sync.Mutex
 	entries  map[uint32]enabledKeyspace
@@ -237,12 +240,16 @@ func (i *enabledKeyspaceIndex) publish(ctx context.Context, entries map[uint32]e
 
 func (i *enabledKeyspaceIndex) publishProgress(ctx context.Context, changes map[uint32]*enabledKeyspace, revision int64) {
 	i.mu.Lock()
-	defer i.mu.Unlock()
 	if ctx.Err() != nil || revision <= i.revision {
+		i.mu.Unlock()
 		return
 	}
+	var removed []uint32
 	for id, entry := range changes {
 		if entry == nil {
+			if _, exists := i.entries[id]; exists {
+				removed = append(removed, id)
+			}
 			delete(i.entries, id)
 		} else {
 			i.entries[id] = *entry
@@ -251,6 +258,10 @@ func (i *enabledKeyspaceIndex) publishProgress(ctx context.Context, changes map[
 	i.revision = revision
 	close(i.changed)
 	i.changed = make(chan struct{})
+	i.mu.Unlock()
+	if len(removed) != 0 && i.onRemoved != nil {
+		i.onRemoved(removed)
+	}
 }
 
 // watch updates a private working set. Progress notifications are ordered after

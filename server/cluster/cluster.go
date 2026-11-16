@@ -964,6 +964,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 			// Update related stores.
 			start := time.Now()
 			c.UpdateAllStoreStatus()
+			failpoint.InjectCall("afterUpdateStoreStats", c)
 			updateStoreStatsGauge.Set(time.Since(start).Seconds())
 		}
 	}
@@ -1433,9 +1434,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		}
 		return nil
 	}
-	failpoint.Inject("concurrentRegionHeartbeat", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("concurrentRegionHeartbeat")
 	tracer.OnSaveCacheBegin()
 	var overlaps []*core.RegionInfo
 	if saveCache {
@@ -2423,9 +2422,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	failpoint.Inject("versionChangeConcurrency", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("versionChangeConcurrency")
 	if minVersion == nil || clusterVersion.Equal(*minVersion) {
 		return
 	}

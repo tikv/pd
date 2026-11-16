@@ -46,11 +46,17 @@ func runWatcherTest(t *testing.T) {
 
 	watcher := newWatcherWithTimerPool(ctx, 10, "test", testTimerPool{})
 	var deadlineReached atomic.Bool
+	deadlineDone := make(chan struct{})
 	done := watcher.Start(ctx, time.Millisecond, func() {
 		deadlineReached.Store(true)
+		close(deadlineDone)
 	})
 	re.NotNil(done)
-	time.Sleep(5 * time.Millisecond)
+	select {
+	case <-deadlineDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("deadline callback did not run")
+	}
 	re.True(deadlineReached.Load())
 
 	deadlineReached.Store(false)
@@ -69,7 +75,6 @@ func runWatcherTest(t *testing.T) {
 		deadlineReached.Store(true)
 	})
 	re.Nil(done)
-	time.Sleep(5 * time.Millisecond)
 	re.False(deadlineReached.Load())
 	cancel()
 	synctest.Wait()

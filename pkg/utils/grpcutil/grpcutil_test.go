@@ -136,6 +136,49 @@ func TestToServerTLSConfig(t *testing.T) {
 			validateProto: true,
 		},
 		{
+			name: "required client certificates",
+			tlsConfig: TLSConfig{
+				KeyPath:        filepath.Join(certPath, "pd-server-key.pem"),
+				CertPath:       filepath.Join(certPath, "pd-server.pem"),
+				CAPath:         filepath.Join(certPath, "ca.pem"),
+				ClientCertAuth: true,
+			},
+			checkConfig:   true,
+			validateProto: true,
+		},
+		{
+			name: "required client certificates without CA",
+			tlsConfig: TLSConfig{
+				KeyPath:        filepath.Join(certPath, "pd-server-key.pem"),
+				CertPath:       filepath.Join(certPath, "pd-server.pem"),
+				ClientCertAuth: true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "required client certificates without certificate",
+			tlsConfig: TLSConfig{
+				KeyPath:        filepath.Join(certPath, "pd-server-key.pem"),
+				CAPath:         filepath.Join(certPath, "ca.pem"),
+				ClientCertAuth: true,
+			},
+			wantErr: true,
+		},
+		{
+			name: "required client certificates without key",
+			tlsConfig: TLSConfig{
+				CertPath:       filepath.Join(certPath, "pd-server.pem"),
+				CAPath:         filepath.Join(certPath, "ca.pem"),
+				ClientCertAuth: true,
+			},
+			wantErr: true,
+		},
+		{
+			name:      "required client certificates without TLS",
+			tlsConfig: TLSConfig{ClientCertAuth: true},
+			wantErr:   true,
+		},
+		{
 			name: "with allowed CNs",
 			tlsConfig: TLSConfig{
 				KeyPath:        filepath.Join(certPath, "pd-server-key.pem"),
@@ -190,7 +233,11 @@ func TestToServerTLSConfig(t *testing.T) {
 			}
 
 			re.NotNil(tlsConfig)
-			re.Equal(tls.VerifyClientCertIfGiven, tlsConfig.ClientAuth)
+			if testCase.tlsConfig.ClientCertAuth {
+				re.Equal(tls.RequireAndVerifyClientCert, tlsConfig.ClientAuth)
+			} else {
+				re.Equal(tls.VerifyClientCertIfGiven, tlsConfig.ClientAuth)
+			}
 
 			if testCase.validateProto {
 				re.Contains(tlsConfig.NextProtos, "http/1.1")

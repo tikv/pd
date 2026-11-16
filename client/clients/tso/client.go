@@ -487,6 +487,8 @@ func (c *Cli) checkLeader(
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("url", url))
 					if !c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream) {
 						cancel()
+					} else {
+						failpoint.InjectCall("afterTSOLeaderStreamRecovery")
 					}
 					return
 				}

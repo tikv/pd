@@ -244,7 +244,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				continue
 			}
 			// Send the consumption to update the metrics.
-			err = s.manager.dispatchConsumption(req)
+			err = s.manager.dispatchConsumption(clientUniqueID, req)
 			if err != nil {
 				return err
 			}

@@ -254,6 +254,71 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeers() {
 	re.Equal(uint64(4), op.Step(0).(operator.RemovePeer).FromStore)
 }
 
+func (suite *ruleCheckerTestSuite) TestFixManyMisplacedLearners() {
+	re := suite.Require()
+	const peerCount = 36
+	var learners []uint64
+	for id := uint64(1); id <= peerCount; id++ {
+		labels := map[string]string{
+			"zone": fmt.Sprintf("z%d", (id-1)%3),
+			"host": strconv.FormatUint(id, 10),
+		}
+		if id >= 4 && id <= 6 {
+			labels["engine"] = "tiflash"
+		}
+		suite.cluster.AddLabelsStore(id, 1, labels)
+		if id > 3 {
+			learners = append(learners, id)
+		}
+	}
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+	}))
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "tiflash",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   3,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "engine", Op: placement.In, Values: []string{"tiflash"}},
+		},
+		LocationLabels: []string{"zone", "host"},
+	}))
+	// Model the redundant TiKV learners left by #6662. Distinct hosts keep the
+	// candidates from being pruned as equivalent during placement fitting.
+	region := suite.cluster.AddRegionWithLearner(1, 1, []uint64{2, 3}, learners)
+	re.Len(region.GetPeers(), peerCount)
+	retainedPeers := make([]*metapb.Peer, 0, 6)
+	for id := uint64(1); id <= 6; id++ {
+		retainedPeers = append(retainedPeers, region.GetStorePeer(id))
+	}
+	leader := region.GetLeader()
+	for remaining := peerCount; remaining > len(retainedPeers); remaining-- {
+		op := suite.rc.Check(region)
+		re.NotNil(op)
+		re.Equal("remove-orphan-peer", op.Desc())
+		re.Equal(1, op.Len())
+		var remove operator.RemovePeer
+		re.IsType(remove, op.Step(0))
+		remove = op.Step(0).(operator.RemovePeer)
+		re.Greater(remove.FromStore, uint64(6))
+		re.NotNil(region.GetStorePeer(remove.FromStore))
+		region = region.Clone(core.WithRemoveStorePeer(remove.FromStore), core.WithIncConfVer())
+		suite.cluster.PutRegion(region)
+		re.Len(region.GetPeers(), remaining-1)
+		for _, peer := range retainedPeers {
+			re.Equal(peer, region.GetStorePeer(peer.GetStoreId()))
+		}
+		re.Equal(leader, region.GetLeader())
+	}
+	re.ElementsMatch(retainedPeers, region.GetPeers())
+	re.Nil(suite.rc.Check(region))
+}
+
 func (suite *ruleCheckerTestSuite) TestFixToManyOrphanPeers() {
 	re := suite.Require()
 	suite.cluster.AddLeaderStore(1, 1)

@@ -48,11 +48,14 @@
 ##   - false: disable redact log.
 ##   - true: enable redact log, which will replace the sensitive information with "?".
 ##   - "MARKER": enable redact log, which will use single guillemets ‹› to enclose the sensitive information.
-# redact-info-log = false
+# redact-info-log = true
 
 [security.encryption]
 ## Encryption method to use for PD data. One of "plaintext", "aes128-ctr", "aes192-ctr" and "aes256-ctr".
 ## Defaults to "plaintext" if not set.
+## New AES configurations require a "file" or "kms" master key.
+## Existing active AES dictionaries with a plaintext master key can start for upgrade compatibility.
+## Configure a file or KMS master key on every PD member before migrating these dictionaries.
 # data-encryption-method = "plaintext"
 ## Specifies how often PD rotates data encryption key. Default is 7 days.
 # data-key-rotation-period = "168h"
@@ -61,9 +64,10 @@
 ##
 ##   * "plaintext":
 ##
-##     Plaintext as a master key means no master key is given and only applicable when
-##     encryption is not enabled, i.e. data-encryption-method = "plaintext". This type doesn't
-##     have sub-config items. Example:
+##     Plaintext as a master key means no master key is given. New configurations can use it
+##     only when encryption is disabled. Existing active AES dictionaries remain readable
+##     during upgrades, with a warning to migrate to a file or KMS master key.
+##     This type doesn't have sub-config items. Example:
 ##     
 ##     [security.encryption.master-key]
 ##     type = "plaintext"
@@ -121,6 +125,7 @@
 # metric-storage = ""
 ## There are some values supported: "auto", "none", or a specific address, default: "auto".
 # dashboard-address = "auto"
+## The following two settings take effect only on NextGen kernels.
 ## Concurrent metadata scans per GC keyspace index load attempt (range: 1-16).
 ## Online changes apply to the next full-load attempt, including retries.
 # gc-keyspace-index-load-concurrency = 4
