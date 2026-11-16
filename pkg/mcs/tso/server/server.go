@@ -183,7 +183,10 @@ func (s *Server) Close() {
 
 	log.Info("closing tso server ...")
 	s.cgMonitor.StopMonitor()
-	// close tso service loops in the keyspace group manager
+	// Close the TSO service loops in the keyspace group manager, which also resigns the
+	// primary. The TSO service keeps handling the requests until the gRPC server stops, so
+	// they get the leader-change error once the allocators start to close, and the clients
+	// look for the new primary instead of reconnecting to this server.
 	s.keyspaceGroupManager.Close()
 	if err := s.serviceRegister.Deregister(); err != nil {
 		log.Error("failed to deregister the service", errs.ZapError(err))

@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -335,6 +336,12 @@ func TestWatcher(t *testing.T) {
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
+	watchStarted := make(chan struct{})
+	notifyWatchStarted := sync.OnceFunc(func() { close(watchStarted) })
+	helper.tick = func(ticker *time.Ticker) <-chan time.Time {
+		notifyWatchStarted()
+		return ticker.C
+	}
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		reloadEvent <- struct{}{}
@@ -364,8 +371,11 @@ func TestWatcher(t *testing.T) {
 			},
 		},
 	}
-	// wait watch to start
-	time.Sleep(time.Second)
+	select {
+	case <-watchStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("encryption key watcher did not start")
+	}
 	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	<-reloadEvent

@@ -678,9 +678,7 @@ func (r *RegionInfo) CompareAndSetReportBuckets(buckets *metapb.Buckets) bool {
 			return true
 		}
 	}
-	failpoint.Inject("concurrentBucketHeartbeat", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("concurrentBucketHeartbeat")
 	return atomic.CompareAndSwapPointer(&r.reportBuckets, unsafe.Pointer(old), unsafe.Pointer(buckets))
 }
 
@@ -960,6 +958,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				}
 				// We check it first and do not return because the log is important for us to investigate,
 				saveCache, needSync = true, true
+			}
+			// Remember elections even when the leader and rounded flow are unchanged.
+			if region.GetTerm() > origin.GetTerm() {
+				saveCache = true
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true

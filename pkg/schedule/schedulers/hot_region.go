@@ -42,7 +42,7 @@ const (
 	splitHotWriteBuckets    = "split-hot-write-region"
 	splitProgressiveRank    = 5
 	minHotScheduleInterval  = time.Second
-	maxHotScheduleInterval  = 20 * time.Second
+	maxHotScheduleInterval  = 10 * time.Second
 	defaultPendingWeight    = 1.0
 	defaultPendingAmpFactor = 2.0
 	defaultStddevThreshold  = 0.1
@@ -301,8 +301,8 @@ func (*hotScheduler) GetMinInterval() time.Duration {
 }
 
 // GetNextInterval implements the Scheduler interface.
-func (s *hotScheduler) GetNextInterval(time.Duration) time.Duration {
-	return intervalGrow(s.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
+func (*hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(interval, maxHotScheduleInterval, exponentialGrowth)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.

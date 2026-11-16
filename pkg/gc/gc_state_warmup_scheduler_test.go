@@ -36,7 +36,7 @@ import (
 // can interfere with the fake clock's deterministic worker scheduling.
 func newGCWarmupSchedulerTest(t *testing.T) *gcStateWarmup {
 	t.Helper()
-	m := NewGCStateManager(endpoint.GCStateProvider{}, config.PDServerConfig{GCStateCacheWarmupConcurrency: 4}, nil)
+	m := NewGCStateManager(endpoint.GCStateProvider{}, config.PDServerConfig{GCStateCacheWarmupConcurrency: 4}, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	generation := &gcStateGeneration{ctx: ctx, cancel: cancel, done: make(chan struct{}), flights: make(map[uint32]*gcStateLoadFlight)}

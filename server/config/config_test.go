@@ -42,10 +42,21 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
-func TestSecurity(t *testing.T) {
+func TestRedactInfoLogDefault(t *testing.T) {
 	re := require.New(t)
-	cfg := NewConfig()
-	re.Equal(logutil.RedactInfoLogOFF, cfg.Security.RedactInfoLog)
+	for _, tc := range []struct {
+		data     string
+		expected logutil.RedactInfoLogType
+	}{
+		{"", logutil.RedactInfoLogON},
+		{"[security]\nredact-info-log = false", logutil.RedactInfoLogOFF},
+	} {
+		cfg := NewConfig()
+		meta, err := toml.Decode(tc.data, cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta, false))
+		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
+	}
 }
 
 func TestTLS(t *testing.T) {

@@ -335,11 +335,18 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 		if clusterID != keypath.ClusterID() {
 			return errs.ErrMismatchClusterID(keypath.ClusterID(), clusterID)
 		}
-		log.Info("establish sync region stream",
-			zap.String("requested-server", request.GetMember().GetName()),
-			zap.String("url", request.GetMember().GetClientUrls()[0]))
-
 		name := request.GetMember().GetName()
+		if name == "" {
+			return status.Error(codes.InvalidArgument, "member name must not be empty")
+		}
+		clientURL := ""
+		if urls := request.GetMember().GetClientUrls(); len(urls) > 0 {
+			clientURL = urls[0]
+		}
+		log.Info("establish sync region stream",
+			zap.String("requested-server", name),
+			zap.String("url", clientURL))
+
 		syncStream, syncStartIndex := s.bindStreamForSync(name, stream)
 		err = s.syncHistoryRegion(ctx, request, syncStream, syncStartIndex)
 		if err != nil {

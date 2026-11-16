@@ -107,10 +107,13 @@ func (s *testTSODispatcherSuite) SetupTest() {
 	// single stable access to the inner stream, we do not allow it to create it more than once in these tests.
 	// To avoid data race on reading `stream` and `streamInner` fields.
 	created := new(atomic.Bool)
+	streamCreated := make(chan struct{})
+	var streamCreatedOnce sync.Once
 	createStream := func(ctx context.Context) *tsoStream {
 		s.streamInner = newMockTSOStreamImpl(ctx, resultModeGenerateOnSignal)
 		s.stream = newTSOStream(ctx, mockStreamURL, s.streamInner)
 		created.Store(true)
+		streamCreatedOnce.Do(func() { close(streamCreated) })
 		return s.stream
 	}
 	s.dispatcher = newTSODispatcher(context.Background(), newMockTSOServiceProvider(s.option, createStream))
@@ -134,9 +137,7 @@ func (s *testTSODispatcherSuite) SetupTest() {
 		req := s.sendReq(ctx)
 		s.reqMustNotReady(req)
 		// Wait until created
-		for !created.Load() {
-			time.Sleep(time.Millisecond)
-		}
+		<-streamCreated
 		s.streamInner.generateNext()
 		s.reqMustReady(req)
 	}

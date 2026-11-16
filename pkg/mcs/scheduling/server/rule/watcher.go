@@ -30,6 +30,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -37,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -80,6 +82,8 @@ type Watcher struct {
 	ruleManager *placement.RuleManager
 	// regionLabeler is used to manage the region label rules.
 	regionLabeler *labeler.RegionLabeler
+	// affinityManager is used to clear the Region cache of affinity groups when their label rules changed.
+	affinityManager *affinity.Manager
 
 	ruleWatcher  *etcdutil.LoopWatcher
 	labelWatcher *etcdutil.LoopWatcher
@@ -99,6 +103,7 @@ func NewWatcher(
 	checkerController *checker.Controller,
 	ruleManager *placement.RuleManager,
 	regionLabeler *labeler.RegionLabeler,
+	affinityManager *affinity.Manager,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	rw := &Watcher{
@@ -112,6 +117,7 @@ func NewWatcher(
 		checkerController:     checkerController,
 		ruleManager:           ruleManager,
 		regionLabeler:         regionLabeler,
+		affinityManager:       affinityManager,
 	}
 	err := rw.initializeRuleWatcher()
 	if err != nil {
@@ -440,7 +446,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
-			log.Debug("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
+			log.Debug("update placement rule", zap.String("key", key), logutil.ZapRedactByteString("value", kv.Value))
 			rule, err := placement.NewRuleFromJSON(kv.Value)
 			if err != nil {
 				applyFailed = true
@@ -559,6 +565,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
 	suspectKeyRanges := make([]*labeler.KeyRangeRule, 0)
+	affinityRuleIDs := make([]string, 0)
 	// TODO: use txn in region labeler.
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
@@ -567,10 +574,11 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 			suspectKeyRanges[i] = nil // avoid memory leak
 		}
 		suspectKeyRanges = suspectKeyRanges[:0]
+		affinityRuleIDs = affinityRuleIDs[:0]
 		return nil
 	}
 	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Debug("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		log.Debug("update region label rule", zap.String("key", string(kv.Key)), logutil.ZapRedactByteString("value", kv.Value))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			return err
@@ -580,6 +588,9 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 			krs := rule.GetKeyRanges()
 			if krs != nil {
 				suspectKeyRanges = append(suspectKeyRanges, krs...)
+			}
+			if strings.HasPrefix(rule.ID, affinity.LabelRuleIDPrefix) {
+				affinityRuleIDs = append(affinityRuleIDs, rule.ID)
 			}
 		}
 		return err
@@ -595,11 +606,19 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 			if krs != nil {
 				suspectKeyRanges = append(suspectKeyRanges, krs...)
 			}
+			if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
+				affinityRuleIDs = append(affinityRuleIDs, id)
+			}
 		}
 		return err
 	}
 	postEventsFn := func([]*clientv3.Event) error {
-		defer rw.regionLabeler.Unlock()
+		rw.regionLabeler.Unlock()
+		// The affinity manager reads the region labeler while holding its own lock,
+		// so clear its cache after unlocking the labeler.
+		if rw.affinityManager != nil && len(affinityRuleIDs) > 0 {
+			rw.affinityManager.InvalidCacheByLabelRules(affinityRuleIDs)
+		}
 		if rw.checkerController == nil {
 			return errors.New("checker controller is nil")
 		}

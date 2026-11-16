@@ -16,10 +16,13 @@ package watch_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
@@ -86,10 +89,13 @@ func TestWatcherCompacted(t *testing.T) {
 	pd1 := cluster.GetLeaderServer()
 	re.NotNil(pd1)
 	client := pd1.GetEtcdClient()
-	_, err = client.Put(context.Background(), "test", "v")
+	putResp, err := client.Put(context.Background(), "test", "v")
 	re.NoError(err)
-	// wait compaction
-	time.Sleep(2 * time.Second)
+	// Wait until the revision written above is actually compacted.
+	testutil.Eventually(re, func() bool {
+		_, err := client.Get(ctx, "test", clientv3.WithRev(putResp.Header.Revision))
+		return errors.Is(err, rpctypes.ErrCompacted)
+	})
 	pd2, err := cluster.Join(ctx)
 	re.NoError(err)
 	err = pd2.Run()

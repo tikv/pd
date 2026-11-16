@@ -115,7 +115,10 @@ func TestMemoryLimitTuner(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return tuner.calcMemoryLimit(tuner.GetPercentage()) == debug.SetMemoryLimit(-1)
 	}, 5*time.Second, 100*time.Millisecond)
-	time.Sleep(100 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		runtime.ReadMemStats(r)
+		return r.NextGC < uint64(tuner.calcMemoryLimit(tuner.GetPercentage()))
+	}, 5*time.Second, 10*time.Millisecond)
 	gcNum = getNowGCNum()
 	checkNextGCEqualMemoryLimit()
 	memory210mb = allocator.alloc(210 << 20)

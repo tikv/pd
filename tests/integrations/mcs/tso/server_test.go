@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
@@ -52,6 +53,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -134,6 +136,43 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	err = testutil.CheckPostJSON(tests.TestDialClient, suite.backendEndpoints+"/pd/api/v1/admin/reset-ts", input,
 		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"))
 	re.NoError(err)
+}
+
+// TestTSOStreamWhenPrimaryCloses checks that while the TSO primary closes, a TSO stream to it
+// fails with the leader-change error rather than "server not started", so that the client
+// looks for the new primary instead of reconnecting to the closing server.
+func (suite *tsoServerTestSuite) TestTSOStreamWhenPrimaryCloses() {
+	re := suite.Require()
+	s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanup()
+	testutil.Eventually(re, s.IsServing)
+
+	cc, err := grpc.NewClient(strings.TrimPrefix(s.GetAddr(), "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	re.NoError(err)
+	defer cc.Close()
+	stream, err := tsopb.NewTSOClient(cc).Tso(suite.ctx)
+	re.NoError(err)
+	req := &tsopb.TsoRequest{Header: &tsopb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: 1}
+	re.NoError(stream.Send(req))
+	_, err = stream.Recv()
+	re.NoError(err)
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		s.Close()
+	}()
+	// The stream keeps the gRPC server from stopping gracefully until it fails, so the
+	// requests reach the server through all of Close until the first error.
+	for err == nil {
+		// Once the stream fails, Send only reports io.EOF, and Recv returns its status.
+		_ = stream.Send(req)
+		_, err = stream.Recv()
+	}
+	re.NotContains(err.Error(), "server not started")
+	re.Contains(err.Error(), "not leader")
+	<-closed
+	re.True(s.IsClosed())
 }
 
 func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
@@ -318,9 +357,12 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
-	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
 	tc.WaitForDefaultPrimaryServing(re)
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	var primary string
+	testutil.Eventually(re, func() bool {
+		primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+		return exist && primary != oldPrimary
+	})
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -335,8 +377,10 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 		}
 	}
 	tc.WaitForDefaultPrimaryServing(re)
-	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
-	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	testutil.Eventually(re, func() bool {
+		primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+		return exist && primary == oldPrimary
+	})
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -417,6 +461,7 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 		var (
 			maxGap      time.Duration
 			lastSuccess time.Time
+			stoppedAt   time.Time
 			// Stop between calls instead of canceling an in-flight GetTS, whose request
 			// may be put back to the pool while the dispatcher still holds it.
 			stopped atomic.Bool
@@ -437,6 +482,7 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 				}
 				lastSuccess = now
 			}
+			stoppedAt = time.Now()
 		}()
 		defer func() {
 			stopped.Store(true)
@@ -453,9 +499,9 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 		time.Sleep(time.Second)
 		stopped.Store(true)
 		<-done
-		// A client that never succeeds again after the change leaves the gap open until now.
+		// End the open gap in the worker so observer scheduling after it exits is excluded.
 		re.True(lastSuccess.After(changedAt))
-		re.Less(max(maxGap, time.Since(lastSuccess)), 400*time.Millisecond)
+		re.Less(max(maxGap, stoppedAt.Sub(lastSuccess)), 400*time.Millisecond)
 	}
 	for range 3 {
 		checkMaxGap(func() {
@@ -747,17 +793,13 @@ func (suite *CommonTestSuite) SetupSuite() {
 
 func (suite *CommonTestSuite) TearDownSuite() {
 	re := suite.Require()
+	defer suite.cancel()
+	defer suite.cluster.Destroy()
 	suite.tsoCluster.Destroy()
 	etcdClient := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
 	re.NoError(err)
-	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, mcs.TSOServiceName)
-		re.NoError(err)
-		re.Empty(endpoints)
-	}
-	suite.cluster.Destroy()
-	suite.cancel()
+	re.Empty(endpoints)
 }
 
 func (suite *CommonTestSuite) TestAdvertiseAddr() {
@@ -795,14 +837,14 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	re.NoError(err)
 	re.NoError(s.Run())
 
-	// transfer leader to the new server
-	err = suite.pdLeader.ResignLeader()
-	re.NoError(err)
-	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
-	check()
-	err = suite.pdLeader.ResignLeader()
-	re.NoError(err)
-	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+	for range 2 {
+		oldLeader := suite.pdLeader.GetConfig().Name
+		re.NoError(suite.pdLeader.ResignLeaderWithRetry())
+		newLeader := suite.cluster.WaitLeaderChange(oldLeader)
+		re.NotEmpty(newLeader)
+		suite.pdLeader = suite.cluster.GetServer(newLeader)
+		check()
+	}
 }
 
 // TestTSOServiceSwitch tests the behavior of TSO service switching when `EnableTSODynamicSwitching` is enabled.
@@ -877,8 +919,11 @@ func TestTSOServiceSwitch(t *testing.T) {
 	err = pdLeader.GetServer().SetMicroserviceConfig(*cfg)
 	re.NoError(err)
 
-	// Wait for PD to detect the change
-	time.Sleep(300 * time.Millisecond)
+	// Wait for PD to initialize its allocator after the configuration change.
+	testutil.Eventually(re, func() bool {
+		return pdLeader.GetServer().GetTSOAllocator().IsInitialize()
+	})
+	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing
 	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))

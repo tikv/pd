@@ -17,16 +17,50 @@ package api
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 
+	"github.com/pingcap/errcode"
+
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
+
+func isAffinityLabelRule(rule *labeler.LabelRule) bool {
+	if rule == nil {
+		return false
+	}
+	if strings.HasPrefix(rule.ID, affinity.LabelRuleIDPrefix) {
+		return true
+	}
+	for _, label := range rule.Labels {
+		if label.Key == affinity.AffinityLabelKey {
+			return true
+		}
+	}
+	return false
+}
+
+func isAffinityLabelRulePatch(patch labeler.LabelRulePatch) bool {
+	if slices.ContainsFunc(patch.SetRules, isAffinityLabelRule) {
+		return true
+	}
+	// Only prefixed IDs belong to the affinity manager. Custom IDs with a
+	// legacy affinity label remain removable through the region-label API.
+	for _, id := range patch.DeleteRules {
+		if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
+			return true
+		}
+	}
+	return false
+}
 
 type regionLabelHandler struct {
 	svr *server.Server
@@ -55,19 +89,25 @@ func (h *regionLabelHandler) GetAllRegionLabelRules(w http.ResponseWriter, r *ht
 
 // PatchRegionLabelRules updates region label rules in batch.
 //
-//	@Tags		region_label
-//	@Summary	Update region label rules in batch.
-//	@Accept		json
-//	@Param		patch	body	labeler.LabelRulePatch	true	"Patch to update rules"
-//	@Produce	json
-//	@Success	200	{string}	string	"Update region label rules successfully."
-//	@Failure	400	{string}	string	"The input is invalid."
-//	@Failure	500	{string}	string	"PD server failed to proceed the request."
-//	@Router		/config/region-label/rules [patch]
+//	@Tags			swagger, region_label
+//	@Summary		Update region label rules in batch.
+//	@Description	Affinity rules must be managed through the affinity API.
+//	@Accept			json
+//	@Param			patch	body	labeler.LabelRulePatch	true	"Patch to update rules"
+//	@Produce		json
+//	@Success		200	{string}	string			"Update region label rules successfully."
+//	@Failure		400	{object}	any				"Invalid input: a JSON string, or an errcode.JSONFormat object with code, msg, and data for affinity rejections."
+//	@Header			400	{string}	TiDB-Error-Code	"Error code for structured errors; input for affinity rejections."
+//	@Failure		500	{string}	string			"PD server failed to proceed the request."
+//	@Router			/config/region-label/rules [patch]
 func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	var patch labeler.LabelRulePatch
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &patch); err != nil {
+		return
+	}
+	if isAffinityLabelRulePatch(patch) {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	if err := cluster.GetRegionLabeler().Patch(patch); err != nil {
@@ -131,19 +171,26 @@ func (h *regionLabelHandler) GetRegionLabelRuleByID(w http.ResponseWriter, r *ht
 
 // DeleteRegionLabelRule deletes label rule of cluster by id.
 //
-//	@Tags		region_label
-//	@Summary	Delete label rule of cluster by id.
-//	@Param		id	path	string	true	"Rule Id"
-//	@Produce	json
-//	@Success	200	{string}	string	"Delete rule successfully."
-//	@Failure	404	{string}	string	"The rule does not exist."
-//	@Failure	500	{string}	string	"PD server failed to proceed the request."
-//	@Router		/config/region-label/rule/{id} [delete]
+//	@Tags			swagger, region_label
+//	@Summary		Delete label rule of cluster by id.
+//	@Description	Affinity rules must be managed through the affinity API.
+//	@Param			id	path	string	true	"Rule Id"
+//	@Produce		json
+//	@Success		200	{string}	string			"Delete rule successfully."
+//	@Failure		400	{object}	any				"Invalid input: a JSON string, or an errcode.JSONFormat object with code, msg, and data for affinity rejections."
+//	@Header			400	{string}	TiDB-Error-Code	"Error code for structured errors; input for affinity rejections."
+//	@Failure		404	{string}	string			"The rule does not exist."
+//	@Failure		500	{string}	string			"PD server failed to proceed the request."
+//	@Router			/config/region-label/rule/{id} [delete]
 func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	id, err := url.PathUnescape(mux.Vars(r)["id"])
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	err = cluster.GetRegionLabeler().DeleteLabelRule(id)
@@ -160,19 +207,25 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 
 // SetRegionLabelRule updates region label rule of cluster.
 //
-//	@Tags		region_label
-//	@Summary	Update region label rule of cluster.
-//	@Accept		json
-//	@Param		rule	body	labeler.LabelRule	true	"Parameters of label rule"
-//	@Produce	json
-//	@Success	200	{string}	string	"Update rule successfully."
-//	@Failure	400	{string}	string	"The input is invalid."
-//	@Failure	500	{string}	string	"PD server failed to proceed the request."
-//	@Router		/config/region-label/rule [post]
+//	@Tags			swagger, region_label
+//	@Summary		Update region label rule of cluster.
+//	@Description	Affinity rules must be managed through the affinity API.
+//	@Accept			json
+//	@Param			rule	body	labeler.LabelRule	true	"Parameters of label rule"
+//	@Produce		json
+//	@Success		200	{string}	string			"Update rule successfully."
+//	@Failure		400	{object}	any				"Invalid input: a JSON string, or an errcode.JSONFormat object with code, msg, and data for affinity rejections."
+//	@Header			400	{string}	TiDB-Error-Code	"Error code for structured errors; input for affinity rejections."
+//	@Failure		500	{string}	string			"PD server failed to proceed the request."
+//	@Router			/config/region-label/rule [post]
 func (h *regionLabelHandler) SetRegionLabelRule(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	var rule labeler.LabelRule
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &rule); err != nil {
+		return
+	}
+	if isAffinityLabelRule(&rule) {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errs.ErrAffinityLabelProtected.FastGenByArgs()))
 		return
 	}
 	if err := cluster.GetRegionLabeler().SetLabelRule(&rule); err != nil {
