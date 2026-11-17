@@ -2843,10 +2843,11 @@ func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit
 	// deleted but that hasn't been finally removed from StoresInfo yet (tombstone
 	// is not deletion). Get's create-on-miss side effect would resurrect that
 	// entry here.
-	ratePerSec := c.opt.PeekStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
-	if limit.Rate(limitType) != ratePerSec {
-		c.ResetStoreLimit(storeID, limitType, ratePerSec)
-	}
+	limit.Refresh(limitType, func() float64 {
+		ratePerSec := c.opt.PeekStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
+		failpoint.InjectCall("storeLimitRateRead", storeID, limitType, ratePerSec)
+		return ratePerSec
+	})
 }
 
 // GetClusterVersion returns the current cluster version.

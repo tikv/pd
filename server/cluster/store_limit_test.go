@@ -22,9 +22,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -152,6 +154,69 @@ func TestStoreLimitRefreshDoesNotWaitForPersistence(t *testing.T) {
 			re.NoError(<-persistenceDone)
 			re.NoError(<-removalDone)
 			re.NotContains(opt.GetScheduleConfig().StoreLimit, uint64(1))
+		})
+	}
+}
+
+func TestStoreLimitConcurrentUpdateKeepsLatestRate(t *testing.T) {
+	for _, typ := range []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer, storelimit.TransferLeaderIn} {
+		t.Run(typ.String(), func(t *testing.T) {
+			re := require.New(t)
+			previousDefault := sc.DefaultStoreLimit.GetDefaultStoreLimit(typ)
+			t.Cleanup(func() { sc.DefaultStoreLimit.SetDefaultStoreLimit(typ, previousDefault) })
+			ctx, cancel := context.WithCancel(t.Context())
+			wg := &sync.WaitGroup{}
+			defer func() {
+				cancel()
+				wg.Wait()
+			}()
+
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+			store := core.NewStoreInfo(&metapb.Store{Id: 1})
+			rc.PutStore(store)
+			limiter := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+
+			const lowRate = 0.00006
+			rateRead := make(chan struct{})
+			resumeRefresh := make(chan struct{})
+			const fp = "github.com/tikv/pd/server/cluster/storeLimitRateRead"
+			re.NoError(failpoint.EnableCall(fp, func(storeID uint64, limitType storelimit.Type, ratePerSec float64) {
+				if storeID == 1 && limitType == typ && ratePerSec == lowRate/operator.StoreBalanceBaseTime {
+					close(rateRead)
+					select {
+					case <-resumeRefresh:
+					case <-ctx.Done():
+					}
+				}
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(fp)) })
+
+			// Delay the global API's refresh after it captures the low rate.
+			globalUpdateDone := make(chan error, 1)
+			wg.Go(func() { globalUpdateDone <- rc.SetAllStoresLimit(typ, lowRate) })
+			select {
+			case <-rateRead:
+			case <-time.After(5 * time.Second):
+				re.FailNow("global update did not reach the rate read")
+			}
+
+			// Apply a newer per-store rate before the delayed refresh resumes.
+			re.NoError(rc.SetStoreLimit(1, typ, storelimit.Unlimited))
+			re.Equal(storelimit.Unlimited/operator.StoreBalanceBaseTime, limiter.Rate(typ))
+			close(resumeRefresh)
+			select {
+			case err := <-globalUpdateDone:
+				re.NoError(err)
+			case <-time.After(5 * time.Second):
+				re.FailNow("global update did not finish")
+			}
+
+			re.Equal(storelimit.Unlimited, opt.PeekStoreLimitByType(1, typ))
+			re.Equal(storelimit.Unlimited/operator.StoreBalanceBaseTime, limiter.Rate(typ))
+			re.True(limiter.Take(storelimit.RegionInfluence[typ], typ, constant.Medium))
+			re.True(rc.GetStore(1).IsAvailable(typ, constant.Medium))
 		})
 	}
 }
