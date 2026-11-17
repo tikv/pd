@@ -1364,6 +1364,82 @@ func TestRegionPreparationWithSharedRegionInfo(t *testing.T) {
 	re.True(right.IsRegionLeaderPrepared())
 }
 
+func TestUpdateSubTreeWithStaleRootOrigin(t *testing.T) {
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	for _, tc := range []struct {
+		name string
+		opts []RegionCreateOption
+	}{
+		{name: "leader", opts: []RegionCreateOption{WithLeader(peers[1])}},
+		{name: "range", opts: []RegionCreateOption{WithStartKey([]byte("a")), WithEndKey([]byte("b"))}},
+		{name: "peers", opts: []RegionCreateOption{WithReplacePeerStore(2, 3)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			regions := NewRegionsInfo()
+			original := NewRegionInfo(&metapb.Region{
+				Id: 1, StartKey: []byte("d"), EndKey: []byte("e"), Peers: peers,
+			}, peers[0], SetApproximateSize(10), SetSource(Heartbeat))
+			neighbor := NewRegionInfo(&metapb.Region{
+				Id: 2, StartKey: []byte("b"), EndKey: []byte("c"), Peers: peers,
+			}, peers[0], SetApproximateSize(10), SetSource(Heartbeat))
+			regions.PutRegion(original)
+			regions.PutRegion(neighbor)
+
+			b := original.Clone(tc.opts...)
+			c := original.Clone()
+			d := c.Clone(SetApproximateSize(30))
+			b.source, c.source, d.source = Heartbeat, Heartbeat, Heartbeat
+			bOrigin, bOverlaps, bRangeChanged := regions.SetRegion(b)
+			cOrigin, cOverlaps, cRangeChanged := regions.SetRegion(c)
+			dOrigin, dOverlaps, dRangeChanged := regions.SetRegion(d)
+			// D only changes statistics relative to its root origin C, but the
+			// C, B, D completion order leaves B in the subtree when D arrives.
+			regions.UpdateSubTree(c, cOrigin, cOverlaps, cRangeChanged)
+			regions.UpdateSubTree(b, bOrigin, bOverlaps, bRangeChanged)
+			re.False(regions.IsRegionLeaderPrepared())
+			regions.UpdateSubTree(d, dOrigin, dOverlaps, dRangeChanged)
+
+			checkRegions(re, regions)
+			re.Equal(2, regions.GetStoreLeaderCount(1))
+			re.Equal(0, regions.GetStoreLeaderCount(2))
+			re.Equal(2, regions.GetStoreFollowerCount(2))
+			re.Equal(0, regions.GetStoreRegionCount(3))
+			re.Equal(int64(40), regions.GetStoreLeaderRegionSize(1))
+			re.Equal(int64(40), regions.GetStoreFollowerRegionSize(2))
+			leaders, err := regions.GetStoreRegionsByTypeInSubTree(1, LeaderInSubTree)
+			re.NoError(err)
+			re.Equal([]*RegionInfo{neighbor, d}, leaders)
+			re.True(regions.IsRegionLeaderPrepared())
+			re.Equal(int32(2), d.GetRef())
+
+			flow := d.Clone(SetApproximateSize(40), SetSource(Heartbeat))
+			regions.PutRegion(flow)
+			checkRegions(re, regions)
+			re.Equal(int64(50), regions.GetStoreLeaderRegionSize(1))
+			re.Equal(int64(50), regions.GetStoreFollowerRegionSize(2))
+			re.True(regions.IsRegionLeaderPrepared())
+			re.Equal(int32(2), flow.GetRef())
+		})
+	}
+}
+
+func TestUpdateSubTreeWithMissingCurrentRegion(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	original := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), SetSource(Heartbeat))
+	regions.PutRegion(original)
+	latest := original.Clone(SetApproximateSize(30), SetSource(Heartbeat))
+	origin, overlaps, rangeChanged := regions.SetRegion(latest)
+	regions.RemoveRegionFromSubTree(original)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.UpdateSubTree(latest, origin, overlaps, rangeChanged)
+	re.Equal(1, regions.GetStoreLeaderCount(1))
+	re.Equal(int64(30), regions.GetStoreLeaderRegionSize(1))
+	re.True(regions.IsRegionLeaderPrepared())
+	re.Equal(int32(2), latest.GetRef())
+}
+
 func TestRegionPreparationWithPendingBatch(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()
