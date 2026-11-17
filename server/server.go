@@ -2140,6 +2140,7 @@ func (s *Server) campaignLeader() {
 	})
 	rebaseStart := time.Now()
 	if err := s.idAllocator.Rebase(); err != nil {
+		resetLeaderOnce.Do(resetLeader)
 		log.Warn("failed to sync id from etcd", errs.ZapError(err), zap.Duration("cost", time.Since(rebaseStart)))
 		return
 	}
@@ -2169,7 +2170,12 @@ func (s *Server) campaignLeader() {
 	// It is the last step of stepping up: from here on only the loop below
 	// notices an expired lease, so nothing that can block may sit between it
 	// and the loop.
+	// The early TSO updater can resign while the cluster is still initializing.
+	if !s.member.GetLeadership().Check() {
+		return
+	}
 	s.member.PromoteSelf()
+	failpoint.InjectCall("afterPDLeaderPromoted", s.member.ID())
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()

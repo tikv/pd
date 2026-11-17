@@ -17,6 +17,8 @@ package member_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +31,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -359,19 +362,22 @@ func TestEarlyTSOStopsAfterPeerPartition(t *testing.T) {
 
 func TestEarlyTSOInitializationFailureResignsBeforeCleanup(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		hook string
+		name       string
+		hook       string
+		key        func() string
+		failureLog string
 	}{
 		{name: "cluster initialization", hook: "github.com/tikv/pd/server/cluster/raftClusterReturn"},
-		{name: "ID rebasing", hook: "github.com/tikv/pd/server/rebaseErr"},
+		{name: "cluster metadata", key: keypath.ClusterPath, failureLog: "failed to load cluster info"},
+		{name: "ID rebasing", key: keypath.AllocIDPath, failureLog: "failed to sync id from etcd"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			checkInitializationFailureCleanup(t, tc.hook)
+			checkInitializationFailureCleanup(t, tc.hook, tc.key, tc.failureLog)
 		})
 	}
 }
 
-func checkInitializationFailureCleanup(t *testing.T, failureHook string) {
+func checkInitializationFailureCleanup(t *testing.T, failureHook string, corruptKey func() string, failureLog string) {
 	t.Helper()
 	re := require.New(t)
 	cluster := newEarlyTSOCluster(t, 1)
@@ -387,21 +393,56 @@ func checkInitializationFailureCleanup(t *testing.T, failureHook string) {
 	re.NotNil(lease)
 	waitClose, resumeClose := pauseLeaseClose(t, lease)
 	t.Cleanup(resumeClose)
+	fname := testutil.InitTempFileLogger(t, "info")
+
+	var clearFailure func()
+	if corruptKey != nil {
+		// A malformed persisted value makes the real initialization call fail,
+		// including its warning log, rather than returning from a failpoint.
+		key := corruptKey()
+		stored, err := svr.GetClient().Get(t.Context(), key)
+		re.NoError(err)
+		re.Len(stored.Kvs, 1)
+		clearFailure = sync.OnceFunc(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_, err := svr.GetClient().Put(ctx, key, string(stored.Kvs[0].Value))
+			re.NoError(err)
+		})
+		t.Cleanup(clearFailure)
+		_, err = svr.GetClient().Put(t.Context(), key, "invalid")
+		re.NoError(err)
+	} else {
+		re.NoError(failpoint.Enable(failureHook, "return(true)"))
+		clearFailure = sync.OnceFunc(func() { re.NoError(failpoint.Disable(failureHook)) })
+		t.Cleanup(clearFailure)
+	}
 
 	const campaignHook = "github.com/tikv/pd/server/leaderLoopCheckAgain"
-	re.NoError(failpoint.Enable(failureHook, "return(true)"))
-	t.Cleanup(func() { re.NoError(failpoint.Disable(failureHook)) })
 	re.NoError(failpoint.Enable(campaignHook, fmt.Sprintf(`return("%d")`, leader.GetServerID())))
 	t.Cleanup(func() { re.NoError(failpoint.Disable(campaignHook)) })
 	resume()
 	waitClose()
 	re.False(svr.IsServing())
 	re.Nil(svr.GetMember().GetLeadership().GetLease())
+	re.True(svr.GetTSOAllocator().IsInitialize())
 	requireEarlyTSORejected(t, stream, leader.GetClusterID())
+	if failureLog != "" {
+		content, err := os.ReadFile(fname)
+		re.NoError(err)
+		re.NotContains(string(content), failureLog)
+	}
 	resumeClose()
 	testutil.Eventually(re, func() bool { return !svr.GetTSOAllocator().IsInitialize() })
+	if failureLog != "" {
+		testutil.Eventually(re, func() bool {
+			content, err := os.ReadFile(fname)
+			re.NoError(err)
+			return strings.Contains(string(content), failureLog)
+		})
+	}
 
-	re.NoError(failpoint.Disable(failureHook))
+	clearFailure()
 	re.NoError(failpoint.Disable(campaignHook))
 	testutil.Eventually(re, svr.IsServing)
 	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())

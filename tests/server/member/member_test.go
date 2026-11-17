@@ -24,6 +24,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -815,15 +817,17 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 			re.NotEmpty(leaderName)
 			leader := cluster.GetServer(leaderName)
 			svr := leader.GetServer()
+			resumeInitialization := func() {}
 			if early {
-				wait, _ := pauseAfterTSOInitialization(t, leader.GetServerID())
+				wait, resume := pauseAfterTSOInitialization(t, leader.GetServerID())
+				resumeInitialization = resume
 				leader.ResetPDLeader()
 				wait()
 				re.False(svr.IsServing())
 			}
 			client := earlyTSOClient(t, leader)
 			stream := earlyTSOStream(t, client, "")
-			requestEarlyTSO(t, stream, leader.GetClusterID())
+			previous := requestEarlyTSO(t, stream, leader.GetClusterID())
 
 			oldLease := svr.GetMember().GetLeadership().GetLease()
 			re.NotNil(oldLease)
@@ -832,6 +836,9 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 			// Capture the log the same way TestPDLeaderResignsBeforeLoggingStepDown
 			// does, and for the same reasons.
 			fname := testutil.InitTempFileLogger(t, "info")
+			const campaignHook = "github.com/tikv/pd/server/leaderLoopCheckAgain"
+			re.NoError(failpoint.Enable(campaignHook, fmt.Sprintf(`return("%d")`, leader.GetServerID())))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(campaignHook)) })
 
 			const resetMsg = "reset the timestamp in memory"
 
@@ -862,6 +869,28 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 			content, err := os.ReadFile(fname)
 			re.NoError(err)
 			re.NotContains(string(content), resetMsg)
+			if early {
+				var promotedWithoutLease atomic.Bool
+				const promotionHook = "github.com/tikv/pd/server/afterPDLeaderPromoted"
+				re.NoError(failpoint.EnableCall(promotionHook, func(id uint64) {
+					if id == leader.GetServerID() && !m.GetLeadership().Check() {
+						promotedWithoutLease.Store(true)
+					}
+				}))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(promotionHook)) })
+				// Finish initialization while the old election key still exists but
+				// the local lease has been withdrawn. This campaign must go straight
+				// to cleanup without republishing itself as the leader.
+				resumeInitialization()
+				testutil.Eventually(re, func() bool {
+					content, err := os.ReadFile(fname)
+					re.NoError(err)
+					return strings.Contains(string(content), "closing the embedded TSO allocator")
+				})
+				re.False(promotedWithoutLease.Load())
+				re.Nil(m.GetLeader())
+				re.NoError(failpoint.Disable(promotionHook))
+			}
 
 			// The line does arrive once the blocked close returns, which is what keeps
 			// the assertion above from passing merely because nothing was captured.
@@ -871,6 +900,15 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 				re.NoError(err)
 				return strings.Contains(string(content), resetMsg)
 			}, testutil.WithWaitFor(30*time.Second))
+			testutil.Eventually(re, func() bool { return !svr.GetTSOAllocator().IsInitialize() })
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"))
+			re.NoError(failpoint.Disable(campaignHook))
+			testutil.Eventually(re, func() bool {
+				lease := m.GetLeadership().GetLease()
+				return lease != nil && lease != oldLease && svr.IsServing()
+			})
+			next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+			re.Negative(tsoutil.CompareTimestamp(previous, next))
 		})
 	}
 }

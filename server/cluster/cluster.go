@@ -398,11 +398,16 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		checkTSODuration := time.Since(checkTSOStart)
 		log.Info("check TSO service completed", zap.Duration("cost", checkTSODuration))
 	}
+	resignOnFailure := func() {
+		if !bootstrap {
+			// Bootstrap does not own the leadership, but an election may already
+			// be serving embedded TSO. Resign before any failure log or cleanup.
+			c.member.Resign()
+		}
+	}
 	defer func() {
 		if !bootstrap && err != nil {
-			// Embedded TSO may already be serving. Release the leadership before
-			// resetting it or entering cleanup that can block.
-			c.member.Resign()
+			resignOnFailure()
 			c.stopTSOJobsIfNeeded()
 		}
 	}()
@@ -420,6 +425,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	loadClusterInfoStart := time.Now()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
+		resignOnFailure()
 		log.Warn("failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
 		return err
 	}
@@ -432,6 +438,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		ruleInitStart := time.Now()
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
+			resignOnFailure()
 			log.Warn("failed to initialize placement rules", errs.ZapError(err), zap.Duration("cost", time.Since(ruleInitStart)))
 			return err
 		}
@@ -443,6 +450,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	labelerDuration := time.Since(labelerStart)
 	if err != nil {
+		resignOnFailure()
 		log.Warn("region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))
 		return err
 	}
@@ -465,6 +473,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	replicationModeStart := time.Now()
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
+		resignOnFailure()
 		log.Warn("failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
 		return err
 	}
@@ -484,6 +493,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		bootstrapKeyspaceStart := time.Now()
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
+			resignOnFailure()
 			log.Warn("failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 			return err
 		}
