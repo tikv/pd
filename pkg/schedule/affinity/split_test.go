@@ -191,6 +191,10 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			require.NoError(t, m.DeleteAffinityGroups([]string{"g1"}, true))
 			return r
 		}},
+		{"group target cleared", func(_ *testing.T, m *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
+			m.SyncGroupFromEtcd(&Group{ID: "g1"})
+			return r
+		}},
 		{"region crosses group boundary", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
 			return r.Clone(core.WithEndKey([]byte("zz")), core.WithIncVersion())
 		}},
@@ -250,6 +254,13 @@ func TestSplitTracking(t *testing.T) {
 	re.NoError(streams.Drain(2))
 	deadline, ok := m.splitDeniedRegions.Peek(region.GetID())
 	re.True(ok)
+	// Expiration retains the target, so heartbeats must keep split suppression.
+	m.ExpireAffinityGroup("g1")
+	group, _ := m.GetRegionAffinityGroupState(region)
+	re.NotNil(group)
+	re.True(group.RegularSchedulingAllowed)
+	re.Equal(uint64(1), group.LeaderStoreID)
+	re.Equal([]uint64{1, 2, 3}, group.VoterStoreIDs)
 	m.MaybeEnableSplit(region, streams)
 	unchanged, _ := m.splitDeniedRegions.Peek(region.GetID())
 	re.Equal(deadline, unchanged, "heartbeats far from the deadline do not extend the TTL")
@@ -262,7 +273,10 @@ func TestSplitTracking(t *testing.T) {
 	}
 	wg.Wait()
 	re.Equal(1, streams.MsgLength(), "concurrent heartbeats renew once")
-	re.NoError(streams.Drain(1))
+	msg, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+	re.True(ok)
+	re.NotNil(msg.GetChangeSplit())
+	re.False(msg.GetChangeSplit().GetAutoSplitEnabled())
 	deadline, ok = m.splitDeniedRegions.Peek(region.GetID())
 	re.True(ok)
 	re.Greater(time.Until(deadline.(time.Time)), splitDeniedRegionTTL-time.Minute)
