@@ -94,6 +94,15 @@ installation and compilation steps, so CI completion times still need to be
 checked after CI runs with this change. The planner uses Python 3.6 or later
 and requires no third-party packages.
 
+CI test jobs install only the failpoint tool needed to prepare the tests.
+`make install-tools` still installs the complete toolchain for static checks
+and generation. GitHub Actions shares Go module caches within each workflow,
+keyed by the runner image, Go version, module dependency files, and tool pins.
+Build caches are separate for each workflow and runner. A new commit restores
+the previous build snapshot for the same workload and dependencies, then saves
+its updated cache.
+Native Go tests use `-count=1` so restored build caches do not skip test execution.
+
 ```shell
 # Inspect every runner's packages without compiling or running tests.
 python3 scripts/ci-shard.py plan --count 10 --parallel 4

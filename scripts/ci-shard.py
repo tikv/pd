@@ -214,7 +214,7 @@ def run_shard(root, packages, durations, parallel):
                 if module in ("client", "tools"):
                     # Preserve the existing package-level test lifecycle in these modules.
                     command = [
-                        "go", "test", "-tags", "deadlock", "-race", "-cover",
+                        "go", "test", "-count=1", "-tags", "deadlock", "-race", "-cover",
                         "-covermode=atomic", f"-coverprofile={results / f'{index}.cov'}",
                         "-coverpkg=../...", "./...",
                     ]

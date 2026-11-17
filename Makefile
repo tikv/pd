@@ -196,7 +196,11 @@ install-tools:
 	}
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
-.PHONY: install-tools
+install-test-tools:
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@go install github.com/pingcap/failpoint/failpoint-ctl
+
+.PHONY: install-tools install-test-tools
 
 #### Static checks ####
 
@@ -297,17 +301,17 @@ gotest: install-tools
 
 JOB_COUNT ?= 10
 JOB_LAYOUT ?= standard
-ci-test-job: install-tools dashboard-ui pd-ut
+ci-test-job: install-test-tools dashboard-ui pd-ut
 	@$(FAILPOINT_ENABLE)
 	./scripts/ci-subtask.sh $(JOB_INDEX) $(JOB_COUNT) $(JOB_LAYOUT) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 TSO_FUNCTION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 
-test-tso-function: install-tools
+test-tso-function: install-test-tools
 	# testing TSO function...
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race -tags without_dashboard,deadlock $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	CGO_ENABLED=1 go test -count=1 -race -tags without_dashboard,deadlock $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster

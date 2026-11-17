@@ -10,10 +10,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-go
         with:
-          go-version: '1.27'
-          check-latest: true
+          cache-scope: check
       - name: Make Check
         run: |
           python3 -m unittest discover -s scripts -p test_ci_shard.py

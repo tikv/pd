@@ -1,0 +1,39 @@
+name: Set up Go and build cache
+description: Reuse Go dependencies and build outputs for each CI workload.
+inputs:
+  cache-scope:
+    description: Workflow and runner that own this cache.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      id: go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.27'
+        check-latest: true
+        cache: false
+    - name: Locate Go caches
+      id: paths
+      shell: bash
+      run: |
+        module_cache=$(go env GOMODCACHE)
+        build_cache=$(go env GOCACHE)
+        echo "modules=$module_cache" >> "$GITHUB_OUTPUT"
+        echo "build=$build_cache" >> "$GITHUB_OUTPUT"
+        echo "image=${ImageOS:-$RUNNER_OS}" >> "$GITHUB_OUTPUT"
+    - name: Restore Go modules
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.paths.outputs.modules }}
+        key: go-modules-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-${{ github.workflow }}-${{ hashFiles('**/go.mod', '**/go.sum', 'Makefile', 'tools.go') }}
+    - name: Restore Go build cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.paths.outputs.build }}
+        # Refresh the snapshot after each commit without sharing partial caches
+        # between matrix runners. Go validates individual build entries itself.
+        key: go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-${{ inputs.cache-scope }}-${{ hashFiles('**/go.mod', '**/go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-${{ inputs.cache-scope }}-${{ hashFiles('**/go.mod', '**/go.sum') }}-

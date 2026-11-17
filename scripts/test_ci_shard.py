@@ -144,6 +144,7 @@ class ShardTests(unittest.TestCase):
             for call, module in zip(run.call_args_list, ("client", "tools")):
                 command = call.args[0]
                 self.assertEqual(command[:2], ["go", "test"])
+                self.assertIn("-count=1", command)
                 self.assertEqual(command[-1], "./...")
                 self.assertIn("-coverpkg=../...", command)
                 self.assertEqual(command[command.index("-tags") + 1], "deadlock")
