@@ -359,11 +359,15 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		gtb.grt = newGroupRUTracker()
 	}
 	adjustDemand := adjustsSlotDemand(totalFillRate, totalBurstLimit)
+	// A client that keeps consuming requests about once per target period, but it only checks on a one-second tick
+	// and the response takes time, so a request can be a second or so late. Allow a quarter of a target period more
+	// before a slot counts as overdue; decaying a merely late slot moves its share to others and back.
+	overdueAfter := targetPeriod + targetPeriod/4
 	for id, ts := range gtb.tokenSlots {
 		ruTracker := gtb.grt.getOrCreateRUTracker(id)
 		allocation := ruTracker.getRUPerSec()
-		// Decay only a slot that hasn't requested for a target period, and only for the time beyond it.
-		cutoff := now.Add(-targetPeriod)
+		// Decay only a slot that hasn't requested for overdueAfter, and only for the time beyond it.
+		cutoff := now.Add(-overdueAfter)
 		overdue := adjustDemand && ts.lastReqTime.Before(cutoff)
 		if overdue {
 			allocation = ruTracker.getRUPerSecAt(cutoff)
@@ -403,8 +407,15 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	// most a target period of the basic fill rate. An active requester's RU/s already follows its demand.
 	// assignSlotTokens grants a reserve on every request whatever the debt, so flooring an active client
 	// below the basic fill rate, or one in debt, would let it borrow more than its refill pays back.
+	// A slot recreated after a 0-token request starts without debt, so also skip the floor while the group owes
+	// more than a target period of its budget, the most its slots can owe together.
+	// The floor raises what the requester can borrow, not what it earned: the refill accumulated since the last
+	// balance is still distributed by the allocation before the floor.
+	var refillAllocation map[uint64]float64
 	if requester, ok := gtb.tokenSlots[clientUniqueID]; ok && adjustDemand && requiredToken > 0 && requesterIdle &&
-		requester.curTokenCapacity >= -basicFillRate*targetPeriod.Seconds() {
+		requester.curTokenCapacity >= -basicFillRate*targetPeriod.Seconds() &&
+		gtb.Tokens >= -allocationBudget*targetPeriod.Seconds() {
+		refillAllocation = maps.Clone(allocationMap)
 		floorRequestingSlot(allocationMap, clientUniqueID, basicFillRate)
 	}
 	// Finally, distribute the fill rate and burst limit to each slot based on the allocation.
@@ -415,6 +426,9 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		ratio := fillRate / allocationBudget
 		burstLimit := float64(totalBurstLimit) * ratio
 		assignTokens := tokensForBalance * ratio
+		if refillAllocation != nil {
+			assignTokens = tokensForBalance * (refillAllocation[id] / allocationBudget)
+		}
 		// Need to reserve burst limit to next balance.
 		if burstLimit > 0 && slot.curTokenCapacity > burstLimit {
 			reservedTokens := slot.curTokenCapacity - burstLimit
