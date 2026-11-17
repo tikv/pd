@@ -205,6 +205,9 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 		{"size reaches limit", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
 			return r.Clone(core.SetApproximateSize(80))
 		}},
+		{"keys reach limit", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
+			return r.Clone(core.SetApproximateKeys(80 * config.RegionSizeToKeysRatio))
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
