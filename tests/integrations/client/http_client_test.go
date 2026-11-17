@@ -35,7 +35,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/unrolled/render"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -63,11 +62,9 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-func TestLegacyHTTPErrorResponse(t *testing.T) {
-	input := errcode.NewInvalidInputErr(errors.New("invalid"))
-	missing := errcode.NewNotFoundErr(errors.New("missing"))
-	group := errcode.Combine(input, missing)
-	internal := errcode.NewInternalErr(errors.New("failed"))
+func TestHTTPErrorResponse(t *testing.T) {
+	input := errs.NewInvalidInputErr(errors.New("invalid"))
+	internal := errs.NewInternalErr(errors.New("failed"))
 	tests := []struct {
 		name      string
 		err       error
@@ -80,39 +77,27 @@ func TestLegacyHTTPErrorResponse(t *testing.T) {
 			body: `{"code":"input","msg":"invalid","data":{}}`,
 		},
 		{
-			name: "not found", err: missing, status: http.StatusNotFound,
-			body: `{"code":"missing","msg":"missing","data":{}}`,
-		},
-		{
-			name: "operation", err: errcode.Op("read region").AddTo(missing), status: http.StatusNotFound,
-			body: `{"code":"missing","msg":"read region: missing","data":{},"operation":"read region"}`,
-		},
-		{
 			name: "annotated", err: errors.Annotate(input, "outer"), status: http.StatusBadRequest,
 			body: `{"code":"input","msg":"outer: invalid","data":{}}`,
 		},
 		{
-			name: "fmt wrapped", err: fmt.Errorf("outer: %w", missing), status: http.StatusNotFound,
-			body: `{"code":"missing","msg":"outer: missing","data":{}}`,
+			name: "fmt wrapped", err: fmt.Errorf("outer: %w", input), status: http.StatusBadRequest,
+			body: `{"code":"input","msg":"outer: invalid","data":{}}`,
 		},
 		{
-			name: "group", err: &group, status: http.StatusBadRequest,
-			body: `{"code":"input","msg":"invalid; missing","data":{},"others":[{"code":"missing","msg":"missing","data":{}}]}`,
-		},
-		{
-			name: "wrapped group", err: errors.Annotate(&group, "outer"), status: http.StatusBadRequest,
-			body: `{"code":"input","msg":"outer: invalid; missing","data":{},"others":[{"code":"missing","msg":"missing","data":{}}]}`,
-		},
-		{
-			name: "same-code group", err: errs.NewInvalidInputErr(&group), status: http.StatusBadRequest,
-			body: `{"code":"input","msg":"invalid; missing","data":{},"others":[{"code":"missing","msg":"missing","data":{}}]}`,
-		},
-		{
-			name: "group operation", err: errcode.Op("validate").AddTo(&group), status: http.StatusBadRequest,
-			body: `{"code":"input","msg":"validate: invalid; missing","data":{},"operation":"validate","others":[{"code":"missing","msg":"missing","data":{}}]}`,
+			name: "repeated input", err: errs.NewInvalidInputErr(input), status: http.StatusBadRequest,
+			body: `{"code":"input","msg":"invalid","data":{}}`,
 		},
 		{
 			name: "internal", err: internal, status: http.StatusInternalServerError,
+			body: `{"code":"internal","msg":"failed","data":{}}`, withStack: true,
+		},
+		{
+			name: "wrapped internal", err: fmt.Errorf("outer: %w", internal), status: http.StatusInternalServerError,
+			body: `{"code":"internal","msg":"outer: failed","data":{}}`, withStack: true,
+		},
+		{
+			name: "preserve internal", err: errs.NewInvalidInputErr(internal), status: http.StatusInternalServerError,
 			body: `{"code":"internal","msg":"failed","data":{}}`, withStack: true,
 		},
 	}
