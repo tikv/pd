@@ -195,6 +195,234 @@ func TestAffinityCheckerLearnerSwap(t *testing.T) {
 	}
 }
 
+func TestAffinityCheckerConflictingLearnerTargetPlacement(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		leader  uint64
+		voters  []uint64
+		relearn bool
+	}{
+		{"valid", 1, []uint64{1, 2, 3}, false},
+		{"invalid-isolation", 1, []uint64{1, 5, 3}, true},
+		{"invalid-count", 1, []uint64{1, 3}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			c, tc, _ := newLearnerConflictController(t)
+			tc.SetEnableUseJointConsensus(true)
+			for id := uint64(1); id <= 8; id++ {
+				tc.AddLabelsStore(id, 10, map[string]string{
+					"zone": strconv.FormatUint((id-1)%4+1, 10), "host": strconv.FormatUint(id, 10),
+				})
+			}
+			rule := tc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+			rule.LocationLabels, rule.IsolationLevel = []string{"zone", "host"}, "zone"
+			re.NoError(tc.GetRuleManager().SetRule(rule))
+			rule = newLearnerRule()
+			rule.Count, rule.LocationLabels, rule.IsolationLevel = 2, []string{"zone", "host"}, "zone"
+			re.NoError(tc.GetRuleManager().SetRule(rule))
+			r1 := putLearners(tc, 1, 4, 6)
+			tc.AddLeaderRegionWithRange(2, "b", "c", 5, 2, 4)
+			r2 := putLearners(tc, 2, 3, 6)
+			checker := c.affinityChecker
+			re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(r1, true))
+			re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(r2, true))
+			manager := tc.GetAffinityManager()
+			const id = "learner-target-placement"
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: id, LeaderStoreID: tt.leader, VoterStoreIDs: tt.voters,
+			}, []byte("a"), []byte("c")))
+			if tt.name == "valid" || tt.relearn {
+				target := cloneRegionWithReplacePeerStores(r2, tt.leader, tt.voters...)
+				re.False(checker.isRegionPlacementRuleSatisfiedWithBestLocation(target, false))
+				op, relearn := checker.createAffinityOperator(r2, manager.GetAffinityGroupState(id), tc.GetRuleManager().FitRegion(tc, r2))
+				re.Equal(tt.relearn, relearn)
+				re.Equal(tt.relearn, op == nil)
+			}
+			conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
+			ops := checker.Check(r2)
+			if tt.name != "valid" {
+				re.Empty(ops)
+				state := manager.GetAffinityGroupState(id)
+				re.True(state.AffinitySchedulingAllowed)
+				re.Equal(uint64(5), state.LeaderStoreID)
+				re.Equal([]uint64{2, 4, 5}, state.VoterStoreIDs)
+				if tt.relearn {
+					re.Equal(conflicts+1, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
+				}
+				return
+			}
+			re.Len(ops, 1)
+			moved := applyLearnerOperator(t, tc, ops[0])
+			re.NotNil(moved.GetStoreVoter(3))
+			re.NotNil(moved.GetStoreLearner(4))
+			re.NotNil(moved.GetStoreLearner(6))
+			re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(moved, false))
+			for _, region := range []*core.RegionInfo{r1, moved} {
+				re.Empty(checker.Check(region))
+				state := manager.GetAffinityGroupState(id)
+				re.True(state.AffinitySchedulingAllowed)
+				re.Equal(tt.leader, state.LeaderStoreID)
+				re.Equal(tt.voters, state.VoterStoreIDs)
+			}
+			re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
+		})
+	}
+}
+
+func TestAffinityCheckerUnpinnedWitness(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		leader  uint64
+		voter   uint64
+		witness uint64
+	}{
+		{"removed-witness", 1, 2, 4},
+		{"witness-on-target-leader", 2, 3, 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			c, tc, _ := newLearnerConflictController(t)
+			tc.SetEnableWitness(true)
+			rule := tc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+			rule.Count = 2
+			re.NoError(tc.GetRuleManager().SetRule(rule))
+			re.NoError(tc.GetRuleManager().SetRule(&placement.Rule{
+				GroupID: placement.DefaultGroupID, ID: "witness", Role: placement.Voter, Count: 1, IsWitness: true,
+			}))
+			tc.AddLeaderRegionWithRange(1, "a", "b", tt.leader, 3-tt.leader, 3)
+			r1 := tc.GetRegion(1)
+			r1 = r1.Clone(core.WithWitness(r1.GetStorePeer(3).GetId()))
+			tc.PutRegion(r1)
+			tc.AddLeaderRegionWithRange(2, "b", "c", 1, tt.voter, tt.witness)
+			r2 := tc.GetRegion(2)
+			r2 = r2.Clone(core.WithWitness(r2.GetStorePeer(tt.witness).GetId()))
+			tc.PutRegion(r2)
+			checker := c.affinityChecker
+			manager := tc.GetAffinityManager()
+			const id = "unpinned-witness"
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: id, LeaderStoreID: tt.leader, VoterStoreIDs: []uint64{1, 2, 3},
+			}, []byte("a"), []byte("c")))
+			failed := promtestutil.ToFloat64(affinityCheckerCreateOpFailedCounter)
+			for range 5 {
+				for _, region := range []*core.RegionInfo{r2, r1} {
+					re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+					re.Empty(checker.Check(region))
+					state := manager.GetAffinityGroupState(id)
+					re.True(state.AffinitySchedulingAllowed)
+					re.Equal(tt.leader, state.LeaderStoreID)
+					re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
+				}
+			}
+			re.Equal(failed, promtestutil.ToFloat64(affinityCheckerCreateOpFailedCounter))
+
+			// A changed voter count still invalidates the old target.
+			rule.Count = 3
+			re.NoError(tc.GetRuleManager().SetRule(rule))
+			r2 = r2.Clone(core.WithAddPeer(&metapb.Peer{Id: 200, StoreId: 5}))
+			tc.PutRegion(r2)
+			re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(r2, true))
+			re.Empty(checker.Check(r2))
+			state := manager.GetAffinityGroupState(id)
+			re.True(state.AffinitySchedulingAllowed)
+			re.Equal(uint64(1), state.LeaderStoreID)
+			storeIDsEq(re, slices.Clone(state.VoterStoreIDs), r2.GetVoters())
+		})
+	}
+}
+
+func TestAffinityCheckerWitnessRuleChange(t *testing.T) {
+	re := require.New(t)
+	c, tc, _ := newLearnerConflictController(t)
+	tc.SetEnableWitness(true)
+	rule := tc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	rule.Count = 2
+	re.NoError(tc.GetRuleManager().SetRule(rule))
+	re.NoError(tc.GetRuleManager().SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: "witness", Role: placement.Voter, Count: 1, IsWitness: true,
+	}))
+	region := tc.GetRegion(1)
+	region = region.Clone(core.WithWitness(region.GetStorePeer(3).GetId()))
+	tc.PutRegion(region)
+	manager := tc.GetAffinityManager()
+	const id = "witness-rule-change"
+	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+		ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
+	}, region.GetStartKey(), region.GetEndKey()))
+	re.Empty(c.affinityChecker.Check(region))
+	rule.LabelConstraints = []placement.LabelConstraint{{Key: "ID", Op: placement.In, Values: []string{"1", "4"}}}
+	re.NoError(tc.GetRuleManager().SetRule(rule))
+	region = region.Clone(core.WithRemoveStorePeer(2), core.WithAddPeer(&metapb.Peer{Id: 200, StoreId: 4}))
+	tc.PutRegion(region)
+	re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+	re.Empty(c.affinityChecker.Check(region))
+	state := manager.GetAffinityGroupState(id)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+	re.Equal([]uint64{1, 3, 4}, state.VoterStoreIDs)
+}
+
+func TestAffinityCheckerLearnerSearchBudget(t *testing.T) {
+	for _, n := range []int{1, 2, 3, 7} {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			re := require.New(t)
+			tc := mockcluster.NewCluster(t.Context(), newAffinityTestOptions())
+			for id := 1; id <= 2*n; id++ {
+				zone := "old"
+				if id > n {
+					zone = strconv.Itoa(id)
+				}
+				tc.AddLabelsStore(uint64(id), 10, map[string]string{"zone": zone})
+			}
+			rule := tc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+			rule.Count = n
+			re.NoError(tc.GetRuleManager().SetRule(rule))
+			rule = newLearnerRule()
+			rule.Count, rule.LocationLabels, rule.IsolationLevel = n, []string{"zone"}, "zone"
+			re.NoError(tc.GetRuleManager().SetRule(rule))
+			peers := make([]*metapb.Peer, 0, 2*n)
+			roles := make(map[uint64]placement.PeerRoleType, n)
+			for id := 1; id <= 2*n; id++ {
+				peer := &metapb.Peer{Id: uint64(100 + id), StoreId: uint64(id)}
+				if id > n {
+					peer.Role = metapb.PeerRole_Learner
+					roles[uint64(id)] = placement.Voter
+				}
+				peers = append(peers, peer)
+			}
+			leader := uint64(n + 1)
+			roles[leader] = placement.Leader
+			region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+			tc.PutRegion(region)
+			checker := newTestAffinityChecker(t.Context(), tc, tc.GetCheckerConfig())
+			fit := tc.GetRuleManager().FitRegionWithoutCache(tc, region)
+			re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+			visits := 0
+			remaining := 32
+			start := time.Now()
+			target, temporary := checker.placeLearners(region, fit, roles, map[*placement.Rule][]*core.StoreInfo{}, region.GetLearners(), &remaining,
+				func(roles map[uint64]placement.PeerRoleType) affinityPlacementStatus {
+					visits++
+					layout := regionWithRoles(region, leader, roles)
+					return checker.checkRegionFitAtBestLocation(layout, tc.GetRuleManager().FitRegionWithoutCache(tc, layout))
+				})
+			re.False(temporary)
+			if n == 1 {
+				re.NotNil(target)
+			} else {
+				re.Nil(target)
+			}
+			want := 1
+			for i := 2; i <= n; i++ {
+				want *= i
+			}
+			t.Logf("learners=%d complete fits=%d elapsed=%s", n, visits, time.Since(start))
+			re.Equal(min(want, 32), visits)
+		})
+	}
+}
+
 func TestAffinityCheckerLearnerPreservesWitness(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
@@ -830,8 +1058,8 @@ func TestAffinityCheckerLearnerNotMoved(t *testing.T) {
 				re.Len(ops, 1)
 				verifyLearnersPreserved(re, ops[0], []uint64{5})
 				operator.ApplyOperator(tc, ops[0])
-				// A target that names the TiFlash store fails the placement check, so
-				// the group expires and first-win relearns the voters of the Region.
+				// The TiFlash learner cannot move off its store, so learner placement
+				// rejects the conflicting target and relearns the Region's voters.
 				_, err := manager.UpdateAffinityGroupPeers(id, 1, []uint64{1, 2, 5})
 				re.NoError(err)
 				re.Empty(c.CheckRegion(tc.GetRegion(1)))
@@ -874,7 +1102,7 @@ func TestAffinityCheckerLearnerNotMoved(t *testing.T) {
 			}
 			re.Equal(moves, promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter))
 			wantConflicts := conflicts
-			if relearn {
+			if relearn || kind == "tiflash" {
 				wantConflicts++
 			}
 			re.Equal(wantConflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
