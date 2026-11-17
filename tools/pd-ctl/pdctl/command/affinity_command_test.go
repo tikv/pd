@@ -46,9 +46,22 @@ func TestTiDBGroupKeyRange(t *testing.T) {
 		re.Equal(tc.end, hex.EncodeToString(keyRange.EndKey), tc.groupID)
 	}
 
-	for _, groupID := range []string{"_tidb_pg1_0", "_tidb_ks1_pg2_3", "_tidb_x_1", "_tidb_t_0", "_tidb_ks16777216_t_1", "_tidb_t_9223372036854775807"} {
-		_, err := tidbGroupKeyRange(groupID)
-		re.Error(err, groupID)
+	for _, tc := range []struct {
+		groupID, err string
+	}{
+		{"_tidb_tg_1_i0", "repair it with ADMIN REPAIR AFFINITY TABLE GROUP"},
+		{"_tidb_ks1_tg_1_i0", "repair it with ADMIN REPAIR AFFINITY TABLE GROUP"},
+		{"_tidb_pg1", "the _tidb_ prefix is reserved for TiDB"},
+		{"_tidb_x_1", "the _tidb_ prefix is reserved for TiDB"},
+		{"_tidb_t_0", "not a TiDB table or partition group"},
+		{"_tidb_pt_99999999999999999999999_p1", "invalid table ID"},
+		{"_tidb_ks1_pt_99999999999999999999999_p1", "invalid table ID"},
+		{"_tidb_pt_1_p99999999999999999999999", "invalid physical ID"},
+		{"_tidb_ks16777216_t_1", "invalid keyspace ID"},
+		{"_tidb_t_9223372036854775807", "invalid physical ID"},
+	} {
+		_, err := tidbGroupKeyRange(tc.groupID)
+		re.ErrorContains(err, tc.err, tc.groupID)
 	}
 }
 

@@ -45,8 +45,8 @@ var (
 	// tidbObjectGroupIDRegexp matches the IDs of TiDB table and partition groups,
 	// with or without a keyspace.
 	tidbObjectGroupIDRegexp = regexp.MustCompile(`^_tidb_(?:ks(0|[1-9][0-9]*)_)?(?:t_([1-9][0-9]*)|pt_([1-9][0-9]*)_p([1-9][0-9]*))$`)
-	// tidbPartitionGroupIDRegexp matches the IDs of the groups of TiDB partition groups.
-	tidbPartitionGroupIDRegexp = regexp.MustCompile(`^_tidb_(?:ks[0-9]+_)?pg`)
+	// tidbTableGroupIDRegexp matches the IDs of the groups of TiDB affinity table groups.
+	tidbTableGroupIDRegexp = regexp.MustCompile(`^_tidb_(?:ks[0-9]+_)?tg_`)
 )
 
 // NewAffinityCommand creates the affinity command.
@@ -93,7 +93,7 @@ func newAffinityCreateCommand() *cobra.Command {
 		Long: `Create an affinity group.
 A group with a custom ID needs --range. In nextgen, each key range of a custom group needs both keys, and all its key ranges must
 lie in one keyspace. The key ranges of a TiDB table or partition group are derived from its ID, for example --table-id 100
---partition-id 101, or --group-id _tidb_pt_100_p101. Groups of TiDB partition groups are created by TiDB.
+--partition-id 101, or --group-id _tidb_pt_100_p101. Groups of TiDB affinity table groups are created by TiDB.
 
 Creating a _tidb_ group in PD does not set the table's AFFINITY attribute in TiDB. For a table without that attribute,
 SHOW AFFINITY does not list the group, and DROP TABLE does not delete it from PD. Manage such groups explicitly with pd-ctl,
@@ -281,16 +281,24 @@ func getAffinityGroupRanges(cmd *cobra.Command, groupID string) (affinityGroupRa
 		return affinityGroupRanges{}, errors.Annotatef(err, "failed to get the key ranges of affinity group %s", groupID)
 	}
 	result := affinityGroupRanges{ID: groupID, Ranges: []affinityKeyRange{}}
+	foundRule := false
 	for _, rule := range rules {
 		if rule == nil || rule.ID != ruleID {
 			continue
 		}
+		foundRule = true
 		data, _ := rule.Data.([]any)
 		for _, item := range data {
 			keyRange, _ := item.(map[string]any)
 			start, _ := keyRange["start_key"].(string)
 			end, _ := keyRange["end_key"].(string)
 			result.Ranges = append(result.Ranges, affinityKeyRange{StartKey: start, EndKey: end})
+		}
+	}
+	// A label rule can outlive its group, while a group can have no rule.
+	if !foundRule {
+		if _, err := PDCli.GetAffinityGroup(cmd.Context(), groupID); err != nil {
+			return affinityGroupRanges{}, errors.Annotatef(err, "failed to get the key ranges of affinity group %s", groupID)
 		}
 	}
 	return result, nil
@@ -472,15 +480,19 @@ func formatAffinityGroupID(tableID, partitionID uint64, keyspaceID *uint32) stri
 // or partition: all keys of its physical ID, encoded like Region keys, under
 // the transaction keyspace prefix when the ID has a keyspace.
 func tidbGroupKeyRange(groupID string) (pd.AffinityGroupKeyRange, error) {
-	if tidbPartitionGroupIDRegexp.MatchString(groupID) {
-		return pd.AffinityGroupKeyRange{}, errors.Errorf("group %s belongs to a TiDB partition group, which TiDB creates; repair it with ADMIN REPAIR PARTITION GROUP", groupID)
+	if tidbTableGroupIDRegexp.MatchString(groupID) {
+		return pd.AffinityGroupKeyRange{}, errors.Errorf("group %s belongs to a TiDB affinity table group, which TiDB creates; repair it with ADMIN REPAIR AFFINITY TABLE GROUP", groupID)
 	}
 	parts := tidbObjectGroupIDRegexp.FindStringSubmatch(groupID)
 	if parts == nil {
 		return pd.AffinityGroupKeyRange{}, errors.Errorf("group %s is not a TiDB table or partition group; the %s prefix is reserved for TiDB", groupID, tidbGroupIDPrefix)
 	}
 	physicalID := parts[2]
-	if physicalID == "" {
+	if parts[3] != "" {
+		tableID, err := strconv.ParseInt(parts[3], 10, 64)
+		if err != nil || tableID <= 0 {
+			return pd.AffinityGroupKeyRange{}, errors.Errorf("invalid table ID %s in group %s", parts[3], groupID)
+		}
 		physicalID = parts[4]
 	}
 	id, err := strconv.ParseInt(physicalID, 10, 64)

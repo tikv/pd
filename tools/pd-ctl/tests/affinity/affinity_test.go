@@ -223,6 +223,68 @@ func TestAffinityCommands(t *testing.T) {
 	re.Contains(groups, partitionGroup)
 }
 
+func TestAffinityRangeShow(t *testing.T) {
+	re := require.New(t)
+	cluster, err := pdTests.NewTestCluster(t.Context(), 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	cluster.WaitLeader()
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	pdAddr := cluster.GetConfig().GetClientURL()
+	run := func(args ...string) ([]byte, error) {
+		return tests.ExecuteCommand(ctl.GetRootCmd(), append([]string{"-u", pdAddr, "config", "affinity"}, args...)...)
+	}
+	manager, err := leaderServer.GetServer().GetAffinityManager()
+	re.NoError(err)
+	key := func(tableID int64) string {
+		raw := append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), codec.GenerateTableKey(tableID)...)
+		return hex.EncodeToString(codec.EncodeBytes(raw))
+	}
+	keyRange := key(100) + "," + key(101)
+
+	t.Run("missing", func(t *testing.T) {
+		re := require.New(t)
+		_, err := run("range", "show", "--group-id", "nonexistent")
+		re.ErrorContains(err, "failed to get the key ranges of affinity group nonexistent")
+		re.ErrorContains(err, "404 Not Found")
+		re.ErrorContains(err, "affinity group nonexistent not found")
+		_, err = run("range", "add", "--group-id", "nonexistent", "--range", keyRange)
+		re.ErrorContains(err, "404 Not Found")
+		re.ErrorContains(err, "affinity group nonexistent not found")
+		if kerneltype.IsNextGen() {
+			re.ErrorContains(err, "failed to get the key ranges of affinity group nonexistent")
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		re := require.New(t)
+		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "empty"}}))
+		out, err := run("range", "show", "--group-id", "empty")
+		re.NoError(err)
+		re.JSONEq(`{"id":"empty","ranges":[]}`, string(out))
+		_, err = run("range", "add", "--group-id", "empty", "--range", keyRange)
+		re.NoError(err)
+		_, err = run("range", "remove", "--group-id", "empty", "--range", keyRange)
+		re.NoError(err)
+		out, err = run("range", "show", "--group-id", "empty")
+		re.NoError(err)
+		re.JSONEq(`{"id":"empty","ranges":[]}`, string(out))
+	})
+	t.Run("orphaned-rule", func(t *testing.T) {
+		re := require.New(t)
+		re.False(manager.IsGroupExist("orphan"))
+		regionLabeler := leaderServer.GetRaftCluster().GetRegionLabeler()
+		re.NoError(regionLabeler.SetLabelRule(affinity.MakeLabelRule(affinity.GroupKeyRanges{
+			GroupID:   "orphan",
+			KeyRanges: []keyutil.KeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x21}}},
+		})))
+		out, err := run("range", "show", "--group-id", "orphan")
+		re.NoError(err)
+		re.JSONEq(`{"id":"orphan","ranges":[{"start_key":"20","end_key":"21"}]}`, string(out))
+	})
+}
+
 func TestAffinityGroupAndRangeCommands(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -320,7 +382,9 @@ func TestAffinityGroupAndRangeCommands(t *testing.T) {
 		err  string
 	}{
 		{[]string{"create", "--group-id", tidbPrefix + "103", "--range", "0a,0b"}, "derived from its ID"},
-		{[]string{"create", "--group-id", "_tidb_pg1_0"}, "partition group"},
+		{[]string{"create", "--group-id", "_tidb_tg_1_i0"}, "ADMIN REPAIR AFFINITY TABLE GROUP"},
+		{[]string{"create", "--group-id", "_tidb_ks1_tg_1_i0"}, "ADMIN REPAIR AFFINITY TABLE GROUP"},
+		{[]string{"create", "--group-id", "_tidb_pg1"}, "reserved for TiDB"},
 		{[]string{"create", "--group-id", "_tidb_custom"}, "reserved for TiDB"},
 		{append([]string{"range", "add", "--range", extraRange}, selector...), "managed by TiDB"},
 		{append([]string{"range", "remove", "--range", extraRange}, selector...), "managed by TiDB"},
@@ -357,7 +421,8 @@ func TestAffinityGroupAndRangeCommands(t *testing.T) {
 	out, err := run("delete", "--group-id", "poc-a", "--force")
 	re.NoError(err)
 	re.Contains(string(out), "Affinity group poc-a and its label rule are deleted if they existed")
-	re.Empty(showRanges("--group-id", "poc-a").Ranges)
+	_, err = run("range", "show", "--group-id", "poc-a")
+	re.ErrorContains(err, "affinity group poc-a not found")
 	groups = make(map[string]*pd.AffinityGroupState)
 	mustRun(&groups, "show", "--prefix", "poc-")
 	re.Empty(groups)
@@ -376,7 +441,8 @@ func TestAffinityGroupAndRangeCommands(t *testing.T) {
 	re.NoError(err)
 	re.Contains(string(out), "Affinity group poc-leftover and its label rule are deleted if they existed")
 	re.Nil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID("poc-leftover")))
-	re.Empty(showRanges("--group-id", "poc-leftover").Ranges)
+	_, err = run("range", "show", "--group-id", "poc-leftover")
+	re.ErrorContains(err, "affinity group poc-leftover not found")
 }
 
 // TestAffinityCustomGroupKeyspace tests the key ranges that pd-ctl takes for
@@ -408,6 +474,10 @@ func TestAffinityCustomGroupKeyspace(t *testing.T) {
 		groups := make(map[string]*pd.AffinityGroupState)
 		mustRun(&groups, "create", "--group-id", "poc-all", "--range", ",")
 		re.Equal(1, groups["poc-all"].RangeCount)
+		for _, keyRange := range []string{"01,", ",10"} {
+			_, err := run("create", "--group-id", "poc-one-sided", "--range", keyRange)
+			re.ErrorContains(err, "key range must have both start_key and end_key, or both empty for entire key space")
+		}
 		return
 	}
 
