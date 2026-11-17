@@ -174,6 +174,9 @@ func TestPlanApply(t *testing.T) {
 	err = plan.DeleteLabelRule("existing")
 	re.NoError(err)
 
+	// Appending to a prefix must preserve the original plan's remaining operations.
+	re.NoError(plan.Prefix(1).DeleteLabelRule("rule1"))
+
 	// Execute commit operations first (simulate transaction commit)
 	commitOps := plan.CommitOps()
 	re.Len(commitOps, 3) // 2 sets + 1 delete
@@ -188,6 +191,12 @@ func TestPlanApply(t *testing.T) {
 		return nil
 	})
 	re.NoError(err)
+
+	var storedRuleIDs []string
+	re.NoError(store.LoadRegionRules(func(id, _ string) {
+		storedRuleIDs = append(storedRuleIDs, id)
+	}))
+	re.ElementsMatch([]string{"rule1", "rule2"}, storedRuleIDs)
 
 	// Now apply the changes to memory
 	plan.Apply()
