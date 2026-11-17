@@ -294,6 +294,129 @@ func TestUnsupportedGroupsStayFixed(t *testing.T) {
 	re.Equal(StopNoGroups, Plan(in, Options{}).Stop)
 }
 
+func TestHardIsolationScaleOut(t *testing.T) {
+	re := require.New(t)
+	in := general(4, 6, 4, 1)
+	rule := in.Groups[0].Rules[0]
+	rule.Location = [][]int32{{1, 1}, {1, 2}, {1, 3}, {2, 4}, {2, 4}, {1, 5}}
+	rule.IsolationDepth = 2
+	for i := range in.Groups {
+		in.Groups[i].CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
+			re.True(meetsIsolation(rule, voters), "illegal candidate: %v", voters)
+			return TargetFeedback{}
+		}
+	}
+	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
+	g := &p.gs[0]
+	iso, ok := p.isolation(g, 0)
+	re.True(ok)
+	re.Equal([maxDepth]int32{3}, iso.pairs)
+	_, ok = p.pickRule(g, 0, []int{3, 4}, nil, true)
+	re.False(ok, "two mandatory peers cannot share dc2/z4")
+	for _, voters := range [][]int{{0, 1, 3, 4}, {0, 1, 4, 5}} {
+		sol := p.assignTarget(g, voters, &ruleSearch{p: p})
+		re.Equal(meetsIsolation(rule, voters), sol.ok, "repair: %v", voters)
+	}
+	r := Plan(in, Options{Seed: 7})
+	re.Equal(int64(64), r.Baseline.Voter)
+	re.Equal(int64(44), r.Score.Voter)
+	loads := make([]int, in.Stores)
+	for i, voters := range r.Voters {
+		re.True(matchesTarget(legalTargets(in, i), voters, nil, r.Leaders[i]))
+		for _, s := range voters {
+			loads[s]++
+		}
+	}
+	re.Equal([]int{3, 3, 3, 2, 2, 3}, loads)
+	re.True(slices.ContainsFunc(r.Voters, func(v []int) bool {
+		return slices.Contains(v, 0) && slices.Contains(v, 1) && slices.Contains(v, 5)
+	}), "a target must use z1, z2, z5 and z4")
+}
+
+func TestHardIsolationPaths(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		location [][]int32
+		depth    int
+		voters   []int
+		base     []int
+		want     []int
+	}{
+		{"first level", [][]int32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}, 1, []int{0, 2}, []int{4, 0, 4, 0}, []int{1, 3}},
+		{"full path", [][]int32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}, 2, []int{0, 1, 2}, []int{0, 0, 4, 0}, []int{0, 1, 3}},
+		{"shared prefix", [][]int32{{0, 0, 0}, {0, 0, 1}, {0, 1, 0}, {0, 1, 1}}, 2, []int{0, 2}, []int{4, 0, 4, 0}, []int{1, 3}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := general(1, len(c.location), len(c.voters), 1)
+			g := &in.Groups[0]
+			g.Voters, g.Rules[0].Location, g.Rules[0].IsolationDepth = c.voters, c.location, c.depth
+			in.BaseVoters = c.base
+			r := Plan(in, Options{})
+			require.ElementsMatch(t, c.want, r.Voters[0])
+			require.True(t, matchesTarget(legalTargets(in, 0), r.Voters[0], nil, r.Leaders[0]))
+			p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
+			combinations(g.Rules[0].Stores, len(c.voters), func(stores []int) {
+				if meetsIsolation(g.Rules[0], stores) {
+					return
+				}
+				// A shared prefix cannot be skipped past the hard boundary.
+				picks := p.pickAll(&p.gs[0], p.gs[0].Rules[0], stores, nil, 0, len(stores), func(int) bool { return true })
+				require.False(t, picks[0][len(stores)].ok)
+				require.False(t, picks[1][len(stores)].ok)
+				_, ok := p.pickRule(&p.gs[0], 0, stores, nil, true)
+				require.False(t, ok, "colliding mandatory peers: %v", stores)
+			})
+		})
+	}
+	// Shared levels may be skipped all the way to the maximum supported depth.
+	in := general(1, 4, 2, 1)
+	for s := range in.Stores {
+		path := make([]int32, maxDepth)
+		path[maxDepth-1] = int32(s / 2)
+		in.Groups[0].Rules[0].Location[s] = path
+	}
+	in.Groups[0].Rules[0].IsolationDepth = maxDepth
+	in.Groups[0].Voters = []int{0, 2}
+	in.BaseVoters = []int{4, 0, 4, 0}
+	require.ElementsMatch(t, []int{1, 3}, Plan(in, Options{}).Voters[0])
+}
+
+func TestUnsupportedIsolationStaysFixed(t *testing.T) {
+	for _, name := range []string{"negative", "too deep", "no labels", "infeasible count", "current collision", "pinned collision"} {
+		t.Run(name, func(t *testing.T) {
+			in := general(2, 6, 3, 3)
+			rule := in.Groups[0].Rules[0]
+			rule.IsolationDepth = 1
+			switch name {
+			case "negative":
+				rule.IsolationDepth = -1
+			case "too deep":
+				rule.IsolationDepth = 2
+			case "no labels":
+				rule.Location = nil
+			case "infeasible count":
+				for s := range in.Stores {
+					rule.Location[s][0] = int32(s % 2)
+				}
+			default:
+				rule.Location[1][0] = 0
+				if name == "pinned collision" {
+					for i := range in.Groups {
+						in.Groups[i].Forced, in.Groups[i].LeaderPinned = []int{1}, true
+					}
+				}
+			}
+			r := Plan(in, Options{})
+			require.Equal(t, StopNoGroups, r.Stop)
+			require.Equal(t, r.Baseline, r.Score)
+			for i, g := range in.Groups {
+				require.Equal(t, g.Voters, r.Voters[i])
+				require.Equal(t, g.Leader, r.Leaders[i])
+			}
+		})
+	}
+}
+
 // General isolation must count candidate scans and respect the work budget.
 func TestGeneralShapesAreBounded(t *testing.T) {
 	re := require.New(t)

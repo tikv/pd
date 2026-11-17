@@ -33,6 +33,8 @@ type shape struct {
 	counts              []int
 	roles               []Role
 	overlap             bool // rules draw candidates from all stores
+	isolationDepth      int
+	copies              int // stores per location path; zero means one
 }
 
 var shapes = []shape{
@@ -46,6 +48,24 @@ var shapes = []shape{
 	{name: "leader+voters overlap", zones: 3, hosts: 2, depth: 1, counts: []int{1, 2}, roles: []Role{RoleLeader, RoleVoter}, overlap: true},
 	{name: "3 rules overlap", zones: 3, hosts: 2, depth: 1, counts: []int{1, 1, 1}, roles: []Role{RoleLeader, RoleVoter, RoleFollower}, overlap: true},
 	{name: "2 voter rules overlap", zones: 2, hosts: 3, depth: 1, counts: []int{2, 1}, roles: []Role{RoleVoter, RoleVoter}, overlap: true},
+	{name: "hard-zone", zones: 3, hosts: 2, depth: 2, counts: []int{3}, roles: []Role{RoleVoter}, isolationDepth: 1},
+	{name: "hard-host", zones: 2, hosts: 2, depth: 2, counts: []int{3}, roles: []Role{RoleVoter}, isolationDepth: 2, copies: 2},
+	{name: "hard-shared-zone", zones: 1, hosts: 3, depth: 2, counts: []int{3}, roles: []Role{RoleVoter}, isolationDepth: 2, copies: 2},
+	{name: "hard-overlap", zones: 3, hosts: 2, depth: 2, counts: []int{1, 2}, roles: []Role{RoleLeader, RoleVoter}, overlap: true, isolationDepth: 1},
+}
+
+func meetsIsolation(r *Rule, stores []int) bool {
+	if r.IsolationDepth == 0 {
+		return true
+	}
+	for i, a := range stores {
+		for _, b := range stores[i+1:] {
+			if slices.Equal(r.Location[a][:r.IsolationDepth], r.Location[b][:r.IsolationDepth]) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Independent PD isolation score: pairwise, base 100, first differing label.
@@ -97,6 +117,9 @@ func legalTargets(in *Input, gi int) []oracleTarget {
 		slices.Sort(cands)
 		best := -1.0
 		combinations(cands, r.Count, func(c []int) {
+			if !meetsIsolation(r, c) {
+				return
+			}
 			score := isolationScore(r.Location, c, r.depth())
 			if score > best {
 				best, per[ri] = score, nil
@@ -142,10 +165,11 @@ func legalTargets(in *Input, gi int) []oracleTarget {
 
 func randomCase(rng *rand.Rand, sh shape) (*Input, bool) {
 	hosts := max(sh.hosts, 1)
-	n := sh.zones * hosts
+	copies := max(sh.copies, 1)
+	n := sh.zones * hosts * copies
 	loc := make([][]int32, n)
 	for s := range n {
-		path := []int32{int32(s / hosts), int32(s % hosts)}
+		path := []int32{int32(s / (hosts * copies)), int32(s / copies % hosts)}
 		loc[s] = path[:sh.depth]
 	}
 	in := &Input{Stores: n, BaseVoters: make([]int, n), BaseLeaders: make([]int, n)}
@@ -160,7 +184,7 @@ func randomCase(rng *rand.Rand, sh shape) (*Input, bool) {
 			var stores []int
 			for s := range n {
 				// leader+followers: the leader rule owns zone 0.
-				if len(sh.counts) == 2 && !sh.overlap && (ri == 0) != (s/hosts == 0) {
+				if len(sh.counts) == 2 && !sh.overlap && (ri == 0) != (s/(hosts*copies) == 0) {
 					continue
 				}
 				p := 0.8
@@ -171,7 +195,7 @@ func randomCase(rng *rand.Rand, sh shape) (*Input, bool) {
 					stores = append(stores, s)
 				}
 			}
-			rules = append(rules, &Rule{Role: sh.roles[ri], Count: c, Stores: stores, Location: loc})
+			rules = append(rules, &Rule{Role: sh.roles[ri], Count: c, Stores: stores, Location: loc, IsolationDepth: sh.isolationDepth})
 		}
 		g := Group{Rules: rules, CanLead: make([]bool, n)}
 		for s := range n {

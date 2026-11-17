@@ -102,8 +102,11 @@ func (p *planner) pickAll(g *groupState, r *Rule, cands, must []int, level, k in
 	for level < depth && sameValue(r, cands, level) {
 		level++
 	}
-	if level >= depth {
-		// One location: only the cost matters.
+	if level >= depth || r.IsolationDepth > 0 && level >= r.IsolationDepth {
+		// One location or hard isolation domain: only the cost matters.
+		if r.IsolationDepth > 0 {
+			k = min(k, 1)
+		}
 		pk := p.picker(k, from)
 		for _, s := range cands {
 			if len(must) > 0 && slices.Contains(must, s) {
@@ -153,6 +156,9 @@ func (p *planner) pickSplit(g *groupState, r *Rule, domains [][]int, must []int,
 			}
 		}
 		top := min(len(d), k)
+		if r.IsolationDepth == level+1 {
+			top = min(top, 1)
+		}
 		sub := p.pickAll(g, r, d, dm, level+1, top, lead)
 		for m := range sub {
 			for n := range sub[m] {

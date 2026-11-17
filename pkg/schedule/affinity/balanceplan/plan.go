@@ -53,6 +53,10 @@ type Rule struct {
 	// labels. Values are interned per level and every path has equal length.
 	// A rule without location labels uses empty paths.
 	Location [][]int32
+	// IsolationDepth is the 1-based depth in Location requiring strict
+	// isolation (at most one peer per domain at Location[s][IsolationDepth-1]),
+	// or 0 when the rule has no hard isolation level.
+	IsolationDepth int
 
 	// Derived by the planner on its private copy.
 	level    int     // first level where candidate stores differ
@@ -269,6 +273,9 @@ func validRule(r *Rule, stores int) bool {
 	if r == nil || r.Count <= 0 || r.Count > maxCount || r.depth() > maxDepth {
 		return false
 	}
+	if r.IsolationDepth < 0 || r.IsolationDepth > r.depth() {
+		return false
+	}
 	if d := r.depth(); d > 0 {
 		if len(r.Location) < stores {
 			return false
@@ -306,6 +313,16 @@ func supported(g *Group, stores int, valid func(*Rule) bool) bool {
 	for ri, r := range g.Rules {
 		if !valid(r) || counts[ri] != r.Count {
 			return false
+		}
+		for k, s := range g.Voters {
+			if r.IsolationDepth == 0 || ruleIndex(g, k) != ri {
+				continue
+			}
+			for j, t := range g.Voters[:k] {
+				if ruleIndex(g, j) == ri && slices.Equal(r.Location[s][:r.IsolationDepth], r.Location[t][:r.IsolationDepth]) {
+					return false
+				}
+			}
 		}
 	}
 	return true
