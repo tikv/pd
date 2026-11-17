@@ -106,6 +106,8 @@ type Manager struct {
 	// rangeConflictsStale is set when the etcd sync methods change groups or key
 	// ranges without recomputing range conflicts.
 	rangeConflictsStale bool
+	// The label watcher has not finished applying this batch. Protected by metaMutex.
+	labelRuleBatchInProgress bool
 	// keyRanges cached in memory to reduce labeler lock contention
 	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges
 	// labelRuleBuffer is a buffer used during etcd synchronization. It holds the
@@ -258,9 +260,6 @@ func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule)
 	for i, group := range groups {
 		m.initGroupLocked(group)
 		m.updateGroupLabelRuleLocked(group.ID, labelRules[i], false)
-	}
-	if m.hasRangeConflicts {
-		m.reconcileRangeConflictsLocked(m.collectRangeConflictsLocked())
 	}
 }
 
@@ -523,13 +522,20 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 // sorts all key ranges. The watcher calls ReconcileRangeConflicts once after
 // each batch of events instead.
 
+// SetLabelRuleBatchInProgress marks the label watcher batch under metaMutex.
+func (m *Manager) SetLabelRuleBatchInProgress(inProgress bool) {
+	m.metaMutex.Lock()
+	m.labelRuleBatchInProgress = inProgress
+	m.metaMutex.Unlock()
+}
+
 // ReconcileRangeConflicts recomputes range conflicts after the Sync methods
 // change groups or key ranges. It returns immediately if there is nothing to
 // recompute.
 func (m *Manager) ReconcileRangeConflicts() {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
-	if !m.rangeConflictsStale {
+	if m.labelRuleBatchInProgress || !m.rangeConflictsStale {
 		return
 	}
 	conflicts := m.collectRangeConflictsLocked()

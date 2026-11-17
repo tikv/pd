@@ -342,6 +342,11 @@ func TestLoadOverlappingAffinityRanges(t *testing.T) {
 			{GroupID: "whole", KeyRanges: []keyutil.KeyRange{keyRange("", "")}},
 			{GroupID: "inner", KeyRanges: []keyutil.KeyRange{keyRange("b", "c")}},
 		}},
+		{"later unbounded range", []GroupKeyRanges{
+			{GroupID: "unbounded", KeyRanges: []keyutil.KeyRange{keyRange("b", "")}},
+			{GroupID: "earlier", KeyRanges: []keyutil.KeyRange{keyRange("a", "c")}},
+			{GroupID: "later", KeyRanges: []keyutil.KeyRange{keyRange("d", "e")}},
+		}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
@@ -394,7 +399,13 @@ func TestLoadOverlappingAffinityRanges(t *testing.T) {
 
 			if testCase.name == "nested ranges" {
 				extra := []GroupKeyRanges{{GroupID: "unrelated", KeyRanges: []keyutil.KeyRange{keyRange("y", "z")}}}
+				const scanHook = "github.com/tikv/pd/pkg/schedule/affinity/beforeRangeConflictScan"
+				scans := 0
+				re.NoError(failpoint.EnableCall(scanHook, func() { scans++ }))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(scanHook)) })
 				re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "unrelated", KeyRanges: []keyutil.KeyRange{keyRange("x", "y")}}}))
+				re.Zero(scans, "a validated creation cannot change existing conflicts")
+				re.NoError(failpoint.Disable(scanHook))
 				re.NoError(manager.UpdateAffinityGroupKeyRanges(extra, nil))
 				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, extra))
 				re.NoError(manager.DeleteAffinityGroups([]string{"unrelated"}, true))
