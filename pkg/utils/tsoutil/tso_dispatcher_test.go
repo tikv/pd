@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"runtime"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -46,20 +45,16 @@ type mockStream struct {
 }
 
 type countRecordingStream struct {
-	count     uint32
-	calls     int
 	counts    []uint32
 	onProcess func()
 }
 
 func (s *countRecordingStream) process(_ uint64, count, _, _ uint32) (tsoResp, error) {
-	s.count = count
-	s.calls++
 	s.counts = append(s.counts, count)
 	if s.onProcess != nil {
 		s.onProcess()
 	}
-	return &pdpb.TsoResponse{Timestamp: &pdpb.Timestamp{Physical: int64(1233 + s.calls), Logical: int64(count)}}, nil
+	return &pdpb.TsoResponse{Timestamp: &pdpb.Timestamp{Physical: int64(1233 + len(s.counts)), Logical: int64(count)}}, nil
 }
 
 type countResponseStream struct {
@@ -112,7 +107,7 @@ func TestTSODispatcherCountValidation(t *testing.T) {
 			remaining, err := dispatcher.processRequests(forward, requests)
 			if !test.valid {
 				require.Error(t, err)
-				require.Zero(t, forward.calls, "invalid counts must not reach the allocator")
+				require.Empty(t, forward.counts, "invalid counts must not reach the allocator")
 				for _, response := range responses {
 					require.Nil(t, response.response)
 				}
@@ -120,7 +115,7 @@ func TestTSODispatcherCountValidation(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Empty(t, remaining)
-			require.Equal(t, 1, forward.calls)
+			require.Len(t, forward.counts, 1)
 			var countSum uint32
 			for i, count := range test.counts {
 				countSum += count
@@ -128,7 +123,7 @@ func TestTSODispatcherCountValidation(t *testing.T) {
 				require.Equal(t, int64(1234), responses[i].response.GetTimestamp().GetPhysical())
 				require.Equal(t, int64(countSum), responses[i].response.GetTimestamp().GetLogical())
 			}
-			require.Equal(t, countSum, forward.count)
+			require.Equal(t, []uint32{countSum}, forward.counts)
 		})
 	}
 }
@@ -160,7 +155,7 @@ func TestTSODispatcherInvalidRequestIsolation(t *testing.T) {
 			remaining, err := dispatcher.processRequests(forward, requests)
 			require.NoError(t, err)
 			require.Empty(t, remaining)
-			require.Equal(t, uint32(2), forward.count)
+			require.Equal(t, []uint32{2}, forward.counts)
 			for i, response := range responses {
 				require.Equal(t, uint32(1), response.response.GetCount())
 				require.Equal(t, int64(i+1), response.response.GetTimestamp().GetLogical())
@@ -370,13 +365,7 @@ func TestTSODispatcherClosedStreamIsolation(t *testing.T) {
 	require.Same(t, ctx, dispatcher.DispatchRequest(t.Context(), request(2, closed), nil))
 	delivered := &countResponseStream{done: make(chan struct{})}
 	require.Same(t, ctx, dispatcher.DispatchRequest(t.Context(), request(1, delivered), nil))
-	finished := make(chan struct{})
-	go func() {
-		defer close(finished)
-		dispatcher.dispatch(queue, &mockProtoFactory{stream: &countRecordingStream{}}, "host", nil, make(chan *TSDeadline, 4))
-	}()
-	// Canceling and joining the dispatcher also synchronizes access to responses.
-	t.Cleanup(func() { cancel(nil); <-finished })
+	startTestDispatcher(t, dispatcher, queue, &mockProtoFactory{stream: &countRecordingStream{}})
 	select {
 	case <-delivered.done:
 		require.NoError(t, context.Cause(ctx))
@@ -522,7 +511,7 @@ func TestTSODispatcherAllRequestsCanceled(t *testing.T) {
 	remaining, err := dispatcher.processRequests(forward, []Request{request})
 	require.NoError(t, err)
 	require.Empty(t, remaining)
-	require.Zero(t, forward.calls)
+	require.Empty(t, forward.counts)
 }
 
 func TestWatchTSDeadlineIgnoresCompletedBatches(t *testing.T) {
@@ -545,64 +534,4 @@ func TestWatchTSDeadlineIgnoresCompletedBatches(t *testing.T) {
 	cancel()
 	<-finished
 	require.Zero(t, canceled.Load())
-}
-
-type benchmarkForwardStream struct {
-	response *pdpb.TsoResponse
-}
-
-func (s *benchmarkForwardStream) process(uint64, uint32, uint32, uint32) (tsoResp, error) {
-	return s.response, nil
-}
-
-type benchmarkResponseStream struct {
-	pdpb.PD_TsoServer
-	ctx context.Context
-}
-
-func (s *benchmarkResponseStream) Context() context.Context   { return s.ctx }
-func (*benchmarkResponseStream) Send(*pdpb.TsoResponse) error { return nil }
-
-func BenchmarkTSODispatcherProcessRequests(b *testing.B) {
-	for _, size := range []int{1, 16, 256, maxMergeRequests} {
-		for _, distinctStreams := range []bool{false, true} {
-			if size == 1 && distinctStreams {
-				continue
-			}
-			name := strconv.Itoa(size) + "/shared-stream"
-			if distinctStreams {
-				name = strconv.Itoa(size) + "/distinct-streams"
-			}
-			b.Run(name, func(b *testing.B) {
-				dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "benchmark_requests"}), nil)
-				ctx, cancel := context.WithCancel(b.Context())
-				b.Cleanup(cancel)
-				requests := make([]Request, size)
-				for i := range requests {
-					requestCtx := ctx
-					if distinctStreams {
-						var cancel context.CancelFunc
-						requestCtx, cancel = context.WithCancel(b.Context())
-						b.Cleanup(cancel)
-					}
-					requests[i] = NewPDProtoRequest("host", nil, &pdpb.TsoRequest{
-						Header: &pdpb.RequestHeader{ClusterId: 1}, Count: 1,
-					}, &benchmarkResponseStream{ctx: requestCtx})
-				}
-				forward := &benchmarkForwardStream{response: &pdpb.TsoResponse{
-					Timestamp: &pdpb.Timestamp{Physical: 1234, Logical: int64(size)},
-				}}
-				b.ReportAllocs()
-				for b.Loop() {
-					remaining, err := dispatcher.processRequests(forward, requests)
-					if err != nil {
-						b.Fatal(err)
-					}
-					if len(remaining) != 0 {
-						b.Fatal("healthy requests did not fit in one batch")
-					}
-				}
-			})
-		}
-	}
 }
