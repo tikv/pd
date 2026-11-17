@@ -144,6 +144,8 @@ type Config struct {
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
+	// LabelProperty has been deprecated since v5.2, and the scheduling service
+	// in microservice mode does not support it. Use placement rules instead.
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
 	// For all warnings during parsing.
