@@ -25,7 +25,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -107,7 +106,16 @@ func (m *Manager) CreateAffinityGroupsIfNotExists(changes []GroupKeyRanges) erro
 func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExisting bool) error {
 	// Step 0: Validate all groups first (without lock)
 	groups := make([]*Group, 0, len(changes))
+	uniqueChanges := make([]GroupKeyRanges, 0, len(changes))
+	seenIDs := make(map[string]struct{}, len(changes))
 	for _, change := range changes {
+		if _, exists := seenIDs[change.GroupID]; exists {
+			if skipExisting {
+				continue
+			}
+			return errs.ErrAffinityGroupExist.FastGenByArgs(change.GroupID)
+		}
+		seenIDs[change.GroupID] = struct{}{}
 		if err := validateGroupKeyRanges(change); err != nil {
 			return err
 		}
@@ -121,7 +129,9 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 			return err
 		}
 		groups = append(groups, group)
+		uniqueChanges = append(uniqueChanges, change)
 	}
+	changes = uniqueChanges
 
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
@@ -370,7 +380,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	// Validate the full batch before planning changes, including empty operations.
 	for _, ops := range [][]GroupKeyRanges{addOps, removeOps} {
 		for _, op := range ops {
-			if err := validateGroupKeyRanges(op); err != nil {
+			if err := ValidateGroupID(op.GroupID); err != nil {
 				return err
 			}
 		}
@@ -384,32 +394,30 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 
 	// Step 0: Validate that a Group is either fully added or fully removed.
 	for _, op := range addOps {
-		if len(op.KeyRanges) == 0 {
-			continue
-		}
 		if _, exists := toAdd[op.GroupID]; exists {
 			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
 		}
-		toAdd[op.GroupID] = GroupKeyRanges{}
+		toAdd[op.GroupID] = op
 	}
 	for _, op := range removeOps {
-		if len(op.KeyRanges) == 0 {
-			continue
-		}
 		if _, exists := toRemove[op.GroupID]; exists {
 			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
 		}
 		if _, exists := toAdd[op.GroupID]; exists {
 			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
 		}
-		toRemove[op.GroupID] = GroupKeyRanges{}
+		toRemove[op.GroupID] = op
 	}
 
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
 	// Step 1: Validate the added KeyRanges.
-	for _, op := range addOps {
+	for groupID, op := range toAdd {
+		if len(op.KeyRanges) == 0 {
+			delete(toAdd, groupID)
+			continue
+		}
 		currentRanges, err := m.getCurrentRanges(op.GroupID)
 		if err != nil {
 			return err
@@ -422,14 +430,18 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		}
 	}
 	// Validate no overlaps with newly added ranges
-	if len(addOps) > 0 {
+	if len(toAdd) > 0 {
 		if err := m.validateNoOverlapLocked(addOps); err != nil {
 			return err
 		}
 	}
 
 	// Step 2: Validate the removed KeyRanges.
-	for _, op := range removeOps {
+	for groupID, op := range toRemove {
+		if len(op.KeyRanges) == 0 {
+			delete(toRemove, groupID)
+			continue
+		}
 		currentRanges, err := m.getCurrentRanges(op.GroupID)
 		if err != nil {
 			return err
@@ -440,9 +452,16 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		}
 		toRemove[op.GroupID] = currentRanges
 	}
+	updatedMap := maps.Clone(toAdd)
+	maps.Copy(updatedMap, toRemove)
+	for _, updated := range updatedMap {
+		if err := validateGroupKeyRanges(updated); err != nil {
+			return err
+		}
+	}
 
 	// Step 3: Create the change plan for the Label
-	for _, op := range addOps {
+	for _, op := range toAdd {
 		// For addOps, directly SetLabelRule (Save will overwrite the old value).
 		// No need to Delete first.
 		labelRule := MakeLabelRule(toAdd[op.GroupID])
@@ -455,7 +474,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		}
 		newAddedLabelRules[op.GroupID] = labelRule
 	}
-	for _, op := range removeOps {
+	for _, op := range toRemove {
 		ranges := toRemove[op.GroupID]
 		var labelRule *labeler.LabelRule
 
@@ -494,8 +513,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	// Step 5: Save the Group and Label information in memory.
 	plan.Apply()
 
-	maps.Copy(m.keyRanges, toAdd)
-	for groupID, currentRanges := range toRemove {
+	for groupID, currentRanges := range updatedMap {
 		if len(currentRanges.KeyRanges) > 0 {
 			m.keyRanges[groupID] = currentRanges
 		} else {
@@ -510,6 +528,9 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 
 // getCurrentRanges retrieves the current key ranges for a group.
 func (m *Manager) getCurrentRanges(groupID string) (GroupKeyRanges, error) {
+	if !m.IsGroupExist(groupID) {
+		return GroupKeyRanges{}, errs.ErrAffinityGroupNotFound.FastGenByArgs(groupID)
+	}
 	// Try cache first
 	if gkr, ok := m.keyRanges[groupID]; ok {
 		return gkr, nil
@@ -519,13 +540,7 @@ func (m *Manager) getCurrentRanges(groupID string) (GroupKeyRanges, error) {
 	labelRule := m.regionLabeler.GetLabelRule(GetLabelRuleID(groupID))
 	if labelRule == nil {
 		// Allow starting from empty when the group exists but has no ranges yet.
-		m.RLock()
-		_, exists := m.groups[groupID]
-		m.RUnlock()
-		if exists {
-			return GroupKeyRanges{GroupID: groupID}, nil
-		}
-		return GroupKeyRanges{}, errors.Errorf("label rule not found for group %s", groupID)
+		return GroupKeyRanges{GroupID: groupID}, nil
 	}
 
 	return extractKeyRangesFromLabelRule(labelRule)

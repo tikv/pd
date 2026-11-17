@@ -307,11 +307,11 @@ func BatchModifyAffinityGroups(c *gin.Context) {
 
 	// Validate and convert operations in one pass
 	affectedGroups := make(map[string]bool)
-	addOps, err := convertAndValidateRangeOps(req.Add, manager, affectedGroups)
+	addOps, err := convertAndValidateRangeOps(req.Add, manager, affectedGroups, false)
 	if handleAffinityError(c, err) {
 		return
 	}
-	removeOps, err := convertAndValidateRangeOps(req.Remove, manager, affectedGroups)
+	removeOps, err := convertAndValidateRangeOps(req.Remove, manager, affectedGroups, true)
 	if handleAffinityError(c, err) {
 		return
 	}
@@ -538,7 +538,7 @@ func validateKeyRange(startKey, endKey []byte) error {
 // convertAndValidateRangeOps validates group operations and converts them to GroupKeyRanges format.
 // It updates affectedGroups with all groups encountered.
 // Multiple operations for the same group are automatically merged.
-func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool) ([]affinity.GroupKeyRanges, error) {
+func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool, remove bool) ([]affinity.GroupKeyRanges, error) {
 	grouped := make(map[string][]keyutil.KeyRange)
 
 	for _, op := range ops {
@@ -555,9 +555,11 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 
 		// Validate and merge ranges for this group
 		for _, kr := range op.Ranges {
-			// Validate key range
-			if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
-				return nil, err
+			// Removal must also match persisted half-unbounded ranges.
+			if !remove || (len(kr.StartKey) > 0 && len(kr.EndKey) > 0) {
+				if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
+					return nil, err
+				}
 			}
 			grouped[op.ID] = append(grouped[op.ID], keyutil.KeyRange{
 				StartKey: kr.StartKey,

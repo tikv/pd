@@ -1294,10 +1294,13 @@ func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[st
 
 // GetAffinityGroup gets an affinity group by group ID.
 func (c *client) GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error) {
+	if groupID == "" {
+		return nil, errors.New("group ID must not be empty")
+	}
 	var state AffinityGroupState
 	err := c.request(ctx, newRequestInfo().
 		WithName("GetAffinityGroup").
-		WithURI(fmt.Sprintf(AffinityGroupByID, groupID)).
+		WithURI(AffinityGroupByID(groupID)).
 		WithMethod(http.MethodGet).
 		WithResp(&state))
 	if err != nil {
@@ -1363,6 +1366,9 @@ func (c *client) GetAllAffinityGroups(ctx context.Context) (map[string]*Affinity
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
 func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error) {
+	if groupID == "" {
+		return nil, errors.New("group ID must not be empty")
+	}
 	req := UpdateAffinityGroupPeersRequest{
 		LeaderStoreID: leaderStoreID,
 		VoterStoreIDs: voterStoreIDs,
@@ -1374,7 +1380,7 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 	var state AffinityGroupState
 	err = c.request(ctx, newRequestInfo().
 		WithName("UpdateAffinityGroupPeers").
-		WithURI(fmt.Sprintf(AffinityGroupByID, groupID)).
+		WithURI(AffinityGroupByID(groupID)).
 		WithMethod(http.MethodPut).
 		WithBody(reqJSON).
 		WithResp(&state))
@@ -1386,7 +1392,10 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 
 // DeleteAffinityGroup deletes an affinity group by group ID.
 func (c *client) DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error {
-	uri := fmt.Sprintf(AffinityGroupByID, groupID)
+	if groupID == "" {
+		return errors.New("group ID must not be empty")
+	}
+	uri := AffinityGroupByID(groupID)
 	if force {
 		uri = fmt.Sprintf("%s?force=true", uri)
 	}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	pd "github.com/tikv/pd/client/http"
@@ -253,9 +254,7 @@ func TestAffinityRangeShow(t *testing.T) {
 		_, err = run("range", "add", "--group-id", "nonexistent", "--range", keyRange)
 		re.ErrorContains(err, "404 Not Found")
 		re.ErrorContains(err, "affinity group nonexistent not found")
-		if kerneltype.IsNextGen() {
-			re.ErrorContains(err, "failed to get the key ranges of affinity group nonexistent")
-		}
+		re.ErrorContains(err, "failed to change the key ranges of affinity group nonexistent")
 	})
 	t.Run("empty", func(t *testing.T) {
 		re := require.New(t)
@@ -283,6 +282,39 @@ func TestAffinityRangeShow(t *testing.T) {
 		re.NoError(err)
 		re.JSONEq(`{"id":"orphan","ranges":[{"start_key":"20","end_key":"21"}]}`, string(out))
 	})
+}
+
+func TestAffinityRangeRemoveHalfUnbounded(t *testing.T) {
+	re := require.New(t)
+	cluster, err := pdTests.NewTestCluster(t.Context(), 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	cluster.WaitLeader()
+	server := cluster.GetLeaderServer()
+	re.NoError(server.BootstrapCluster())
+	manager, err := server.GetServer().GetAffinityManager()
+	re.NoError(err)
+	key := func(table int64) []byte {
+		return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), codec.GenerateTableKey(table)...))
+	}
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
+	for i, legacy := range []keyutil.KeyRange{{EndKey: key(100)}, {StartKey: key(300)}} {
+		id := fmt.Sprintf("legacy-half-%d", i)
+		re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{legacy, {StartKey: key(200), EndKey: key(201)}}}}))
+		re.NoError(failpoint.Disable(modeFlag))
+		before := manager.GetAffinityGroupState(id)
+		groups := make(map[string]*pd.AffinityGroupState)
+		tests.MustExec(re, ctl.GetRootCmd(), []string{
+			"-u", cluster.GetConfig().GetClientURL(), "config", "affinity", "range", "remove", "--group-id", id,
+			"--range", hex.EncodeToString(legacy.StartKey) + "," + hex.EncodeToString(legacy.EndKey),
+		}, &groups)
+		re.Equal(1, groups[id].RangeCount)
+		re.Equal(before.CreateTimestamp, groups[id].CreateTimestamp)
+		re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
+	}
 }
 
 func TestAffinityGroupAndRangeCommands(t *testing.T) {
@@ -517,25 +549,28 @@ func TestAffinityCustomGroupKeyspace(t *testing.T) {
 	re.EqualError(err, fmt.Sprintf("%skey range %q lies in keyspace 2 and key range %q in keyspace 1", rule("poc-two"), table(2, 100), table(1, 100)))
 	re.False(manager.IsGroupExist("poc-two"))
 
-	// range add checks the new ranges with the ranges that the group has.
+	// PD checks the new ranges with the persisted ranges of the group.
 	groups := make(map[string]*pd.AffinityGroupState)
 	mustRun(&groups, "create", "--group-id", "poc-one", "--range", table(1, 100))
 	re.Equal(1, groups["poc-one"].RangeCount)
 	_, err = run("range", "add", "--group-id", "poc-one", "--range", table(2, 100))
-	re.EqualError(err, fmt.Sprintf("%skey range %q lies in keyspace 2 and key range %q in keyspace 1", rule("poc-one"), table(2, 100), table(1, 100)))
+	re.ErrorContains(err, "key ranges must belong to transaction keyspace 1")
 	groups = make(map[string]*pd.AffinityGroupState)
 	mustRun(&groups, "range", "add", "--group-id", "poc-one", "--range", table(1, 110))
 	re.Equal(2, groups["poc-one"].RangeCount)
 
-	// PD takes such a range from its API. The group gets no more ranges from
-	// pd-ctl until that range is removed.
+	// Seed a legacy range; PD rejects further additions until it is removed.
 	legacy := keyRange(key(4, 100), key(6, 100))
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
 		GroupID:   "poc-legacy",
 		KeyRanges: []keyutil.KeyRange{{StartKey: key(4, 100), EndKey: key(6, 100)}},
 	}}))
-	_, err = run("range", "add", "--group-id", "poc-legacy", "--range", table(4, 200))
-	re.EqualError(err, fmt.Sprintf("%skey range %q starts in keyspace 4 and ends after it", rule("poc-legacy"), legacy))
+	re.NoError(failpoint.Disable(modeFlag))
+	_, err = run("range", "add", "--group-id", "poc-legacy", "--range", table(4, 50))
+	re.ErrorContains(err, "key ranges must belong to transaction keyspace 4")
 	groups = make(map[string]*pd.AffinityGroupState)
 	mustRun(&groups, "range", "remove", "--group-id", "poc-legacy", "--range", legacy)
 	re.Zero(groups["poc-legacy"].RangeCount)

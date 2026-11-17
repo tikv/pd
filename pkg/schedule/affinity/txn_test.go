@@ -53,7 +53,7 @@ func TestNextGenTiDBGroupOperations(t *testing.T) {
 	re.NoError(failpoint.Enable(modeFlag, "return(false)"))
 	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
 	// Seed legacy groups to exercise validation before skip-existing shortcuts.
-	legacy := []string{"_tidb_t_1001", "_tidb_pt_1001_p3"}
+	legacy := []string{"_tidb_t_1001", "_tidb_pt_1001_p3", "_tidb_tg_100"}
 	for _, id := range legacy {
 		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
 		_, err := manager.UpdateAffinityGroupPeers(id, 1, []uint64{1})
@@ -163,8 +163,8 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	// Test 1: Non-overlapping ranges should succeed
 	keyRanges1 := []GroupKeyRanges{
 		{GroupID: "group1", KeyRanges: []keyutil.KeyRange{
-			{StartKey: []byte("a"), EndKey: []byte("b")},
-			{StartKey: []byte("c"), EndKey: []byte("d")},
+			{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("b"))},
+			{StartKey: keyForTest([]byte("c")), EndKey: keyForTest([]byte("d"))},
 		}},
 	}
 	err = validate(keyRanges1)
@@ -173,8 +173,8 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	// Test 2: Overlapping ranges within same request should fail
 	keyRanges2 := []GroupKeyRanges{
 		{GroupID: "group1", KeyRanges: []keyutil.KeyRange{
-			{StartKey: []byte("a"), EndKey: []byte("c")},
-			{StartKey: []byte("b"), EndKey: []byte("d")},
+			{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("c"))},
+			{StartKey: keyForTest([]byte("b")), EndKey: keyForTest([]byte("d"))},
 		}},
 	}
 	err = validate(keyRanges2)
@@ -184,8 +184,8 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	// Test 3: Adjacent ranges (not overlapping) should succeed
 	keyRanges3 := []GroupKeyRanges{
 		{GroupID: "group1", KeyRanges: []keyutil.KeyRange{
-			{StartKey: []byte("a"), EndKey: []byte("b")},
-			{StartKey: []byte("b"), EndKey: []byte("c")},
+			{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("b"))},
+			{StartKey: keyForTest([]byte("b")), EndKey: keyForTest([]byte("c"))},
 		}},
 	}
 	err = validate(keyRanges3)
@@ -194,8 +194,8 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	// Test 5: Duplicate range should fail validation
 	keyRangesDup := []GroupKeyRanges{
 		{GroupID: "group1", KeyRanges: []keyutil.KeyRange{
-			{StartKey: []byte("a"), EndKey: []byte("c")},
-			{StartKey: []byte("a"), EndKey: []byte("c")},
+			{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("c"))},
+			{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("c"))},
 		}},
 	}
 	err = validate(keyRangesDup)
@@ -203,10 +203,10 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	re.Contains(err.Error(), "overlap")
 
 	// Test 4: Verify checkKeyRangesOverlap function directly
-	overlaps := checkKeyRangesOverlap([]byte("a"), []byte("c"), []byte("b"), []byte("d"))
+	overlaps := checkKeyRangesOverlap(keyForTest([]byte("a")), keyForTest([]byte("c")), keyForTest([]byte("b")), keyForTest([]byte("d")))
 	re.True(overlaps, "Ranges [a,c) and [b,d) should overlap")
 
-	overlaps = checkKeyRangesOverlap([]byte("a"), []byte("b"), []byte("c"), []byte("d"))
+	overlaps = checkKeyRangesOverlap(keyForTest([]byte("a")), keyForTest([]byte("b")), keyForTest([]byte("c")), keyForTest([]byte("d")))
 	re.False(overlaps, "Ranges [a,b) and [c,d) should not overlap")
 }
 
@@ -341,7 +341,7 @@ func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 			Labels:   []labeler.RegionLabel{{Key: AffinityLabelKey, Value: id}},
 			RuleType: labeler.KeyRange,
 			Data: []any{
-				map[string]any{"start_key": hex.EncodeToString([]byte{byte(2*i + 1)}), "end_key": hex.EncodeToString([]byte{byte(2*i + 2)})},
+				map[string]any{"start_key": hex.EncodeToString(keyForTest([]byte{byte(2*i + 1)})), "end_key": hex.EncodeToString(keyForTest([]byte{byte(2*i + 2)}))},
 			},
 		}
 		re.NoError(plan.SetLabelRule(rule))
@@ -367,8 +367,8 @@ func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 	err = manager.CreateAffinityGroups([]GroupKeyRanges{{
 		GroupID: "real",
 		KeyRanges: []keyutil.KeyRange{{
-			StartKey: []byte{0x01},
-			EndKey:   []byte{0x02},
+			StartKey: keyForTest([]byte{0x01}),
+			EndKey:   keyForTest([]byte{0x02}),
 		}},
 	}})
 	re.NoError(err)
@@ -441,8 +441,8 @@ func TestUpdateAffinityGroupKeyRangesAddToEmptyGroup(t *testing.T) {
 		[]GroupKeyRanges{{
 			GroupID: "empty-group",
 			KeyRanges: []keyutil.KeyRange{{
-				StartKey: []byte{0x00},
-				EndKey:   []byte{0x01},
+				StartKey: keyForTest([]byte{0x00}),
+				EndKey:   keyForTest([]byte{0x01}),
 			}},
 		}},
 		nil,
@@ -467,7 +467,7 @@ func TestDuplicateRangeAdd(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	r := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x10}}
+	r := keyutil.KeyRange{StartKey: keyForTest([]byte{0x00}), EndKey: keyForTest([]byte{0x10})}
 
 	// First add.
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "dup",
@@ -502,8 +502,8 @@ func TestDeleteAffinityGroupsForceMissing(t *testing.T) {
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{
 		GroupID: "with-range",
 		KeyRanges: []keyutil.KeyRange{{
-			StartKey: []byte{0x00},
-			EndKey:   []byte{0x10},
+			StartKey: keyForTest([]byte{0x00}),
+			EndKey:   keyForTest([]byte{0x10}),
 		}},
 	}}))
 
@@ -530,8 +530,8 @@ func TestSameGroupNonOverlappingAdd(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	r1 := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x10}}
-	r2 := keyutil.KeyRange{StartKey: []byte{0x20}, EndKey: []byte{0x30}}
+	r1 := keyutil.KeyRange{StartKey: keyForTest([]byte{0x00}), EndKey: keyForTest([]byte{0x10})}
+	r2 := keyutil.KeyRange{StartKey: keyForTest([]byte{0x20}), EndKey: keyForTest([]byte{0x30})}
 
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{r1}}}))
 
@@ -565,7 +565,7 @@ func TestOverlapDuringMigration(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	r := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x10}}
+	r := keyutil.KeyRange{StartKey: keyForTest([]byte{0x00}), EndKey: keyForTest([]byte{0x10})}
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g1", KeyRanges: []keyutil.KeyRange{r}}}))
 
 	err = manager.UpdateAffinityGroupKeyRanges(
@@ -593,8 +593,8 @@ func TestPartialOverlapSameGroup(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	rOld := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x10}}
-	rNew := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x05}}
+	rOld := keyutil.KeyRange{StartKey: keyForTest([]byte{0x00}), EndKey: keyForTest([]byte{0x10})}
+	rNew := keyutil.KeyRange{StartKey: keyForTest([]byte{0x00}), EndKey: keyForTest([]byte{0x05})}
 
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{rOld}}}))
 
@@ -626,7 +626,7 @@ func TestNewGroupOverlapWithExistingGroup(t *testing.T) {
 	re.NoError(err)
 
 	// Create group A with range [0x00, 0x20]
-	rangeA := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x20}}
+	rangeA := keyutil.KeyRange{StartKey: keyForTest([]byte{0x00}), EndKey: keyForTest([]byte{0x20})}
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{
 		GroupID:   "groupA",
 		KeyRanges: []keyutil.KeyRange{rangeA},
@@ -634,7 +634,7 @@ func TestNewGroupOverlapWithExistingGroup(t *testing.T) {
 
 	// Try to create group B with overlapping range [0x10, 0x30]
 	// This should be rejected because it overlaps with group A's existing range
-	rangeB := keyutil.KeyRange{StartKey: []byte{0x10}, EndKey: []byte{0x30}}
+	rangeB := keyutil.KeyRange{StartKey: keyForTest([]byte{0x10}), EndKey: keyForTest([]byte{0x30})}
 	err = manager.CreateAffinityGroups([]GroupKeyRanges{{
 		GroupID:   "groupB",
 		KeyRanges: []keyutil.KeyRange{rangeB},
@@ -662,7 +662,7 @@ func TestNewGroupOverlapWithExistingGroup(t *testing.T) {
 
 	// Now test the critical case: batch update with multiple groups
 	// Create group D with range [0x40, 0x50]
-	rangeD := keyutil.KeyRange{StartKey: []byte{0x40}, EndKey: []byte{0x50}}
+	rangeD := keyutil.KeyRange{StartKey: keyForTest([]byte{0x40}), EndKey: keyForTest([]byte{0x50})}
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{
 		GroupID:   "groupD",
 		KeyRanges: []keyutil.KeyRange{rangeD},
@@ -673,8 +673,8 @@ func TestNewGroupOverlapWithExistingGroup(t *testing.T) {
 
 	// Try to add ranges to both group C and group E in a single batch,
 	// where group C's new range [0x45, 0x55] overlaps with group D's existing range [0x40, 0x50]
-	rangeC := keyutil.KeyRange{StartKey: []byte{0x45}, EndKey: []byte{0x55}} // overlaps with D
-	rangeE := keyutil.KeyRange{StartKey: []byte{0x60}, EndKey: []byte{0x70}} // no overlap
+	rangeC := keyutil.KeyRange{StartKey: keyForTest([]byte{0x45}), EndKey: keyForTest([]byte{0x55})} // overlaps with D
+	rangeE := keyutil.KeyRange{StartKey: keyForTest([]byte{0x60}), EndKey: keyForTest([]byte{0x70})} // no overlap
 	err = manager.UpdateAffinityGroupKeyRanges(
 		[]GroupKeyRanges{
 			{GroupID: "groupC", KeyRanges: []keyutil.KeyRange{rangeC}},

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +90,7 @@ const (
 var idRegexp = regexp.MustCompile("^[-A-Za-z0-9_]{1,64}$")
 
 // TiDB owns this namespace. Other applications may still use custom IDs.
-var tidbKeyspaceIDRegexp = regexp.MustCompile(`^_tidb_ks(0|[1-9][0-9]*)_(?:t_([1-9][0-9]*)|pt_([1-9][0-9]*)_p([1-9][0-9]*))$`)
+var tidbKeyspaceIDRegexp = regexp.MustCompile(`^_tidb_ks(0|[1-9][0-9]*)_(?:t_([1-9][0-9]*)|pt_([1-9][0-9]*)_p([1-9][0-9]*)|tg_([1-9][0-9]*)(?:_i(0|[1-9][0-9]*))?)$`)
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
@@ -331,7 +332,7 @@ func parseGroupID(id string) (uint32, bool, error) {
 	if !kerneltype.IsNextGen() {
 		return 0, false, nil
 	}
-	if strings.HasPrefix(id, "_tidb_t_") || strings.HasPrefix(id, "_tidb_pt_") {
+	if strings.HasPrefix(id, "_tidb_t_") || strings.HasPrefix(id, "_tidb_pt_") || strings.HasPrefix(id, "_tidb_tg_") {
 		return 0, false, errs.ErrAffinityGroupContent.FastGenByArgs("nextgen requires keyspace-aware TiDB affinity group IDs; use a keyspace-aware TiDB or pd-ctl --keyspace-id")
 	}
 	if !strings.HasPrefix(id, "_tidb_ks") {
@@ -357,8 +358,21 @@ func parseGroupID(id string) (uint32, bool, error) {
 
 func validateGroupKeyRanges(group GroupKeyRanges) error {
 	keyspaceID, scoped, err := parseGroupID(group.GroupID)
-	if err != nil || !scoped {
+	if err != nil || !kerneltype.IsNextGen() || len(group.KeyRanges) == 0 {
 		return err
+	}
+	if !scoped {
+		// Use the same ordered boundaries as the range checks, including the
+		// exclusive fencepost after the last valid keyspace.
+		end := 1 << (8 * (codec.KeyspacePrefixLen - 1))
+		next := sort.Search(end+1, func(id int) bool {
+			boundary := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, uint32(id))
+			return bytes.Compare(group.KeyRanges[0].StartKey, boundary[:]) < 0
+		})
+		if next == 0 || next > end {
+			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s key ranges must belong to one transaction keyspace", group.GroupID))
+		}
+		keyspaceID = uint32(next - 1)
 	}
 	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
 	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID+1)

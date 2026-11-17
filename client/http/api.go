@@ -91,8 +91,7 @@ const (
 	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
 	GetKeyspaceMetaByID   = "/pd/api/v2/keyspaces/id/%d"
 	// Affinity
-	AffinityGroups    = "/pd/api/v2/affinity-groups"
-	AffinityGroupByID = "/pd/api/v2/affinity-groups/%s"
+	AffinityGroups = "/pd/api/v2/affinity-groups"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -122,6 +121,11 @@ func RegionsReplicatedByKeyRange(keyRange *KeyRange) string {
 	startKeyStr, endKeyStr := keyRange.EscapeAsHexStr()
 	return fmt.Sprintf("%s?startKey=%s&endKey=%s",
 		regionsReplicated, startKeyStr, endKeyStr)
+}
+
+// AffinityGroupByID returns the path of PD HTTP API for an affinity group.
+func AffinityGroupByID(groupID string) string {
+	return AffinityGroups + "/" + url.PathEscape(groupID)
 }
 
 // RegionSiblingsByID returns the path of PD HTTP API to get sibling regions by ID.

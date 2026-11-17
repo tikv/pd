@@ -15,16 +15,67 @@
 package command
 
 import (
+	"context"
 	"encoding/hex"
 	"strconv"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/client/constants"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/codec"
 )
+
+type affinityRangeAddClient struct {
+	pd.Client
+	added bool
+	read  bool
+}
+
+func (c *affinityRangeAddClient) GetRegionLabelRulesByIDs(context.Context, []string) ([]*pd.LabelRule, error) {
+	c.read = true
+	return nil, errors.New("label rules are not synchronized")
+}
+
+func (c *affinityRangeAddClient) AddAffinityGroupKeyRanges(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange) (map[string]*pd.AffinityGroupState, error) {
+	c.added = true
+	return map[string]*pd.AffinityGroupState{"custom": {ID: "custom", RangeCount: len(groups["custom"])}}, nil
+}
+
+func TestAffinityRangeAddDoesNotReadLabelRules(t *testing.T) {
+	re := require.New(t)
+	previous := PDCli
+	t.Cleanup(func() { PDCli = previous })
+	client := &affinityRangeAddClient{}
+	PDCli = client
+	cmd := NewAffinityCommand()
+	cmd.PersistentPreRunE = nil
+	cmd.SetArgs([]string{"range", "add", "--group-id", "custom", "--range", "7800000174800000ff0000000064000000fc,7800000174800000ff0000000065000000fc"})
+	re.NoError(cmd.Execute())
+	re.True(client.added)
+	re.False(client.read)
+}
+
+func TestAffinityCommandsRejectPositionalArgs(t *testing.T) {
+	for _, args := range [][]string{{"show"}, {"create"}, {"delete"}, {"update"}, {"range", "show"}, {"range", "add"}, {"range", "remove"}} {
+		t.Run(args[len(args)-1], func(t *testing.T) {
+			re := require.New(t)
+			cmd := NewAffinityCommand()
+			cmd.PersistentPreRunE = nil
+			sub, _, err := cmd.Find(args)
+			re.NoError(err)
+			called := false
+			sub.RunE = func(_ *cobra.Command, _ []string) error { called = true; return nil }
+			cmd.SetArgs(append(args, "unexpected-group"))
+			re.ErrorContains(cmd.Execute(), "unknown command")
+			re.False(called)
+		})
+	}
+}
 
 func TestTiDBGroupKeyRange(t *testing.T) {
 	re := require.New(t)
@@ -156,7 +207,7 @@ func TestCheckCustomGroupKeyspace(t *testing.T) {
 		},
 		{existing: ranges(keyRange(nil, nil)), added: ranges(table(1, 100)), problem: `key range "," covers the whole key space`},
 	} {
-		err := checkCustomGroupKeyspace("poc", tc.existing, tc.added)
+		err := checkCustomGroupKeyspace("poc", append(tc.existing, tc.added...))
 		if tc.problem == "" {
 			re.NoError(err, "%v %v", tc.existing, tc.added)
 			continue

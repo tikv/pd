@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -80,6 +79,7 @@ func newAffinityShowCommand() *cobra.Command {
 		Short: "show affinity group state",
 		Long: `Show all affinity groups when no group is selected, or the groups whose IDs start with --prefix.
 Selecting no group means omitting --group-id, --partition-id and --keyspace-id, and omitting --table-id or setting it to 0.`,
+		Args: cobra.NoArgs,
 		RunE: affinityShowCommandFunc,
 	}
 	cmd.Flags().String("prefix", "", "show the groups whose IDs start with the prefix, such as _tidb_pt_100_p or _tidb_ks1_; end it with a separator to avoid matching longer IDs")
@@ -98,6 +98,7 @@ lie in one keyspace. The key ranges of a TiDB table or partition group are deriv
 Creating a _tidb_ group in PD does not set the table's AFFINITY attribute in TiDB. For a table without that attribute,
 SHOW AFFINITY does not list the group, and DROP TABLE does not delete it from PD. Manage such groups explicitly with pd-ctl,
 including deletion after dropping their tables.`,
+		Args: cobra.NoArgs,
 		RunE: affinityCreateCommandFunc,
 	}
 	cmd.Flags().StringArray("range", nil, "key range as <start_key>,<end_key> in hex, encoded like Region keys; repeat the flag for more ranges")
@@ -112,6 +113,7 @@ func newAffinityRangeCommand() *cobra.Command {
 	show := &cobra.Command{
 		Use:   "show",
 		Short: "show the key ranges of an affinity group",
+		Args:  cobra.NoArgs,
 		RunE:  affinityRangeShowCommandFunc,
 	}
 	add := &cobra.Command{
@@ -120,11 +122,13 @@ func newAffinityRangeCommand() *cobra.Command {
 		Long: `Add key ranges to an affinity group.
 In nextgen, each key range of a group with a custom ID needs both keys, and all its key ranges, with the ones it has, must lie in
 one keyspace.`,
+		Args: cobra.NoArgs,
 		RunE: affinityRangeAddCommandFunc,
 	}
 	remove := &cobra.Command{
 		Use:   "remove",
 		Short: "remove key ranges from an affinity group",
+		Args:  cobra.NoArgs,
 		RunE:  affinityRangeRemoveCommandFunc,
 	}
 	for _, sub := range []*cobra.Command{add, remove} {
@@ -139,6 +143,7 @@ func newAffinityDeleteCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete",
 		Short: "delete the affinity group for the target ID",
+		Args:  cobra.NoArgs,
 		RunE:  affinityDeleteCommandFunc,
 	}
 	cmd.Flags().Bool("force", false, "delete the affinity group even if it has key ranges, and delete its label rule even if the group no longer exists")
@@ -149,6 +154,7 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "update leader and voters for a specific affinity group",
+		Args:  cobra.NoArgs,
 		RunE:  affinityUpdatePeersCommandFunc,
 	}
 	cmd.Flags().Uint64("leader", 0, "leader store ID")
@@ -225,7 +231,7 @@ func affinityCreateCommandFunc(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		if kerneltype.IsNextGen() {
-			if err := checkCustomGroupKeyspace(groupID, nil, ranges); err != nil {
+			if err := checkCustomGroupKeyspace(groupID, ranges); err != nil {
 				return err
 			}
 		}
@@ -304,27 +310,6 @@ func getAffinityGroupRanges(cmd *cobra.Command, groupID string) (affinityGroupRa
 	return result, nil
 }
 
-// getAffinityGroupKeyRanges returns the key ranges of a group with decoded keys.
-func getAffinityGroupKeyRanges(cmd *cobra.Command, groupID string) ([]pd.AffinityGroupKeyRange, error) {
-	group, err := getAffinityGroupRanges(cmd, groupID)
-	if err != nil {
-		return nil, err
-	}
-	ranges := make([]pd.AffinityGroupKeyRange, 0, len(group.Ranges))
-	for _, r := range group.Ranges {
-		start, err := hex.DecodeString(r.StartKey)
-		if err != nil {
-			return nil, errors.Annotatef(err, "invalid start key %q of affinity group %s", r.StartKey, groupID)
-		}
-		end, err := hex.DecodeString(r.EndKey)
-		if err != nil {
-			return nil, errors.Annotatef(err, "invalid end key %q of affinity group %s", r.EndKey, groupID)
-		}
-		ranges = append(ranges, pd.AffinityGroupKeyRange{StartKey: start, EndKey: end})
-	}
-	return ranges, nil
-}
-
 func affinityRangeAddCommandFunc(cmd *cobra.Command, _ []string) error {
 	return changeAffinityGroupRanges(cmd, true)
 }
@@ -350,11 +335,7 @@ func changeAffinityGroupRanges(cmd *cobra.Command, add bool) error {
 		return err
 	}
 	if add && kerneltype.IsNextGen() && !strings.HasPrefix(groupID, tidbGroupIDPrefix) {
-		existing, err := getAffinityGroupKeyRanges(cmd, groupID)
-		if err != nil {
-			return err
-		}
-		if err := checkCustomGroupKeyspace(groupID, existing, ranges); err != nil {
+		if err := checkCustomGroupKeyspace(groupID, ranges); err != nil {
 			return err
 		}
 	}
@@ -538,15 +519,13 @@ func parseAffinityKeyRanges(rawRanges []string) ([]pd.AffinityGroupKeyRange, err
 
 // checkCustomGroupKeyspace checks the key ranges of a group with a custom ID
 // in nextgen: each range needs both keys, and all ranges lie in one
-// transaction keyspace. PD checks the ranges of a keyspace-aware TiDB group
-// against the keyspace in its ID, but takes any range for a custom group,
-// which could then take the Regions of several tenants, or of all of them.
-// existing are the ranges that the group has, and added the ranges to give it.
-func checkCustomGroupKeyspace(groupID string, existing, added []pd.AffinityGroupKeyRange) error {
+// transaction keyspace. PD validates the merged ranges against the persisted
+// group; this check provides early feedback on the ranges in the command.
+func checkCustomGroupKeyspace(groupID string, ranges []pd.AffinityGroupKeyRange) error {
 	const rule = "nextgen requires the key ranges of custom group %s to lie in one keyspace, but key range %q "
 	var first pd.AffinityGroupKeyRange
 	var firstKeyspaceID uint32
-	for i, r := range slices.Concat(existing, added) {
+	for i, r := range ranges {
 		keyRange := formatAffinityKeyRange(r)
 		if len(r.StartKey) == 0 {
 			if len(r.EndKey) == 0 {
