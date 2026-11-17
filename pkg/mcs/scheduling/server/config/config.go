@@ -550,6 +550,21 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	limit := o.GetStoreLimit(storeID)
+	return storeLimitByType(limit, typ)
+}
+
+// PeekStoreLimitByType reads a store limit from the latest schedule snapshot,
+// falling back to its defaults without creating a store entry.
+func (o *PersistConfig) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	cfg := o.GetScheduleConfig()
+	limit, ok := cfg.StoreLimit[storeID]
+	if !ok {
+		limit = cfg.GetDefaultStoreLimit()
+	}
+	return storeLimitByType(limit, typ)
+}
+
+func storeLimitByType(limit sc.StoreLimitConfig, typ storelimit.Type) float64 {
 	switch typ {
 	case storelimit.AddPeer:
 		return limit.AddPeer
