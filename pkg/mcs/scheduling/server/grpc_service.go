@@ -453,6 +453,9 @@ func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBa
 		// use batch way to split region
 		curID := id - uint64(requestIDCount) + 1
 		for range splitCount {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			newRegionID := curID
 			curID++
 
@@ -472,6 +475,9 @@ func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBa
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	recordRegions = append(recordRegions, reqRegion.GetId())
 	if versioninfo.IsFeatureSupported(c.persistConfig.GetClusterVersion(), versioninfo.RegionMerge) {
 		// Disable merge the regions in a period of time.

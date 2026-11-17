@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -27,11 +28,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
@@ -248,7 +252,7 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 }
 
 func newTestSchedulingServiceForSplit(
-	t *testing.T,
+	t testing.TB,
 ) (*Service, *Cluster, *captureHeartbeatStream) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -413,6 +417,77 @@ func TestAskBatchSplitAllocationCancellation(t *testing.T) {
 			require.ErrorIs(t, err, context.Canceled)
 			require.Nil(t, resp)
 			require.Equal(t, call, client.calls)
+		})
+	}
+}
+
+func TestAskBatchSplitConstructionCancellation(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		nonBatch    bool
+		count       uint32
+		cancelAfter int
+	}{
+		{"during batch construction", false, 1000, 1},
+		{"before batch bookkeeping", false, 3, 3},
+		{"before legacy bookkeeping", true, 3, 3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			client := &splitScatterPDClient{next: 1000, nonBatch: test.nonBatch}
+			cluster.SwitchPDLeader(client)
+			region := newAffinitySplitTestRegion()
+			cluster.PutRegion(region)
+			pendingBefore := splitScatterPendingMetricValue(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			constructed := 0
+			core := zapcore.NewCore(zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()), zapcore.AddSync(io.Discard), zap.InfoLevel)
+			logger := zap.New(core, zap.Hooks(func(entry zapcore.Entry) error {
+				if entry.Message == "alloc ids for region split" {
+					constructed++
+					if constructed == test.cancelAfter {
+						cancel()
+					}
+				}
+				return nil
+			}))
+			restore := log.ReplaceGlobals(logger, &log.ZapProperties{Level: zap.NewAtomicLevelAt(zap.InfoLevel)})
+			defer restore()
+
+			resp, err := svc.AskBatchSplit(ctx, &schedulingpb.AskBatchSplitRequest{
+				Region: region.GetMeta(), SplitCount: test.count, Reason: pdpb.SplitReason_LOAD,
+			})
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, resp)
+			require.Equal(t, test.cancelAfter, constructed)
+			require.Empty(t, cluster.GetCoordinator().GetCheckerController().GetPendingProcessedRegions())
+			require.Equal(t, pendingBefore, splitScatterPendingMetricValue(t))
+		})
+	}
+}
+
+func BenchmarkAskBatchSplit(b *testing.B) {
+	oldLevel := log.GetLevel()
+	log.SetLevel(zapcore.ErrorLevel)
+	b.Cleanup(func() { log.SetLevel(oldLevel) })
+	for _, count := range []uint32{1, 1000, 100000} {
+		b.Run(strconv.FormatUint(uint64(count), 10), func(b *testing.B) {
+			svc, cluster, _ := newTestSchedulingServiceForSplit(b)
+			client := &splitScatterPDClient{next: 1000}
+			cluster.SwitchPDLeader(client)
+			region := newAffinitySplitTestRegion()
+			cluster.PutRegion(region)
+			request := &schedulingpb.AskBatchSplitRequest{Region: region.GetMeta(), SplitCount: count}
+			b.ReportAllocs()
+			for b.Loop() {
+				// Reuse the ID range to keep bookkeeping size constant across samples.
+				client.next = 1000
+				if _, err := svc.AskBatchSplit(b.Context(), request); err != nil {
+					b.Fatal(err)
+				}
+			}
 		})
 	}
 }

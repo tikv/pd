@@ -153,24 +153,27 @@ func (s *TSODispatcher) dispatch(
 			for i := 1; i < pendingTSOReqCount; i++ {
 				requests = append(requests, <-tsoQueue.requestCh)
 			}
-			done := make(chan struct{})
-			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
-			select {
-			case tsDeadlineCh <- dl:
-			case <-dispatcherCtx.Done():
-				return
-			}
-			err = s.processRequests(forwardStream, requests)
-			close(done)
-			if err != nil {
-				log.Error("proxy forward tso error",
-					zap.String("forwarded-host", forwardedHost),
-					errs.ZapError(errs.ErrGRPCSend, err))
-				if needUpdateServicePrimaryAddr && errs.IsLeaderChanged(err) {
-					tsoPrimaryWatchers[0].ForceLoad()
+			for pending := requests; len(pending) > 0; {
+				done := make(chan struct{})
+				dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
+				select {
+				case tsDeadlineCh <- dl:
+				case <-dispatcherCtx.Done():
+					timerutil.GlobalTimerPool.Put(dl.timer)
+					return
 				}
-				tsoQueue.cancel(err)
-				return
+				pending, err = s.processRequests(forwardStream, pending)
+				close(done)
+				if err != nil {
+					log.Error("proxy forward tso error",
+						zap.String("forwarded-host", forwardedHost),
+						errs.ZapError(errs.ErrGRPCSend, err))
+					if needUpdateServicePrimaryAddr && errs.IsLeaderChanged(err) {
+						tsoPrimaryWatchers[0].ForceLoad()
+					}
+					tsoQueue.cancel(err)
+					return
+				}
 			}
 		case <-noProxyRequestsTimer.C:
 			log.Info("close tso proxy as it is idle for a while")
@@ -182,28 +185,38 @@ func (s *TSODispatcher) dispatch(
 	}
 }
 
-func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) error {
+// processRequests forwards one logical-capacity batch and returns the remaining requests.
+// Compact live requests in place so canceled streams need no upstream allocation.
+func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) ([]Request, error) {
 	if len(requests) == 0 {
-		return ValidateTSOCount(0)
+		return nil, ValidateTSOCount(0)
 	}
-	for _, request := range requests {
-		if err := ValidateTSOCount(uint64(request.getCount())); err != nil {
-			return err
+	var count uint64
+	consumed, size := 0, 0
+	for consumed < len(requests) {
+		request := requests[consumed]
+		requestCount, active := request.getCountIfActive()
+		if !active {
+			consumed++
+			continue
 		}
+		if err := ValidateTSOCount(uint64(requestCount)); err != nil {
+			return nil, err
+		}
+		if count+uint64(requestCount) > logicalBits {
+			break
+		}
+		if size != consumed {
+			requests[size] = request
+		}
+		size++
+		consumed++
+		count += uint64(requestCount)
 	}
-	for len(requests) > 0 {
-		count := uint64(requests[0].getCount())
-		end := 1
-		for end < len(requests) && count+uint64(requests[end].getCount()) <= logicalBits {
-			count += uint64(requests[end].getCount())
-			end++
-		}
-		if err := s.processBatch(forwardStream, requests[:end], uint32(count)); err != nil {
-			return err
-		}
-		requests = requests[end:]
+	if size == 0 {
+		return nil, nil
 	}
-	return nil
+	return requests[consumed:], s.processBatch(forwardStream, requests[:size], uint32(count))
 }
 
 func (s *TSODispatcher) processBatch(forwardStream stream, requests []Request, count uint32) error {
@@ -303,9 +316,15 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 		case d := <-tsDeadlineCh:
 			select {
 			case <-d.timer.C:
-				log.Warn("tso proxy request processing is canceled due to timeout",
-					errs.ZapError(errs.ErrProxyTSOTimeout))
-				d.cancel()
+				// A completed batch may be observed after its timer has fired.
+				// Its stale deadline must not cancel a subsequent batch.
+				select {
+				case <-d.done:
+				default:
+					log.Warn("tso proxy request processing is canceled due to timeout",
+						errs.ZapError(errs.ErrProxyTSOTimeout))
+					d.cancel()
+				}
 				timerutil.GlobalTimerPool.Put(d.timer)
 			case <-d.done:
 				timerutil.GlobalTimerPool.Put(d.timer)

@@ -61,6 +61,9 @@ const (
 	MaxBatchSplitCount = 1 << 17
 	// MaxBatchSplitResponseSize bounds the encoded response and the region/peer
 	// ID work needed to construct it. Forwarding RPCs must accept this size.
+	// Clients must also configure a receive limit of at least this size. The Go
+	// gRPC default and older PD forwarders may still limit responses to 4 MiB;
+	// upgrade forwarding PD nodes before issuing larger batches through them.
 	MaxBatchSplitResponseSize = 8 << 20
 )
 
