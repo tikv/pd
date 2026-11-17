@@ -2175,6 +2175,7 @@ func (s *Server) campaignLeader() {
 	promoted := s.member.TryPromoteSelf()
 	failpoint.InjectCall("afterPDLeaderPromotionAttempt", s.member.ID(), promoted)
 	if !promoted {
+		stepDownAndLog("leadership was withdrawn before promotion, PD leader will step down")
 		return
 	}
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)

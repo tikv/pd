@@ -628,6 +628,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 			c.RLock()
 			if c.running {
 				c.checkTSOService()
+				failpoint.InjectCall("afterTSOServiceCheck", c.member.ID())
 			}
 			c.RUnlock()
 		}
@@ -641,13 +642,15 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 			log.Error("failed to initialize the TSO allocator", errs.ZapError(err))
 			return err
 		}
+		// Publish readiness only for a newly initialized timestamp state. A
+		// periodic check must not restore a term that Resign has withdrawn.
+		if c.onTSOReady != nil {
+			c.onTSOReady(true)
+		}
 	} else if !c.running {
 		// If the TSO allocator is already initialized, but the running flag is false,
 		// it means there maybe unexpected error happened before.
 		log.Warn("the TSO allocator is already initialized before, but the cluster is not running")
-	}
-	if c.onTSOReady != nil {
-		c.onTSOReady(true)
 	}
 	return nil
 }

@@ -971,6 +971,29 @@ func TestPDLeaderRejectsPromotionAfterWithdrawal(t *testing.T) {
 	re.Same(oldLease, m.GetLeadership().GetLease())
 	re.True(m.GetLeadership().Check())
 
+	// Run a periodic service check while the withdrawn lease is still live.
+	// It must not make the old TSO term ready again.
+	const serviceCheckHook = "github.com/tikv/pd/server/cluster/afterTSOServiceCheck"
+	serviceChecked := make(chan struct{})
+	var serviceCheckedOnce sync.Once
+	re.NoError(failpoint.EnableCall(serviceCheckHook, func(id uint64) {
+		if id == leader.GetServerID() {
+			serviceCheckedOnce.Do(func() { close(serviceChecked) })
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(serviceCheckHook)) })
+	select {
+	case <-serviceChecked:
+	case <-time.After(30 * time.Second):
+		t.Fatal("service check did not run during leadership withdrawal")
+	}
+	re.Same(oldLease, m.GetLeadership().GetLease())
+	re.True(m.GetLeadership().Check())
+	members, err := client.GetMembers(t.Context(), &pdpb.GetMembersRequest{})
+	re.NoError(err)
+	re.Nil(members.GetLeader())
+	requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+
 	attempted := make(chan bool, 1)
 	const attemptHook = "github.com/tikv/pd/server/afterPDLeaderPromotionAttempt"
 	re.NoError(failpoint.EnableCall(attemptHook, func(id uint64, promoted bool) {
@@ -988,7 +1011,7 @@ func TestPDLeaderRejectsPromotionAfterWithdrawal(t *testing.T) {
 	}
 	re.Nil(m.GetLeader())
 	re.False(svr.IsServing())
-	members, err := client.GetMembers(t.Context(), &pdpb.GetMembersRequest{})
+	members, err = client.GetMembers(t.Context(), &pdpb.GetMembersRequest{})
 	re.NoError(err)
 	re.Nil(members.GetLeader())
 	requireEarlyTSORejected(t, stream, leader.GetClusterID())
