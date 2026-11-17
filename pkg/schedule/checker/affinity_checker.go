@@ -139,7 +139,19 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		// so expire the group first, then provide the available Region information and fetch the Group state again.
 		if !isAffinity {
 			targetRegion := cloneRegionWithReplacePeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...)
-			if targetRegion == nil || !c.isRegionPlacementRuleSatisfiedWithBestLocation(targetRegion, false /* isExistingRegion */) {
+			if targetRegion != nil {
+				// Affinity moves preserve witness stores and cannot make a witness the leader.
+				for _, peer := range region.GetVoters() {
+					if peer.GetIsWitness() && (!slices.Contains(group.VoterStoreIDs, peer.GetStoreId()) || peer.GetStoreId() == group.LeaderStoreID) {
+						return nil
+					}
+				}
+			}
+			hasConflictingLearner := slices.ContainsFunc(region.GetLearners(), func(peer *metapb.Peer) bool {
+				return slices.Contains(group.VoterStoreIDs, peer.GetStoreId())
+			})
+			// Validate conflicting learners together with their final destinations.
+			if targetRegion == nil || (!hasConflictingLearner && !c.isRegionPlacementRuleSatisfiedWithBestLocation(targetRegion, false /* isExistingRegion */)) {
 				c.affinityManager.ExpireAffinityGroup(group.ID)
 				group = c.affinityManager.GetAffinityGroupState(group.ID)
 				needRefetch = true
