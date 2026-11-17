@@ -91,16 +91,34 @@ func TestTLS(t *testing.T) {
 
 func TestClientCertAllowedCNValidation(t *testing.T) {
 	testCases := []struct {
-		name        string
-		clientURLs  string
-		clientCNs   string
-		gateway     bool
-		omitGateway bool
-		missing     string
-		wantErr     string
+		name          string
+		clientURLs    string
+		clientCNs     string
+		legacyCNs     string
+		gateway       bool
+		omitGateway   bool
+		missing       string
+		wantErr       string
+		wantClientCNs []string
+		wantPeerCNs   []string
 	}{
-		{name: "https", clientURLs: "https://127.0.0.1:2379"},
-		{name: "default gateway disabled", clientURLs: "https://127.0.0.1:2379", omitGateway: true},
+		{name: "https", clientURLs: "https://127.0.0.1:2379", wantClientCNs: []string{"pd-server"}},
+		{name: "default gateway disabled", clientURLs: "https://127.0.0.1:2379", omitGateway: true, wantClientCNs: []string{"pd-server"}},
+		{name: "multiple client CNs", clientURLs: "https://127.0.0.1:2379", clientCNs: `["pd-server", "tidb"]`, wantClientCNs: []string{"pd-server", "tidb"}},
+		{
+			name: "empty allowlist with legacy single CN", clientURLs: "https://127.0.0.1:2379",
+			clientCNs: `[]`, legacyCNs: `["pd-server"]`, wantPeerCNs: []string{"pd-server"},
+		},
+		{
+			name: "empty allowlist with legacy multiple CNs", clientURLs: "https://127.0.0.1:2379",
+			clientCNs: `[]`, legacyCNs: `["pd-server", "tidb"]`,
+			wantClientCNs: []string{"pd-server", "tidb"}, wantPeerCNs: []string{"pd-server", "tidb"},
+		},
+		{
+			name: "client allowlist overrides legacy CNs", clientURLs: "https://127.0.0.1:2379",
+			legacyCNs:     `["pd-server", "client"]`,
+			wantClientCNs: []string{"pd-server"}, wantPeerCNs: []string{"pd-server", "client"},
+		},
 		{name: "gateway enabled", clientURLs: "https://127.0.0.1:2379", gateway: true, wantErr: "requires enable-grpc-gateway = false"},
 		{name: "gateway enabled with multiple CNs", clientURLs: "https://127.0.0.1:2379", clientCNs: `["pd-server", "tidb"]`, gateway: true, wantErr: "requires enable-grpc-gateway = false"},
 		{name: "empty allowlist with gateway enabled", clientURLs: "https://127.0.0.1:2379", clientCNs: `[]`, gateway: true},
@@ -126,6 +144,9 @@ func TestClientCertAllowedCNValidation(t *testing.T) {
 				text = append(text, fmt.Sprintf("enable-grpc-gateway = %t\n", testCase.gateway))
 			}
 			text = append(text, fmt.Sprintf("[security]\nclient-cert-allowed-cn = %s\n", clientCNs))
+			if testCase.legacyCNs != "" {
+				text = append(text, fmt.Sprintf("cert-allowed-cn = %s\n", testCase.legacyCNs))
+			}
 			for _, key := range []string{"cacert-path", "cert-path", "key-path"} {
 				if key != testCase.missing {
 					text = append(text, fmt.Sprintf("%s = %q\n", key, "test.pem"))
@@ -145,12 +166,8 @@ func TestClientCertAllowedCNValidation(t *testing.T) {
 			etcdCfg, err := cfg.GenEmbedEtcdConfig()
 			re.NoError(err)
 			re.Equal(testCase.gateway, etcdCfg.EnableGRPCGateway)
-			if clientCNs == `[]` {
-				re.Empty(etcdCfg.ClientTLSInfo.AllowedCNs)
-			} else {
-				re.Equal([]string{"pd-server"}, etcdCfg.ClientTLSInfo.AllowedCNs)
-			}
-			re.Empty(etcdCfg.PeerTLSInfo.AllowedCNs)
+			re.Equal(testCase.wantClientCNs, etcdCfg.ClientTLSInfo.AllowedCNs)
+			re.Equal(testCase.wantPeerCNs, etcdCfg.PeerTLSInfo.AllowedCNs)
 		})
 	}
 }
