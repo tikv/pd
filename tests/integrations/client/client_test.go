@@ -1304,7 +1304,7 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	actualStores, err := suite.client.GetAllStores(context.Background())
 	re.NoError(err)
 	re.Len(actualStores, len(stores))
-	stores = actualStores
+	stores := actualStores
 
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId(), false)
