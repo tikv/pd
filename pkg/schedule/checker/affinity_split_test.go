@@ -310,6 +310,29 @@ func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
 	cluster.SetScheduleConfig(cfg)
 	ops := checker.Check(region)
 	requireAffinitySplit(t, ops)
+	re.Empty(checker.Check(region), "overlapping checks must retain the unstarted split")
+	// A caller may skip admission after a store-limit check.
+	ops[0].SetStatusReachTime(operator.CREATED, time.Now().Add(-operator.OperatorExpireTime-time.Second))
+	group := cluster.GetAffinityManager().GetAffinityGroupState("split_before_move")
+	prepared := make(chan *operator.Operator, 32)
+	start := make(chan struct{})
+	for range cap(prepared) {
+		go func() {
+			<-start
+			op, _ := checker.prepareAffinityPeerMove(region, group)
+			prepared <- op
+		}()
+	}
+	close(start)
+	var retry []*operator.Operator
+	for range cap(prepared) {
+		if op := <-prepared; op != nil {
+			retry = append(retry, op)
+		}
+	}
+	re.Equal(operator.EXPIRED, ops[0].Status())
+	ops = retry
+	requireAffinitySplit(t, ops)
 	re.Equal(1, opController.AddWaitingOperator(ops...))
 	re.False(ops[0].GetStartTime().IsZero())
 	opController.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})

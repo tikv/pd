@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const recentMergeTTL = time.Minute
@@ -59,6 +60,7 @@ type AffinityChecker struct {
 	affinityManager  *affinity.Manager
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
+	splitMu          syncutil.Mutex
 	splitAttempts    cache.Cache
 	startTime        time.Time
 	balancer         *affinityBalancer
@@ -195,7 +197,9 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
 		// The move is done, so a later move of the Region tries to split it again.
+		c.splitMu.Lock()
 		c.splitAttempts.Remove(region.GetID())
+		c.splitMu.Unlock()
 		return c.mergeCheck(region, group)
 	}
 

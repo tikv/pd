@@ -63,6 +63,8 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if !slices.ContainsFunc(group.VoterStoreIDs, func(id uint64) bool { return region.GetStorePeer(id) == nil }) {
 		return nil, true
 	}
+	c.splitMu.Lock()
+	defer c.splitMu.Unlock()
 
 	wait := func(reason string) (*operator.Operator, bool) {
 		checkerCounter.WithLabelValues(affinityChecker, "wait-"+reason).Inc()
@@ -99,6 +101,11 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		// example because the waiting queue is full, sends no request, so the
 		// wait does not start and the next patrol requests the split again.
 		if attempt.startedAt.IsZero() && attempt.split != nil {
+			// Keep a split that can still start between preparation and admission.
+			// Expire unsubmitted operators so they cannot block later patrols.
+			if attempt.split.Status() == operator.CREATED && !attempt.split.CheckExpired() {
+				return nil, false
+			}
 			attempt.startedAt = attempt.split.GetStartTime()
 		}
 		if sizeUnknown && attempt.startedAt.IsZero() {
