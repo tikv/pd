@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,7 +45,9 @@ func TestTargetWriterFailures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
+			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
 				_, _ = io.Copy(io.Discard, r.Body)
 				if tc.name == "timeout" || tc.name == "canceled" {
 					<-r.Context().Done()
@@ -74,6 +77,12 @@ func TestTargetWriterFailures(t *testing.T) {
 			re.ErrorContains(err, tc.wantError)
 			re.Empty(written)
 			re.Equal(1, failures)
+			if tc.name == "no leader" {
+				re.ErrorIs(err, affinity.ErrTargetWriterNotReady)
+				re.Zero(requests.Load())
+			} else {
+				re.NotErrorIs(err, affinity.ErrTargetWriterNotReady)
+			}
 		})
 	}
 }

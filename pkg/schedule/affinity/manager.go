@@ -572,23 +572,29 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 // A changed target takes the availability that the store conditions known now give, as when
 // an admin sets it through PD, or a write whose result was unknown committed it.
 // Both metaMutex and the write lock of RWMutex must be held.
-func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) {
+func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) bool {
 	if groupInfo.CreateTimestamp != group.CreateTimestamp {
 		m.deleteGroupLocked(group.ID)
 		m.initGroupLocked(group)
 		// The label watcher will not resend an unchanged rule for the new instance.
 		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
-		return
+		return true
 	}
 
 	// Publishing a normalized target also normalizes the voter order in memory.
 	if sameStoredGroup(&groupInfo.Group, group) && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
-		return
+		return false
 	}
 	groupInfo.Group = *group
 	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
-	m.setTargetAvailabilityLocked(groupInfo)
+	// A changed target gets its own grace period, even if the old target expired.
+	groupInfo.availability = groupDegraded
+	groupInfo.degradedExpiredAt = newDegradedExpiredAtFromNow()
+	if m.storeConditionsKnown {
+		m.setTargetAvailabilityLocked(groupInfo)
+	}
 	m.resetCountLocked(groupInfo)
+	return true
 }
 
 // SyncGroupDeleteFromEtcd synchronizes a group deletion from etcd.

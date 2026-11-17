@@ -67,7 +67,7 @@ func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity
 func (w *TargetWriter) writeTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
 	leaderURL, err := w.getLeaderURL()
 	if err != nil {
-		return nil, err
+		return nil, errors.Annotate(affinity.ErrTargetWriterNotReady, err.Error())
 	}
 	body, err := json.Marshal(&affinity.GroupTargetsRequest{Targets: targets})
 	if err != nil {

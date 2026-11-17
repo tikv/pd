@@ -15,6 +15,8 @@
 package affinity
 
 import (
+	"errors"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -37,14 +39,17 @@ func (m *Manager) sendObservedTarget(target GroupTarget) {
 	m.targetWriteMutex.Unlock()
 	go func() {
 		defer logutil.LogPanic()
-		_, err := m.targetWriter.WriteGroupTargets(m.ctx, []GroupTarget{target})
+		written, err := m.targetWriter.WriteGroupTargets(m.ctx, []GroupTarget{target})
+		if err == nil && !slices.Contains(written, target.Expected.ID) {
+			err = errors.New("affinity group target was not written")
+		}
 		m.targetWriteMutex.Lock()
 		m.targetWriteInFlight = false
 		if err != nil {
 			m.targetWriteRetryAt = time.Now().Add(time.Second)
 		}
 		m.targetWriteMutex.Unlock()
-		if err != nil && m.ctx.Err() == nil {
+		if err != nil && !errors.Is(err, ErrTargetWriterNotReady) && m.ctx.Err() == nil {
 			targetWriteFailureCounter.Inc()
 			log.Warn("failed to write affinity group target", zap.String("group-id", target.Expected.ID), zap.Error(err))
 		}
