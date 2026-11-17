@@ -24,7 +24,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -870,24 +869,23 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 			re.NoError(err)
 			re.NotContains(string(content), resetMsg)
 			if early {
-				var promotedWithoutLease atomic.Bool
-				const promotionHook = "github.com/tikv/pd/server/afterPDLeaderPromoted"
-				re.NoError(failpoint.EnableCall(promotionHook, func(id uint64) {
-					if id == leader.GetServerID() && !m.GetLeadership().Check() {
-						promotedWithoutLease.Store(true)
+				attempted := make(chan bool, 1)
+				const promotionHook = "github.com/tikv/pd/server/afterPDLeaderPromotionAttempt"
+				re.NoError(failpoint.EnableCall(promotionHook, func(id uint64, promoted bool) {
+					if id == leader.GetServerID() {
+						attempted <- promoted
 					}
 				}))
 				t.Cleanup(func() { re.NoError(failpoint.Disable(promotionHook)) })
 				// Finish initialization while the old election key still exists but
-				// the local lease has been withdrawn. This campaign must go straight
-				// to cleanup without republishing itself as the leader.
+				// the local lease has been withdrawn. This campaign must not publish.
 				resumeInitialization()
-				testutil.Eventually(re, func() bool {
-					content, err := os.ReadFile(fname)
-					re.NoError(err)
-					return strings.Contains(string(content), "closing the embedded TSO allocator")
-				})
-				re.False(promotedWithoutLease.Load())
+				select {
+				case promoted := <-attempted:
+					re.False(promoted)
+				case <-time.After(30 * time.Second):
+					t.Fatal("PD initialization did not attempt promotion")
+				}
 				re.Nil(m.GetLeader())
 				re.NoError(failpoint.Disable(promotionHook))
 			}
@@ -911,4 +909,98 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 			re.Negative(tsoutil.CompareTimestamp(previous, next))
 		})
 	}
+}
+
+// TestPDLeaderRejectsPromotionAfterWithdrawal covers the interval before Resign
+// detaches the lease: the lease is still live, but its member identity is gone.
+func TestPDLeaderRejectsPromotionAfterWithdrawal(t *testing.T) {
+	re := require.New(t)
+	cluster := newEarlyTSOCluster(t, 1)
+	leader := cluster.GetLeaderServer()
+	svr := leader.GetServer()
+	client := earlyTSOClient(t, leader)
+	previous := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+
+	const promotionHook = "github.com/tikv/pd/server/beforePDLeaderPromoted"
+	reachedPromotion := make(chan struct{})
+	releasePromotion := make(chan struct{})
+	resumePromotion := sync.OnceFunc(func() { close(releasePromotion) })
+	t.Cleanup(resumePromotion)
+	re.NoError(failpoint.EnableCall(promotionHook, func(id uint64) {
+		if id == leader.GetServerID() {
+			close(reachedPromotion)
+			<-releasePromotion
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(promotionHook)) })
+	leader.ResetPDLeader()
+	select {
+	case <-reachedPromotion:
+	case <-time.After(30 * time.Second):
+		t.Fatal("PD initialization did not reach promotion")
+	}
+	oldLease := svr.GetMember().GetLeadership().GetLease()
+	re.NotNil(oldLease)
+	re.False(svr.IsServing())
+	stream := earlyTSOStream(t, client, "")
+	requestEarlyTSO(t, stream, leader.GetClusterID())
+
+	const withdrawalHook = "github.com/tikv/pd/pkg/member/afterMemberLeaderWithdrawn"
+	withdrawn := make(chan struct{})
+	releaseWithdrawal := make(chan struct{})
+	resumeWithdrawal := sync.OnceFunc(func() { close(releaseWithdrawal) })
+	t.Cleanup(resumeWithdrawal)
+	var withdrawnOnce sync.Once
+	re.NoError(failpoint.EnableCall(withdrawalHook, func(id uint64) {
+		if id == leader.GetServerID() {
+			withdrawnOnce.Do(func() { close(withdrawn) })
+			<-releaseWithdrawal
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(withdrawalHook)) })
+	const updateHook = "github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"
+	re.NoError(failpoint.Enable(updateHook, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(updateHook)) })
+	select {
+	case <-withdrawn:
+	case <-time.After(30 * time.Second):
+		t.Fatal("TSO updater did not withdraw leadership")
+	}
+	m := svr.GetMember()
+	re.Nil(m.GetLeader())
+	re.Same(oldLease, m.GetLeadership().GetLease())
+	re.True(m.GetLeadership().Check())
+
+	attempted := make(chan bool, 1)
+	const attemptHook = "github.com/tikv/pd/server/afterPDLeaderPromotionAttempt"
+	re.NoError(failpoint.EnableCall(attemptHook, func(id uint64, promoted bool) {
+		if id == leader.GetServerID() {
+			attempted <- promoted
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(attemptHook)) })
+	resumePromotion()
+	select {
+	case promoted := <-attempted:
+		re.False(promoted)
+	case <-time.After(30 * time.Second):
+		t.Fatal("promotion waited for blocked lease revocation")
+	}
+	re.Nil(m.GetLeader())
+	re.False(svr.IsServing())
+	members, err := client.GetMembers(t.Context(), &pdpb.GetMembersRequest{})
+	re.NoError(err)
+	re.Nil(members.GetLeader())
+	requireEarlyTSORejected(t, stream, leader.GetClusterID())
+
+	re.NoError(failpoint.Disable(promotionHook))
+	re.NoError(failpoint.Disable(attemptHook))
+	re.NoError(failpoint.Disable(updateHook))
+	resumeWithdrawal()
+	testutil.Eventually(re, func() bool {
+		lease := m.GetLeadership().GetLease()
+		return lease != nil && lease != oldLease && svr.IsServing()
+	})
+	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+	re.Negative(tsoutil.CompareTimestamp(previous, next))
 }

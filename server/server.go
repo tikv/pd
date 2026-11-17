@@ -2171,11 +2171,12 @@ func (s *Server) campaignLeader() {
 	// notices an expired lease, so nothing that can block may sit between it
 	// and the loop.
 	// The early TSO updater can resign while the cluster is still initializing.
-	if !s.member.GetLeadership().Check() {
+	failpoint.InjectCall("beforePDLeaderPromoted", s.member.ID())
+	promoted := s.member.TryPromoteSelf()
+	failpoint.InjectCall("afterPDLeaderPromotionAttempt", s.member.ID(), promoted)
+	if !promoted {
 		return
 	}
-	s.member.PromoteSelf()
-	failpoint.InjectCall("afterPDLeaderPromoted", s.member.ID())
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()

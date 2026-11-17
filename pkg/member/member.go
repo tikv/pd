@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,6 +54,9 @@ const (
 type Member struct {
 	leadership *election.Leadership
 	leader     atomic.Value // stored as *pdpb.Member
+	leaderMu   sync.Mutex
+	// withdrawnLease fences promotion while Resign is still revoking the lease.
+	withdrawnLease *election.Lease
 	// etcd and cluster information.
 	etcd   *embed.Etcd
 	client *clientv3.Client
@@ -160,7 +164,22 @@ func (m *Member) unsetLeader() {
 
 // PromoteSelf sets the member itself to a PD leader.
 func (m *Member) PromoteSelf() {
+	m.leaderMu.Lock()
+	defer m.leaderMu.Unlock()
 	m.setLeader(m.member)
+}
+
+// TryPromoteSelf publishes this member only while its leadership is live and
+// has not been withdrawn by Resign.
+func (m *Member) TryPromoteSelf() bool {
+	m.leaderMu.Lock()
+	defer m.leaderMu.Unlock()
+	lease := m.leadership.GetLease()
+	if lease == nil || lease == m.withdrawnLease || lease.IsExpired() {
+		return false
+	}
+	m.setLeader(m.member)
+	return true
 }
 
 // GetElectionPath returns the path of the PD leader.
@@ -284,7 +303,13 @@ func (m *Member) WatchLeader(ctx context.Context, leader *pdpb.Member, revision 
 // the identity before anything that can block is what keeps a member that is no
 // longer serving from still answering as the leader.
 func (m *Member) Resign() {
+	m.leaderMu.Lock()
+	m.withdrawnLease = m.leadership.GetLease()
 	m.unsetLeader()
+	m.leaderMu.Unlock()
+	// Reset can block on etcd or logging. Promotions already reject this lease
+	// without waiting for its revocation or holding leaderMu across that work.
+	failpoint.InjectCall("afterMemberLeaderWithdrawn", m.ID())
 	m.leadership.Reset()
 }
 
