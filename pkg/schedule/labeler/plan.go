@@ -77,7 +77,7 @@ func (p *Plan) Prefix(n int) *Plan {
 	if p.err != nil {
 		return p
 	}
-	return &Plan{labeler: p.labeler, commitOps: p.commitOps[:n], applyLockedOps: p.applyLockedOps[:n]}
+	return &Plan{labeler: p.labeler, commitOps: p.commitOps[:n:n], applyLockedOps: p.applyLockedOps[:n:n]}
 }
 
 // CommitOps retrieves all operations in the transaction.
