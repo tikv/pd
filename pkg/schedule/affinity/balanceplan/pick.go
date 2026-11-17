@@ -199,7 +199,6 @@ func (p *planner) storeItem(g *groupState, s int, lead func(int) bool) item {
 // and cheapest leader. A store whose voter count already exceeds the best
 // one's cannot win, as the count is the first cost field.
 func (p *planner) domainItem(g *groupState, d, must []int, lead func(int) bool, pk *picker) {
-	p.work += int64(len(d))
 	it := item{voter: -1, leader: -1}
 	for _, s := range d {
 		if len(must) > 0 && slices.Contains(must, s) {
@@ -422,22 +421,6 @@ func sameValue(r *Rule, stores []int, level int) bool {
 		}
 	}
 	return true
-}
-
-// pairsOf computes the isolation vector of a peer set.
-func pairsOf(r *Rule, stores []int) [maxDepth]int32 {
-	var out [maxDepth]int32
-	for i, a := range stores {
-		for _, b := range stores[i+1:] {
-			for lv := range r.depth() {
-				if r.Location[a][lv] != r.Location[b][lv] {
-					break
-				}
-				out[lv]++
-			}
-		}
-	}
-	return out
 }
 
 func pairCount(k int) int32 { return int32(k * (k - 1) / 2) }

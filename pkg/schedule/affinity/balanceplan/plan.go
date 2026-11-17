@@ -95,6 +95,8 @@ const (
 // TargetFeedback preserves the placement decision and directed repair alternatives.
 // Replace is scoped to the checked combination, never a persistent store exclusion.
 // An offered replacement may still be rejected by another rule or Region.
+// The planner retains Replace and its Candidates slices read-only until Plan
+// returns. Later callbacks must not reuse or modify their backing arrays.
 // Work charges the caller's candidate scans to the plan's shared budget.
 // This is a scan count, not a wall clock bound on placement fitting.
 type TargetFeedback struct {
@@ -169,16 +171,17 @@ const (
 // Result is the planned layout in input group order. Groups the planner
 // cannot express keep their input target.
 type Result struct {
-	Voters                [][]int
-	Leaders               []int
-	Baseline, Fast, Score Score
-	Stop                  StopReason
-	Visits                int
-	Work                  int64
-	Changed               int
+	Voters          [][]int
+	Leaders         []int
+	Baseline, Score Score
+	Stop            StopReason
+	Visits          int
+	Work            int64
+	Changed         int
 	// TemporarilyBlocked reports a temporary placement rejection.
 	TemporarilyBlocked bool
-	// PlacementLimited reports that a directed repair reached a search limit.
+	// PlacementLimited reports rejected targets whose directed repairs were
+	// cut off with alternatives unexplored by a search limit or cancellation.
 	PlacementLimited bool
 }
 
@@ -224,13 +227,12 @@ func Plan(in *Input, opt Options) Result {
 	p := newPlanner(in, opt)
 	res := Result{Baseline: p.score()}
 	if len(p.gs) == 0 {
-		res.Fast, res.Score, res.Stop = res.Baseline, res.Baseline, StopNoGroups
+		res.Score, res.Stop = res.Baseline, StopNoGroups
 		res.Voters, res.Leaders = p.expand(nil, nil)
 		return res
 	}
 	origV, origL := p.layout()
-	fastV, fastL, fast := p.greedy(opt.Seed)
-	res.Fast = fast
+	fastV, fastL, _ := p.greedy(opt.Seed)
 	res.Stop = StopGreedy
 	res.Score = p.revert(origV, origL, fastV, fastL)
 	res.Score.Leader += p.chainLeaders(fastL)
@@ -537,12 +539,8 @@ func (p *planner) greedy(seed uint64) ([][]int, []int, Score) {
 		}
 		left := len(p.gs)
 		for left > 0 && !p.stopped() {
-			// Visit from the store with the most voters that still lists a
-			// pending group; ties go to the lower index. Up to the target
-			// scale of 300 stores a linear scan costs about the same as a
-			// heap and keeps no invariant. It grows with the store count: a
-			// 1000-group sparse table on 3000 stores plans in 2.9 s with the
-			// scan and 0.47 s with a lazy heap, with identical results.
+			// Visit pending groups from the store with the most voters;
+			// ties go to the lower index.
 			s := -1
 			for t := range members {
 				if len(members[t]) > 0 && (s < 0 || p.v[t] > p.v[s]) {
@@ -672,8 +670,7 @@ func (p *planner) checkTarget(g *groupState, voters []int, leader int) TargetFee
 	}
 	feedback := g.CheckTarget(voters, leader, p.opt.WorkBudget-p.work)
 	p.work += max(1, feedback.Work)
-	if p.stopped() {
-		p.placementLimited = true
+	if p.stopped() && feedback.Status != TargetRejected {
 		return TargetFeedback{Status: TargetRejected}
 	}
 	p.blocked = p.blocked || feedback.Status == TargetTemporarilyBlocked
@@ -750,9 +747,7 @@ func (p *planner) move(g *groupState, voters []int, leader int) Score {
 // store z with l[z] <= l[a]-2. Only a and z change counts, so the score drops
 // by at least 2. With the voters fixed, the leaders are optimal exactly when
 // no such path exists (Harvey et al., "Semi-matchings for bipartite graphs
-// and load balancing", 2006). Single-group moves miss a path whose first
-// transfer only ties: 24 groups on 6 stores stayed at leader counts
-// 3/4/5/4/4/4, although two transfers in a row reach 4 on every store.
+// and load balancing", 2006).
 //
 // A leader moves as in visitLeader: a pinned leader stays, and a leader moves
 // only to a voter of a rule that may hold it, on a store that may lead. A
@@ -778,7 +773,8 @@ func (p *planner) chainLeaders(leaders []int) int64 {
 		}
 		hosts := p.leaderHosts(g)
 		for k, s := range g.cur {
-			if ri := g.curRule[k]; slices.Contains(hosts, ri) && p.leaderCapable(g, g.Rules[ri], s) && p.checkTarget(g, g.cur, s).Status == TargetSatisfied {
+			// Later rounds may return to this leader; its validity is known.
+			if ri := g.curRule[k]; slices.Contains(hosts, ri) && p.leaderCapable(g, g.Rules[ri], s) && (s == g.lead || p.checkTarget(g, g.cur, s).Status == TargetSatisfied) {
 				alt = append(alt, s)
 			}
 		}
