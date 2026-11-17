@@ -153,6 +153,7 @@ class ShardTests(unittest.TestCase):
     def test_native_timings_keep_failure_logs_and_test_lifecycle(self):
         events = [
             {"Action": "output", "Package": "p", "Test": "TestPass", "Output": "quiet pass log\n"},
+            {"Action": "pass", "Package": "p", "Test": "TestPass/child", "Elapsed": 1},
             {"Action": "pass", "Package": "p", "Test": "TestPass", "Elapsed": 2},
             {"Action": "output", "Package": "p", "Test": "TestFail/child", "Output": "failure detail\n"},
             {"Action": "fail", "Package": "p", "Test": "TestFail/child", "Elapsed": 3},
@@ -160,6 +161,7 @@ class ShardTests(unittest.TestCase):
             {"Action": "skip", "Package": "p", "Test": "TestSkip", "Elapsed": 10},
             {"Action": "pass", "Package": "cached", "Test": "TestCached", "Elapsed": 100},
             {"Action": "output", "Package": "cached", "Output": "ok cached (cached)\n"},
+            {"Action": "output", "Package": "p", "Test": "TestIncomplete", "Output": "interrupted test detail\n"},
         ]
         process = mock.MagicMock()
         process.__enter__.return_value = process
@@ -169,15 +171,25 @@ class ShardTests(unittest.TestCase):
         with mock.patch.object(ci.subprocess, "Popen", return_value=process) as popen, contextlib.redirect_stdout(output):
             code, timings = ci.run_native_tests(["go", "test", "-race", "./..."], Path("/repo/client"), {"CGO_ENABLED": "1"})
         self.assertEqual(code, 1)
-        self.assertEqual(timings, [(2, "p", "TestPass"), (4, "p", "TestFail")])
+        self.assertEqual(timings, [(2, "p", "TestPass")])
         self.assertIn("failure detail", output.getvalue())
+        self.assertIn("interrupted test detail", output.getvalue())
         self.assertNotIn("quiet pass log", output.getvalue())
         self.assertEqual(popen.call_args.args[0], ["go", "test", "-json", "-race", "./..."])
 
     def test_slowest_three_combine_modules_without_counting_subtests(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "0.xml").write_text('<testsuites><testsuite><testcase classname="root" name="TestSuite" time="8"/><testcase classname="root" name="TestSuite/child" time="7"/><testcase classname="root" name="TestSkip" time="100"><skipped/></testcase></testsuite></testsuites>')
+            (root / "0.xml").write_text(
+                '<testsuites><testsuite failures="1" errors="1">'
+                '<testcase classname="root" name="TestSuite" time="8"/>'
+                '<testcase classname="root" name="TestSuite/child" time="7"/>'
+                '<testcase classname="root" name="TestSkip" time="100"><skipped/></testcase>'
+                '<testcase classname="root" name="TestFail" time="200"><failure/></testcase>'
+                '<testcase classname="root" name="TestError" time="300"><error/></testcase>'
+                '<testcase classname="root" name="TestIncomplete"/>'
+                '</testsuite></testsuites>'
+            )
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 ci.print_slowest(root, [(10, "client", "TestSlow"), (9, "tools", "TestMedium"), (1, "client", "TestFast")])
@@ -185,6 +197,16 @@ class ShardTests(unittest.TestCase):
             self.assertEqual([line.strip() for line in lines[-3:]], [
                 "1. 10.000s  client.TestSlow", "2. 9.000s  tools.TestMedium", "3. 8.000s  root.TestSuite",
             ])
+
+    def test_no_successful_tests_still_prints_summary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "0.xml").write_text('<testsuite><testcase classname="p" name="TestFail" time="100"><failure/></testcase></testsuite>')
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                ci.print_slowest(root, [])
+            self.assertIn("No successful tests recorded.", output.getvalue())
+            self.assertNotIn("TestFail", output.getvalue())
 
     def test_update_uses_medians_and_ignores_failures(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -196,6 +218,36 @@ class ShardTests(unittest.TestCase):
             profile = ci.update_profile({"tests": {}, "packages": {}}, reports)
             self.assertEqual(profile["packages"], {"p": {"seconds": 6, "longest": 6}})
             self.assertEqual(profile["tests"], {"p.t": 6})
+
+    def test_failed_samples_preserve_previous_successful_history(self):
+        with tempfile.TemporaryDirectory() as temp:
+            report = Path(temp) / "report.xml"
+            report.write_text(
+                '<testsuites><testsuite failures="1" errors="1">'
+                '<testcase classname="p" name="TestOld" time="0.01"><failure/></testcase>'
+                '<testcase classname="p" name="TestOld" time="1000"><error/></testcase>'
+                '<testcase classname="p" name="TestOld" time="2000"><skipped/></testcase>'
+                '<testcase classname="p" name="TestOld"/>'
+                '<testcase classname="p" name="TestOld/child" time="3000"/>'
+                '<testcase classname="p" name="TestPass" time="4"/>'
+                '</testsuite></testsuites>'
+            )
+            profile = {"tests": {"p.TestOld": 12}, "packages": {"p": {"seconds": 12, "longest": 12}}}
+            ci.update_profile(profile, [report])
+            self.assertEqual(profile["tests"], {"p.TestOld": 12, "p.TestPass": 4})
+            self.assertEqual(profile["packages"], {"p": {"seconds": 16, "longest": 12}})
+
+    def test_rejects_invalid_successful_test_durations(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            report = root / "0.xml"
+            for duration in ("-1", "nan", "inf"):
+                with self.subTest(duration=duration):
+                    report.write_text(f'<testsuite><testcase classname="p" name="TestPass" time="{duration}"/></testsuite>')
+                    with self.assertRaises(ValueError):
+                        ci.update_profile({"tests": {}, "packages": {}}, [report])
+                    with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(ValueError):
+                        ci.print_slowest(root, [])
 
     def test_rejects_invalid_history(self):
         with tempfile.TemporaryDirectory() as temp:

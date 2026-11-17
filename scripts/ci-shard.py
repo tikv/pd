@@ -169,7 +169,7 @@ def run_native_tests(command, directory, environment):
                 if event["Action"] == "fail":
                     print("".join(output[key]), end="", flush=True)
                 output.pop(key, None)
-                if event["Action"] != "skip":
+                if event["Action"] == "pass":
                     timings.append((event.get("Elapsed", 0), package, test))
         returncode = process.wait()
     if returncode:
@@ -178,17 +178,27 @@ def run_native_tests(command, directory, environment):
     return returncode, [timing for timing in timings if timing[1] not in cached]
 
 
+def successful_test_timings(filename):
+    for case in ET.parse(filename).iter("testcase"):
+        if "/" in case.get("name", "") or any(case.find(status) is not None for status in ("failure", "error", "skipped")):
+            continue
+        if "time" not in case.attrib:
+            continue
+        seconds = float(case.attrib["time"])
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError(f"invalid test duration in {filename}")
+        yield seconds, case.attrib["classname"], case.attrib["name"]
+
+
 def print_slowest(directory, native_timings):
     timings = list(native_timings)
     for filename in sorted(directory.glob("*.xml")):
-        for case in ET.parse(filename).iter("testcase"):
-            if case.find("skipped") is None and "/" not in case.get("name", ""):
-                timings.append((float(case.get("time", "0")), case.get("classname", ""), case.get("name", "")))
-    print("\nSlowest completed tests on this runner (actual elapsed; top-level tests/suites):", flush=True)
+        timings.extend(successful_test_timings(filename))
+    print("\nSlowest successful tests on this runner (actual elapsed; top-level tests/suites):", flush=True)
     for index, (seconds, package, test) in enumerate(sorted(timings, key=lambda item: (-item[0], item[1], item[2]))[:3], 1):
         print(f"  {index}. {seconds:.3f}s  {package}.{test}", flush=True)
     if not timings:
-        print("  No completed tests recorded.", flush=True)
+        print("  No successful tests recorded.", flush=True)
 
 
 def run_shard(root, packages, durations, parallel):
@@ -236,13 +246,8 @@ def run_shard(root, packages, durations, parallel):
 def update_profile(profile, reports):
     samples = collections.defaultdict(list)
     for filename in reports:
-        for case in ET.parse(filename).iter("testcase"):
-            if case.find("failure") is not None or case.find("skipped") is not None:
-                continue
-            seconds = float(case.get("time", "0"))
-            if not math.isfinite(seconds) or seconds < 0:
-                raise ValueError(f"invalid test duration in {filename}")
-            samples[(case.attrib["classname"], case.attrib["name"])].append(seconds)
+        for seconds, package, test in successful_test_timings(filename):
+            samples[(package, test)].append(seconds)
     for (package, test), values in samples.items():
         profile["tests"][f"{package}.{test}"] = round(statistics.median(values), 3)
     for package in {package for package, _ in samples}:

@@ -120,8 +120,11 @@ standard ten-runner layout.
 The client and tools modules retain their existing `deadlock` test tags in
 NextGen CI; the root and integration modules also use `nextgen`.
 
-Each runner prints its three slowest completed top-level tests or suites using
-actual elapsed times from that run, including when tests fail. Root and
+Each runner prints its three slowest successful top-level tests or suites using
+actual elapsed times from that run. A failed job still prints the summary for
+tests that passed. Failed, errored, skipped, and incomplete tests are excluded
+from both the ranking and historical duration updates; a failed sample never
+replaces a previously successful timing. Root and
 integration timings reuse the existing JUnit reports. Client and tools tests
 use `go test -json` with the same package-level test execution; successful test
 logs are suppressed and failure logs are retained. Subtests are excluded from
