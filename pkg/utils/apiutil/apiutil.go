@@ -112,7 +112,7 @@ func TagJSONError(err error) error {
 	return err
 }
 
-// ErrorResp writes a structured response for native HTTP errors and legacy errcode values.
+// ErrorResp writes a structured response for HTTP errors in a Cause or Unwrap chain.
 // Other errors produce HTTP status 500 and a JSON string.
 // A nil error also produces HTTP status 500 and is logged at the error level.
 func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
@@ -127,50 +127,20 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 		return
 	}
 	w.Header().Set("TiDB-Error-Code", httpErr.Code())
-	rd.JSON(w, httpErr.HTTPCode(), newHTTPErrorResponse(httpErr))
-}
-
-type httpErrorResponse struct {
-	Code      string              `json:"code"`
-	Msg       string              `json:"msg"`
-	Data      any                 `json:"data"`
-	Operation string              `json:"operation,omitempty"`
-	Stack     errors.StackTrace   `json:"stack,omitempty"`
-	Others    []httpErrorResponse `json:"others,omitempty"`
-}
-
-// newHTTPErrorResponse preserves the legacy JSON fields and additional-error order.
-func newHTTPErrorResponse(err errs.HTTPError) httpErrorResponse {
-	response := httpErrorResponse{Code: err.Code(), Msg: err.Error(), Data: err.GetClientData()}
-	for _, value := range []any{err, response.Data} {
-		if operation, ok := value.(interface{ GetOperation() string }); ok {
-			response.Operation = operation.GetOperation()
-			if response.Operation != "" {
-				break
-			}
-		}
-	}
-	if errs.IsInternalHTTPError(err) {
+	response := httpErrorResponse{Code: httpErr.Code(), Msg: err.Error(), Data: httpErr.GetClientData()}
+	if errs.IsInternalHTTPError(httpErr) {
 		if tracer := errs.GetStackTracer(err); tracer != nil {
 			response.Stack = tracer.StackTrace()
 		}
 	}
-	if group, ok := err.(errors.ErrorGroup); ok {
-		items := group.Errors()
-		if len(items) > 1 {
-			for _, item := range items[1:] {
-				// Avoid collecting an already coded member's chain again.
-				other := errs.AsHTTPError(item)
-				if other == nil {
-					other = errs.FindHTTPError(item)
-				}
-				if other != nil {
-					response.Others = append(response.Others, newHTTPErrorResponse(other))
-				}
-			}
-		}
-	}
-	return response
+	rd.JSON(w, httpErr.HTTPCode(), response)
+}
+
+type httpErrorResponse struct {
+	Code  string            `json:"code"`
+	Msg   string            `json:"msg"`
+	Data  any               `json:"data"`
+	Stack errors.StackTrace `json:"stack,omitempty"`
 }
 
 // GetIPPortFromHTTPRequest returns http client host IP and port from context.

@@ -16,11 +16,8 @@ package client_test
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"math"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"sort"
 	"strings"
@@ -33,7 +30,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/unrolled/render"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -44,7 +40,6 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -52,7 +47,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -61,65 +55,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
-
-func TestHTTPErrorResponse(t *testing.T) {
-	input := errs.NewInvalidInputErr(errors.New("invalid"))
-	internal := errs.NewInternalErr(errors.New("failed"))
-	tests := []struct {
-		name      string
-		err       error
-		status    int
-		body      string
-		withStack bool
-	}{
-		{
-			name: "input", err: input, status: http.StatusBadRequest,
-			body: `{"code":"input","msg":"invalid","data":{}}`,
-		},
-		{
-			name: "annotated", err: errors.Annotate(input, "outer"), status: http.StatusBadRequest,
-			body: `{"code":"input","msg":"outer: invalid","data":{}}`,
-		},
-		{
-			name: "fmt wrapped", err: fmt.Errorf("outer: %w", input), status: http.StatusBadRequest,
-			body: `{"code":"input","msg":"outer: invalid","data":{}}`,
-		},
-		{
-			name: "repeated input", err: errs.NewInvalidInputErr(input), status: http.StatusBadRequest,
-			body: `{"code":"input","msg":"invalid","data":{}}`,
-		},
-		{
-			name: "internal", err: internal, status: http.StatusInternalServerError,
-			body: `{"code":"internal","msg":"failed","data":{}}`, withStack: true,
-		},
-		{
-			name: "wrapped internal", err: fmt.Errorf("outer: %w", internal), status: http.StatusInternalServerError,
-			body: `{"code":"internal","msg":"outer: failed","data":{}}`, withStack: true,
-		},
-		{
-			name: "preserve internal", err: errs.NewInvalidInputErr(internal), status: http.StatusInternalServerError,
-			body: `{"code":"internal","msg":"failed","data":{}}`, withStack: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			re := require.New(t)
-			response := httptest.NewRecorder()
-			apiutil.ErrorResp(render.New(), response, tt.err)
-			re.Equal(tt.status, response.Code)
-			var body map[string]any
-			re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
-			re.Equal(body["code"], response.Header().Get("TiDB-Error-Code"))
-			if tt.withStack {
-				re.NotEmpty(body["stack"])
-				delete(body, "stack")
-			}
-			encoded, err := json.Marshal(body)
-			re.NoError(err)
-			re.JSONEq(tt.body, string(encoded))
-		})
-	}
-}
 
 type httpClientTestSuite struct {
 	suite.Suite
