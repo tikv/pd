@@ -257,6 +257,127 @@ func TestAffinityCheckerLearnerPreservesWitness(t *testing.T) {
 	}
 }
 
+func TestAffinityCheckerPreservesWitness(t *testing.T) {
+	for _, joint := range []bool{false, true} {
+		t.Run("joint="+strconv.FormatBool(joint), func(t *testing.T) {
+			for _, tt := range []struct {
+				name    string
+				voters  []uint64
+				learner bool
+			}{
+				{"no-learner", []uint64{4, 2, 3}, false},
+				{"non-conflicting-learner", []uint64{4, 2, 3}, true},
+				{"replace-two-voters", []uint64{4, 2, 5}, true},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					re := require.New(t)
+					c, tc, _ := newLearnerConflictController(t)
+					tc.SetEnableUseJointConsensus(joint)
+					tc.SetEnableWitness(true)
+					rule := tc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+					rule.Count = 2
+					re.NoError(tc.GetRuleManager().SetRule(rule))
+					re.NoError(tc.GetRuleManager().SetRule(&placement.Rule{
+						GroupID: placement.DefaultGroupID, ID: "pinned-witness", Role: placement.Voter, Count: 1, IsWitness: true,
+						LabelConstraints: []placement.LabelConstraint{{Key: "ID", Op: placement.In, Values: []string{"2"}}},
+					}))
+					region := tc.GetRegion(1)
+					if tt.learner {
+						tc.AddRegionStore(10, 10)
+						tc.SetStoreLabel(10, map[string]string{"ID": "10", "engine": "tiflash"})
+						learnerRule := newLearnerRule("10")
+						learnerRule.GroupID = "tiflash"
+						learnerRule.LabelConstraints = append(learnerRule.LabelConstraints,
+							placement.LabelConstraint{Key: "engine", Op: placement.In, Values: []string{"tiflash"}})
+						re.NoError(tc.GetRuleManager().SetRule(learnerRule))
+						region = putLearners(tc, 1, 10)
+					}
+					region = region.Clone(core.WithWitness(region.GetStorePeer(2).GetId()))
+					tc.PutRegion(region)
+					manager := tc.GetAffinityManager()
+					const id = "retained-witness"
+					re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+						ID: id, LeaderStoreID: 4, VoterStoreIDs: tt.voters,
+					}, region.GetStartKey(), region.GetEndKey()))
+					var op *operator.Operator
+					for range 50 {
+						ops := c.CheckRegion(region)
+						re.Len(ops, 1)
+						op = ops[0]
+						state := manager.GetAffinityGroupState(id)
+						re.True(state.AffinitySchedulingAllowed)
+						re.Equal(uint64(4), state.LeaderStoreID)
+						re.ElementsMatch(tt.voters, state.VoterStoreIDs)
+					}
+					moved := applyLearnerOperator(t, tc, op)
+					re.Equal(region.GetStorePeer(2), moved.GetStorePeer(2))
+					re.Equal(region.GetLearners(), moved.GetLearners())
+					re.Equal(uint64(4), moved.GetLeader().GetStoreId())
+					storeIDsEq(re, slices.Clone(tt.voters), moved.GetVoters())
+					re.True(tc.GetRuleManager().FitRegionWithoutCache(tc, moved).IsSatisfied())
+					re.Empty(c.CheckRegion(moved))
+					re.Equal(affinity.PhaseStable, manager.GetAffinityGroupState(id).Phase)
+				})
+			}
+		})
+	}
+}
+
+func TestCloneRegionWithPeerStoresPreservesWitness(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		voters []uint64 // First voter is the target leader.
+	}{
+		{"retained-witness", []uint64{4, 2, 5}},
+		{"removed-witness", []uint64{4, 5, 3}},
+		{"removed-witness-retained-leader", []uint64{1, 4, 5}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			_, tc, _ := newLearnerConflictController(t)
+			tc.SetEnableUseJointConsensus(true)
+			tc.SetEnablePlacementRules(false)
+			tc.AddRegionStore(10, 10)
+			region := tc.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{10})
+			region = region.Clone(core.WithWitness(region.GetStorePeer(2).GetId()))
+			roles := map[uint64]placement.PeerRoleType{10: placement.Learner}
+			for _, storeID := range tt.voters {
+				roles[storeID] = placement.Voter
+			}
+			roles[tt.voters[0]] = placement.Leader
+			for range 50 {
+				target := cloneRegionWithReplacePeerStores(region, tt.voters[0], tt.voters...)
+				re.NotNil(target)
+				re.Same(target.GetStorePeer(tt.voters[0]), target.GetLeader())
+				re.False(target.GetLeader().GetIsWitness())
+				re.Equal(region.GetLearners(), target.GetLearners())
+				storeIDsEq(re, slices.Clone(tt.voters), target.GetVoters())
+				for _, storeID := range tt.voters {
+					peer := target.GetStoreVoter(storeID)
+					re.Equal(metapb.PeerRole_Voter, peer.GetRole())
+					if old := region.GetStoreVoter(storeID); old != nil {
+						re.Equal(old, peer)
+					} else {
+						re.False(peer.GetIsWitness(), "new voter on store %d", storeID)
+					}
+				}
+				op, err := operator.CreateMoveRegionOperator("test", tc, region, operator.OpAffinity, roles)
+				re.NoError(err)
+				tc.PutRegion(region)
+				moved := applyLearnerOperator(t, tc, op)
+				for _, peer := range target.GetPeers() {
+					actual := moved.GetStorePeer(peer.GetStoreId())
+					re.NotNil(actual)
+					re.Equal(peer.GetRole(), actual.GetRole())
+					re.Equal(peer.GetIsWitness(), actual.GetIsWitness())
+				}
+				re.True(region.GetStorePeer(2).GetIsWitness())
+				re.Equal(uint64(1), region.GetLeader().GetStoreId())
+			}
+		})
+	}
+}
+
 // The target drops the voters on stores 1 and 3. A learner on store 1 would
 // share a zone with the learner on store 5, so the learner on store 4 takes
 // store 3 instead, although store 1 comes first.

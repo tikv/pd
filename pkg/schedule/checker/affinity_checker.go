@@ -17,6 +17,7 @@ package checker
 import (
 	"bytes"
 	"context"
+	"math"
 	"slices"
 	"time"
 
@@ -275,22 +276,7 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		kind |= operator.OpLeader
 	}
 
-	var op *operator.Operator
-	var err error
-	if movedLearners {
-		// Match the witness flags by store, as in the validated learner layout.
-		peers := make(map[uint64]*metapb.Peer, len(roles))
-		for storeID, role := range roles {
-			peers[storeID] = &metapb.Peer{
-				StoreId: storeID, Role: role.MetaPeerRole(),
-				IsWitness: region.GetStorePeer(storeID).GetIsWitness(),
-			}
-		}
-		op, err = operator.NewBuilder("affinity-move-region", c.cluster, region).
-			SetPeers(peers).SetExpectedRoles(roles).Build(kind)
-	} else {
-		op, err = operator.CreateMoveRegionOperator("affinity-move-region", c.cluster, region, kind, roles)
-	}
+	op, err := operator.CreateMoveRegionOperator("affinity-move-region", c.cluster, region, kind, roles)
 	if err != nil {
 		log.Warn("create affinity move region operator failed",
 			zap.Uint64("region-id", region.GetID()),
@@ -468,13 +454,6 @@ func (c *AffinityChecker) allowAffinityMerge(region, adjacent *core.RegionInfo) 
 	return true
 }
 
-// Presence flags for tracking store locations
-const (
-	inSource = 1 << 0 // 0b01: if only in source
-	inTarget = 1 << 1 // 0b10: if only in target
-	// inBoth = inSource | inTarget = 0b11: store exists in both
-)
-
 // cloneRegionWithReplacePeerStores clones the Region and updates its voters and leader to the target stores.
 // If the number of voters does not match or the leader is not among the target voters,
 // it returns nil to indicate failure. Source and target placement must not contain duplicate store IDs respectively.
@@ -489,33 +468,22 @@ func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uin
 		return nil
 	}
 
-	// presences records whether a storeID exists in the source and/or target
-	presences := make(map[uint64]int, len(sourceVoters)+len(voterStoreIDs))
-	for _, voter := range sourceVoters {
-		presences[voter.GetStoreId()] |= inSource
-	}
-	for _, voterStoreID := range voterStoreIDs {
-		presences[voterStoreID] |= inTarget
-	}
-
-	storesToRemove := make([]uint64, 0, len(sourceVoters))
-	storesToAdd := make([]uint64, 0, len(voterStoreIDs))
-	for storeID, presence := range presences {
-		switch presence {
-		case inSource:
-			storesToRemove = append(storesToRemove, storeID)
-		case inTarget:
-			storesToAdd = append(storesToAdd, storeID)
+	peers := make([]*metapb.Peer, 0, len(region.GetPeers()))
+	var leader *metapb.Peer
+	for _, storeID := range voterStoreIDs {
+		peer := region.GetStoreVoter(storeID)
+		if peer == nil {
+			// Placement-rule fitting identifies the leader by peer ID.
+			peer = &metapb.Peer{Id: math.MaxUint64 - storeID, StoreId: storeID, Role: metapb.PeerRole_Voter}
+		}
+		peers = append(peers, peer)
+		if storeID == leaderStoreID {
+			leader = peer
 		}
 	}
+	peers = append(peers, region.GetLearners()...)
 
-	options := make([]core.RegionCreateOption, 0, len(storesToRemove)+1)
-	for i, removeStoreID := range storesToRemove {
-		options = append(options, core.WithReplacePeerStore(removeStoreID, storesToAdd[i]))
-	}
-	options = append(options, core.WithReplaceLeaderStore(leaderStoreID))
-
-	return region.Clone(options...)
+	return region.Clone(core.SetPeers(peers), core.WithLeader(leader))
 }
 
 // RecordOpSuccess is called when an operator completes successfully.
