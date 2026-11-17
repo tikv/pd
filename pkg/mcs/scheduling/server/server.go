@@ -524,7 +524,11 @@ func (s *Server) startMetaConfWatcher() (err error) {
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.persistConfig, s.storage)
+=======
+	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, basicCluster, storage)
+>>>>>>> e6e8d9364c (schedule: keep store limiter rates in sync with configuration (#11463))
 	if err != nil {
 		return err
 	}

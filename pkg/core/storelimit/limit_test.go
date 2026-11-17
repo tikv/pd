@@ -42,6 +42,9 @@ func TestStoreLimit(t *testing.T) {
 	limit.Reset(float64(rate), AddPeer)
 	re.False(limit.Available(influence, AddPeer, constant.Low))
 	re.False(limit.Take(influence, AddPeer, constant.Low))
+	limit.Refresh(AddPeer, func() float64 { return float64(rate) })
+	re.False(limit.Available(influence, AddPeer, constant.Low))
+	re.False(limit.Take(influence, AddPeer, constant.Low))
 
 	limit.Reset(0, AddPeer)
 	re.True(limit.Available(influence, AddPeer, constant.Low))
