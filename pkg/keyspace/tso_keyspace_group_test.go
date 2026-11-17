@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -516,8 +517,7 @@ func updateKeyspaceForGroupForTest(m *GroupManager, id string, keyspaceID uint32
 	err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		return op(txn)
 	})
-	cb(err)
-	return err
+	return cb(err)
 }
 
 func TestKeyspaceGroupTestSuite(t *testing.T) {
@@ -531,6 +531,9 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store, nil)
 	idAllocator := mockid.NewIDAllocator()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
+	var err error
+	cluster.RegionLabeler, err = labeler.NewRegionLabeler(suite.ctx, store, time.Hour)
+	re.NoError(err)
 	suite.kg = NewKeyspaceManager(suite.ctx, store, cluster, idAllocator, &mockConfig{}, suite.kgm, nil)
 	re.NoError(suite.kgm.Bootstrap(suite.ctx))
 }
@@ -740,8 +743,8 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceForGroupTxnOpUsesCommitte
 	})
 	re.NoError(err)
 
-	deleteCb(nil)
-	addCb(nil)
+	re.NoError(deleteCb(nil))
+	re.NoError(addCb(nil))
 
 	stored, err := suite.kgm.GetKeyspaceGroupByID(2)
 	re.NoError(err)

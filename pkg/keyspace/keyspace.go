@@ -17,6 +17,8 @@ package keyspace
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"maps"
 	"strconv"
 	"sync"
 	"time"
@@ -78,6 +80,11 @@ const (
 	// CheckKeyspaceRegionBound's regression tests can name this key
 	// explicitly and guard against ever special-casing it again.
 	WaitRegionSplitKey = "wait_region_split"
+
+	// creationPendingKey is a PD-owned creation token. Its presence means the
+	// keyspace is waiting for its region split, not an ordinary disabled keyspace.
+	// A new token on ID reuse fences completion by an older create request.
+	creationPendingKey = "creation_pending"
 )
 
 // Config is the interface for keyspace config.
@@ -297,7 +304,9 @@ func (manager *Manager) repairReservedKeyspace(id uint32) error {
 		return err
 	}
 	for _, cb := range txnCbs {
-		cb(nil)
+		if err := cb(nil); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -323,27 +332,24 @@ func (manager *Manager) createKeyspaceInner(name string, config map[string]strin
 	if err := validateName(name); err != nil {
 		return nil, err
 	}
-	// Check if keyspace with that name already exists before allocating ID.
-	// This prevents unnecessary ID allocation when the name already exists.
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		nameExists, _, err := manager.store.LoadKeyspaceID(txn, name)
-		if err != nil {
-			return err
-		}
-		if nameExists {
-			return errs.ErrKeyspaceExists
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	if _, ok := config[creationPendingKey]; ok {
+		return nil, errors.New("creation_pending is managed by PD")
 	}
+	if len(ids) > 0 {
+		if err := validateID(ids[0]); err != nil {
+			return nil, err
+		}
+	}
+	tracer.waitSplit = manager.config.ToWaitRegionSplit()
+	if existing, err := manager.loadPendingKeyspace(name, ids...); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return manager.resumeKeyspaceCreation(tracer, existing)
+	}
+	var err error
 	var newID uint32
 	if len(ids) > 0 {
 		newID = ids[0]
-		if err = validateID(newID); err != nil {
-			return nil, err
-		}
 	} else {
 		// Allocate new keyspaceID.
 		newID, err = manager.allocID()
@@ -352,7 +358,6 @@ func (manager *Manager) createKeyspaceInner(name string, config map[string]strin
 		}
 	}
 	tracer.SetKeyspace(newID, name)
-	tracer.waitSplit = manager.config.ToWaitRegionSplit()
 	tracer.OnAllocateIDFinished()
 	if isProtectedKeyspaceID(newID) {
 		err := newModifyProtectedKeyspaceError()
@@ -392,7 +397,57 @@ func (manager *Manager) createKeyspaceInner(name string, config map[string]strin
 		}
 	}
 	tracer.OnGetConfigFinished()
-	return manager.createKeyspaceWithoutCheck(tracer, config, createTime)
+	meta, err := manager.createKeyspaceWithoutCheck(tracer, config, createTime)
+	if errors.Cause(err) == errs.ErrKeyspaceExists {
+		// Another create may have committed after the preflight name check.
+		existing, loadErr := manager.loadPendingKeyspace(name, ids...)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if existing != nil {
+			return manager.resumeKeyspaceCreation(tracer, existing)
+		}
+	}
+	return meta, err
+}
+
+func (manager *Manager) loadPendingKeyspace(name string, ids ...uint32) (*keyspacepb.KeyspaceMeta, error) {
+	var meta *keyspacepb.KeyspaceMeta
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		found, id, err := manager.store.LoadKeyspaceID(txn, name)
+		if err != nil || !found {
+			return err
+		}
+		if len(ids) > 0 && ids[0] != id {
+			return errs.ErrKeyspaceExists
+		}
+		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
+		if err != nil {
+			return err
+		}
+		if meta == nil {
+			return errs.ErrKeyspaceNotFound
+		}
+		if meta.GetState() != keyspacepb.KeyspaceState_DISABLED || meta.GetConfig()[creationPendingKey] == "" {
+			return errs.ErrKeyspaceExists
+		}
+		return nil
+	})
+	return meta, err
+}
+
+func (manager *Manager) resumeKeyspaceCreation(tracer *createKeyspaceTracer, meta *keyspacepb.KeyspaceMeta) (*keyspacepb.KeyspaceMeta, error) {
+	tracer.SetKeyspace(meta.GetId(), meta.GetName())
+	tracer.OnAllocateIDFinished()
+	tracer.OnGetConfigFinished()
+	manager.refreshKeyspaceMetaCache(meta.GetId())
+	if err := manager.kgm.refreshKeyspaceGroupForKeyspace(meta); err != nil {
+		return nil, errors.Annotate(err, "refresh keyspace group cache failed; retry create to continue")
+	}
+	if err := manager.refreshKeyspaceRegionLabel(meta.GetId()); err != nil {
+		return nil, errors.Annotate(err, "refresh keyspace region label cache failed; retry create to continue")
+	}
+	return manager.finishKeyspaceCreation(tracer, meta)
 }
 
 func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer, config map[string]string, createTime int64) (*keyspacepb.KeyspaceMeta, error) {
@@ -401,6 +456,9 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		config = make(map[string]string)
 	}
 	config[RegionBoundType] = boundType.String()
+	// Keep the internal token out of the caller's request map so the same
+	// request can be retried without trying to set a PD-owned field.
+	config = maps.Clone(config)
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: tracer.keyspaceID},
@@ -410,9 +468,13 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		StateChangedAt: createTime,
 		Config:         config,
 	}
-	// if waitSplit is false, we can enable the keyspace directly, otherwise we need to wait for the split to finish.
-	if !tracer.waitSplit {
+	// Reserved keyspaces bootstrap without waiting. Ordinary keyspaces retain
+	// a recoverable identity until post-commit cache synchronization succeeds,
+	// even when this request does not wait for the region split.
+	if isProtectedKeyspaceID(tracer.keyspaceID) {
 		keyspace.State = keyspacepb.KeyspaceState_ENABLED
+	} else {
+		config[creationPendingKey] = rand.Text()
 	}
 
 	txnOps := make([]txnOp, 0, 4)
@@ -458,47 +520,43 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 	// here is only used to serialize the creation transaction.
 	var groupID uint64
 	if gid := config[TSOKeyspaceGroupIDKey]; gid != "" {
-		groupID, err = strconv.ParseUint(gid, 10, 64)
+		groupID, err = strconv.ParseUint(gid, 10, 32)
 		if err != nil {
 			return nil, err
 		}
 	}
 	err = manager.runCreateKeyspaceTxn(assignToMetaServiceGroup, uint32(groupID), txnOps)
-	for _, cb := range txnCbs {
-		if cb != nil {
-			cb(err)
-		}
-	}
 	if err != nil {
 		log.Warn("[keyspace] txn execute failed", errs.ZapError(err))
 		return nil, err
 	}
+	for _, cb := range txnCbs {
+		if err := cb(nil); err != nil {
+			return nil, errors.Annotate(err, "keyspace records committed but cache refresh failed; retry create to continue")
+		}
+	}
+	return manager.finishKeyspaceCreation(tracer, keyspace)
+}
 
+func (manager *Manager) finishKeyspaceCreation(tracer *createKeyspaceTracer, keyspace *keyspacepb.KeyspaceMeta) (*keyspacepb.KeyspaceMeta, error) {
 	tracer.OnSaveKeyspaceMetaFinished()
-
-	// Split keyspace region.
-	if tracer.waitSplit {
-		err = manager.waitKeyspaceRegionSplit(tracer.keyspaceID, boundType)
-		failpoint.Inject("waitSplitKeyspaceFailed", func() {
-			err = errors.New("failpoint triggered: waitSplitKeyspaceFailed")
-		})
-		if err == nil {
-			// only enable the keyspace after the split is finished, so that the keyspace is not used before the split is finished.
-			err = manager.enableNewKeyspace(tracer.keyspaceID, createTime)
-			if err == nil {
-				keyspace.State = keyspacepb.KeyspaceState_ENABLED
-				keyspace.StateChangedAt = createTime
-			}
+	if keyspace.GetConfig()[creationPendingKey] != "" {
+		var err error
+		if tracer.waitSplit {
+			err = manager.waitKeyspaceRegionSplit(keyspace.GetId(), keyTypeStringToRegionBoundType(keyspace.GetConfig()[RegionBoundType]))
+		}
+		if tracer.waitSplit {
+			failpoint.Inject("waitSplitKeyspaceFailed", func() {
+				err = errors.New("failpoint triggered: waitSplitKeyspaceFailed")
+			})
 		}
 		if err != nil {
-			if rbErr := manager.rollbackCreateKeyspace(keyspace); rbErr != nil {
-				log.Warn("[create-keyspace] failed to rollback keyspace after enable failed",
-					zap.Uint32("keyspace-id", tracer.keyspaceID),
-					zap.String("keyspace-name", tracer.keyspaceName),
-					errs.ZapError(rbErr),
-				)
-			}
-			return nil, err
+			return nil, errors.Annotate(err, "wait for keyspace region split failed; retry create to continue")
+		}
+		failpoint.InjectCall("beforeEnableCreatedKeyspace")
+		keyspace, err = manager.enableNewKeyspace(keyspace)
+		if err != nil {
+			return nil, errors.Annotate(err, "enable keyspace transaction failed; query keyspace or retry create")
 		}
 	}
 
@@ -510,301 +568,6 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		zap.String("keyspace-name", keyspace.GetName()),
 	)
 	return keyspace, nil
-}
-
-// rollbackCreateKeyspace undoes what createKeyspaceWithoutCheck committed,
-// when the wait-split step after it fails. It does this as a single
-// compensating transaction - identity check, meta deletion, TSO
-// keyspace-group membership deletion, and region label rule deletion all
-// committing together or not at all - rather than through any intermediate
-// state, so there is never a window in which part of the compensation has
-// applied and part has not.
-//
-// An earlier version of this used a permanent TOMBSTONE seal as an internal
-// lock, transitioning the keyspace to it as soon as its identity was
-// confirmed and only then separately cleaning up TSO group membership and
-// the meta. That had its own problem: if the seal committed but the later
-// meta deletion never did (e.g. persistent storage trouble), the keyspace
-// was stuck in TOMBSTONE forever - a terminal state with no legal way out -
-// which is worse than simply leaving it DISABLED. See #10461's own
-// suggested fix: "make intermediate states explicit and safely recoverable"
-// is listed as an alternative to compensation/rollback, not something
-// rollback needs to add a new mid-cleanup state to satisfy. This version
-// avoids that by never introducing an intermediate state at all - identity
-// is checked against durable state (id, still DISABLED, still named
-// expectedName) inside the very same transaction that deletes the meta,
-// TSO group membership, and label rule, not as a separate check beforehand
-// that something else could invalidate before the deletes commit. If every
-// retry fails - most likely the target TSO keyspace group being
-// persistently mid split/merge - nothing has been committed by any of them
-// (each attempt is all-or-nothing), so this simply gives up and leaves the
-// keyspace exactly as createKeyspaceWithoutCheck left it: DISABLED, with
-// its meta, TSO group membership, and label rule all intact and
-// self-consistent - the same explicit, recoverable state #10461 already
-// accepts as a valid outcome, never a half-deleted one.
-//
-// Known limitation: (id, name, DISABLED) is still not a fully unique
-// identity for this rollback. If the original keyspace this call is for is
-// archived and removed while wait-split is still running (e.g. by an
-// operator, through the normal RemoveKeyspacesFromGroup/RemoveKeyspace
-// path), and a CreateKeyspaceByID call then reuses the same id *and* the
-// same name before this stale rollback runs, this will adopt the
-// replacement and delete it instead of silently doing nothing - the
-// replacement is otherwise indistinguishable from the keyspace this
-// rollback actually created. This requires two independent, unlikely
-// events to line up (the original being manually archived+removed while
-// its own create call is still in flight, and the id+name both being
-// reused before rollback gets to run) and is accepted rather than guarded
-// against - see this PR's description for the trade-off. The far more
-// common id-reuse case, a different name, is not affected: the name check
-// above already rejects it.
-//
-// The TSO keyspace group to delete membership from is resolved via
-// GetGroupByKeyspaceID (the GroupManager's cache of current membership) on
-// every attempt, not from this keyspace's own Config[TSOKeyspaceGroupIDKey]:
-// a TSO keyspace-group split/merge moves keyspaces between groups by
-// rewriting the groups' own Keyspaces lists without ever touching that
-// field (see the comment on TSOKeyspaceGroupIDKey), so it can be
-// permanently wrong, not just transiently stale. GetGroupByKeyspaceID
-// itself is accurate with respect to split/merge specifically - those hold
-// GroupManager.Lock for their whole duration and update storage and cache
-// under it together - but can still lag storage briefly behind a concurrent
-// creation's or another rollback's own group-membership commit, both of
-// which stage their change in their own transaction and update the cache
-// afterward in a separate callback (see updateKeyspaceForGroupTxnOp). The
-// delete built from it is therefore storage-verified within the same
-// transaction it commits in (buildRollbackGroupDeleteOp), so a stale or
-// since-changed cache read only ever fails that attempt (triggering a
-// retry, which re-resolves the group fresh) rather than silently
-// committing a delete that did not actually apply. A cache miss
-// (GetGroupByKeyspaceID finding no group at all) gets the same treatment,
-// not a free pass to skip the group delete - see errRollbackGroupNotResolved.
-//
-// buildRollbackGroupDeleteOp is always called before metaLock is acquired,
-// never while holding it: it touches GroupManager.RLock/Lock, while
-// RemoveKeyspacesFromGroup takes GroupManager.Lock first and then metaLock
-// (via RemoveKeyspace) - holding metaLock across it would invert that order
-// and can deadlock against a concurrent RemoveKeyspacesFromGroup. metaLock
-// is scoped to just the RunTxn call below, which never touches GroupManager.
-func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
-	var regionLabeler *labeler.RegionLabeler
-	var ruleID string
-	if cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
-		regionLabeler = cl.GetRegionLabeler()
-		ruleID = getRegionLabelID(keyspace.GetId())
-	}
-	id := keyspace.GetId()
-	expectedName := keyspace.GetName()
-
-	metaOp := func(txn kv.Txn) error {
-		current, err := manager.store.LoadKeyspaceMeta(txn, id)
-		if err != nil {
-			return err
-		}
-		if current == nil || current.GetState() != keyspacepb.KeyspaceState_DISABLED || current.GetName() != expectedName {
-			return errRollbackTargetChanged
-		}
-		if err := manager.unassignKeyspaceFromMetaServiceGroup(txn, current); err != nil {
-			return err
-		}
-		if err := manager.store.RemoveKeyspace(txn, id, expectedName); err != nil {
-			return err
-		}
-		if regionLabeler == nil {
-			return nil
-		}
-		return regionLabeler.GetRuleStorage().DeleteRegionRule(txn, ruleID)
-	}
-
-	var groupCb txnCb
-	var committed, targetChanged bool
-	var err error
-	backoff := time.Second
-retryLoop:
-	for i := range 3 {
-		// Resolved before metaLock is acquired, deliberately: this touches
-		// GroupManager.RLock/Lock (GetGroupByKeyspaceID,
-		// updateKeyspaceForGroupTxnOp), while RemoveKeyspacesFromGroup takes
-		// GroupManager.Lock first and then metaLock (via RemoveKeyspace) -
-		// holding metaLock across this call would invert that order and can
-		// deadlock against a concurrent RemoveKeyspacesFromGroup. metaLock is
-		// only ever held below, around RunTxn itself, which never touches
-		// GroupManager.
-		var groupOp txnOp
-		var groupID uint32
-		groupOp, groupID, groupCb, err = manager.buildRollbackGroupDeleteOp(id)
-		if err == nil {
-			ops := []txnOp{metaOp}
-			if groupOp != nil {
-				ops = append(ops, groupOp)
-			}
-			manager.metaLock.Lock(id)
-			err = manager.RunTxn(groupID, ops)
-			manager.metaLock.Unlock(id)
-			if err == nil {
-				committed = true
-				break retryLoop
-			}
-			if err == errRollbackTargetChanged { //nolint:errorlint // fixed sentinel, never wrapped
-				targetChanged = true
-				break retryLoop
-			}
-		}
-		if i < 2 {
-			// manager.ctx, not the caller's request context: this cleanup
-			// must run to completion even if the original CreateKeyspace
-			// call's context is cancelled (e.g. the client disconnected),
-			// but should stop promptly on server shutdown instead of
-			// blocking it for the rest of the backoff.
-			select {
-			case <-time.After(backoff):
-			case <-manager.ctx.Done():
-				err = manager.ctx.Err()
-				break retryLoop
-			}
-			backoff *= 2
-		}
-	}
-
-	if targetChanged {
-		return nil
-	}
-	if !committed {
-		log.Warn("[keyspace] rollback could not clean up failed create after retrying; leaving keyspace as DISABLED for manual handling",
-			zap.Uint32("keyspace-id", id), zap.String("keyspace-name", expectedName), errs.ZapError(err))
-		return err
-	}
-
-	if groupCb != nil {
-		groupCb(nil)
-	}
-	manager.refreshKeyspaceMetaCache(id)
-	if regionLabeler != nil {
-		// Re-read from storage rather than unconditionally deleting the
-		// cache entry: nothing reserves the "keyspaces/<id>" rule ID
-		// against the generic label-rule API, so a concurrent SetLabelRule
-		// on the same id could have already persisted and cached a
-		// replacement between our delete committing and this call - a bare
-		// delete would then remove that newer cache entry, leaving storage
-		// with the replacement but the cache believing it doesn't exist.
-		// See saveKeyspaceRegionLabelerTxnOp's callback for the same
-		// pattern.
-		found, err := regionLabeler.ReloadRuleFromStorage(ruleID)
-		if err != nil {
-			log.Error("failed to reload region label rule into cache after rollback, cache may be stale",
-				zap.Uint32("keyspace-id", id), zap.String("rule-id", ruleID), errs.ZapError(err))
-		} else if found {
-			log.Warn("region label rule was recreated by a concurrent writer before rollback's delete could be cached",
-				zap.Uint32("keyspace-id", id), zap.String("rule-id", ruleID))
-		}
-	}
-	return nil
-}
-
-// errRollbackTargetChanged means the record at id is no longer the keyspace
-// this rollback is cleaning up (identified by id, name, and create token
-// together, since id and name alone are not unique - see the function
-// comment on rollbackCreateKeyspace) by the time the compensating
-// transaction was about to commit. Not a transient failure: retrying cannot
-// succeed, since something else has legitimately taken over this identity
-// (a state change, or - once this keyspace is gone - an unrelated
-// CreateKeyspaceByID reusing its id and name).
-var errRollbackTargetChanged = errors.New("keyspace no longer identifies the same failed create, not rolling it back")
-
-// errRollbackGroupMembershipMoved means buildRollbackGroupDeleteOp's delete
-// found keyspaceID was not (or no longer) a member of the group
-// GetGroupByKeyspaceID had just resolved, by the time the compensating
-// transaction was about to commit - see the function comment on
-// rollbackCreateKeyspace for why GetGroupByKeyspaceID can still be wrong in
-// that narrow way. The keyspace's own identity is unaffected; the caller
-// should simply retry the whole compensating transaction, which re-resolves
-// the group fresh.
-var errRollbackGroupMembershipMoved = errors.New("keyspace group membership moved before the compensating transaction committed")
-
-// errRollbackGroupNotResolved means GetGroupByKeyspaceID could not find
-// keyspaceID in any group, outside classic mode. This is never a
-// legitimate state for a DISABLED keyspace to be in on its own: every
-// keyspace is added to a group at creation time, and the only path that
-// fully removes that membership (RemoveKeyspace, via RemoveKeyspacesFromGroup)
-// requires ARCHIVED or TOMBSTONE, neither of which this rollback's target
-// ever becomes. So a miss here can only be GetGroupByKeyspaceID's cache
-// lagging storage (see the function comment on rollbackCreateKeyspace), not
-// genuine absence - treating it as "nothing to clean up" would let the
-// compensating transaction delete the meta while storage still lists this
-// keyspace in whatever group it actually belongs to. Surfacing it as a
-// retryable error instead means the caller's retry loop re-resolves fresh
-// and, if every attempt still misses, gives up and leaves the keyspace
-// DISABLED rather than ever deleting the meta without having confirmed
-// there was truly no membership to remove.
-var errRollbackGroupNotResolved = errors.New("keyspace group membership not resolved, not safe to delete meta yet")
-
-// buildRollbackGroupDeleteOp resolves which TSO keyspace group keyspaceID
-// currently belongs to (via GetGroupByKeyspaceID) and returns a txnOp that
-// deletes it - meant to be committed as part of the same transaction as
-// rollbackCreateKeyspace's meta deletion, not a separate one, so the two can
-// never partially apply.
-//
-// This does not reuse updateKeyspaceForGroupTxnOp's own delete op: that one
-// silently no-ops (returns success) when keyspaceID is no longer where
-// GetGroupByKeyspaceID said it was by commit time, which is exactly right
-// for its other caller (a best-effort cleanup that must not block on a
-// moving target) but wrong here - it would let the whole compensating
-// transaction commit having deleted the meta without having actually
-// removed the group membership. The op built here fails the transaction
-// instead (errRollbackGroupMembershipMoved), so the caller retries against a
-// freshly-resolved group rather than losing track of a membership it never
-// actually cleaned up. updateKeyspaceForGroupTxnOp is still called for its
-// pre-check (group exists, not mid split/merge) and its post-commit
-// cache-refresh callback, both reused as-is.
-//
-// Returns a nil op and a nil callback, with a nil error, only if
-// manager.kgm is nil (classic mode): there is no group concept at all, so
-// rollbackCreateKeyspace's transaction only needs its meta op. If
-// GetGroupByKeyspaceID cannot resolve a group outside classic mode, that is
-// surfaced as an error (errRollbackGroupNotResolved) instead of also being
-// treated as "nothing to delete" - see that error's comment for why.
-func (manager *Manager) buildRollbackGroupDeleteOp(keyspaceID uint32) (op txnOp, groupID uint32, cb txnCb, err error) {
-	if manager.kgm == nil {
-		return nil, 0, nil, nil
-	}
-	groupID, userKind, err := manager.kgm.GetGroupByKeyspaceID(keyspaceID)
-	if err != nil {
-		// Not a cache hit, but not proof of absence either - see
-		// errRollbackGroupNotResolved. Surface it as retryable rather than
-		// treating it as nothing to delete.
-		return nil, 0, nil, errRollbackGroupNotResolved
-	}
-	_, cb, err = manager.kgm.updateKeyspaceForGroupTxnOp(userKind, strconv.FormatUint(uint64(groupID), 10), keyspaceID, opDelete)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	if cb == nil {
-		// manager.kgm is nil (classic mode): nothing to delete.
-		return nil, 0, nil, nil
-	}
-	// The candidate group has been decided; pause here for tests exercising
-	// what a concurrent group move (or state change, observed by metaOp
-	// inside the same transaction as this op) does to an in-flight retry
-	// attempt.
-	failpoint.InjectCall("rollbackGroupDeleteOpAfterLookup")
-	op = func(txn kv.Txn) error {
-		kg, err := manager.kgm.store.LoadKeyspaceGroup(txn, groupID)
-		if err != nil {
-			return err
-		}
-		if kg == nil || !slice.Contains(kg.Keyspaces, keyspaceID) {
-			return errRollbackGroupMembershipMoved
-		}
-		if kg.IsSplitting() {
-			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(groupID)
-		}
-		if kg.IsMerging() {
-			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(groupID)
-		}
-		kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-		return manager.kgm.store.SaveKeyspaceGroup(txn, kg)
-	}
-	return op, groupID, cb, nil
 }
 
 // runCreateKeyspaceTxn runs the keyspace creation operations in a single
@@ -826,11 +589,12 @@ func (manager *Manager) runCreateKeyspaceTxn(holdMetaGroupLock bool, groupID uin
 // creation transaction. The caller must hold the meta-service group manager's
 // read lock for the whole transaction (see runCreateKeyspaceTxn).
 func (manager *Manager) assignMetaServiceGroupTxnOp(keyspace *keyspacepb.KeyspaceMeta) (txnOp, txnCb) {
-	cb := func(err error) {
+	cb := func(err error) error {
 		if err != nil {
-			return
+			return err
 		}
 		manager.mgm.AttachEndpoints(keyspace.Config)
+		return nil
 	}
 	op := func(txn kv.Txn) error {
 		// Re-check under the lock: concurrent PATCHes may remove all groups or
@@ -880,12 +644,12 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 }
 
 type txnOp = func(txn kv.Txn) error
-type txnCb = func(err error)
+type txnCb = func(err error) error
 
 func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) (txnOp, txnCb) {
-	cb := func(err error) {
+	cb := func(err error) error {
 		if err != nil {
-			return
+			return err
 		}
 		// Re-read from storage instead of storing keyspace.Name/State captured
 		// here: this callback runs after txnLock is released (see the callback
@@ -893,6 +657,7 @@ func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) 
 		// concurrent UpdateKeyspaceState(ByID) call that already committed and
 		// cached a newer state. See refreshKeyspaceMetaCache.
 		manager.refreshKeyspaceMetaCache(keyspace.GetId())
+		return nil
 	}
 	return func(txn kv.Txn) error {
 		// Save keyspace ID.
@@ -939,9 +704,9 @@ func (manager *Manager) saveKeyspaceRegionLabelerTxnOp(id uint32, boundType regi
 		return nil, nil, err
 	}
 	regionLabeler := cl.GetRegionLabeler()
-	cb := func(err error) {
+	cb := func(err error) error {
 		if err != nil {
-			return
+			return err
 		}
 		// Re-read the rule from storage instead of caching the keyspaceRule
 		// snapshot captured above: this callback can run after a concurrent
@@ -953,26 +718,59 @@ func (manager *Manager) saveKeyspaceRegionLabelerTxnOp(id uint32, boundType regi
 		// and the cache update under one lock hold, so this can't itself
 		// race a concurrent writer the way a separate read-then-write pair
 		// would.
-		found, reloadErr := regionLabeler.ReloadRuleFromStorage(keyspaceRule.ID)
-		if reloadErr != nil {
-			log.Error("failed to reload region label rule into cache after commit, cache may be stale",
-				zap.Uint32("keyspace-id", id), zap.String("rule-id", keyspaceRule.ID), errs.ZapError(reloadErr))
-			return
-		}
-		if !found {
-			log.Warn("region label rule was deleted by a concurrent writer before it could be cached",
-				zap.Uint32("keyspace-id", id), zap.String("rule-id", keyspaceRule.ID))
-			return
+		if err := manager.refreshKeyspaceRegionLabel(id); err != nil {
+			return err
 		}
 		log.Info("added region label for keyspace",
 			zap.Uint32("keyspace-id", id),
 			zap.Any("label-rule", keyspaceRule),
 			zap.Stringer("key-type", boundType),
 		)
+		return nil
 	}
 	return func(txn kv.Txn) error {
 		return regionLabeler.GetRuleStorage().SaveRegionRule(txn, keyspaceRule.ID, keyspaceRule)
 	}, cb, nil
+}
+
+// refreshCreationCache retries cache reads, not the creation or enable transaction.
+func refreshCreationCache(ctx context.Context, refresh func() error) error {
+	var err error
+	for i := range 3 {
+		if err = refresh(); err == nil {
+			return nil
+		}
+		if i < 2 {
+			timer := time.NewTimer(time.Duration(i+1) * 100 * time.Millisecond)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			}
+		}
+	}
+	return err
+}
+
+func (manager *Manager) refreshKeyspaceRegionLabel(id uint32) error {
+	failpoint.Inject("skipSplitRegion", func() {
+		failpoint.Return(nil)
+	})
+	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
+	if !ok || cl.GetRegionLabeler() == nil {
+		return errors.New("cluster does not support region label")
+	}
+	return refreshCreationCache(manager.ctx, func() error {
+		found, err := cl.GetRegionLabeler().ReloadRuleFromStorage(getRegionLabelID(id))
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errors.Errorf("region label rule for keyspace %d not found", id)
+		}
+		return nil
+	})
 }
 
 func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBoundType) error {
@@ -1178,6 +976,9 @@ func checkKeyspaceConfigPreconditions(config map[string]string, preconditions ma
 
 func applyKeyspaceConfigMutations(config map[string]string, mutations []*Mutation) error {
 	for _, mutation := range mutations {
+		if mutation.Key == creationPendingKey {
+			return errors.New("creation_pending is managed by PD")
+		}
 		switch mutation.Op {
 		case OpPut:
 			config[mutation.Key] = mutation.Value
@@ -1478,7 +1279,8 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	return meta, nil
 }
 
-func (manager *Manager) enableNewKeyspace(id uint32, now int64) error {
+func (manager *Manager) enableNewKeyspace(expected *keyspacepb.KeyspaceMeta) (*keyspacepb.KeyspaceMeta, error) {
+	id := expected.GetId()
 	var meta *keyspacepb.KeyspaceMeta
 	var err error
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -1491,19 +1293,34 @@ func (manager *Manager) enableNewKeyspace(id uint32, now int64) error {
 		if meta == nil {
 			return errs.ErrKeyspaceNotFound
 		}
-		if err = manager.transformKeyspaceState(txn, meta, keyspacepb.KeyspaceState_ENABLED, now); err != nil {
-			return err
+		if meta.GetState() == keyspacepb.KeyspaceState_ENABLED {
+			return errs.ErrKeyspaceExists
 		}
+		if expected.GetConfig()[creationPendingKey] == "" || meta.GetConfig()[creationPendingKey] != expected.GetConfig()[creationPendingKey] || meta.GetName() != expected.GetName() {
+			return errors.New("keyspace creation is no longer pending for this request")
+		}
+		if meta.GetState() != keyspacepb.KeyspaceState_DISABLED {
+			return errs.ErrKeyspaceExists
+		}
+		delete(meta.Config, creationPendingKey)
+		meta.State = keyspacepb.KeyspaceState_ENABLED
+		meta.StateChangedAt = meta.GetCreatedAt()
+		failpoint.Inject("saveKeyspaceMetaFailed", func() {
+			failpoint.Return(errors.New("failpoint triggered: saveKeyspaceMetaFailed"))
+		})
 		return manager.store.SaveKeyspaceMeta(txn, meta)
 	})
 	if err != nil {
-		return err
+		// A commit error can mean the enable actually committed. Never leave
+		// a previously cached DISABLED state trusted after an uncertain result.
+		manager.refreshKeyspaceMetaCache(id)
+		return nil, err
 	}
 	manager.refreshKeyspaceMetaCache(meta.GetId())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
-	return nil
+	return meta, nil
 }
 
 // unassignKeyspaceFromMetaServiceGroup removes the keyspace's meta-service group
@@ -1547,6 +1364,15 @@ func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.Keys
 	// Consult state transition table to check if the operation is legal.
 	if !slice.Contains(stateTransitionTable[meta.GetState()], newState) {
 		return errors.Errorf("cannot change keyspace state from %s to %s", meta.GetState().String(), newState.String())
+	}
+	if newState == keyspacepb.KeyspaceState_ENABLED && meta.GetConfig()[creationPendingKey] != "" {
+		if manager.config.ToWaitRegionSplit() {
+			return errors.New("keyspace region split is pending; retry create to enable it")
+		}
+		delete(meta.Config, creationPendingKey)
+	}
+	if newState == keyspacepb.KeyspaceState_ARCHIVED || newState == keyspacepb.KeyspaceState_TOMBSTONE {
+		delete(meta.Config, creationPendingKey)
 	}
 	if newState == keyspacepb.KeyspaceState_TOMBSTONE {
 		if err := manager.unassignKeyspaceFromMetaServiceGroup(txn, meta); err != nil {

@@ -36,6 +36,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 
@@ -1092,61 +1093,75 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 		return nil, nil, errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
 	}
 	m.Unlock()
-	cb := func(err error) {
+	cb := func(err error) error {
 		if err != nil {
-			return
+			return err
 		}
-		// Retry (with backoff) outside the lock so a transient load failure
-		// doesn't hold up other groups' callbacks.
-		var kg *endpoint.KeyspaceGroup
-		var loadErr error
-		for i := range 3 {
-			loadErr = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-				var err error
-				kg, err = m.store.LoadKeyspaceGroup(txn, uint32(groupID))
-				return err
-			})
-			if loadErr == nil && kg != nil {
-				break
-			}
-			if i < 2 {
-				time.Sleep(time.Second)
-			}
-		}
-		if loadErr != nil || kg == nil {
-			log.Error("failed to reload keyspace group into cache after commit, cache may be stale",
-				zap.Uint64("group-id", groupID), zap.Error(loadErr))
-			return
-		}
-		m.Lock()
-		defer m.Unlock()
-		// Re-read once more under the lock instead of Put-ing the snapshot
-		// loaded above: this callback can be delayed behind a later commit
-		// whose own callback already ran and cached a newer membership, and
-		// Put-ing the stale outer snapshot would clobber it. Re-reading here
-		// means whichever callback's Put runs last always reads what is
-		// currently durable, so the cache converges to storage regardless of
-		// callback ordering.
-		var fresh *endpoint.KeyspaceGroup
-		loadErr = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-			var err error
-			fresh, err = m.store.LoadKeyspaceGroup(txn, uint32(groupID))
+		return refreshCreationCache(m.ctx, func() error {
+			m.Lock()
+			defer m.Unlock()
+			_, err := m.refreshKeyspaceGroupLocked(uint32(groupID))
 			return err
 		})
-		if loadErr != nil || fresh == nil {
-			log.Error("failed to re-validate keyspace group before caching, cache may be stale",
-				zap.Uint64("group-id", groupID), zap.Error(loadErr))
-			return
-		}
-		// Use the userKind-bucket-safe helper rather than Put-ing directly
-		// into m.groups[userKind]: fresh carries its own current UserKind,
-		// which may differ from the userKind captured above if a concurrent
-		// UpdateKeyspaceGroup reassignment landed first, and this keeps the
-		// cache from holding a duplicate copy under the wrong bucket.
-		m.putKeyspaceGroupToCacheLocked(fresh)
 	}
 	op := m.saveKeyspaceGroupTxnOp(uint32(groupID), keyspaceID, mutation)
 	return op, cb, nil
+}
+
+// refreshKeyspaceGroupLocked reloads and publishes under the same lock, rather
+// than publishing a snapshot that a delayed callback captured before locking.
+func (m *GroupManager) refreshKeyspaceGroupLocked(groupID uint32) (*endpoint.KeyspaceGroup, error) {
+	var group *endpoint.KeyspaceGroup
+	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		var err error
+		group, err = m.store.LoadKeyspaceGroup(txn, groupID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID)
+	}
+	m.putKeyspaceGroupToCacheLocked(group)
+	return group, nil
+}
+
+// refreshKeyspaceGroupForKeyspace restores the cache on a pending create retry.
+// Try the recorded group first. Split/merge can move membership without updating
+// that config, so only the recovery fallback scans the durable groups.
+func (m *GroupManager) refreshKeyspaceGroupForKeyspace(meta *keyspacepb.KeyspaceMeta) error {
+	if m == nil {
+		return nil
+	}
+	groupID, err := strconv.ParseUint(meta.GetConfig()[TSOKeyspaceGroupIDKey], 10, 32)
+	if err != nil {
+		return err
+	}
+	return refreshCreationCache(m.ctx, func() error {
+		m.Lock()
+		defer m.Unlock()
+		group, err := m.refreshKeyspaceGroupLocked(uint32(groupID))
+		if err == nil && slice.Contains(group.Keyspaces, meta.GetId()) {
+			return nil
+		}
+		if err != nil && !errs.ErrKeyspaceGroupNotExists.Equal(err) {
+			return err
+		}
+		groups, err := m.store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, group := range groups {
+			m.putKeyspaceGroupToCacheLocked(group)
+			found = found || slice.Contains(group.Keyspaces, meta.GetId())
+		}
+		if !found {
+			return errs.ErrKeyspaceNotInAnyKeyspaceGroup
+		}
+		return nil
+	})
 }
 
 // UpdateKeyspaceGroup updates the keyspace group.
