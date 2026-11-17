@@ -24,8 +24,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -48,8 +50,9 @@ func TestMain(m *testing.M) {
 }
 
 type testAuditServer struct {
-	options  *config.ServiceMiddlewarePersistOptions
-	backends []audit.Backend
+	options   *config.ServiceMiddlewarePersistOptions
+	backends  []audit.Backend
+	configErr error
 }
 
 func (s *testAuditServer) GetAuditBackend() []audit.Backend {
@@ -58,6 +61,10 @@ func (s *testAuditServer) GetAuditBackend() []audit.Backend {
 
 func (s *testAuditServer) GetServiceMiddlewarePersistOptions() *config.ServiceMiddlewarePersistOptions {
 	return s.options
+}
+
+func (s *testAuditServer) IsHTTPAuditEnabled() (bool, error) {
+	return s.options.IsAuditEnabled(), s.configErr
 }
 
 func newTestAuditServer(backends ...audit.Backend) *testAuditServer {
@@ -88,13 +95,16 @@ func (b *recordingAuditBackend) ProcessHTTPRequest(r *http.Request) bool {
 
 type auditReadCloser struct {
 	io.Reader
-	reads  int
-	closed bool
+	reads     int
+	bytesRead int
+	closed    bool
 }
 
 func (r *auditReadCloser) Read(p []byte) (int, error) {
 	r.reads++
-	return r.Reader.Read(p)
+	n, err := r.Reader.Read(p)
+	r.bytesRead += n
+	return n, err
 }
 
 func (r *auditReadCloser) Close() error {
@@ -151,14 +161,15 @@ func TestAuditBackendSelection(t *testing.T) {
 			svr.options.SetAuditConfig(&config.AuditConfig{EnableAudit: tc.enabled})
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			router.POST("/pd/api/v2/keyspaces", Audit("CreateKeyspace", tc.labels...), func(c *gin.Context) {
+			router.POST("/pd/api/v2/keyspaces", AuditWithBody("CreateKeyspace", tc.labels...), func(c *gin.Context) {
 				re.Equal(tc.capture, body.reads > 0)
-				re.Equal(tc.capture, body.closed)
+				re.False(body.closed)
 				_, ok := requestutil.RequestInfoFrom(c.Request.Context())
 				re.Equal(tc.expectInfo, ok)
 				data, err := io.ReadAll(c.Request.Body)
 				re.NoError(err)
 				re.Equal("request-body", string(data))
+				re.NoError(c.Request.Body.Close())
 				events = append(events, "handler")
 				c.Status(http.StatusBadRequest)
 			})
@@ -238,7 +249,7 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
 			var recordedInfo requestutil.RequestInfo
-			router.POST("/selected", Audit("CreateKeyspace", audit.LocalLogLabel), func(c *gin.Context) {
+			router.POST("/selected", AuditWithBody("CreateKeyspace", audit.LocalLogLabel), func(c *gin.Context) {
 				var ok bool
 				recordedInfo, ok = requestutil.RequestInfoFrom(c.Request.Context())
 				re.True(ok)
@@ -276,6 +287,142 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 			} else {
 				re.Contains(string(lines[0]), "private-value")
 			}
+		})
+	}
+}
+
+func TestAuditLocalLogDoesNotSetEndTime(t *testing.T) {
+	re := require.New(t)
+	svr := newTestAuditServer(audit.NewLocalLogBackend(true))
+	router := gin.New()
+	var handlerRequest *http.Request
+	router.Use(func(c *gin.Context) {
+		c.Set(ServerContextKey, svr)
+		c.Next()
+		re.Same(handlerRequest, c.Request)
+		_, ok := requestutil.EndTimeFrom(c.Request.Context())
+		re.False(ok)
+	})
+	router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+		handlerRequest = c.Request
+		c.Status(http.StatusNoContent)
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", http.NoBody))
+	re.Equal(http.StatusNoContent, recorder.Code)
+}
+
+func TestAuditConfigReadError(t *testing.T) {
+	re := require.New(t)
+	svr := newTestAuditServer()
+	svr.configErr = io.ErrUnexpectedEOF
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
+	called := false
+	router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+		called = true
+		c.Status(http.StatusNoContent)
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", http.NoBody))
+	re.Equal(http.StatusInternalServerError, recorder.Code)
+	re.False(called)
+}
+
+func TestAuditBoundedBody(t *testing.T) {
+	for _, size := range []int{0, maxAuditBodyBytes - 1, maxAuditBodyBytes, maxAuditBodyBytes + 1, 4 << 20} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			re := require.New(t)
+			payload := strings.Repeat("x", size)
+			body := &auditReadCloser{Reader: strings.NewReader(payload)}
+			svr := newTestAuditServer()
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
+			router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+				re.LessOrEqual(body.bytesRead, maxAuditBodyBytes+1)
+				re.False(body.closed)
+				info, ok := requestutil.RequestInfoFrom(c.Request.Context())
+				re.True(ok)
+				if size > maxAuditBodyBytes {
+					re.Equal(payload[:maxAuditBodyBytes]+" [truncated]", info.BodyParam)
+				} else {
+					re.Equal(payload, info.BodyParam)
+				}
+				data, err := io.ReadAll(c.Request.Body)
+				re.NoError(err)
+				re.Equal(payload, string(data))
+				re.NoError(c.Request.Body.Close())
+				re.True(body.closed)
+				c.Status(http.StatusNoContent)
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", body))
+			re.Equal(http.StatusNoContent, recorder.Code)
+		})
+	}
+}
+
+func TestAuditBodyReadErrors(t *testing.T) {
+	for _, size := range []int{10, maxAuditBodyBytes + 10} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			re := require.New(t)
+			body := &auditReadCloser{Reader: io.MultiReader(strings.NewReader(strings.Repeat("x", size)), iotest.ErrReader(io.ErrUnexpectedEOF))}
+			svr := newTestAuditServer()
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
+			called := false
+			router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+				called = true
+				data, err := io.ReadAll(c.Request.Body)
+				re.Len(data, size)
+				re.ErrorIs(err, io.ErrUnexpectedEOF)
+				c.AbortWithStatus(http.StatusInternalServerError)
+			})
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/selected", body)
+			router.ServeHTTP(recorder, request)
+			re.Equal(http.StatusInternalServerError, recorder.Code)
+			re.Equal(size > maxAuditBodyBytes, called)
+			re.NoError(request.Body.Close())
+		})
+	}
+}
+
+func TestAuditSkipsUnusedAndRedactedBodies(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mode    logutil.RedactInfoLogType
+		capture bool
+	}{
+		{name: "bodyless", mode: logutil.RedactInfoLogOFF},
+		{name: "fully redacted", mode: logutil.RedactInfoLogON, capture: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			var logger *zap.Logger
+			var props *log.ZapProperties
+			re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, tc.mode))
+			t.Cleanup(func() { re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, logutil.RedactInfoLogOFF)) })
+			body := &auditReadCloser{Reader: strings.NewReader(strings.Repeat("x", 4<<20))}
+			svr := newTestAuditServer()
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
+			middleware := Audit("Selected", audit.LocalLogLabel)
+			if tc.capture {
+				middleware = AuditWithBody("Selected", audit.LocalLogLabel)
+			}
+			router.POST("/selected", middleware, func(c *gin.Context) {
+				re.Zero(body.reads)
+				re.False(body.closed)
+				data, err := io.ReadAll(c.Request.Body)
+				re.NoError(err)
+				re.Len(data, 4<<20)
+				re.NoError(c.Request.Body.Close())
+				c.Status(http.StatusNoContent)
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", body))
+			re.Equal(http.StatusNoContent, recorder.Code)
 		})
 	}
 }

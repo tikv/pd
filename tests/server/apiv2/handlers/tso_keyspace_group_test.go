@@ -21,9 +21,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -34,9 +39,14 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	kgconstant "github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -50,6 +60,50 @@ type keyspaceGroupTestSuite struct {
 
 func TestKeyspaceGroupTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceGroupTestSuite))
+}
+
+func TestEvictTSOPrimaryAuditBody(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(cfg *config.Config, _ string) {
+		cfg.Security.RedactInfoLog = logutil.RedactInfoLogOFF
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	forwarded := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tso/api/v1/primary/evict" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		forwarded <- string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+	entry := &discovery.ServiceRegistryEntry{ServiceAddr: target.URL}
+	value, err := entry.Serialize()
+	re.NoError(err)
+	_, err = leader.GetServer().GetClient().Put(ctx, keypath.RegistryPath(mcsconstant.TSOServiceName, target.URL), value)
+	re.NoError(err)
+	logFile := testutil.InitTempFileLogger(t, "info")
+	const payload = `{"new_primary":"replacement"}`
+	response, err := tests.TestDialClient.Post(leader.GetAddr()+"/pd/api/v2/ms/tso/primary/evict?node="+url.QueryEscape(target.URL), "application/json", strings.NewReader(payload))
+	re.NoError(err)
+	defer response.Body.Close()
+	re.Equal(http.StatusNoContent, response.StatusCode)
+	re.JSONEq(payload, <-forwarded)
+	data, err := os.ReadFile(logFile)
+	re.NoError(err)
+	re.Contains(string(data), "ServiceLabel:EvictTSOPrimary,")
+	re.Contains(string(data), "replacement")
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {

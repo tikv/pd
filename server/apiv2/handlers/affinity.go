@@ -32,13 +32,22 @@ import (
 // RegisterAffinity registers affinity group related handlers to router paths.
 func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
-	router.Use(middlewares.BootstrapChecker())
-	router.POST("", middlewares.Audit("PostAffinityGroups", audit.LocalLogLabel), PostAffinityGroups)
-	router.PATCH("", middlewares.Audit("BatchModifyAffinityGroups", audit.LocalLogLabel), BatchModifyAffinityGroups)
-	router.PUT("/:group_id", middlewares.Audit("UpdateAffinityGroupPeers", audit.LocalLogLabel), UpdateAffinityGroupPeers)
-	router.DELETE("/:group_id", middlewares.Audit("DeleteAffinityGroup", audit.LocalLogLabel), DeleteAffinityGroup)
-	router.GET("", GetAllAffinityGroups)
-	router.GET("/:group_id", GetAffinityGroup)
+	redirect, bootstrap := middlewares.Redirector(), middlewares.BootstrapChecker()
+	createAudit := middlewares.AuditWithBody("CreateAffinityGroups", audit.LocalLogLabel)
+	deleteAudit := middlewares.AuditWithBody("DeleteAffinityGroups", audit.LocalLogLabel)
+	router.POST("", func(c *gin.Context) {
+		if _, hasDelete := c.GetQuery("delete"); hasDelete {
+			deleteAudit(c)
+		} else {
+			createAudit(c)
+		}
+	}, redirect, bootstrap, PostAffinityGroups)
+	router.PATCH("", middlewares.AuditWithBody("BatchModifyAffinityGroups", audit.LocalLogLabel), redirect, bootstrap, BatchModifyAffinityGroups)
+	router.PUT("/:group_id", middlewares.AuditWithBody("UpdateAffinityGroupPeers", audit.LocalLogLabel), redirect, bootstrap, UpdateAffinityGroupPeers)
+	router.DELETE("/:group_id", middlewares.Audit("DeleteAffinityGroup", audit.LocalLogLabel), redirect, bootstrap, DeleteAffinityGroup)
+	affinityRedirect := middlewares.AffinityMicroserviceRedirector()
+	router.GET("", redirect, affinityRedirect, bootstrap, GetAllAffinityGroups)
+	router.GET("/:group_id", redirect, affinityRedirect, bootstrap, GetAffinityGroup)
 }
 
 // --- API Structures ---

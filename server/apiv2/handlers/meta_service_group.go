@@ -38,10 +38,10 @@ const (
 // RegisterMetaServiceGroup registers meta-service group related handlers to router paths.
 func RegisterMetaServiceGroup(r *gin.RouterGroup) {
 	router := r.Group("meta-service-groups")
-	router.Use(middlewares.BootstrapChecker())
-	router.GET("", GetMetaServiceGroups)
-	router.PATCH("", middlewares.Audit("PatchMetaServiceGroups", audit.LocalLogLabel), PatchMetaServiceGroups)
-	router.PATCH("/:id/status", middlewares.Audit("PatchMetaServiceGroupStatus", audit.LocalLogLabel), PatchMetaServiceGroupStatus)
+	redirect, bootstrap := middlewares.Redirector(), middlewares.BootstrapChecker()
+	router.GET("", redirect, bootstrap, GetMetaServiceGroups)
+	router.PATCH("", middlewares.AuditWithBody("PatchMetaServiceGroups", audit.LocalLogLabel), redirect, bootstrap, PatchMetaServiceGroups)
+	router.PATCH("/:id/status", middlewares.AuditWithBody("PatchMetaServiceGroupStatus", audit.LocalLogLabel), redirect, bootstrap, PatchMetaServiceGroupStatus)
 }
 
 // MetaServiceGroupStatus represents the status of a meta-service group.

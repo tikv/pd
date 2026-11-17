@@ -44,19 +44,19 @@ const (
 // RegisterTSOKeyspaceGroup registers keyspace group handlers to the server.
 func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router := r.Group("tso/keyspace-groups")
-	router.Use(middlewares.BootstrapChecker())
-	router.POST("", middlewares.Audit("CreateKeyspaceGroups", audit.LocalLogLabel), CreateKeyspaceGroups)
-	router.GET("", GetKeyspaceGroups)
-	router.GET("/:id", GetKeyspaceGroupByID)
-	router.DELETE("/:id", middlewares.Audit("DeleteKeyspaceGroupByID", audit.LocalLogLabel), DeleteKeyspaceGroupByID)
-	router.PATCH("/:id", middlewares.Audit("SetNodesForKeyspaceGroup", audit.LocalLogLabel), SetNodesForKeyspaceGroup)             // only to support set nodes
-	router.PATCH("/:id/*node", middlewares.Audit("SetPriorityForKeyspaceGroup", audit.LocalLogLabel), SetPriorityForKeyspaceGroup) // only to support set priority
-	router.POST("/:id/alloc", middlewares.Audit("AllocNodesForKeyspaceGroup", audit.LocalLogLabel), AllocNodesForKeyspaceGroup)
-	router.POST("/:id/split", middlewares.Audit("SplitKeyspaceGroupByID", audit.LocalLogLabel), SplitKeyspaceGroupByID)
-	router.DELETE("/:id/split", middlewares.Audit("FinishSplitKeyspaceByID", audit.LocalLogLabel), FinishSplitKeyspaceByID)
-	router.POST("/:id/merge", middlewares.Audit("MergeKeyspaceGroups", audit.LocalLogLabel), MergeKeyspaceGroups)
-	router.DELETE("/:id/merge", middlewares.Audit("FinishMergeKeyspaceByID", audit.LocalLogLabel), FinishMergeKeyspaceByID)
-	router.DELETE("/:id/keyspaces", middlewares.Audit("RemoveKeyspacesFromGroup", audit.LocalLogLabel), RemoveKeyspacesFromGroup)
+	redirect, bootstrap := middlewares.Redirector(), middlewares.BootstrapChecker()
+	router.POST("", middlewares.AuditWithBody("CreateKeyspaceGroups", audit.LocalLogLabel), redirect, bootstrap, CreateKeyspaceGroups)
+	router.GET("", redirect, bootstrap, GetKeyspaceGroups)
+	router.GET("/:id", redirect, bootstrap, GetKeyspaceGroupByID)
+	router.DELETE("/:id", middlewares.Audit("DeleteKeyspaceGroupByID", audit.LocalLogLabel), redirect, bootstrap, DeleteKeyspaceGroupByID)
+	router.PATCH("/:id", middlewares.AuditWithBody("SetNodesForKeyspaceGroup", audit.LocalLogLabel), redirect, bootstrap, SetNodesForKeyspaceGroup)
+	router.PATCH("/:id/*node", middlewares.AuditWithBody("SetPriorityForKeyspaceGroup", audit.LocalLogLabel), redirect, bootstrap, SetPriorityForKeyspaceGroup)
+	router.POST("/:id/alloc", middlewares.AuditWithBody("AllocNodesForKeyspaceGroup", audit.LocalLogLabel), redirect, bootstrap, AllocNodesForKeyspaceGroup)
+	router.POST("/:id/split", middlewares.AuditWithBody("SplitKeyspaceGroupByID", audit.LocalLogLabel), redirect, bootstrap, SplitKeyspaceGroupByID)
+	router.DELETE("/:id/split", middlewares.Audit("FinishSplitKeyspaceByID", audit.LocalLogLabel), redirect, bootstrap, FinishSplitKeyspaceByID)
+	router.POST("/:id/merge", middlewares.AuditWithBody("MergeKeyspaceGroups", audit.LocalLogLabel), redirect, bootstrap, MergeKeyspaceGroups)
+	router.DELETE("/:id/merge", middlewares.Audit("FinishMergeKeyspaceByID", audit.LocalLogLabel), redirect, bootstrap, FinishMergeKeyspaceByID)
+	router.DELETE("/:id/keyspaces", middlewares.AuditWithBody("RemoveKeyspacesFromGroup", audit.LocalLogLabel), redirect, bootstrap, RemoveKeyspacesFromGroup)
 }
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.

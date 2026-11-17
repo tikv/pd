@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
@@ -61,6 +63,30 @@ func (suite *affinityHandlerTestSuite) SetupSuite() {
 
 func (suite *affinityHandlerTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityAuditActions() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		re.Equal("?", logutil.RedactString("private-group"))
+		logFile := testutil.InitTempFileLogger(suite.T(), "info")
+		mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"private-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x05}}}},
+			},
+		})
+		mustBatchDeleteAffinityGroups(re, leader.GetAddr(), &handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{"private-group"}, Force: true})
+		data, err := os.ReadFile(logFile)
+		re.NoError(err)
+		re.Equal(1, strings.Count(string(data), "ServiceLabel:CreateAffinityGroups,"))
+		re.Equal(1, strings.Count(string(data), "ServiceLabel:DeleteAffinityGroups,"))
+		for line := range strings.SplitSeq(string(data), "\n") {
+			if strings.Contains(line, "audit log") {
+				re.NotContains(line, "private-group")
+			}
+		}
+	})
 }
 
 func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {

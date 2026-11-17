@@ -39,14 +39,14 @@ const managerUninitializedErr = "keyspace manager is not initialized"
 // RegisterKeyspace register keyspace related handlers to router paths.
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
-	router.Use(middlewares.BootstrapChecker())
-	router.POST("", middlewares.Audit("CreateKeyspace", audit.LocalLogLabel), CreateKeyspace)
-	router.POST("/id", middlewares.Audit("CreateKeyspaceByID", audit.LocalLogLabel), CreateKeyspaceByID)
-	router.GET("", LoadAllKeyspaces)
-	router.GET("/:name", LoadKeyspace)
-	router.PATCH("/:name/config", middlewares.Audit("UpdateKeyspaceConfig", audit.LocalLogLabel), UpdateKeyspaceConfig)
-	router.PUT("/:name/state", middlewares.Audit("UpdateKeyspaceState", audit.LocalLogLabel), UpdateKeyspaceState)
-	router.GET("/id/:id", LoadKeyspaceByID)
+	redirect, bootstrap := middlewares.Redirector(), middlewares.BootstrapChecker()
+	router.POST("", middlewares.AuditWithBody("CreateKeyspace", audit.LocalLogLabel), redirect, bootstrap, CreateKeyspace)
+	router.POST("/id", middlewares.AuditWithBody("CreateKeyspaceByID", audit.LocalLogLabel), redirect, bootstrap, CreateKeyspaceByID)
+	router.GET("", redirect, bootstrap, LoadAllKeyspaces)
+	router.GET("/:name", redirect, bootstrap, LoadKeyspace)
+	router.PATCH("/:name/config", middlewares.AuditWithBody("UpdateKeyspaceConfig", audit.LocalLogLabel), redirect, bootstrap, UpdateKeyspaceConfig)
+	router.PUT("/:name/state", middlewares.AuditWithBody("UpdateKeyspaceState", audit.LocalLogLabel), redirect, bootstrap, UpdateKeyspaceState)
+	router.GET("/id/:id", redirect, bootstrap, LoadKeyspaceByID)
 }
 
 // CreateKeyspaceParams represents parameters needed when creating a new keyspace.

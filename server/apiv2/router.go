@@ -53,16 +53,14 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 		c.Next()
 	})
 	root := router.Group(apiV2Prefix)
-	// add ready check handler before Redirector to avoid redirecting it to the leader
 	handlers.RegisterReadyCheck(root)
-	root.Use(middlewares.Redirector())
+	// Routes place auditing before redirection so ingress identity is retained.
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
 	handlers.RegisterMetaServiceGroup(root)
 	handlers.RegisterSafePoint(root)
 	handlers.RegisterMicroservice(root)
 	handlers.RegisterMaintenance(root)
-	root.Use(middlewares.AffinityMicroserviceRedirector())
 	handlers.RegisterAffinity(root)
 	return router, group, nil
 }

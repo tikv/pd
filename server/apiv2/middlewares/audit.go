@@ -15,25 +15,41 @@
 package middlewares
 
 import (
+	"bytes"
+	"io"
+	"net/http"
 	"slices"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
-	"github.com/tikv/pd/server/config"
 )
 
 type auditServer interface {
 	GetAuditBackend() []audit.Backend
-	GetServiceMiddlewarePersistOptions() *config.ServiceMiddlewarePersistOptions
+	IsHTTPAuditEnabled() (bool, error)
 }
 
+// Limit each logged body to 4 KiB without limiting the handler's input.
+const maxAuditBodyBytes = 4 << 10
+
 // Audit selects the audit backends for one HTTP route. It shares the API v1
-// audit switch, request format, redaction, and backend ordering. Routes without
-// this middleware or without backend labels are not audited.
+// audit switch, request format, redaction, and backend ordering. It does not read
+// the request body. Routes without backend labels are not audited.
 func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
+	return newAudit(serviceLabel, false, backendLabels...)
+}
+
+// AuditWithBody also captures a bounded body prefix for routes that consume it.
+// Fully redacted bodies are left unread, and handlers retain the complete stream.
+func AuditWithBody(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
+	return newAudit(serviceLabel, true, backendLabels...)
+}
+
+func newAudit(serviceLabel string, captureBody bool, backendLabels ...string) gin.HandlerFunc {
 	labels := &audit.BackendLabels{Labels: backendLabels}
 	return func(c *gin.Context) {
 		if len(labels.Labels) == 0 {
@@ -41,7 +57,12 @@ func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 			return
 		}
 		svr := c.MustGet(ServerContextKey).(auditServer)
-		if !svr.GetServiceMiddlewarePersistOptions().IsAuditEnabled() {
+		enabled, err := svr.IsHTTPAuditEnabled()
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !enabled {
 			c.Next()
 			return
 		}
@@ -49,18 +70,32 @@ func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 		backends := svr.GetAuditBackend()
 		info := requestutil.GetRequestInfoWithoutBody(c.Request)
 		info.ServiceLabel = serviceLabel
-		if slices.Contains(labels.Labels, audit.LocalLogLabel) {
-			info.CaptureBody(c.Request)
+		if captureBody && slices.Contains(labels.Labels, audit.LocalLogLabel) {
+			err = captureAuditBody(c.Request, &info)
 		}
 		c.Request = c.Request.WithContext(requestutil.WithRequestInfo(c.Request.Context(), info))
+		hasAfterBackend := false
 		for _, backend := range backends {
-			if backend.ProcessBeforeHandler() && backend.Match(labels) {
+			if !backend.Match(labels) {
+				continue
+			}
+			if backend.ProcessBeforeHandler() {
 				backend.ProcessHTTPRequest(c.Request)
+			} else {
+				hasAfterBackend = true
 			}
 		}
 
-		c.Next()
+		if err != nil {
+			// Never turn a failed body read into a successful mutation.
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		} else {
+			c.Next()
+		}
 
+		if !hasAfterBackend {
+			return
+		}
 		c.Request = c.Request.WithContext(requestutil.WithEndTime(c.Request.Context(), time.Now().Unix()))
 		for _, backend := range backends {
 			if !backend.ProcessBeforeHandler() && backend.Match(labels) {
@@ -68,4 +103,28 @@ func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 			}
 		}
 	}
+}
+
+type auditRequestBody struct {
+	io.Reader
+	io.Closer
+}
+
+func captureAuditBody(r *http.Request, info *requestutil.RequestInfo) error {
+	if r.Body == nil || r.Body == http.NoBody {
+		return nil
+	}
+	if logutil.IsInfoLogFullyRedacted() {
+		info.BodyParam = "?"
+		return nil
+	}
+	body := r.Body
+	prefix, err := io.ReadAll(io.LimitReader(body, maxAuditBodyBytes+1))
+	r.Body = &auditRequestBody{Reader: io.MultiReader(bytes.NewReader(prefix), body), Closer: body}
+	if len(prefix) > maxAuditBodyBytes {
+		info.BodyParam = string(prefix[:maxAuditBodyBytes]) + " [truncated]"
+	} else {
+		info.BodyParam = string(prefix)
+	}
+	return err
 }

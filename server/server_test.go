@@ -27,6 +27,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
@@ -36,6 +37,15 @@ import (
 )
 
 var errTestFollowerRegionStorage = stderrors.New("test follower region storage error")
+
+func TestHTTPAuditUnavailableServer(t *testing.T) {
+	re := require.New(t)
+	s := &Server{}
+	enabled, err := s.IsHTTPAuditEnabled()
+	re.False(enabled)
+	re.Error(err)
+	re.True(errs.ErrServerNotStarted.Equal(err))
+}
 
 func TestResetFollowerRegionCacheRequiresRegionStorage(t *testing.T) {
 	re := require.New(t)
