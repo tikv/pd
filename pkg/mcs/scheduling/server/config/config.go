@@ -743,8 +743,15 @@ func (o *PersistConfig) AddSchedulerCfg(string, []string) {}
 // This method is a no-op since we only use configurations derived from one-way synchronization from API server now.
 func (o *PersistConfig) RemoveSchedulerCfg(tp string) {}
 
+<<<<<<< HEAD
 // CheckLabelProperty checks if the label property is satisfied.
 func (o *PersistConfig) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+=======
+// CheckLabelProperty always returns false. The scheduling service does not
+// support label-property, which has been deprecated since v5.2. Use placement
+// rules or evict-leader-scheduler to keep leaders off a store.
+func (*PersistConfig) CheckLabelProperty(string, []*metapb.StoreLabel) bool {
+>>>>>>> 0d7a8c8def (*: warn that the scheduling service ignores label-property (#11448))
 	return false
 }
 
