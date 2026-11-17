@@ -410,7 +410,7 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 	slices.Sort(voterStoreIDs)
 	// Note: if the check fails, no changes are applied. The existing Group is returned as-is without error.
 	if observed != nil {
-		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer {
+		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer || group.rangeConflict {
 			return group, nil
 		}
 		// Group must not change voterStoreIDs while it is not in the expired status. Changing only leaderStoreID is allowed.
