@@ -17,6 +17,7 @@ package errs
 import (
 	stderrors "errors"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"go.uber.org/zap"
@@ -60,6 +61,7 @@ type httpError struct {
 	err        error
 	code       string
 	statusCode int
+	legacyCode any
 }
 
 func (e *httpError) Error() string { return e.err.Error() }
@@ -73,6 +75,8 @@ func (e *httpError) Code() string { return e.code }
 
 // HTTPCode returns the response status code.
 func (e *httpError) HTTPCode() int { return e.statusCode }
+
+func (e *httpError) legacyCodeValue() any { return e.legacyCode }
 
 // GetClientData preserves the original error data across HTTP error wrappers.
 func (e *httpError) GetClientData() any {
@@ -89,7 +93,7 @@ type internalHTTPError struct {
 
 // NewInvalidInputErr marks err as invalid input with HTTP status 400.
 // An existing HTTPError retains its code and status.
-// It panics on nil.
+// It panics on nil, as the original errcode constructor did.
 func NewInvalidInputErr(err error) error {
 	if err == nil {
 		panic("NewCodedError error is nil")
@@ -97,6 +101,7 @@ func NewInvalidInputErr(err error) error {
 	wrapped := &httpError{err: err, code: "input", statusCode: http.StatusBadRequest}
 	if httpErr := AsHTTPError(err); httpErr != nil {
 		wrapped.code, wrapped.statusCode = httpErr.Code(), httpErr.HTTPCode()
+		wrapped.legacyCode = legacyHTTPCodeValue(httpErr)
 	}
 	return wrapped
 }
@@ -111,6 +116,7 @@ func NewInternalErr(err error) error {
 	wrapped := &httpError{err: err, code: "internal", statusCode: http.StatusInternalServerError}
 	if httpErr := AsHTTPError(err); httpErr != nil && IsInternalHTTPError(httpErr) {
 		wrapped.code, wrapped.statusCode = httpErr.Code(), httpErr.HTTPCode()
+		wrapped.legacyCode = legacyHTTPCodeValue(httpErr)
 	}
 	tracer := GetStackTracer(err)
 	if tracer == nil {
@@ -123,7 +129,7 @@ func NewInternalErr(err error) error {
 }
 
 // FindHTTPError preserves the first HTTP error's code and any additional error
-// codes in a Cause or Unwrap chain.
+// codes in a Cause or Unwrap chain, including legacy errcode.ErrorCode values.
 func FindHTTPError(err error) HTTPError {
 	var code HTTPError
 	current := err
@@ -131,6 +137,12 @@ func FindHTTPError(err error) HTTPError {
 	hasContext := false
 	appendCode := func(next HTTPError, withContext bool) {
 		original := error(next)
+		switch legacy := next.(type) {
+		case *legacyHTTPError:
+			original = legacy.err
+		case *legacyHTTPErrorGroup:
+			original = legacy.err
+		}
 		if withContext {
 			context := &httpErrorContext{HTTPError: next, top: current}
 			if group, ok := next.(errors.ErrorGroup); ok {
@@ -149,7 +161,7 @@ func FindHTTPError(err error) HTTPError {
 	}
 	for err != nil {
 		if httpErr := AsHTTPError(err); httpErr != nil {
-			if code == nil || code.Code() != httpErr.Code() {
+			if code == nil || !sameHTTPErrorCode(code, httpErr) {
 				appendCode(httpErr, hasContext)
 			} else if _, grouped := code.(errors.ErrorGroup); !grouped {
 				// A same-code wrapper can hide group members while retaining the metadata.
@@ -206,15 +218,92 @@ func GetStackTracer(err error) errors.StackTracer {
 }
 
 // IsInternalHTTPError reports whether the code belongs to the internal family.
-// Codes outside that family do not include a stack, even with HTTP 500.
+// Legacy codes outside that family do not include a stack, even with HTTP 500.
 func IsInternalHTTPError(err HTTPError) bool {
 	return err.Code() == "internal" || strings.HasPrefix(err.Code(), "internal.")
 }
 
-// AsHTTPError returns HTTP error metadata without traversing the error chain.
+// AsHTTPError returns metadata for a native HTTPError or legacy errcode.ErrorCode
+// without traversing its error chain. Native HTTP errors avoid reflection.
 func AsHTTPError(err error) HTTPError {
-	httpErr, _ := err.(HTTPError)
-	return httpErr
+	if httpErr, ok := err.(HTTPError); ok {
+		return httpErr
+	}
+	if err == nil {
+		return nil
+	}
+	method := reflect.ValueOf(err).MethodByName("Code")
+	if !method.IsValid() || method.Type().NumIn() != 0 || method.Type().NumOut() != 1 {
+		return nil
+	}
+	type httpCoder interface{ HTTPCode() int }
+	codeType := method.Type().Out(0)
+	if codeType.PkgPath() != "github.com/pingcap/errcode" || codeType.Name() != "Code" {
+		return nil
+	}
+	name, ok := codeType.MethodByName("CodeStr")
+	if !ok || name.Type.NumIn() != 1 || name.Type.NumOut() != 1 || name.Type.Out(0).Kind() != reflect.String ||
+		!codeType.Implements(reflect.TypeFor[httpCoder]()) {
+		return nil
+	}
+	code := method.Call(nil)[0]
+	var legacyCode any
+	if code.Comparable() {
+		legacyCode = code.Interface()
+	}
+	adapted := &legacyHTTPError{httpError: &httpError{
+		err:        err,
+		code:       code.MethodByName("CodeStr").Call(nil)[0].String(),
+		statusCode: code.Interface().(httpCoder).HTTPCode(),
+		legacyCode: legacyCode,
+	}}
+	if group, ok := err.(errors.ErrorGroup); ok {
+		return &legacyHTTPErrorGroup{legacyHTTPError: adapted, ErrorGroup: group}
+	}
+	return adapted
+}
+
+// legacyHTTPCodeValue retains the original code identity through local wrappers.
+func legacyHTTPCodeValue(err HTTPError) any {
+	if legacy, ok := err.(interface{ legacyCodeValue() any }); ok {
+		return legacy.legacyCodeValue()
+	}
+	return nil
+}
+
+// sameHTTPErrorCode preserves legacy equality for distinct codes sharing a name.
+func sameHTTPErrorCode(first, second HTTPError) bool {
+	if first.Code() != second.Code() {
+		return false
+	}
+	left, right := legacyHTTPCodeValue(first), legacyHTTPCodeValue(second)
+	return left == nil || right == nil || left == right
+}
+
+type legacyHTTPError struct {
+	*httpError
+}
+
+// GetClientData preserves the legacy error's data override.
+func (e *legacyHTTPError) GetClientData() any {
+	if data, ok := e.err.(interface{ GetClientData() any }); ok {
+		return data.GetClientData()
+	}
+	return e.err
+}
+
+// GetOperation preserves the legacy error's operation metadata.
+func (e *legacyHTTPError) GetOperation() string {
+	if operation, ok := e.err.(interface{ GetOperation() string }); ok {
+		return operation.GetOperation()
+	}
+	return ""
+}
+
+// legacyHTTPErrorGroup preserves group membership without making single errors groups.
+type legacyHTTPErrorGroup struct {
+	*legacyHTTPError
+	errors.ErrorGroup
 }
 
 type httpErrorContext struct {
@@ -222,7 +311,8 @@ type httpErrorContext struct {
 	top error
 }
 
-func (e *httpErrorContext) Error() string { return e.top.Error() }
+func (e *httpErrorContext) Error() string        { return e.top.Error() }
+func (e *httpErrorContext) legacyCodeValue() any { return legacyHTTPCodeValue(e.HTTPError) }
 
 // Cause retains the original context while traversing the error chain.
 func (e *httpErrorContext) Cause() error {
@@ -244,6 +334,8 @@ func (e *httpErrorGroupContext) Cause() error { return e.HTTPError }
 // Unwrap preserves standard-library error traversal.
 func (e *httpErrorGroupContext) Unwrap() error { return e.HTTPError }
 
+func (e *httpErrorGroupContext) legacyCodeValue() any { return legacyHTTPCodeValue(e.HTTPError) }
+
 // GetOperation preserves operation metadata from the outer HTTP error.
 func (e *httpErrorGroupContext) GetOperation() string {
 	if operation, ok := e.HTTPError.(interface{ GetOperation() string }); ok {
@@ -257,7 +349,9 @@ type httpErrorGroup struct {
 	others []error
 }
 
-// Error joins group messages with semicolons.
+func (e *httpErrorGroup) legacyCodeValue() any { return legacyHTTPCodeValue(e.HTTPError) }
+
+// Error preserves the legacy semicolon-separated group message.
 func (e *httpErrorGroup) Error() string {
 	var message strings.Builder
 	message.WriteString(e.HTTPError.Error())
@@ -276,7 +370,7 @@ func (e *httpErrorGroup) Errors() []error {
 	return append([]error{e.HTTPError}, e.others...)
 }
 
-// unwrapError gives pingcap/errors Cause methods precedence over standard Unwrap methods.
+// unwrapError gives legacy Cause methods precedence over standard Unwrap methods.
 func unwrapError(err error) error {
 	if cause := errors.Unwrap(err); cause != nil {
 		return cause

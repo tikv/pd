@@ -38,4 +38,6 @@ We use [Swagger 2.0](https://swagger.io/specification/v2/) to automatically gene
 
 Use `apiutil.ErrorResp` with `errs.NewInvalidInputErr` or `errs.NewInternalErr` for structured error responses.
 These responses include the `TiDB-Error-Code` header and a JSON body with `code`, `msg`, and `data` fields. Internal errors also include a `stack` field.
-Errors implementing `errs.HTTPError` retain their code and HTTP mapping. Ordinary errors return HTTP 500 with the error message as a JSON string. Keep existing HTTP status codes and error messages stable: clients use them for retry decisions, fallback behavior, and diagnostics.
+Errors implementing `errs.HTTPError` and existing `errcode.ErrorCode` values retain their code and HTTP mapping. Ordinary errors return HTTP 500 with the error message as a JSON string. Keep existing HTTP status codes and error messages stable: clients use them for retry decisions, fallback behavior, and diagnostics.
+
+Legacy error values are adapted without importing `github.com/pingcap/errcode`. Keep that package out of every module's `go.mod` and `go.sum`, including test modules.

@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -347,10 +348,35 @@ func TestInternalErrorPreservesStack(t *testing.T) {
 	re.JSONEq(string(stack), string(body.Stack))
 }
 
-// Coded fixtures exercise HTTP response metadata.
+// Coded fixtures exercise response metadata without depending on errcode.
 type codedResponseCode struct {
-	name   string
+	name   codedResponseCodeStr
 	status int
+}
+
+type codedResponseCodeStr string
+
+func (c codedResponseCode) CodeStr() codedResponseCodeStr { return c.name }
+func (c codedResponseCode) HTTPCode() int                 { return c.status }
+
+type unrelatedResponseError struct{ code codedResponseCode }
+
+func (unrelatedResponseError) Error() string             { return "request failed" }
+func (e unrelatedResponseError) Code() codedResponseCode { return e.code }
+
+// TestUnrelatedErrorCode keeps method lookalikes on the ordinary error path.
+func TestUnrelatedErrorCode(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, 0} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			re := require.New(t)
+			err := unrelatedResponseError{code: codedResponseCode{"quota.exceeded", status}}
+			response := httptest.NewRecorder()
+			re.NotPanics(func() { ErrorResp(render.New(), response, err) })
+			re.Equal(http.StatusInternalServerError, response.Code)
+			re.Empty(response.Header().Get("TiDB-Error-Code"))
+			re.JSONEq(`"request failed"`, response.Body.String())
+		})
+	}
 }
 
 type codedResponseError struct {
@@ -361,7 +387,7 @@ type codedResponseError struct {
 }
 
 func (*codedResponseError) Error() string          { return "request failed" }
-func (e *codedResponseError) Code() string         { return e.code.name }
+func (e *codedResponseError) Code() string         { return string(e.code.name) }
 func (e *codedResponseError) HTTPCode() int        { return e.code.status }
 func (e *codedResponseError) GetClientData() any   { return e.data }
 func (e *codedResponseError) Cause() error         { return e.cause }
@@ -391,7 +417,7 @@ func (operationResponseData) GetOperation() string { return "update store" }
 func TestCodedErrorResp(t *testing.T) {
 	typed := &responseTestError{Detail: "invalid store ID"}
 	coded := func(code string, status int) *codedResponseError {
-		return &codedResponseError{code: codedResponseCode{code, status}, data: typed}
+		return &codedResponseError{code: codedResponseCode{codedResponseCodeStr(code), status}, data: typed}
 	}
 	input := coded("input", http.StatusBadRequest)
 	missing := coded("missing", http.StatusNotFound)
