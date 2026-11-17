@@ -111,13 +111,20 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		// A split that the controller rejects or cancels before it starts, for
 		// example because the waiting queue is full, sends no request, so the
 		// wait does not start and the next patrol requests the split again.
-		if attempt.startedAt.IsZero() && attempt.split != nil {
+		if attempt.split != nil {
 			// Keep a split that can still start between preparation and admission.
 			// Expire unsubmitted operators so they cannot block later patrols.
 			if attempt.split.Status() == operator.CREATED && !attempt.split.CheckExpired() {
 				return nil, false
 			}
-			attempt.startedAt = attempt.split.GetStartTime()
+			if attempt.startedAt.IsZero() {
+				attempt.startedAt = attempt.split.GetStartTime()
+			}
+			if !attempt.split.IsEnd() {
+				attempt.expiresAt = now.Add(affinitySplitCacheTTL)
+				c.splitAttempts.Put(region.GetID(), attempt)
+				return nil, false
+			}
 		}
 		if sizeUnknown && attempt.startedAt.IsZero() {
 			attempt.startedAt = now

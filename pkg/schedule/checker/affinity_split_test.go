@@ -119,12 +119,15 @@ func TestAffinitySplitBeforeMoveThresholds(t *testing.T) {
 	}
 }
 
-// ageAffinitySplitAttempt makes the first split of the attempt start wait ago.
+// ageAffinitySplitAttempt ends the current split and ages its attempt by wait.
 func ageAffinitySplitAttempt(t *testing.T, checker *AffinityChecker, regionID uint64, wait time.Duration) {
 	t.Helper()
 	value, ok := checker.splitAttempts.Get(regionID)
 	require.True(t, ok)
 	attempt := value.(affinitySplitAttempt)
+	if attempt.split != nil && !attempt.split.IsEnd() {
+		require.True(t, attempt.split.Cancel())
+	}
 	attempt.startedAt = time.Now().Add(-wait)
 	checker.splitAttempts.Put(regionID, attempt)
 }
@@ -341,6 +344,59 @@ func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
 	re.False(ops[0].GetStartTime().IsZero())
 	opController.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
 	re.Nil(opController.GetOperator(region.GetID()))
+	requireAffinityMove(t, checker.Check(region))
+}
+
+func TestAffinitySplitBeforeMoveOverlappingChecks(t *testing.T) {
+	re := require.New(t)
+	cluster, controller, opController := newAffinitySplitControllerTest(t)
+	checker := controller.GetAffinityChecker()
+	region := cluster.GetRegion(1).Clone(core.SetApproximateSize(1315))
+	cluster.PutRegion(region)
+	ops := checker.Check(region)
+	requireAffinitySplit(t, ops)
+	split := ops[0]
+	re.Empty(checker.Check(region), "retain the split before admission")
+	split.LimitTimeout(time.Minute)
+	re.Equal(1, opController.AddWaitingOperator(split))
+	startedAt := time.Now().Add(-affinitySplitWaitTimeout / 2)
+	split.SetStatusReachTime(operator.STARTED, startedAt)
+	value, ok := checker.splitAttempts.Get(region.GetID())
+	re.True(ok)
+	attempt := value.(affinitySplitAttempt)
+	expiresAt := time.Now().Add(time.Minute)
+	attempt.expiresAt = expiresAt
+	checker.splitAttempts.Put(region.GetID(), attempt)
+
+	// A caller that passed the controller's operator check before admission
+	// can still reach the affinity checker after the split has started.
+	for range 2 {
+		re.Empty(checker.Check(region), "an in-flight split must not produce a duplicate")
+		value, ok = checker.splitAttempts.Get(region.GetID())
+		re.True(ok)
+		attempt = value.(affinitySplitAttempt)
+		re.Same(split, attempt.split)
+		re.Equal(startedAt, attempt.startedAt)
+		re.True(attempt.expiresAt.After(expiresAt))
+	}
+
+	// End the split without a version change while the attempt still has time.
+	opController.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
+	re.Equal(operator.TIMEOUT, split.Status())
+	re.Nil(opController.GetOperator(region.GetID()))
+	ops = checker.Check(region)
+	requireAffinitySplit(t, ops)
+	value, ok = checker.splitAttempts.Get(region.GetID())
+	re.True(ok)
+	re.Equal(startedAt, value.(affinitySplitAttempt).startedAt)
+	re.Equal(1, opController.AddWaitingOperator(ops...))
+	ops[0].SetStatusReachTime(operator.STARTED, time.Now().Add(-affinitySplitWaitTimeout/2-time.Second))
+	opController.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
+	re.Equal(operator.TIMEOUT, ops[0].Status(), "a retry only has the remaining attempt budget")
+	re.Nil(opController.GetOperator(region.GetID()))
+
+	ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
+	re.Equal(region.GetRegionEpoch().GetVersion(), cluster.GetRegion(region.GetID()).GetRegionEpoch().GetVersion())
 	requireAffinityMove(t, checker.Check(region))
 }
 
