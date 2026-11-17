@@ -345,6 +345,12 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 			return group, nil
 		}
 		if m.targetWriter != nil {
+			m.RLock()
+			conditionsKnown := m.storeConditionsKnown
+			m.RUnlock()
+			if !conditionsKnown && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
+				return group, nil
+			}
 			target := GroupTarget{Expected: group.Group, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
 			if sameStoredGroup(&target.Expected, target.result()) {
 				m.Lock()

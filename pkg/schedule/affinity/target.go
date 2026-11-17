@@ -19,10 +19,14 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/keypath"
 )
+
+// ErrTargetWriterNotReady indicates that no request could be sent yet.
+var ErrTargetWriterNotReady = errors.New("affinity target writer is not ready")
 
 // GroupTarget is a target decided from the persisted group in Expected.
 // NOTE: This type is exported by HTTP API.
@@ -98,7 +102,7 @@ func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
 	var stored *Group
 	written := false
 	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		value, err := txn.Load(keypath.AffinityGroupPath(target.Expected.ID))
+		value, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
 		if err != nil || value == "" {
 			return err
 		}
@@ -126,9 +130,7 @@ func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
 	if stored != nil {
 		m.Lock()
 		if group, ok := m.groups[stored.ID]; ok {
-			m.syncGroupTargetLocked(group, stored)
-			if written {
-				group = m.groups[stored.ID]
+			if changed := m.syncGroupTargetLocked(group, stored); written && !changed {
 				m.setTargetAvailabilityLocked(group)
 				m.resetCountLocked(group)
 			}
