@@ -691,6 +691,15 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 			Contents: buf.String(),
 		}
 		res.err = err
+	} else {
+		skipPrefix := "--- SKIP: " + fn + " ("
+		// An unindented marker identifies a skipped top-level test.
+		for line := range strings.SplitSeq(buf.String(), "\n") {
+			if strings.HasPrefix(line, skipPrefix) {
+				res.SkipMessage = &JUnitSkipMessage{Message: "skipped"}
+				break
+			}
+		}
 	}
 
 	res.d = time.Since(start)

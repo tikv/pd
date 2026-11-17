@@ -58,3 +58,36 @@ func TestOrderTasks(t *testing.T) {
 	require.Equal(t, []task{{"pkg/a", "TestSlow"}, {"pkg/a", "TestFast"}, {"pkg/b", "TestNew"}}, tasks)
 	require.Error(t, orderTasks(tasks, filename+".missing"))
 }
+
+func TestRunTestCaseResults(t *testing.T) {
+	if outcome := os.Getenv("PD_UT_RESULT_FIXTURE"); outcome != "" {
+		switch outcome {
+		case "fail":
+			t.Fatal("fixture failure")
+		case "skip":
+			t.Skip("fixture skip")
+		case "skipped-child":
+			t.Run("child", func(t *testing.T) { t.Skip("fixture child skip") })
+		}
+		return
+	}
+
+	originalWorkDir := workDir
+	workDir = t.TempDir()
+	t.Cleanup(func() { workDir = originalWorkDir })
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	require.NoError(t, os.Symlink(executable, filepath.Join(workDir, testFileName("."))))
+	for _, outcome := range []string{"pass", "fail", "skip", "skipped-child"} {
+		t.Run(outcome, func(t *testing.T) {
+			t.Setenv("PD_UT_RESULT_FIXTURE", outcome)
+			result := new(numa).runTestCase(".", "TestRunTestCaseResults")
+			require.Equal(t, outcome == "fail", result.Failure != nil)
+			require.Equal(t, outcome == "fail", result.err != nil)
+			require.Equal(t, outcome == "skip", result.SkipMessage != nil)
+			if result.Failure != nil {
+				require.Contains(t, result.Failure.Contents, "fixture failure")
+			}
+		})
+	}
+}

@@ -523,7 +523,7 @@
       "longest": 84.843
     },
     "github.com/tikv/pd/tests/server/watch": {
-      "seconds": 36.029,
+      "seconds": 34.303,
       "longest": 34.303
     },
     "github.com/tikv/pd/tools/pd-analysis/analysis": {
@@ -2493,7 +2493,6 @@
     "github.com/tikv/pd/tests/server/storage.TestHotRegionStorageTestSuite": 21.285,
     "github.com/tikv/pd/tests/server/tso.TestTSOProxyTestSuite": 84.843,
     "github.com/tikv/pd/tests/server/tso.TestTSOSuite": 48.561,
-    "github.com/tikv/pd/tests/server/watch.TestWatcher": 1.726,
     "github.com/tikv/pd/tests/server/watch.TestWatcherCompacted": 34.303
   }
 }
