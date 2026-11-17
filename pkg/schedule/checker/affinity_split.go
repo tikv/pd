@@ -51,7 +51,8 @@ type affinitySplitAttempt struct {
 	// starts an operator when it admits it, and then sends the split request.
 	// startedAt is the first split start time, or the time the checker starts
 	// waiting for a non-positive size. It is zero until either wait starts.
-	split *operator.Operator
+	split            *operator.Operator
+	fallbackRecorded bool
 }
 
 // prepareAffinityPeerMove requests a SCAN split before the move to roles adds a
@@ -133,7 +134,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		if !attempt.startedAt.IsZero() {
 			splitWait = now.Sub(attempt.startedAt)
 		}
-		if splitWait <= affinitySplitWaitTimeout {
+		if splitWait < affinitySplitWaitTimeout {
 			if sizeUnknown {
 				c.splitAttempts.Put(region.GetID(), attempt)
 				return wait("unknown-size")
@@ -162,8 +163,10 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	}
 	// The engine may have no split key or no positive size, so a timed-out attempt
 	// moves without a preliminary split and accepts a potentially large snapshot.
-	if splitWait > affinitySplitWaitTimeout {
-		log.Debug("allow affinity peer move after split wait timeout", zap.Uint64("region-id", region.GetID()),
+	if splitWait >= affinitySplitWaitTimeout && !attempt.fallbackRecorded {
+		attempt.fallbackRecorded = true
+		c.splitAttempts.Put(region.GetID(), attempt)
+		log.Info("allow affinity peer move after split wait timeout", zap.Uint64("region-id", region.GetID()),
 			zap.String("group-id", group.ID), zap.Int64("size", region.GetApproximateSize()),
 			zap.Int64("keys", region.GetApproximateKeys()), zap.Duration("wait-duration", splitWait))
 		affinityCheckerSplitTimeoutCounter.Inc()

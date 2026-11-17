@@ -17,6 +17,7 @@ package checker
 import (
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/docker/go-units"
@@ -175,6 +176,32 @@ func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
 	}
 }
 
+func TestAffinitySplitBeforeMoveFallbackBoundary(t *testing.T) {
+	for _, wait := range []time.Duration{affinitySplitWaitTimeout, affinitySplitWaitTimeout + time.Second} {
+		t.Run(wait.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				cluster, checker := newAffinitySplitTest(t)
+				region := cluster.GetRegion(1)
+				requireAffinitySplit(t, checker.Check(region))
+				ageAffinitySplitAttempt(t, checker, region.GetID(), wait)
+				value, ok := checker.splitAttempts.Get(region.GetID())
+				re.True(ok)
+				re.Equal(wait, time.Since(value.(affinitySplitAttempt).startedAt))
+				group := cluster.GetAffinityManager().GetAffinityGroupState("split_before_move")
+				roles := map[uint64]placement.PeerRoleType{1: placement.Leader, 2: placement.Voter, 3: placement.Voter}
+				fallbacks := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
+				for range 3 {
+					op, ready := checker.prepareAffinityPeerMove(region, group, roles)
+					re.Nil(op)
+					re.True(ready)
+					re.Equal(fallbacks+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+				}
+			})
+		})
+	}
+}
+
 func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 	for _, reason := range []string{"epoch", "expired", "evicted", "new target", "new move", "current target", "split succeeds", "zero size"} {
 		t.Run(reason, func(t *testing.T) {
@@ -194,16 +221,14 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 				re.Zero(region.GetApproximateSize())
 				re.Empty(checker.Check(region))
 				re.Empty(checker.Check(region), "a retry must still wait before the timeout")
-				originalTimeout := affinitySplitWaitTimeout
-				affinitySplitWaitTimeout = 0
-				t.Cleanup(func() { affinitySplitWaitTimeout = originalTimeout })
+				ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
 				fallbacks := promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter)
 				for range 2 {
 					ops := checker.Check(region)
 					requireAffinityMove(t, ops)
 				}
 				re.Zero(region.GetApproximateSize())
-				re.Equal(fallbacks+2, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
+				re.Equal(fallbacks+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
 				region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
 					Region: region.GetMeta(), Leader: region.GetLeader(), ApproximateSize: 64 * units.MiB,
 				}, 0)
@@ -280,6 +305,7 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 			attempt := value.(affinitySplitAttempt)
 			re.Equal(region.GetRegionEpoch().GetVersion(), attempt.version)
 			re.True(attempt.startedAt.IsZero(), "a new attempt must start a fresh wait")
+			re.False(attempt.fallbackRecorded, "a new attempt must record its own fallback")
 			ageAffinitySplitAttempt(t, checker, region.GetID(), affinitySplitWaitTimeout+time.Second)
 			ops := checker.Check(region)
 			requireAffinityMove(t, ops)
@@ -291,8 +317,8 @@ func TestAffinitySplitBeforeMoveFallbackTransitions(t *testing.T) {
 
 func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
 	originalTimeout := affinitySplitWaitTimeout
-	// A zero budget exposes premature fallback when no split has started.
-	affinitySplitWaitTimeout = 0
+	// A minimal positive budget exposes premature fallback before a split starts.
+	affinitySplitWaitTimeout = time.Nanosecond
 	t.Cleanup(func() { affinitySplitWaitTimeout = originalTimeout })
 
 	re := require.New(t)
@@ -342,6 +368,7 @@ func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
 	requireAffinitySplit(t, ops)
 	re.Equal(1, opController.AddWaitingOperator(ops...))
 	re.False(ops[0].GetStartTime().IsZero())
+	ops[0].SetStatusReachTime(operator.STARTED, time.Now().Add(-affinitySplitWaitTimeout-time.Second))
 	opController.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
 	re.Nil(opController.GetOperator(region.GetID()))
 	requireAffinityMove(t, checker.Check(region))
