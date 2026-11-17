@@ -286,14 +286,18 @@ func TestSyncOverlappingAffinityRanges(t *testing.T) {
 					// Cache the Region in group a before the conflict appears.
 					_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
 					re.True(isAffinity)
+					manager.SetLabelRuleBatchInProgress(true)
 				}
 			}
+			// A group watcher post callback must not publish a partial label batch.
+			manager.ReconcileRangeConflicts()
 			// Before the batch that adds b ends, lookups see the old state.
 			for _, groupRanges := range ranges {
 				re.True(manager.GetAffinityGroupState(groupRanges.GroupID).AffinitySchedulingAllowed)
 			}
 			group, _ := manager.GetAndCacheRegionAffinityGroupState(region)
 			re.Equal("a", group.ID)
+			manager.SetLabelRuleBatchInProgress(false)
 			manager.ReconcileRangeConflicts()
 			for _, groupRanges := range ranges {
 				state := manager.GetAffinityGroupState(groupRanges.GroupID)
@@ -305,18 +309,42 @@ func TestSyncOverlappingAffinityRanges(t *testing.T) {
 			group, _ = manager.GetAndCacheRegionAffinityGroupState(region)
 			re.Nil(group)
 
+			syncRanges := func(groupRanges GroupKeyRanges) {
+				data, err := json.Marshal(MakeLabelRule(groupRanges))
+				re.NoError(err)
+				rule, err := labeler.NewLabelRuleFromJSON(data)
+				re.NoError(err)
+				re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+				re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(groupRanges)))
+			}
+			// Updating just b's rule must resolve the conflict for both groups.
+			syncRanges(GroupKeyRanges{GroupID: "b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("x"), EndKey: []byte("y")}}})
+			manager.ReconcileRangeConflicts()
+			for _, groupRanges := range ranges {
+				re.True(manager.GetAffinityGroupState(groupRanges.GroupID).AffinitySchedulingAllowed)
+			}
+			syncRanges(ranges[1])
+			manager.ReconcileRangeConflicts()
+			re.False(manager.GetAffinityGroupState("a").AffinitySchedulingAllowed)
+
 			re.NoError(regionLabeler.DeleteLabelRule(GetLabelRuleID("b")))
 			if labelFirst {
 				manager.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID("b"))
+			} else {
+				manager.SyncGroupDeleteFromEtcd("b")
 			}
-			manager.SyncGroupDeleteFromEtcd("b")
-			if !labelFirst {
+			// Either deletion alone must mark conflicts stale and restore a.
+			re.False(manager.GetAffinityGroupState("a").AffinitySchedulingAllowed)
+			manager.ReconcileRangeConflicts()
+			re.True(manager.GetAffinityGroupState("a").AffinitySchedulingAllowed)
+			if labelFirst {
+				manager.SyncGroupDeleteFromEtcd("b")
+			} else {
 				manager.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID("b"))
 			}
 			re.False(manager.IsGroupExist("b"))
 			re.NotContains(manager.keyRanges, "b")
 			re.Empty(manager.labelRuleBuffer)
-			re.False(manager.GetAffinityGroupState("a").AffinitySchedulingAllowed)
 			manager.ReconcileRangeConflicts()
 			group, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
 			re.NotNil(group)
