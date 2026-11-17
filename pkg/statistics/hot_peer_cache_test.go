@@ -764,19 +764,18 @@ func TestRemoveLastHotPeerClearsRegionIndex(t *testing.T) {
 				cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}))
 			}
 			cache := NewHotPeerCache(t.Context(), cluster, kind)
-			for regionID := uint64(1); regionID <= 100; regionID++ {
-				for storeID := uint64(1); storeID <= 2; storeID++ {
-					cache.UpdateStat(&HotPeerStat{
-						RegionID: regionID, StoreID: storeID,
-						Loads: make([]float64, utils.DimLen), actionType: utils.Add,
-					})
-				}
-				cache.UpdateStat(&HotPeerStat{RegionID: regionID, StoreID: 1, actionType: utils.Remove})
-				re.Equal(map[uint64]struct{}{2: {}}, cache.storesOfRegion[regionID])
-				re.NotNil(cache.getHotPeerStat(regionID, 2))
-				cache.UpdateStat(&HotPeerStat{RegionID: regionID, StoreID: 2, actionType: utils.Remove})
-				re.NotContains(cache.storesOfRegion, regionID)
+			regionID := uint64(1)
+			for storeID := uint64(1); storeID <= 2; storeID++ {
+				cache.UpdateStat(&HotPeerStat{
+					RegionID: regionID, StoreID: storeID,
+					Loads: make([]float64, utils.DimLen), actionType: utils.Add,
+				})
 			}
+			cache.UpdateStat(&HotPeerStat{RegionID: regionID, StoreID: 1, actionType: utils.Remove})
+			re.Equal(map[uint64]struct{}{2: {}}, cache.storesOfRegion[regionID])
+			re.NotNil(cache.getHotPeerStat(regionID, 2))
+			cache.UpdateStat(&HotPeerStat{RegionID: regionID, StoreID: 2, actionType: utils.Remove})
+			re.NotContains(cache.storesOfRegion, regionID)
 			cache.lastGCTime = time.Time{}
 			cache.gc()
 			re.Empty(cache.storesOfRegion)

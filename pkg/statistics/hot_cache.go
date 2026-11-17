@@ -55,11 +55,12 @@ func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckWriteAsync(task func(cache *HotPeerCache)) bool {
-	if w.writeCache.taskQueue.Len() > chanMaxLength {
+	queue := w.writeCache.taskQueue
+	if len(queue.In) == cap(queue.In) || queue.Len() > chanMaxLength {
 		return false
 	}
 	select {
-	case w.writeCache.taskQueue.In <- &hotCacheTask{run: task}:
+	case queue.In <- &hotCacheTask{run: task}:
 		return true
 	default:
 		return false
@@ -68,11 +69,12 @@ func (w *HotCache) CheckWriteAsync(task func(cache *HotPeerCache)) bool {
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
-	if w.readCache.taskQueue.Len() > chanMaxLength {
+	queue := w.readCache.taskQueue
+	if len(queue.In) == cap(queue.In) || queue.Len() > chanMaxLength {
 		return false
 	}
 	select {
-	case w.readCache.taskQueue.In <- &hotCacheTask{run: task}:
+	case queue.In <- &hotCacheTask{run: task}:
 		return true
 	default:
 		return false

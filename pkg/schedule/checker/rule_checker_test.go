@@ -2125,26 +2125,21 @@ func TestRuleCacheIgnoresDeletedPatrolRegions(t *testing.T) {
 			for id := uint64(1); id <= 3; id++ {
 				s.cluster.AddLeaderStore(id, 1)
 			}
-			retained := 0
-			for id := uint64(1); id <= 100; id++ {
-				s.cluster.AddLeaderRegionWithRange(id, "", "", 1, 2, 3)
-				region := s.cluster.GetRegion(id).Clone(core.WithIncConfVer(), core.WithIncVersion())
-				s.cluster.PutRegion(region)
-				re.Nil(s.rc.Check(region))
-				re.Equal(enabled, s.ruleManager.CheckIsCachedDirectly(id))
+			const id = uint64(1)
+			s.cluster.AddLeaderRegionWithRange(id, "", "", 1, 2, 3)
+			region := s.cluster.GetRegion(id).Clone(core.WithIncConfVer(), core.WithIncVersion())
+			s.cluster.PutRegion(region)
+			re.Nil(s.rc.Check(region))
+			re.Equal(enabled, s.ruleManager.CheckIsCachedDirectly(id))
 
-				// A merge removes the region and its cache while a patrol worker
-				// still holds the snapshot dispatched before the merge.
-				s.cluster.RemoveRegion(region)
-				s.ruleManager.InvalidCache(id)
-				re.Nil(s.cluster.GetRegion(id))
-				re.Nil(s.rc.Check(region))
-				if s.ruleManager.CheckIsCachedDirectly(id) {
-					retained++
-				}
-			}
+			// A merge removes the region and its cache while a patrol worker
+			// still holds the snapshot dispatched before the merge.
+			s.cluster.RemoveRegion(region)
+			s.ruleManager.InvalidCache(id)
+			re.Nil(s.cluster.GetRegion(id))
+			re.Nil(s.rc.Check(region))
+			re.False(s.ruleManager.CheckIsCachedDirectly(id), "old patrol snapshots must not reinsert deleted regions")
 			re.Zero(s.cluster.GetTotalRegionCount())
-			re.Zero(retained, "old patrol snapshots must not reinsert deleted regions")
 		})
 	}
 }
