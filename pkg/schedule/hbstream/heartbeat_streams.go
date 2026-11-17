@@ -279,6 +279,9 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 		select {
 		case s.msgCh <- resp:
 		default:
+			if store := s.storeInformer.GetStore(region.GetLeader().GetStoreId()); store != nil && !store.IsRemoved() {
+				heartbeatStreamCounter.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10), "push", "queue-full").Inc()
+			}
 		}
 		return
 	}
