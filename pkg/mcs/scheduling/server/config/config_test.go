@@ -32,6 +32,54 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
+func TestPeekStoreLimitByType(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		storeLimit map[uint64]sc.StoreLimitConfig
+	}{
+		{name: "nil store limits"},
+		{name: "empty store limits", storeLimit: map[uint64]sc.StoreLimitConfig{}},
+		{
+			name: "explicit limits including zero",
+			storeLimit: map[uint64]sc.StoreLimitConfig{1: {
+				AddPeer: 0, RemovePeer: 180, TransferLeaderIn: 240,
+			}},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := &Config{Schedule: sc.ScheduleConfig{
+				DefaultStoreLimit: sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 60, TransferLeaderIn: 120},
+				StoreLimit:        testCase.storeLimit,
+			}}
+			expected := cfg.Schedule.Clone()
+			persistConfig := NewPersistConfig(cfg, nil)
+			for _, storeID := range []uint64{1, 2} {
+				limit, ok := expected.StoreLimit[storeID]
+				if !ok {
+					limit = expected.GetDefaultStoreLimit()
+				}
+				re.Equal(limit.AddPeer, persistConfig.PeekStoreLimitByType(storeID, storelimit.AddPeer))
+				re.Equal(limit.RemovePeer, persistConfig.PeekStoreLimitByType(storeID, storelimit.RemovePeer))
+				re.Equal(limit.TransferLeaderIn, persistConfig.PeekStoreLimitByType(storeID, storelimit.TransferLeaderIn))
+				re.Zero(persistConfig.PeekStoreLimitByType(storeID, storelimit.SendSnapshot))
+			}
+			re.Same(&cfg.Schedule, persistConfig.GetScheduleConfig())
+			re.Equal(expected, persistConfig.GetScheduleConfig())
+
+			updated := expected.Clone()
+			updated.DefaultStoreLimit = sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 90, TransferLeaderIn: 150}
+			delete(updated.StoreLimit, 1)
+			persistConfig.SetScheduleConfig(updated)
+			re.Zero(persistConfig.PeekStoreLimitByType(1, storelimit.AddPeer))
+			re.Equal(float64(90), persistConfig.PeekStoreLimitByType(1, storelimit.RemovePeer))
+			re.Equal(float64(150), persistConfig.PeekStoreLimitByType(1, storelimit.TransferLeaderIn))
+			re.Same(updated, persistConfig.GetScheduleConfig())
+			re.NotContains(updated.StoreLimit, uint64(1))
+		})
+	}
+}
+
 func TestSetScheduleConfigDoesNotBlockWhenSchedulersUpdatingNotifierIsFull(t *testing.T) {
 	re := require.New(t)
 	persistConfig := NewPersistConfig(&Config{}, nil)

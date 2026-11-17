@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -88,6 +89,7 @@ func (suite *configTestSuite) TestConfigWatch() {
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
+		core.NewBasicCluster(),
 		endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
 	)
 	re.NoError(err)
@@ -147,6 +149,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
+		core.NewBasicCluster(),
 		storage,
 	)
 	re.NoError(err)
