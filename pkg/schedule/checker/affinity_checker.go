@@ -329,22 +329,7 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		kind |= operator.OpLeader
 	}
 
-	var op *operator.Operator
-	var err error
-	if movedLearners {
-		// Match the witness flags by store, as in the validated learner layout.
-		peers := make(map[uint64]*metapb.Peer, len(roles))
-		for storeID, role := range roles {
-			peers[storeID] = &metapb.Peer{
-				StoreId: storeID, Role: role.MetaPeerRole(),
-				IsWitness: region.GetStorePeer(storeID).GetIsWitness(),
-			}
-		}
-		op, err = operator.NewBuilder("affinity-move-region", c.cluster, region).
-			SetPeers(peers).SetExpectedRoles(roles).Build(kind)
-	} else {
-		op, err = operator.CreateMoveRegionOperator("affinity-move-region", c.cluster, region, kind, roles)
-	}
+	op, err := operator.CreateMoveRegionOperator("affinity-move-region", c.cluster, region, kind, roles)
 	if err != nil {
 		log.Warn("create affinity move region operator failed",
 			zap.Uint64("region-id", region.GetID()),
