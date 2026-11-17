@@ -123,9 +123,9 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	re := suite.Require()
-	suite.cancel()
 	suite.tsoCluster.Destroy()
 	suite.cluster.Destroy()
+	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
