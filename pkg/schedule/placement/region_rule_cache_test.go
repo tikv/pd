@@ -340,6 +340,69 @@ func TestSetCacheRejectsRemovedRegion(t *testing.T) {
 	}
 }
 
+type pausedRegionSet struct {
+	*core.BasicCluster
+	read   chan struct{}
+	resume chan struct{}
+}
+
+func (s *pausedRegionSet) GetRegion(id uint64) *core.RegionInfo {
+	region := s.BasicCluster.GetRegion(id)
+	close(s.read)
+	<-s.resume
+	return region
+}
+
+func TestSetCacheSerializesRegionRemoval(t *testing.T) {
+	for _, warmup := range []int{0, 1, minHitCountToCacheHit + 1} {
+		t.Run(fmt.Sprintf("warmup-%d", warmup), func(t *testing.T) {
+			re := require.New(t)
+			manager := NewRegionRuleFitCacheManager()
+			cluster := core.NewBasicCluster()
+			stores := mockStores(3)
+			for _, store := range stores {
+				cluster.PutStore(store)
+			}
+			region := mockRegion(3, 0)
+			cluster.PutRegion(region)
+			rules := addExtraRules(0)
+			fit := fitRegion(stores, region, rules, false)
+			fit.regionStores, fit.rules = stores, rules
+			for range warmup {
+				manager.SetCache(cluster, region, fit)
+			}
+			paused := &pausedRegionSet{
+				BasicCluster: cluster,
+				read:         make(chan struct{}),
+				resume:       make(chan struct{}),
+			}
+			written, invalidated := make(chan struct{}), make(chan struct{})
+			go func() {
+				manager.SetCache(paused, region, fit)
+				close(written)
+			}()
+			<-paused.read
+			cluster.RemoveRegion(region)
+			// With the old membership snapshot paused, invalidation must not
+			// be able to acquire the cache lock before the writer publishes it.
+			lockAvailable := manager.mu.TryLock()
+			if lockAvailable {
+				manager.mu.Unlock()
+			}
+			go func() {
+				manager.Invalid(region.GetID())
+				close(invalidated)
+			}()
+			close(paused.resume)
+			<-written
+			<-invalidated
+			re.False(lockAvailable, "membership validation must serialize with invalidation")
+			re.Empty(manager.regionCaches)
+			re.Empty(manager.storesOfRegion)
+		})
+	}
+}
+
 // buryAfterReadStoreSet wraps a *core.StoresInfo and buries the target store
 // as a side effect of the first GetStore(target) call, but still returns the
 // pre-bury snapshot from that same call -- modeling allStoresLive's read
