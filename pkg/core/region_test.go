@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	mrand "math/rand/v2"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1304,6 +1305,82 @@ func TestCheckAndPutSubTree(t *testing.T) {
 	regions.CheckAndPutSubTree(region)
 	// should failed to put because the root tree is missing
 	re.Equal(0, regions.tree.length())
+}
+
+func TestRegionPreparationTracksOutOfOrderTopology(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	original := NewRegionInfo(&metapb.Region{
+		Id: 1, StartKey: []byte("a"), EndKey: []byte("b"), Peers: peers,
+	}, peers[0], SetSource(Heartbeat))
+	regions.PutRegion(original)
+	re.True(regions.IsRegionLeaderPrepared())
+
+	latest := original.Clone(WithLeader(peers[1]), SetSource(Heartbeat))
+	_, err := regions.CheckAndPutRootTree(ContextTODO(), latest)
+	re.NoError(err)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.CheckAndPutSubTree(latest)
+	re.True(regions.IsRegionLeaderPrepared())
+	// A delayed same-epoch update can restore an obsolete subtree leader.
+	regions.UpdateSubTreeOrderInsensitive(original)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.CheckAndPutSubTree(original)
+	re.True(regions.IsRegionLeaderPrepared())
+
+	// Flow statistics can lag without changing membership or leader readiness.
+	flow := latest.Clone(SetApproximateSize(100), SetSource(Heartbeat))
+	_, err = regions.CheckAndPutRootTree(ContextTODO(), flow)
+	re.NoError(err)
+	re.True(regions.IsRegionLeaderPrepared())
+	regions.CheckAndPutSubTree(flow)
+	re.True(regions.IsRegionLeaderPrepared())
+
+	regions.RemoveRegion(flow)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.RemoveRegionFromSubTree(flow)
+	re.True(regions.IsRegionLeaderPrepared())
+	regions.PutRegion(flow)
+	regions.RemoveRegionFromSubTree(flow)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.CheckAndPutSubTree(flow)
+	re.True(regions.IsRegionLeaderPrepared())
+	regions.SetRegion(original)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.ResetRegionCache()
+	re.True(regions.IsRegionLeaderPrepared())
+}
+
+func TestRegionPreparationWithSharedRegionInfo(t *testing.T) {
+	re := require.New(t)
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	left, right := NewRegionsInfo(), NewRegionsInfo()
+	left.PutRegion(region)
+	right.SetRegion(region)
+	re.True(left.IsRegionLeaderPrepared())
+	re.False(right.IsRegionLeaderPrepared())
+	right.CheckAndPutSubTree(region)
+	re.True(right.IsRegionLeaderPrepared())
+}
+
+func TestRegionPreparationWithPendingBatch(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	batch := make([]*RegionInfo, 1024)
+	for i := range batch {
+		peer := &metapb.Peer{Id: uint64(i + 1), StoreId: 1}
+		batch[i] = NewRegionInfo(&metapb.Region{
+			Id: uint64(i + 1), StartKey: fmt.Appendf(nil, "%04d", i),
+			EndKey: fmt.Appendf(nil, "%04d", i+1), Peers: []*metapb.Peer{peer},
+		}, peer, SetSource(Heartbeat))
+		regions.SetRegion(batch[i])
+	}
+	re.False(regions.IsRegionLeaderPrepared())
+	for i, region := range slices.Backward(batch) {
+		regions.CheckAndPutSubTree(region)
+		re.Equal(i == 0, regions.IsRegionLeaderPrepared())
+	}
 }
 
 func TestCntRefAfterResetRegionCache(t *testing.T) {

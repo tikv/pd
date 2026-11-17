@@ -47,6 +47,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		return true
 	}
 	if time.Since(checker.start) > CollectTimeout {
+		c.UpdateAllStoreStatus()
 		checker.prepared = true
 		return true
 	}
@@ -74,6 +75,8 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 			return false
 		}
 	}
+	// Schedulers score StoreInfo snapshots rather than the Region subtrees.
+	c.UpdateAllStoreStatus()
 	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionCount))
 	checker.prepared = true
 	return true

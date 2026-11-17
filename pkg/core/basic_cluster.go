@@ -15,6 +15,8 @@
 package core
 
 import (
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
@@ -35,7 +37,16 @@ func NewBasicCluster() *BasicCluster {
 
 // UpdateStoreStatus updates the information of the store.
 func (bc *BasicCluster) UpdateStoreStatus(storeID uint64) {
+	// Serialize the snapshot with its publication so an older refresh cannot
+	// overwrite the statistics collected before scheduling starts.
+	bc.storeStatsMu.Lock()
+	defer bc.storeStatsMu.Unlock()
+	bc.updateStoreStatusLocked(storeID)
+}
+
+func (bc *BasicCluster) updateStoreStatusLocked(storeID uint64) {
 	leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize := bc.GetStoreStats(storeID)
+	failpoint.InjectCall("beforePublishStoreStatus")
 	bc.StoresInfo.UpdateStoreStatus(storeID, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
@@ -83,13 +94,15 @@ func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, key
 
 // UpdateAllStoreStatus updates the information of all stores.
 func (bc *BasicCluster) UpdateAllStoreStatus() {
+	bc.storeStatsMu.Lock()
+	defer bc.storeStatsMu.Unlock()
 	// Update related stores.
 	stores := bc.GetStores()
 	for _, store := range stores {
 		if store.IsRemoved() {
 			continue
 		}
-		bc.UpdateStoreStatus(store.GetID())
+		bc.updateStoreStatusLocked(store.GetID())
 	}
 }
 
