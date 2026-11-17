@@ -63,9 +63,6 @@ jobs:
         run: |
           make ci-test-job JOB_INDEX=$WORKER_ID JOB_COUNT=10
           mv covprofile covprofile_$WORKER_ID
-          if [ -f junitfile ]; then
-            cat junitfile
-          fi
       - name: Upload test durations ${{ matrix.worker_id }}
         if: always()
         uses: actions/upload-artifact@v4
