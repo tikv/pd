@@ -61,9 +61,10 @@ func TestJsonRespondErrorBadInput(t *testing.T) {
 		name    string
 		body    string
 		message string
+		data    string
 	}{
-		{name: "type mismatch", body: `{"zone":"cn","host":"local"}`, message: "json: cannot unmarshal object into Go value of type []string"},
-		{name: "invalid syntax", body: `{"zone":"cn",`, message: "unexpected end of JSON input"},
+		{name: "type mismatch", body: `{"zone":"cn","host":"local"}`, message: "json: cannot unmarshal object into Go value of type []string", data: `{"Value":"object","Type":{},"Offset":1,"Struct":"","Field":"","Err":null}`},
+		{name: "invalid syntax", body: `{"zone":"cn",`, message: "unexpected end of JSON input", data: `{"Offset":13}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -81,7 +82,7 @@ func TestJsonRespondErrorBadInput(t *testing.T) {
 			re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
 			re.Equal("input", body.Code)
 			re.Equal(tc.message, body.Msg)
-			re.NotEmpty(body.Data)
+			re.JSONEq(tc.data, string(body.Data))
 		})
 	}
 }
