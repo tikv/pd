@@ -398,13 +398,13 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		checkTSODuration := time.Since(checkTSOStart)
 		log.Info("check TSO service completed", zap.Duration("cost", checkTSODuration))
 	}
-	resignOnFailure := func() {
+	resignOnFailure := sync.OnceFunc(func() {
 		if !bootstrap {
 			// Bootstrap does not own the leadership, but an election may already
 			// be serving embedded TSO. Resign before any failure log or cleanup.
 			c.member.Resign()
 		}
-	}
+	})
 	defer func() {
 		if !bootstrap && err != nil {
 			resignOnFailure()
