@@ -40,6 +40,8 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -91,6 +93,51 @@ func TestAuditJSONReadErrorCompatibility(t *testing.T) {
 					})
 				}
 			}
+		})
+	}
+}
+
+func TestAuditConfigReadErrorForwarding(t *testing.T) {
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(follower)
+	logFile := testutil.InitTempFileLogger(t, "info")
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("audit=%t", enabled), func(t *testing.T) {
+			re := require.New(t)
+			re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+			before, err := os.ReadFile(logFile)
+			re.NoError(err)
+			// Force the existing etcd read deadline to expire without disrupting
+			// HTTP access to the serving leader.
+			const slowGet = "github.com/tikv/pd/pkg/utils/etcdutil/SlowEtcdKVGet"
+			delaySeconds := int(etcdutil.DefaultRequestTimeout/time.Second) + 1
+			re.NoError(failpoint.Enable(slowGet, fmt.Sprintf("return(%d)", delaySeconds)))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(slowGet)) })
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, leader.GetAddr()+"/pd/api/v2/keyspaces", []byte("{"),
+				testutil.Status(re, http.StatusBadRequest), testutil.StringContain(re, "[PD:gin:ErrBindJSON]")))
+			response, err := tests.TestDialClient.Post(follower.GetAddr()+"/pd/api/v2/keyspaces", "application/json", strings.NewReader("{"))
+			re.NoError(err)
+			data, err := io.ReadAll(response.Body)
+			re.NoError(err)
+			re.NoError(response.Body.Close())
+			after, err := os.ReadFile(logFile)
+			re.NoError(err)
+			entries := string(after[len(before):])
+			re.Contains(entries, "load from etcd meet error")
+			re.Contains(entries, keypath.ServiceMiddlewarePath())
+			re.True(leader.GetServer().GetMember().IsServing())
+			re.Equal(leaderName, cluster.GetLeader())
+			re.Equal(http.StatusBadRequest, response.StatusCode)
+			re.Contains(string(data), "[PD:gin:ErrBindJSON]")
 		})
 	}
 }

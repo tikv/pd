@@ -310,19 +310,31 @@ func TestAuditLocalLogDoesNotSetEndTime(t *testing.T) {
 
 func TestAuditConfigReadError(t *testing.T) {
 	re := require.New(t)
-	svr := newTestAuditServer()
+	output := &bytes.Buffer{}
+	syncer := zapcore.Lock(zapcore.AddSync(output))
+	logger, props, err := log.InitLoggerWithWriteSyncer(&log.Config{Format: "json"}, syncer, syncer)
+	re.NoError(err)
+	t.Cleanup(log.ReplaceGlobals(logger, props))
+	svr := newTestAuditServer(&recordingAuditBackend{label: audit.LocalLogLabel, before: true, run: func(*http.Request) {
+		t.Fatal("audit must be skipped when its configuration is unavailable")
+	}})
 	svr.configErr = io.ErrUnexpectedEOF
+	body := &auditReadCloser{Reader: strings.NewReader("request-body")}
 	router := gin.New()
 	router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
 	called := false
-	router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+	router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
 		called = true
-		c.Status(http.StatusNoContent)
+		re.Same(body, c.Request.Body)
+		re.Zero(body.reads)
+		c.Status(http.StatusServiceUnavailable)
 	})
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", http.NoBody))
-	re.Equal(http.StatusInternalServerError, recorder.Code)
-	re.False(called)
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", body))
+	re.Equal(http.StatusServiceUnavailable, recorder.Code)
+	re.True(called)
+	re.Contains(output.String(), "skip HTTP audit because configuration could not be loaded")
+	re.Contains(output.String(), io.ErrUnexpectedEOF.Error())
 }
 
 func TestAuditCompleteBody(t *testing.T) {

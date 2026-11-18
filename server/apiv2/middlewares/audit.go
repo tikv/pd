@@ -23,7 +23,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 )
@@ -56,7 +59,9 @@ func newAudit(serviceLabel string, captureBody bool, backendLabels ...string) gi
 		svr := c.MustGet(ServerContextKey).(auditServer)
 		enabled, err := svr.IsHTTPAuditEnabled()
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			// Optional auditing must not replace the route's existing response.
+			log.Warn("skip HTTP audit because configuration could not be loaded", errs.ZapError(err))
+			c.Next()
 			return
 		}
 		if !enabled {
