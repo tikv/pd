@@ -91,6 +91,15 @@ func (d *dimStat) clone() *dimStat {
 	}
 }
 
+type readPeerRole uint8
+
+const (
+	readRoleSampled readPeerRole = iota
+	readRoleLeader
+	readRoleFollower
+	readRoleInvalid
+)
+
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
 	StoreID  uint64 `json:"store_id"`
@@ -99,6 +108,16 @@ type HotPeerStat struct {
 	HotDegree int `json:"hot_degree"`
 	// AntiCount used to eliminate some noise when remove region in cache.
 	AntiCount int `json:"anti_count"`
+	// Keep query flags near the degree counters to limit cache-line reads.
+	// isLeader records the role when this sample was collected.
+	isLeader bool
+	// readRole overlays accepted metadata without changing sample provenance.
+	readRole readPeerRole
+	// inCold marks a cached peer absent from the latest store heartbeat.
+	inCold bool
+	// If the item in storeA is just inherited from storeB,
+	// then other store, such as storeC, will be forbidden to inherit from storeA until the item in storeA is hot.
+	allowInherited bool
 	// Loads contains only Kind-related statistics and is DimLen in length.
 	Loads []float64 `json:"loads"`
 	// rolling statistics contains denoising data, it's DimLen in length.
@@ -107,16 +126,10 @@ type HotPeerStat struct {
 	stores []uint64
 	// actionType is the action type of the region, add, update or remove.
 	actionType utils.ActionType
-	// isLeader is true means that the region has a leader on this store.
-	isLeader bool
+	// peerID identifies the region peer associated with a read sample.
+	peerID uint64
 	// lastTransferLeaderTime is used to cool down frequent transfer leader.
 	lastTransferLeaderTime time.Time
-	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
-	// we will handle it as cold peer and mark the inCold flag
-	inCold bool
-	// If the item in storeA is just inherited from storeB,
-	// then other store, such as storeC, will be forbidden to inherit from storeA until the item in storeA is hot.
-	allowInherited bool
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -126,7 +139,11 @@ func (stat *HotPeerStat) ID() uint64 {
 
 // Less compares two HotPeerStat. Implementing TopNItem.
 func (stat *HotPeerStat) Less(dim int, than utils.TopNItem) bool {
-	return stat.GetLoad(dim) < than.(*HotPeerStat).GetLoad(dim)
+	other := than.(*HotPeerStat)
+	if stat.readRole == readRoleInvalid || other.readRole == readRoleInvalid {
+		return stat.readRole == readRoleInvalid && other.readRole != readRoleInvalid
+	}
+	return stat.GetLoad(dim) < other.GetLoad(dim)
 }
 
 // Log is used to output some info
@@ -148,12 +165,24 @@ func (stat *HotPeerStat) Log(str string) {
 
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
 func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int, rwTy utils.RWType) bool {
+	// A role change has no matching read sample yet. Waiting alone cannot make
+	// these loads suitable for scheduling, even for a previously returned view.
+	if minHotDegree > 0 && rwTy == utils.Read && stat.readRole != readRoleSampled {
+		return true
+	}
 	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*rwTy.ReportInterval())
 }
 
 // IsLeader indicates the item belong to the leader.
 func (stat *HotPeerStat) IsLeader() bool {
-	return stat.isLeader
+	switch stat.readRole {
+	case readRoleLeader:
+		return true
+	case readRoleFollower, readRoleInvalid:
+		return false
+	default:
+		return stat.isLeader
+	}
 }
 
 // GetActionType returns the item action type.
