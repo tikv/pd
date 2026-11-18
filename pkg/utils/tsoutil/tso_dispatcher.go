@@ -232,6 +232,7 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	return remaining, nil
 }
 
+// finishRequest sends the allocated timestamps and reports whether any downstream send failed.
 func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) bool {
 	countSum := int64(0)
 	for i := range requests {
