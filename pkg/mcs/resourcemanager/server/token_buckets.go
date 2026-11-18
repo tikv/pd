@@ -486,7 +486,7 @@ func floorRequestingSlot(allocationMap map[uint64]float64, requesterID uint64, b
 }
 
 func (gtb *GroupTokenBucket) debtWithin(allowance float64) bool {
-	if gtb.getBurstableMode() == moderated {
+	if getBurstableMode(gtb.Settings) == moderated {
 		return gtb.moderatedDebt <= allowance
 	}
 	return gtb.Tokens >= -allowance

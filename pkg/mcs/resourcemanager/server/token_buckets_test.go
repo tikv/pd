@@ -1178,6 +1178,50 @@ func TestModeratedDebtGatesReturningFloor(t *testing.T) {
 	re.InDelta(6000.0, gtb.tokenSlots[2].fillRate, 1e-9, "repayment must reopen the floor")
 }
 
+func TestModeratedDebtFloorAfterOverride(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		rg := FromProtoResourceGroup(&rmpb.ResourceGroup{
+			Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: -2},
+			}},
+		})
+		gtb := rg.RUSettings.RU
+		gtb.grt = newGroupRUTracker()
+		request := func(id uint64, amount float64) *rmpb.TokenBucket {
+			now := time.Now()
+			gtb.grt.sample(id, now, amount)
+			grant, _ := gtb.request(now, amount, 5000, id)
+			return grant
+		}
+		request(2, 1)
+		for range 12 {
+			request(1, 150000)
+			request(2, 0)
+			time.Sleep(5 * time.Second)
+		}
+		rg.overrideFillRateAndBurstLimit(500, 500)
+		re.Equal(limited, gtb.getBurstableMode())
+		re.Zero(gtb.moderatedDebt)
+		grant := request(2, 10)
+		re.Less(gtb.Tokens, -500.0*5)
+		t.Logf("override: raw tokens=%g debt=%g share=%g grant=%g", gtb.Tokens, gtb.moderatedDebt, gtb.tokenSlots[2].fillRate, grant.Tokens)
+		re.InDelta(250.0, gtb.tokenSlots[2].fillRate, 1e-9)
+		re.Equal(10.0, grant.Tokens)
+		re.Equal(grant.Tokens, gtb.moderatedDebt)
+
+		rg.overrideFillRateAndBurstLimit(-1, -1)
+		re.Equal(moderated, gtb.getBurstableMode())
+		re.Equal(grant.Tokens, gtb.moderatedDebt)
+		request(2, 0)
+		grant = request(2, 10)
+		re.InDelta(6000.0, gtb.tokenSlots[2].fillRate, 1e-9)
+		re.Equal(10.0, grant.Tokens)
+		re.Equal(20.0, gtb.moderatedDebt)
+	})
+}
+
 func TestModeratedDebtSettingsAndOverrides(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		re := require.New(t)
