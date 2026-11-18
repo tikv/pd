@@ -142,6 +142,47 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 	})
 }
 
+func (suite *affinityHandlerTestSuite) TestNextGenPolicyInheritance() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
+		leader := cluster.GetLeaderServer()
+		manager, err := leader.GetServer().GetAffinityManager()
+		re.NoError(err)
+		const source = "_tidb_ks42_t_1001"
+		const replacement = "_tidb_ks42_t_1002"
+		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: source}}))
+		_, err = manager.UpdateAffinityGroupPolicy(source, affinity.BalancePolicyFixed)
+		re.NoError(err)
+		prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 42)
+		input := handlers.CreateAffinityGroupInput{Ranges: []handlers.AffinityKeyRange{{
+			StartKey: codec.EncodeBytes(append(prefix, codec.GenerateTableKey(1002)...)),
+			EndKey:   codec.EncodeBytes(append(prefix, codec.GenerateTableKey(1003)...)),
+		}}}
+		for _, invalid := range []struct{ target, source string }{
+			{replacement, "_tidb_ks43_t_1001"},
+			{replacement, "custom-source"},
+			{"custom-target", source},
+			{"custom-target", "custom-source"},
+		} {
+			input.InheritPolicyFrom = invalid.source
+			status, message := doCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
+				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{invalid.target: input},
+			})
+			re.Equal(http.StatusBadRequest, status)
+			re.Contains(message, "policy inheritance requires scoped TiDB groups in the same keyspace")
+			re.False(manager.IsGroupExist(invalid.target))
+		}
+		input.InheritPolicyFrom = source
+		mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{replacement: input},
+		})
+		re.Equal(affinity.BalancePolicyFixed, manager.GetAffinityGroupState(replacement).BalancePolicy)
+	})
+}
+
 func (suite *affinityHandlerTestSuite) TearDownTest() {
 	// Clean up any remaining affinity groups after each test to avoid interference between tests.
 	suite.env.RunFuncInStartedEnvs(func(cluster *tests.TestCluster) {
@@ -670,6 +711,131 @@ func (suite *affinityHandlerTestSuite) TestAffinityUpdatePolicy() {
 		re.Equal(affinity.BalancePolicyFixed, mustGetAffinityGroup(re, serverAddr, "policy").BalancePolicy)
 		statusCode, _, _ := doUpdateAffinityGroupPolicy(re, serverAddr, "missing", affinity.BalancePolicyFixed)
 		re.Equal(http.StatusNotFound, statusCode)
+	})
+}
+
+// doUpdateAffinityGroupPolicies updates the balance policy of several groups and
+// returns the status code and the group states or the error message.
+func doUpdateAffinityGroupPolicies(re *require.Assertions, serverAddr string, req any) (int, map[string]*affinity.GroupState, string) {
+	data, err := json.Marshal(req)
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Post(getAffinityGroupURL(serverAddr, "policies"), "application/json", bytes.NewReader(data))
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	if resp.StatusCode != http.StatusOK {
+		var errorMsg string
+		if err := json.Unmarshal(body, &errorMsg); err != nil {
+			errorMsg = string(body)
+		}
+		return resp.StatusCode, nil, errorMsg
+	}
+	var result handlers.AffinityGroupsResponse
+	re.NoError(json.Unmarshal(body, &result))
+	return resp.StatusCode, result.AffinityGroups, ""
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityUpdatePolicies() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"policies-a": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
+				"policies-b": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+			},
+		}
+		mustCreateAffinityGroups(re, serverAddr, &createReq)
+
+		for _, policy := range []affinity.BalancePolicy{affinity.BalancePolicyFixed, affinity.BalancePolicyFixed, affinity.BalancePolicyAuto} {
+			statusCode, states, errorMsg := doUpdateAffinityGroupPolicies(re, serverAddr,
+				&handlers.UpdateAffinityGroupPoliciesRequest{IDs: []string{"policies-a", "policies-b"}, BalancePolicy: policy})
+			re.Equal(http.StatusOK, statusCode, errorMsg)
+			re.Len(states, 2)
+			for _, id := range []string{"policies-a", "policies-b"} {
+				re.Equal(policy, states[id].BalancePolicy)
+				// Reads may be served by the scheduling service, which follows etcd.
+				testutil.Eventually(re, func() bool {
+					return mustGetAffinityGroup(re, serverAddr, id).BalancePolicy == policy
+				})
+			}
+		}
+
+		// Invalid requests are rejected and keep the policies.
+		for _, req := range []any{
+			&handlers.UpdateAffinityGroupPoliciesRequest{IDs: []string{"policies-a"}},
+			&handlers.UpdateAffinityGroupPoliciesRequest{IDs: []string{"policies-a"}, BalancePolicy: "manual"},
+			&handlers.UpdateAffinityGroupPoliciesRequest{BalancePolicy: affinity.BalancePolicyFixed},
+			// A misspelled field leaves the policy empty.
+			map[string]any{"ids": []string{"policies-a"}, "balance_polcy": "fixed"},
+			map[string]any{"ids": []string{"policies a"}, "balance_policy": "fixed"},
+		} {
+			statusCode, _, errorMsg := doUpdateAffinityGroupPolicies(re, serverAddr, req)
+			re.Equal(http.StatusBadRequest, statusCode, errorMsg)
+		}
+		// A missing group fails the request before anything is written.
+		statusCode, _, errorMsg := doUpdateAffinityGroupPolicies(re, serverAddr,
+			&handlers.UpdateAffinityGroupPoliciesRequest{IDs: []string{"policies-a", "missing"}, BalancePolicy: affinity.BalancePolicyFixed})
+		re.Equal(http.StatusNotFound, statusCode, errorMsg)
+		re.Contains(errorMsg, "missing")
+		for _, id := range []string{"policies-a", "policies-b"} {
+			re.Equal(affinity.BalancePolicyAuto, mustGetAffinityGroup(re, serverAddr, id).BalancePolicy)
+		}
+	})
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityCreateInheritPolicy() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		const source = "_tidb_ks1_t_1001"
+		const replacement = "_tidb_ks1_t_1002"
+		const withoutSource = "_tidb_ks1_t_1003"
+		const missing = "_tidb_ks1_t_1004"
+		const invalid = "_tidb_ks1_t_1005"
+		keyRange := func(tableID int64) []handlers.AffinityKeyRange {
+			prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1)
+			return []handlers.AffinityKeyRange{{
+				StartKey: codec.EncodeBytes(append(prefix, codec.GenerateTableKey(tableID)...)),
+				EndKey:   codec.EncodeBytes(append(prefix, codec.GenerateTableKey(tableID+1)...)),
+			}}
+		}
+		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				source: {Ranges: keyRange(1001)},
+			},
+		})
+		statusCode, _, errorMsg := doUpdateAffinityGroupPolicy(re, serverAddr, source, affinity.BalancePolicyFixed)
+		re.Equal(http.StatusOK, statusCode, errorMsg)
+
+		resp := mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				replacement: {
+					Ranges:            keyRange(1002),
+					InheritPolicyFrom: source,
+				},
+				withoutSource: {
+					Ranges:            keyRange(1003),
+					InheritPolicyFrom: missing,
+				},
+			},
+		})
+		re.Equal(affinity.BalancePolicyFixed, resp.AffinityGroups[replacement].BalancePolicy)
+		re.Equal(affinity.BalancePolicy(""), resp.AffinityGroups[withoutSource].BalancePolicy)
+		testutil.Eventually(re, func() bool {
+			return mustGetAffinityGroup(re, serverAddr, replacement).BalancePolicy == affinity.BalancePolicyFixed
+		})
+
+		statusCode, errorMsg = doCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				invalid: {
+					Ranges:            keyRange(1005),
+					InheritPolicyFrom: "bad id",
+				},
+			},
+		})
+		re.Equal(http.StatusBadRequest, statusCode, errorMsg)
 	})
 }
 

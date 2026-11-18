@@ -83,6 +83,7 @@ func newAffinityUpdatePolicyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "policy",
 		Short: "set the balance policy for a specific affinity group",
+		Args:  cobra.NoArgs,
 		RunE:  affinityUpdatePolicyCommandFunc,
 	}
 	cmd.Flags().String("balance-policy", "", "balance policy: auto or fixed")

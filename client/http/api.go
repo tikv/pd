@@ -91,9 +91,10 @@ const (
 	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
 	GetKeyspaceMetaByID   = "/pd/api/v2/keyspaces/id/%d"
 	// Affinity
-	AffinityGroups      = "/pd/api/v2/affinity-groups"
-	AffinityGroupByID   = "/pd/api/v2/affinity-groups/%s"
-	AffinityGroupPolicy = "/pd/api/v2/affinity-groups/%s/policy"
+	AffinityGroups        = "/pd/api/v2/affinity-groups"
+	AffinityGroupByID     = "/pd/api/v2/affinity-groups/%s"
+	AffinityGroupPolicy   = "/pd/api/v2/affinity-groups/%s/policy"
+	AffinityGroupPolicies = "/pd/api/v2/affinity-groups/policies"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -257,4 +258,9 @@ func GetKeyspaceMetaByIDURL(id uint32) string {
 // GetDeleteSafePointURI returns the URI for delete safepoint service
 func GetDeleteSafePointURI(serviceID string) string {
 	return fmt.Sprintf("%s/%s", safepoint, serviceID)
+}
+
+// AffinityGroupPolicyPath returns the policy endpoint for one escaped group ID.
+func AffinityGroupPolicyPath(groupID string) string {
+	return fmt.Sprintf(AffinityGroupPolicy, url.PathEscape(groupID))
 }
