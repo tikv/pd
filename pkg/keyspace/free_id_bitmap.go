@@ -206,18 +206,18 @@ func (b *freeIDBitmap) loadRangeLocked(ctx context.Context, start, end uint32) e
 	return nil
 }
 
-// firstFree returns the smallest cached free ID in [start, end). Unknown
-// buckets before a candidate prevent selection, including across bucket keys.
-// The search does no storage reads. Callers recheck eligibility and selection
-// under mu before claiming through updateLocked, so reclamation cannot insert
-// an earlier free ID between the final selection and the claim.
-func (b *freeIDBitmap) firstFree(start, end uint32) (uint32, bool) {
+// findFreeCandidate searches cached nonempty buckets in order within [start, end).
+// A candidate at a bucket boundary requires a known non-free predecessor when
+// that predecessor is also in the requested range. Other earlier buckets do
+// not block selection. The search does no storage reads. Callers recheck Region
+// eligibility and selection under mu before claiming through updateLocked.
+func (b *freeIDBitmap) findFreeCandidate(start, end uint32) (uint32, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.firstFreeLocked(start, end)
+	return b.findFreeCandidateLocked(start, end)
 }
 
-func (b *freeIDBitmap) firstFreeLocked(startID, endID uint32) (uint32, bool) {
+func (b *freeIDBitmap) findFreeCandidateLocked(startID, endID uint32) (uint32, bool) {
 	if startID >= endID || endID > constant.MaxValidKeyspaceID+1 {
 		return 0, false
 	}
@@ -225,36 +225,38 @@ func (b *freeIDBitmap) firstFreeLocked(startID, endID uint32) (uint32, bool) {
 	firstBucket := startID / idsPerBucket
 	lastBucket := (endID - 1) / idsPerBucket
 
-	// Start with the first nonempty bucket at or after the requested range.
 	index, _ := slices.BinarySearch(b.freeBuckets, firstBucket)
-	nextUncheckedBucket := firstBucket
 	for _, bucket := range b.freeBuckets[index:] {
 		if bucket > lastBucket {
 			break
 		}
-		if !b.bucketRangeLoadedLocked(nextUncheckedBucket, bucket) {
-			return 0, false
+		id, found := b.firstFreeInBucketLocked(bucket, startID, endID)
+		if !found {
+			continue
 		}
-		nextUncheckedBucket = bucket + 1
-		if id, found := b.firstFreeInBucketLocked(bucket, startID, endID); found {
-			return id, true
+		atBucketStart := id == bucket*idsPerBucket
+		if atBucketStart && id > startID && !b.previousBucketAllowsSelectionLocked(bucket) {
+			continue
 		}
+		return id, true
 	}
 	return 0, false
 }
 
-// bucketRangeLoadedLocked checks the inclusive bucket range. A missing entry
-// within the loaded prefix is known empty, unless explicitly invalidated.
-func (b *freeIDBitmap) bucketRangeLoadedLocked(firstBucket, lastBucket uint32) bool {
-	for bucket := firstBucket; bucket <= lastBucket; bucket++ {
-		if _, invalid := b.invalid[bucket]; invalid {
-			return false
-		}
-		if _, loaded := b.buckets[bucket]; !loaded && bucket >= b.nextLoad {
-			return false
-		}
+// previousBucketAllowsSelectionLocked checks only the preceding bucket's last
+// bit. Unknown or invalidated state defers a candidate at the current boundary.
+// The caller guarantees that bucket is nonzero.
+func (b *freeIDBitmap) previousBucketAllowsSelectionLocked(bucket uint32) bool {
+	previousBucket := bucket - 1
+	if _, invalid := b.invalid[previousBucket]; invalid {
+		return false
 	}
-	return true
+	previous, loaded := b.buckets[previousBucket]
+	if !loaded && previousBucket >= b.nextLoad {
+		return false
+	}
+	// A known absent bucket is empty; otherwise test its highest bit.
+	return previous.Value == "" || previous.Value[len(previous.Value)-1]&0x80 == 0
 }
 
 // firstFreeInBucketLocked searches only the intersection of this bucket and
