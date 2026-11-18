@@ -296,6 +296,15 @@ func (h *historyBuffer) resetWithIndex(index uint64) {
 }
 
 func (h *historyBuffer) resetWithIndexLocked(index uint64) {
+	if h.capacity() <= h.baseCapacity {
+		end := len(h.records)
+		// A non-full ring starts at zero with only its prefix populated.
+		// Full rings can also retain a reference in the reserved slot.
+		if h.head == 0 && h.tail < h.capacity() {
+			end = h.tail
+		}
+		clear(h.records[:end])
+	}
 	h.index = index
 	h.head = 0
 	h.tail = 0
@@ -305,8 +314,6 @@ func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	h.retains = nil
 	if h.capacity() > h.baseCapacity {
 		h.resizeLocked(h.baseCapacity)
-	} else {
-		clear(h.records)
 	}
 }
 
