@@ -199,6 +199,30 @@ func TestFreeIDBitmap(t *testing.T) {
 		require.Equal(t, uint32(512), id)
 	})
 
+	t.Run("search respects ID range across bytes and buckets", func(t *testing.T) {
+		b, _ := newBitmap(t)
+		for _, id := range []uint32{7, 8, 511, 512} {
+			require.NoError(t, b.update(ctx, id, true, noMetadata))
+		}
+		for _, tc := range []struct {
+			start, end, expected uint32
+			found                bool
+		}{
+			{0, 7, 0, false},
+			{7, 8, 7, true},
+			{8, 9, 8, true},
+			{9, 511, 0, false},
+			{9, 512, 511, true},
+			{511, 513, 511, true},
+			{512, 513, 512, true},
+			{513, 1024, 0, false},
+		} {
+			id, found := b.firstFree(tc.start, tc.end)
+			require.Equal(t, tc.found, found, "range [%d, %d)", tc.start, tc.end)
+			require.Equal(t, tc.expected, id, "range [%d, %d)", tc.start, tc.end)
+		}
+	})
+
 	t.Run("metadata and bitmap commit together", func(t *testing.T) {
 		b, store := newBitmap(t)
 		owner := b.prefix + "owner"

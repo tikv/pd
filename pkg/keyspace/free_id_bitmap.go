@@ -217,30 +217,59 @@ func (b *freeIDBitmap) firstFree(start, end uint32) (uint32, bool) {
 	return b.firstFreeLocked(start, end)
 }
 
-func (b *freeIDBitmap) firstFreeLocked(start, end uint32) (uint32, bool) {
-	if start >= end || end > constant.MaxValidKeyspaceID+1 {
+func (b *freeIDBitmap) firstFreeLocked(startID, endID uint32) (uint32, bool) {
+	if startID >= endID || endID > constant.MaxValidKeyspaceID+1 {
 		return 0, false
 	}
-	width := uint32(b.bucketBytes * 8)
-	index, _ := slices.BinarySearch(b.freeBuckets, start/width)
-	checked := start / width
+	idsPerBucket := uint32(b.bucketBytes * 8)
+	firstBucket := startID / idsPerBucket
+	lastBucket := (endID - 1) / idsPerBucket
+
+	// Start with the first nonempty bucket at or after the requested range.
+	index, _ := slices.BinarySearch(b.freeBuckets, firstBucket)
+	nextUncheckedBucket := firstBucket
 	for _, bucket := range b.freeBuckets[index:] {
-		if bucket > (end-1)/width {
+		if bucket > lastBucket {
 			break
 		}
-		for ; checked <= bucket; checked++ {
-			if _, invalid := b.invalid[checked]; invalid {
-				return 0, false
-			}
-			if _, loaded := b.buckets[checked]; !loaded && checked >= b.nextLoad {
-				return 0, false
-			}
+		if !b.bucketRangeLoadedLocked(nextUncheckedBucket, bucket) {
+			return 0, false
 		}
-		value := b.buckets[bucket].Value
-		for id := max(start, bucket*width); id < min(end, (bucket+1)*width); id++ {
-			if value[(id%width)/8]&(1<<(id%8)) != 0 {
-				return id, true
-			}
+		nextUncheckedBucket = bucket + 1
+		if id, found := b.firstFreeInBucketLocked(bucket, startID, endID); found {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
+// bucketRangeLoadedLocked checks the inclusive bucket range. A missing entry
+// within the loaded prefix is known empty, unless explicitly invalidated.
+func (b *freeIDBitmap) bucketRangeLoadedLocked(firstBucket, lastBucket uint32) bool {
+	for bucket := firstBucket; bucket <= lastBucket; bucket++ {
+		if _, invalid := b.invalid[bucket]; invalid {
+			return false
+		}
+		if _, loaded := b.buckets[bucket]; !loaded && bucket >= b.nextLoad {
+			return false
+		}
+	}
+	return true
+}
+
+// firstFreeInBucketLocked searches only the intersection of this bucket and
+// [startID, endID). Bit offsets are relative to the beginning of the bucket.
+func (b *freeIDBitmap) firstFreeInBucketLocked(bucket, startID, endID uint32) (uint32, bool) {
+	idsPerBucket := uint32(b.bucketBytes * 8)
+	bucketStartID := bucket * idsPerBucket
+	firstBit := max(startID, bucketStartID) - bucketStartID
+	endBit := min(endID, bucketStartID+idsPerBucket) - bucketStartID
+	bitmap := b.buckets[bucket].Value
+	for bit := firstBit; bit < endBit; bit++ {
+		byteIndex := bit / 8
+		bitMask := byte(1 << (bit % 8))
+		if bitmap[byteIndex]&bitMask != 0 {
+			return bucketStartID + bit, true
 		}
 	}
 	return 0, false
