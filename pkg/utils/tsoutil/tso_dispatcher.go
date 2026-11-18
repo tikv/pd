@@ -96,7 +96,14 @@ func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, 
 		}
 	}
 	tsoQueue := val.(*tsoRequestProxyQueue)
-	tsoQueue.requestCh <- req
+	select {
+	case tsoQueue.requestCh <- req:
+	default:
+		select {
+		case tsoQueue.requestCh <- req:
+		case <-tsoQueue.ctx.Done():
+		}
+	}
 	return tsoQueue.ctx
 }
 
@@ -134,6 +141,11 @@ func (s *TSODispatcher) dispatch(
 		return
 	}
 	defer cancel()
+	cancelBatch := func() {
+		// Returning the downstream handlers also unblocks a flow-controlled Send.
+		tsoQueue.cancel(context.Canceled)
+		cancel()
+	}
 
 	// make(chan Request, maxMergeRequests+1) + 1
 	requests := make([]Request, 0, maxMergeRequests+2)
@@ -155,7 +167,7 @@ func (s *TSODispatcher) dispatch(
 			}
 			for pending := requests; len(pending) > 0; {
 				done := make(chan struct{})
-				dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
+				dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancelBatch)
 				select {
 				case tsDeadlineCh <- dl:
 				case <-dispatcherCtx.Done():
@@ -242,10 +254,25 @@ func (s *TSODispatcher) processBatch(forwardStream stream, requests []Request, c
 
 func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) {
 	countSum := int64(0)
+	var remaining []Request
 	for i := range requests {
 		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
 		// The timestamps remain consumed even if this downstream stream closed.
-		// Only an upstream failure may tear down the shared forwarding queue.
+		countSum = newCountSum
+		if err != nil {
+			log.Warn("send tso response to client failed", errs.ZapError(err))
+			remaining = requests[i+1:]
+			break
+		}
+	}
+	// After a failed send, skip canceled streams without checking healthy batches twice.
+	for _, request := range remaining {
+		count, active := request.getCountIfActive()
+		if !active {
+			countSum += int64(count)
+			continue
+		}
+		newCountSum, err := request.postProcess(countSum, physical, firstLogical)
 		countSum = newCountSum
 		if err != nil {
 			log.Warn("send tso response to client failed", errs.ZapError(err))
