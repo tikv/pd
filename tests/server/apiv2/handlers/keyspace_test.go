@@ -15,12 +15,16 @@
 package handlers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -36,13 +40,59 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
+}
+
+func TestAuditJSONReadErrorCompatibility(t *testing.T) {
+	for _, redaction := range []logutil.RedactInfoLogType{logutil.RedactInfoLogOFF, logutil.RedactInfoLogMarker} {
+		t.Run(fmt.Sprintf("redaction=%d", redaction), func(t *testing.T) {
+			re := require.New(t)
+			cluster, err := tests.NewTestCluster(t.Context(), 1, func(cfg *config.Config, _ string) {
+				cfg.Security.RedactInfoLog = redaction
+			})
+			re.NoError(err)
+			defer cluster.Destroy()
+			re.NoError(cluster.RunInitialServers())
+			re.NotEmpty(cluster.WaitLeader())
+			leader := cluster.GetLeaderServer()
+			re.NoError(leader.BootstrapCluster())
+			address, err := url.Parse(leader.GetAddr())
+			re.NoError(err)
+			for _, enabled := range []bool{false, true} {
+				re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+				for _, padding := range []int{0, 16 << 10} {
+					t.Run(fmt.Sprintf("audit=%t/padding=%d", enabled, padding), func(t *testing.T) {
+						re := require.New(t)
+						payload := `{"name":"` + strings.Repeat("x", padding)
+						conn, err := net.Dial("tcp", address.Host)
+						re.NoError(err)
+						defer conn.Close()
+						re.NoError(conn.SetDeadline(time.Now().Add(10 * time.Second)))
+						_, err = fmt.Fprintf(conn,
+							"POST /pd/api/v2/keyspaces HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+							address.Host, len(payload)+20, payload)
+						re.NoError(err)
+						re.NoError(conn.(*net.TCPConn).CloseWrite())
+						response, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodPost})
+						re.NoError(err)
+						data, err := io.ReadAll(response.Body)
+						re.NoError(err)
+						re.NoError(response.Body.Close())
+						re.Equal(http.StatusBadRequest, response.StatusCode)
+						re.Contains(string(data), "[PD:gin:ErrBindJSON]unexpected EOF")
+					})
+				}
+			}
+		})
+	}
 }
 
 type keyspaceTestSuite struct {

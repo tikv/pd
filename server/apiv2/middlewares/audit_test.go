@@ -325,8 +325,8 @@ func TestAuditConfigReadError(t *testing.T) {
 	re.False(called)
 }
 
-func TestAuditBoundedBody(t *testing.T) {
-	for _, size := range []int{0, maxAuditBodyBytes - 1, maxAuditBodyBytes, maxAuditBodyBytes + 1, 4 << 20} {
+func TestAuditCompleteBody(t *testing.T) {
+	for _, size := range []int{0, 10, 4 << 20} {
 		t.Run(strconv.Itoa(size), func(t *testing.T) {
 			re := require.New(t)
 			payload := strings.Repeat("x", size)
@@ -335,15 +335,11 @@ func TestAuditBoundedBody(t *testing.T) {
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
 			router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
-				re.LessOrEqual(body.bytesRead, maxAuditBodyBytes+1)
+				re.Equal(size, body.bytesRead)
 				re.False(body.closed)
 				info, ok := requestutil.RequestInfoFrom(c.Request.Context())
 				re.True(ok)
-				if size > maxAuditBodyBytes {
-					re.Equal(payload[:maxAuditBodyBytes]+" [truncated]", info.BodyParam)
-				} else {
-					re.Equal(payload, info.BodyParam)
-				}
+				re.Equal(payload, info.BodyParam)
 				data, err := io.ReadAll(c.Request.Body)
 				re.NoError(err)
 				re.Equal(payload, string(data))
@@ -359,28 +355,50 @@ func TestAuditBoundedBody(t *testing.T) {
 }
 
 func TestAuditBodyReadErrors(t *testing.T) {
-	for _, size := range []int{10, maxAuditBodyBytes + 10} {
-		t.Run(strconv.Itoa(size), func(t *testing.T) {
-			re := require.New(t)
-			body := &auditReadCloser{Reader: io.MultiReader(strings.NewReader(strings.Repeat("x", size)), iotest.ErrReader(io.ErrUnexpectedEOF))}
-			svr := newTestAuditServer()
-			router := gin.New()
-			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			called := false
-			router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
-				called = true
-				data, err := io.ReadAll(c.Request.Body)
-				re.Len(data, size)
-				re.ErrorIs(err, io.ErrUnexpectedEOF)
-				c.AbortWithStatus(http.StatusInternalServerError)
+	for _, tc := range []struct {
+		name   string
+		reader func(string) io.Reader
+		err    error
+	}{
+		{name: "unexpected EOF", reader: func(payload string) io.Reader {
+			return io.MultiReader(strings.NewReader(payload), iotest.ErrReader(io.ErrUnexpectedEOF))
+		}, err: io.ErrUnexpectedEOF},
+		{name: "one-shot error", reader: func(payload string) io.Reader {
+			return iotest.TimeoutReader(strings.NewReader(payload))
+		}, err: iotest.ErrTimeout},
+	} {
+		for _, status := range []int{http.StatusBadRequest, http.StatusInternalServerError} {
+			t.Run(tc.name+"/"+strconv.Itoa(status), func(t *testing.T) {
+				re := require.New(t)
+				payload := "partial body"
+				body := &auditReadCloser{Reader: tc.reader(payload)}
+				svr := newTestAuditServer()
+				router := gin.New()
+				router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
+				called := false
+				router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+					called = true
+					re.False(body.closed)
+					info, ok := requestutil.RequestInfoFrom(c.Request.Context())
+					re.True(ok)
+					re.Equal(payload, info.BodyParam)
+					// A zero-length read must not consume the stored error.
+					n, err := c.Request.Body.Read(nil)
+					re.Zero(n)
+					re.NoError(err)
+					data, err := io.ReadAll(c.Request.Body)
+					re.Equal(payload, string(data))
+					re.ErrorIs(err, tc.err)
+					re.NoError(c.Request.Body.Close())
+					re.True(body.closed)
+					c.AbortWithStatus(status)
+				})
+				recorder := httptest.NewRecorder()
+				router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", body))
+				re.Equal(status, recorder.Code)
+				re.True(called)
 			})
-			recorder := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodPost, "/selected", body)
-			router.ServeHTTP(recorder, request)
-			re.Equal(http.StatusInternalServerError, recorder.Code)
-			re.Equal(size > maxAuditBodyBytes, called)
-			re.NoError(request.Body.Close())
-		})
+		}
 	}
 }
 

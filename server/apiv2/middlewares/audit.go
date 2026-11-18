@@ -15,10 +15,10 @@
 package middlewares
 
 import (
-	"bytes"
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,9 +33,6 @@ type auditServer interface {
 	IsHTTPAuditEnabled() (bool, error)
 }
 
-// Limit each logged body to 4 KiB without limiting the handler's input.
-const maxAuditBodyBytes = 4 << 10
-
 // Audit selects the audit backends for one HTTP route. It shares the API v1
 // audit switch, request format, redaction, and backend ordering. It does not read
 // the request body. Routes without backend labels are not audited.
@@ -43,7 +40,7 @@ func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 	return newAudit(serviceLabel, false, backendLabels...)
 }
 
-// AuditWithBody also captures a bounded body prefix for routes that consume it.
+// AuditWithBody also captures the request body for routes that consume it.
 // Fully redacted bodies are left unread, and handlers retain the complete stream.
 func AuditWithBody(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 	return newAudit(serviceLabel, true, backendLabels...)
@@ -71,7 +68,7 @@ func newAudit(serviceLabel string, captureBody bool, backendLabels ...string) gi
 		info := requestutil.GetRequestInfoWithoutBody(c.Request)
 		info.ServiceLabel = serviceLabel
 		if captureBody && slices.Contains(labels.Labels, audit.LocalLogLabel) {
-			err = captureAuditBody(c.Request, &info)
+			captureAuditBody(c.Request, &info)
 		}
 		c.Request = c.Request.WithContext(requestutil.WithRequestInfo(c.Request.Context(), info))
 		hasAfterBackend := false
@@ -86,12 +83,7 @@ func newAudit(serviceLabel string, captureBody bool, backendLabels ...string) gi
 			}
 		}
 
-		if err != nil {
-			// Never turn a failed body read into a successful mutation.
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-		} else {
-			c.Next()
-		}
+		c.Next()
 
 		if !hasAfterBackend {
 			return
@@ -106,25 +98,41 @@ func newAudit(serviceLabel string, captureBody bool, backendLabels ...string) gi
 }
 
 type auditRequestBody struct {
-	io.Reader
-	io.Closer
+	io.ReadCloser
+	captured *strings.Reader
+	readErr  error
 }
 
-func captureAuditBody(r *http.Request, info *requestutil.RequestInfo) error {
+func (body *auditRequestBody) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if body.captured.Len() > 0 {
+		return body.captured.Read(p)
+	}
+	if body.readErr != nil {
+		err := body.readErr
+		body.readErr = nil
+		return 0, err
+	}
+	return body.ReadCloser.Read(p)
+}
+
+func captureAuditBody(r *http.Request, info *requestutil.RequestInfo) {
 	if r.Body == nil || r.Body == http.NoBody {
-		return nil
+		return
 	}
 	if logutil.IsInfoLogFullyRedacted() {
 		info.BodyParam = "?"
-		return nil
+		return
 	}
-	body := r.Body
-	prefix, err := io.ReadAll(io.LimitReader(body, maxAuditBodyBytes+1))
-	r.Body = &auditRequestBody{Reader: io.MultiReader(bytes.NewReader(prefix), body), Closer: body}
-	if len(prefix) > maxAuditBodyBytes {
-		info.BodyParam = string(prefix[:maxAuditBodyBytes]) + " [truncated]"
-	} else {
-		info.BodyParam = string(prefix)
+	data, err := io.ReadAll(r.Body)
+	info.BodyParam = string(data)
+	// Leave read errors to the handler so auditing preserves its response and
+	// prevents mutations based on an incomplete body.
+	r.Body = &auditRequestBody{
+		ReadCloser: r.Body,
+		captured:   strings.NewReader(info.BodyParam),
+		readErr:    err,
 	}
-	return err
 }
