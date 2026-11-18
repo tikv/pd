@@ -294,41 +294,24 @@ func (b *freeIDBitmap) updateLocked(ctx context.Context, id uint32, free bool, m
 	if !b.initialized || id > constant.MaxValidKeyspaceID {
 		return errors.New("free ID bitmap is not initialized or ID is out of range")
 	}
-	bucket := id / uint32(b.bucketBytes*8)
-	value, loaded := b.buckets[bucket]
-	if !loaded && bucket < b.nextLoad {
-		_, invalid := b.invalid[bucket]
-		loaded = !invalid
-		value.Key = b.bucketKey(bucket)
+	idsPerBucket := uint32(b.bucketBytes * 8)
+	bucket := id / idsPerBucket
+	cached, err := b.loadBucketLocked(ctx, bucket)
+	if err != nil {
+		return err
 	}
-	if !loaded {
-		if err := b.loadRangeLocked(ctx, bucket, bucket+1); err != nil {
-			return err
-		}
-		value = b.buckets[bucket]
+	updated, err := b.updatedBucketValue(cached.Value, id%idsPerBucket, free)
+	if err != nil {
+		return err
 	}
-	bits := make([]byte, b.bucketBytes)
-	copy(bits, value.Value)
-	bit := id % uint32(b.bucketBytes*8)
-	mask := byte(1 << (bit % 8))
-	if (bits[bit/8]&mask != 0) == free {
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	if free {
-		bits[bit/8] |= mask
-	} else {
-		bits[bit/8] &^= mask
-	}
-	updated := string(bits)
-	if !slices.ContainsFunc(bits, func(v byte) bool { return v != 0 }) {
-		updated = ""
-	}
-	var committed kv.CommittedRevisionTxn
-	err := b.store.RunInTxnWithConditions(ctx, []clientv3.Cmp{
-		clientv3.Compare(clientv3.ModRevision(value.Key), "=", value.ModRevision),
+
+	// Commit the bit and metadata together, provided the cached bucket is current.
+	var committedTxn kv.CommittedRevisionTxn
+	err = b.store.RunInTxnWithConditions(ctx, []clientv3.Cmp{
+		clientv3.Compare(clientv3.ModRevision(cached.Key), "=", cached.ModRevision),
 	}, func(txn kv.Txn) error {
 		var ok bool
-		committed, ok = txn.(kv.CommittedRevisionTxn)
+		committedTxn, ok = txn.(kv.CommittedRevisionTxn)
 		if !ok {
 			return errors.New("free ID bitmap requires the committed transaction revision")
 		}
@@ -336,18 +319,63 @@ func (b *freeIDBitmap) updateLocked(ctx context.Context, id uint32, free bool, m
 			return err
 		}
 		if updated == "" {
-			return txn.Remove(value.Key)
+			return txn.Remove(cached.Key)
 		}
-		return txn.Save(value.Key, updated)
+		return txn.Save(cached.Key, updated)
 	})
 	if err != nil {
-		b.publishLocked(bucket, "", 0)
-		delete(b.buckets, bucket)
-		b.invalid[bucket] = struct{}{}
+		// The commit may have succeeded despite the error. Reload before reuse.
+		b.invalidateBucketLocked(bucket)
 		return err
 	}
-	b.publishLocked(bucket, updated, committed.CommitRevision())
+	b.publishLocked(bucket, updated, committedTxn.CommitRevision())
 	return nil
+}
+
+// loadBucketLocked returns a cached bucket, reading storage only if its state
+// is unknown. An absent bucket inside the loaded prefix has revision zero.
+func (b *freeIDBitmap) loadBucketLocked(ctx context.Context, bucket uint32) (kv.KeyValuePair, error) {
+	if cached, loaded := b.buckets[bucket]; loaded {
+		return cached, nil
+	}
+	_, invalid := b.invalid[bucket]
+	if bucket < b.nextLoad && !invalid {
+		return kv.KeyValuePair{Key: b.bucketKey(bucket)}, nil
+	}
+	if err := b.loadRangeLocked(ctx, bucket, bucket+1); err != nil {
+		return kv.KeyValuePair{}, err
+	}
+	return b.buckets[bucket], nil
+}
+
+// updatedBucketValue changes one bucket-relative bit in a copy of the bitmap.
+// Repeating a claim or reclaim is a conflict. An empty result deletes the bucket.
+func (b *freeIDBitmap) updatedBucketValue(value string, bitOffset uint32, free bool) (string, error) {
+	bitmap := make([]byte, b.bucketBytes)
+	copy(bitmap, value)
+	byteIndex := bitOffset / 8
+	bitMask := byte(1 << (bitOffset % 8))
+	currentlyFree := bitmap[byteIndex]&bitMask != 0
+	if currentlyFree == free {
+		return "", errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	if free {
+		bitmap[byteIndex] |= bitMask
+	} else {
+		bitmap[byteIndex] &^= bitMask
+	}
+	if !slices.ContainsFunc(bitmap, func(v byte) bool { return v != 0 }) {
+		return "", nil
+	}
+	return string(bitmap), nil
+}
+
+// invalidateBucketLocked removes the cached value and its allocation candidates.
+// The invalid marker overrides loaded-prefix coverage until the bucket is reread.
+func (b *freeIDBitmap) invalidateBucketLocked(bucket uint32) {
+	b.publishLocked(bucket, "", 0)
+	delete(b.buckets, bucket)
+	b.invalid[bucket] = struct{}{}
 }
 
 func (b *freeIDBitmap) publishLocked(bucket uint32, value string, revision int64) {
