@@ -17,6 +17,8 @@ package core
 import (
 	"bytes"
 	"math/rand/v2"
+	"sync/atomic"
+	"unsafe"
 
 	"go.uber.org/zap"
 
@@ -31,6 +33,17 @@ import (
 
 type regionItem struct {
 	*RegionInfo
+}
+
+// loadRegionInfo reads the immutable value published by a cache update.
+func (r *regionItem) loadRegionInfo() *RegionInfo {
+	return (*RegionInfo)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&r.RegionInfo))))
+}
+
+// setRegionInfo requires the owning tree's write lock. Atomic publication also
+// lets preparation snapshots read the value after releasing that lock.
+func (r *regionItem) setRegionInfo(region *RegionInfo) {
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&r.RegionInfo)), unsafe.Pointer(region))
 }
 
 // GetStartKey returns the start key of the region.

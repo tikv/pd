@@ -39,7 +39,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -50,6 +49,12 @@ import (
 
 const (
 	randomRegionMaxRetry = 10
+	// Bound work under the tree read locks while checking preparation.
+	regionPreparationScanBatchSize = 16
+	// Bound the temporary topology journal during a preparation query.
+	regionPreparationMaxChanges = 1 << 16
+	// Bound retries when changes arrive during the incremental recheck.
+	regionPreparationMaxRounds = 3
 	// ScanRegionLimit is the default limit for the number of regions to scan in a region scan request.
 	ScanRegionLimit = 1000
 	// batchSearchSize is the default size for the number of IDs/keys/prevKeys to search in a batch.
@@ -1081,21 +1086,14 @@ type RegionsInfo struct {
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 	// This tree is used to check the overlaps among all the subtrees.
 	overlapTree *regionTree
-	// Keep only topology differences between the root and subtrees. Statistics-only
-	// updates do not change readiness or enter this index. The B-tree releases
-	// emptied nodes instead of retaining a synchronization backlog's peak capacity.
-	preparationMu     syncutil.Mutex
-	unpreparedRegions *btree.BTreeG[regionTreePreparation]
-}
-
-type regionTreePreparation struct {
-	regionID      uint64
-	root, subtree *RegionInfo
-}
-
-// Less orders pending Regions by ID.
-func (p regionTreePreparation) Less(than regionTreePreparation) bool {
-	return p.regionID < than.regionID
+	// Serialize preparation scans. Writers only record topology changes
+	// while a scan is active, under their own tree's lock.
+	preparationMu          syncutil.Mutex
+	preparationChecking    bool
+	preparationRootChanges []uint64
+	preparationSubChanges  []uint64
+	preparationRootInvalid atomic.Bool
+	preparationSubInvalid  atomic.Bool
 }
 
 func sameRegionPreparation(left, right *RegionInfo) bool {
@@ -1106,9 +1104,14 @@ func sameRegionPreparation(left, right *RegionInfo) bool {
 		left.peersEqualTo(right) && left.LoadedFromStorage() == right.LoadedFromStorage()
 }
 
-// updateRegionPreparation is called under the lock of the tree being updated.
-// Neither tree's lock may be acquired while preparationMu is held.
+// updateRegionPreparation is called under the write lock of the tree being updated.
 func (r *RegionsInfo) updateRegionPreparation(origin, region *RegionInfo, root bool) {
+	if r.preparationChecking {
+		r.recordRegionPreparationChange(origin, region, root)
+	}
+}
+
+func (r *RegionsInfo) recordRegionPreparationChange(origin, region *RegionInfo, root bool) {
 	if sameRegionPreparation(origin, region) {
 		return
 	}
@@ -1118,24 +1121,18 @@ func (r *RegionsInfo) updateRegionPreparation(origin, region *RegionInfo, root b
 	} else {
 		id = origin.GetID()
 	}
-	r.preparationMu.Lock()
-	defer r.preparationMu.Unlock()
-	if r.unpreparedRegions == nil {
-		r.unpreparedRegions = btree.NewG[regionTreePreparation](defaultBTreeDegree)
-	}
-	pending, ok := r.unpreparedRegions.Get(regionTreePreparation{regionID: id})
-	if !ok {
-		pending = regionTreePreparation{regionID: id, root: origin, subtree: origin}
-	}
 	if root {
-		pending.root = region
+		if len(r.preparationRootChanges) == regionPreparationMaxChanges {
+			r.preparationRootInvalid.Store(true)
+			return
+		}
+		r.preparationRootChanges = append(r.preparationRootChanges, id)
 	} else {
-		pending.subtree = region
-	}
-	if sameRegionPreparation(pending.root, pending.subtree) {
-		r.unpreparedRegions.Delete(pending)
-	} else {
-		r.unpreparedRegions.ReplaceOrInsert(pending)
+		if len(r.preparationSubChanges) == regionPreparationMaxChanges {
+			r.preparationSubInvalid.Store(true)
+			return
+		}
+		r.preparationSubChanges = append(r.preparationSubChanges, id)
 	}
 }
 
@@ -1308,7 +1305,8 @@ func (r *RegionsInfo) preUpdateSubTreeLocked(
 	if rangeChanged || peerChanged {
 		// If the range or peers have changed, clean up the subtrees before updating them.
 		// TODO: improve performance by deleting only the different peers.
-		r.removeRegionFromSubTreeLocked(origin, originItem)
+		// The replacement records its final topology before releasing the subtree lock.
+		r.removeRegionFromSubTreeLocked(origin, nil)
 	} else {
 		r.updateSubTreeStat(origin, region)
 		// overlapTree is the only ref-counted subtree and the shared item is
@@ -1316,8 +1314,12 @@ func (r *RegionsInfo) preUpdateSubTreeLocked(
 		// a flow-only update leaves the live region stuck at ref 1 while it is
 		// still present in the subtree.
 		r.overlapTree.updateRef(origin, region)
-		originItem.RegionInfo = region
-		r.updateRegionPreparation(origin, region, false)
+		originItem.setRegionInfo(region)
+		// Range and peers are unchanged here; only a source transition can
+		// affect preparation. Avoid repeating the topology comparison.
+		if r.preparationChecking && origin.LoadedFromStorage() != region.LoadedFromStorage() {
+			r.recordRegionPreparationChange(origin, region, false)
+		}
 		return true
 	}
 	return false
@@ -1442,12 +1444,12 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			}
 			r.tree.remove(origin)
 			// Update the RegionInfo in the regionItem.
-			item.RegionInfo = region
+			item.setRegionInfo(region)
 		} else {
 			// If the range is not changed, only the statistical on the regionTree needs to be updated.
 			r.tree.updateStat(origin, region)
 			// Update the RegionInfo in the regionItem.
-			item.RegionInfo = region
+			item.setRegionInfo(region)
 			r.updateRegionPreparation(origin, region, true)
 			return origin, nil, rangeChanged
 		}
@@ -1564,9 +1566,10 @@ func (r *RegionsInfo) ResetRegionCache() {
 	r.witnesses = make(map[uint64]*regionTree)
 	r.pendingPeers = make(map[uint64]*regionTree)
 	r.overlapTree = newRegionTreeWithCountRef()
-	r.preparationMu.Lock()
-	r.unpreparedRegions = nil
-	r.preparationMu.Unlock()
+	if r.preparationChecking {
+		r.preparationRootInvalid.Store(true)
+		r.preparationSubInvalid.Store(true)
+	}
 }
 
 // RemoveRegionFromSubTree removes RegionInfo from regionSubTrees
@@ -2024,22 +2027,205 @@ func (r *RegionsInfo) GetStoreLeaderCount(storeID uint64) int {
 	return r.leaders[storeID].length()
 }
 
-// IsRegionLeaderPrepared checks whether all cached regions have leaders and their subtrees are populated.
+// IsRegionLeaderPrepared verifies that all cached regions have leaders and matching subtrees.
+// Concurrent changes that exceed the check's budget make it return false for a later retry.
 func (r *RegionsInfo) IsRegionLeaderPrepared() bool {
-	r.t.RLock()
-	r.st.RLock()
-	defer r.st.RUnlock()
-	totalRegionCount := len(r.regions)
-	unprepared := r.unpreparedRegions != nil && r.unpreparedRegions.Len() != 0
-	r.t.RUnlock()
-	if unprepared {
+	r.preparationMu.Lock()
+	defer r.preparationMu.Unlock()
+	r.t.Lock()
+	r.st.Lock()
+	if !r.regionLeaderCountsPreparedLocked() {
+		r.st.Unlock()
+		r.t.Unlock()
 		return false
 	}
+	if len(r.regions) == 0 {
+		r.st.Unlock()
+		r.t.Unlock()
+		return true
+	}
+	r.preparationChecking = true
+	rootSnapshot, subSnapshot := r.tree.tree.Clone(), r.overlapTree.tree.Clone()
+	r.st.Unlock()
+	r.t.Unlock()
+	defer func() {
+		r.t.RLock()
+		r.st.RLock()
+		r.preparationChecking = false
+		r.preparationRootChanges = nil
+		r.preparationSubChanges = nil
+		r.preparationRootInvalid.Store(false)
+		r.preparationSubInvalid.Store(false)
+		r.st.RUnlock()
+		r.t.RUnlock()
+	}()
+	// Snapshot item order outside the cache locks. A pointer slice avoids a
+	// coroutine switch for every Region and is released when this query returns.
+	items := make([]*regionItem, 0, rootSnapshot.Len())
+	rootSnapshot.Ascend(func(item *regionItem) bool {
+		items = append(items, item)
+		return !r.preparationRootInvalid.Load() && !r.preparationSubInvalid.Load()
+	})
+	if len(items) != rootSnapshot.Len() || r.preparationRootInvalid.Load() || r.preparationSubInvalid.Load() {
+		return false
+	}
+	var changed map[uint64]struct{}
+	mark := func(id uint64) bool {
+		if _, ok := changed[id]; ok {
+			return true
+		}
+		if len(changed) == regionPreparationMaxChanges {
+			return false
+		}
+		if changed == nil {
+			changed = make(map[uint64]struct{})
+		}
+		changed[id] = struct{}{}
+		return true
+	}
+	valid, count := true, 0
+	subSnapshot.Ascend(func(subItem *regionItem) bool {
+		if count == len(items) {
+			valid = false
+			return false
+		}
+		root, subtree := items[count].loadRegionInfo(), subItem.loadRegionInfo()
+		if root == nil || subtree == nil {
+			valid = false
+			return false
+		}
+		if root != subtree && (root.GetID() != subtree.GetID() || !sameRegionPreparation(root, subtree)) {
+			if !mark(root.GetID()) || !mark(subtree.GetID()) {
+				valid = false
+				return false
+			}
+		}
+		count++
+		if count%regionPreparationScanBatchSize == 0 {
+			failpoint.InjectCall("regionPreparationScanBatch", root.GetID())
+		}
+		valid = !r.preparationRootInvalid.Load() && !r.preparationSubInvalid.Load()
+		return valid
+	})
+	if !valid || count != len(items) {
+		return false
+	}
+	if count%regionPreparationScanBatchSize != 0 {
+		failpoint.InjectCall("regionPreparationScanBatch", items[count-1].loadRegionInfo().GetID())
+	}
+	// Recheck captured IDs in small batches outside the tree locks.
+	var batch [regionPreparationScanBatchSize]struct {
+		id            uint64
+		root, subtree *regionItem
+	}
+	checkBatch := func(count int) bool {
+		r.t.RLock()
+		for i := range count {
+			batch[i].root = r.regions[batch[i].id]
+		}
+		r.t.RUnlock()
+		r.st.RLock()
+		for i := range count {
+			batch[i].subtree = r.subRegions[batch[i].id]
+		}
+		r.st.RUnlock()
+		for _, pair := range batch[:count] {
+			var root, subtree *RegionInfo
+			if pair.root != nil {
+				root = pair.root.loadRegionInfo()
+			}
+			if pair.subtree != nil {
+				subtree = pair.subtree.loadRegionInfo()
+			}
+			if !sameRegionPreparation(root, subtree) {
+				return false
+			}
+		}
+		failpoint.InjectCall("regionPreparationScanBatch", batch[count-1].id)
+		return !r.preparationRootInvalid.Load() && !r.preparationSubInvalid.Load()
+	}
+	for range regionPreparationMaxRounds {
+		rootChanges, subChanges, ok := func() ([]uint64, []uint64, bool) {
+			r.t.RLock()
+			r.st.RLock()
+			defer r.t.RUnlock()
+			defer r.st.RUnlock()
+			if r.preparationRootInvalid.Load() || r.preparationSubInvalid.Load() {
+				return nil, nil, false
+			}
+			root, subtree := r.preparationRootChanges, r.preparationSubChanges
+			r.preparationRootChanges, r.preparationSubChanges = nil, nil
+			return root, subtree, true
+		}()
+		if !ok {
+			return false
+		}
+		for _, ids := range [][]uint64{rootChanges, subChanges} {
+			for _, id := range ids {
+				if !mark(id) {
+					return false
+				}
+			}
+		}
+		count = 0
+		for id := range changed {
+			batch[count].id = id
+			count++
+			if count == len(batch) {
+				if !checkBatch(count) {
+					return false
+				}
+				count = 0
+			}
+		}
+		if count > 0 && !checkBatch(count) {
+			return false
+		}
+		// Finish a small final set under both locks. This permits preparation
+		// during matched topology updates without waiting for a quiet interval.
+		done, prepared := func() (bool, bool) {
+			r.t.RLock()
+			r.st.RLock()
+			defer r.t.RUnlock()
+			defer r.st.RUnlock()
+			if r.preparationRootInvalid.Load() || r.preparationSubInvalid.Load() {
+				return true, false
+			}
+			if len(r.preparationRootChanges)+len(r.preparationSubChanges) > regionPreparationScanBatchSize {
+				return false, false
+			}
+			for _, ids := range [][]uint64{r.preparationRootChanges, r.preparationSubChanges} {
+				for _, id := range ids {
+					var root, subtree *RegionInfo
+					if item := r.regions[id]; item != nil {
+						root = item.RegionInfo
+					}
+					if item := r.subRegions[id]; item != nil {
+						subtree = item.RegionInfo
+					}
+					if !sameRegionPreparation(root, subtree) {
+						return true, false
+					}
+				}
+			}
+			return true, r.regionLeaderCountsPreparedLocked()
+		}()
+		if done {
+			return prepared
+		}
+		clear(changed)
+	}
+	return false
+}
+
+// regionLeaderCountsPreparedLocked requires both tree locks.
+func (r *RegionsInfo) regionLeaderCountsPreparedLocked() bool {
 	count := 0
 	for _, leaders := range r.leaders {
 		count += leaders.length()
 	}
-	return count == len(r.subRegions) && count == totalRegionCount
+	return count == len(r.subRegions) && count == len(r.regions) &&
+		r.tree.length() == count && r.overlapTree.length() == count
 }
 
 // GetStoreFollowerCount get the total count of a store's follower RegionInfo
