@@ -59,10 +59,6 @@ func (s *testAuditServer) GetAuditBackend() []audit.Backend {
 	return s.backends
 }
 
-func (s *testAuditServer) GetServiceMiddlewarePersistOptions() *config.ServiceMiddlewarePersistOptions {
-	return s.options
-}
-
 func (s *testAuditServer) IsHTTPAuditEnabled() (bool, error) {
 	return s.options.IsAuditEnabled(), s.configErr
 }
