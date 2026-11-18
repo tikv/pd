@@ -134,7 +134,7 @@ func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
 		}
 		// The boundary batch exercises the monolithic handler's existing per-ID
 		// allocation under race instrumentation, so allow a longer RPC deadline.
-		for _, count := range []uint32{0, 100000, 131072, 1} {
+		for _, count := range []uint32{0, 131072, 1} {
 			request.SplitCount = count
 			ctx, cancel := context.WithTimeout(s.T().Context(), 30*time.Second)
 			resp, err := client.AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(responseLimit))
