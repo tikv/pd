@@ -1476,23 +1476,6 @@ func (s *Server) GetAuditConfig() *config.AuditConfig {
 	return s.serviceMiddlewarePersistOptions.GetAuditConfig().Clone()
 }
 
-// IsHTTPAuditEnabled returns the current switch for selected HTTP v2 routes.
-// Followers read persisted options because their local copy is only reloaded
-// during leader transitions, and may not reflect the leader's latest update.
-func (s *Server) IsHTTPAuditEnabled() (bool, error) {
-	if s.IsClosed() {
-		return false, errs.ErrServerNotStarted.FastGenByArgs()
-	}
-	if s.member.IsServing() {
-		return s.serviceMiddlewarePersistOptions.IsAuditEnabled(), nil
-	}
-	cfg := config.NewServiceMiddlewareConfig()
-	if _, err := s.storage.LoadServiceMiddlewareConfig(cfg); err != nil {
-		return false, err
-	}
-	return cfg.EnableAudit, nil
-}
-
 // SetAuditConfig sets the audit config.
 func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 	old := s.serviceMiddlewarePersistOptions.GetAuditConfig()

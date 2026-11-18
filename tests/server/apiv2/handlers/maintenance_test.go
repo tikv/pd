@@ -122,7 +122,7 @@ func TestMaintenanceAuditFollower(t *testing.T) {
 			t.Run(fmt.Sprintf("follower-local=%t/audit=%t", allowLocal, enabled), func(t *testing.T) {
 				re := require.New(t)
 				re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
-				// Exercise a stale follower copy in both directions without an election.
+				// Like API v1, each receiver uses its own in-memory audit switch.
 				follower.GetServer().GetServiceMiddlewarePersistOptions().SetAuditConfig(&config.AuditConfig{EnableAudit: !enabled})
 				before, err := os.ReadFile(logFile)
 				re.NoError(err)
@@ -139,17 +139,17 @@ func TestMaintenanceAuditFollower(t *testing.T) {
 				re.NoError(response.Body.Close())
 				re.Equal(http.StatusNotFound, response.StatusCode)
 				expected := 0
-				if enabled {
+				if !enabled {
 					expected++
-					if !allowLocal {
-						expected++ // The leader also audits the forwarded HTTP request.
-					}
+				}
+				if enabled && !allowLocal {
+					expected++ // The leader uses its own switch for the forwarded request.
 				}
 				data, err := os.ReadFile(logFile)
 				re.NoError(err)
 				entries := string(data[len(before):])
 				re.Equal(expected, strings.Count(entries, "ServiceLabel:DeleteMaintenanceTask,"))
-				if enabled {
+				if !enabled {
 					re.Contains(entries, peer, "the ingress connection must remain observable despite a forged forwarding header")
 				}
 				re.Equal(leaderName, cluster.GetLeader())

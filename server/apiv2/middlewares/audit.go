@@ -24,17 +24,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/pingcap/log"
-
 	"github.com/tikv/pd/pkg/audit"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
+	"github.com/tikv/pd/server/config"
 )
 
 type auditServer interface {
 	GetAuditBackend() []audit.Backend
-	IsHTTPAuditEnabled() (bool, error)
+	GetServiceMiddlewarePersistOptions() *config.ServiceMiddlewarePersistOptions
 }
 
 // Audit selects the audit backends for one HTTP route. It shares the API v1
@@ -58,14 +56,7 @@ func newAudit(serviceLabel string, captureBody bool, backendLabels ...string) gi
 			return
 		}
 		svr := c.MustGet(ServerContextKey).(auditServer)
-		enabled, err := svr.IsHTTPAuditEnabled()
-		if err != nil {
-			// Optional auditing must not replace the route's existing response.
-			log.Warn("skip HTTP audit because configuration could not be loaded", errs.ZapError(err))
-			c.Next()
-			return
-		}
-		if !enabled {
+		if !svr.GetServiceMiddlewarePersistOptions().IsAuditEnabled() {
 			c.Next()
 			return
 		}

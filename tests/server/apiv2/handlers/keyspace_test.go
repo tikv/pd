@@ -97,7 +97,7 @@ func TestAuditJSONReadErrorCompatibility(t *testing.T) {
 	}
 }
 
-func TestAuditConfigReadErrorForwarding(t *testing.T) {
+func TestAuditFollowerWithoutConfigRead(t *testing.T) {
 	re := require.New(t)
 	cluster, err := tests.NewTestCluster(t.Context(), 3)
 	re.NoError(err)
@@ -114,10 +114,11 @@ func TestAuditConfigReadErrorForwarding(t *testing.T) {
 		t.Run(fmt.Sprintf("audit=%t", enabled), func(t *testing.T) {
 			re := require.New(t)
 			re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+			follower.GetServer().GetServiceMiddlewarePersistOptions().SetAuditConfig(&config.AuditConfig{EnableAudit: enabled})
 			before, err := os.ReadFile(logFile)
 			re.NoError(err)
-			// Force the existing etcd read deadline to expire without disrupting
-			// HTTP access to the serving leader.
+			// A storage lookup would exceed its deadline. Auditing must use the
+			// local switch so forwarding does not depend on that lookup.
 			const slowGet = "github.com/tikv/pd/pkg/utils/etcdutil/SlowEtcdKVGet"
 			delaySeconds := int(etcdutil.DefaultRequestTimeout/time.Second) + 1
 			re.NoError(failpoint.Enable(slowGet, fmt.Sprintf("return(%d)", delaySeconds)))
@@ -132,8 +133,12 @@ func TestAuditConfigReadErrorForwarding(t *testing.T) {
 			after, err := os.ReadFile(logFile)
 			re.NoError(err)
 			entries := string(after[len(before):])
-			re.Contains(entries, "load from etcd meet error")
-			re.Contains(entries, keypath.ServiceMiddlewarePath())
+			re.NotContains(entries, keypath.ServiceMiddlewarePath())
+			expected := 0
+			if enabled {
+				expected = 3 // One direct request and both receivers of the forwarded request.
+			}
+			re.Equal(expected, strings.Count(entries, "ServiceLabel:CreateKeyspace,"))
 			re.True(leader.GetServer().GetMember().IsServing())
 			re.Equal(leaderName, cluster.GetLeader())
 			re.Equal(http.StatusBadRequest, response.StatusCode)

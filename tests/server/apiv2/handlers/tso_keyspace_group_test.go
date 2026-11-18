@@ -129,6 +129,7 @@ func TestAuditEarlyRejection(t *testing.T) {
 				}
 				for _, enabled := range []bool{false, true} {
 					re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+					follower.GetServer().GetServiceMiddlewarePersistOptions().SetAuditConfig(&config.AuditConfig{EnableAudit: enabled})
 					for _, target := range []struct {
 						name   string
 						server *tests.TestServer
