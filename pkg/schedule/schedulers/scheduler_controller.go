@@ -290,7 +290,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 }
 
 // RemoveScheduler removes a scheduler by name.
-func (c *Controller) RemoveScheduler(name string) error {
+func (c *Controller) RemoveScheduler(name string) (err error) {
 	c.Lock()
 	defer c.Unlock()
 	if c.cluster == nil {
@@ -300,6 +300,19 @@ func (c *Controller) RemoveScheduler(name string) error {
 	if !ok {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
+	if removal := s.removal; removal != nil {
+		c.Unlock()
+		<-removal.done
+		c.Lock()
+		return removal.err
+	}
+	removal := &schedulerRemoval{done: make(chan struct{})}
+	s.removal = removal
+	defer func() {
+		removal.err = err
+		s.removal = nil
+		close(removal.done)
+	}()
 
 	conf := c.cluster.GetSchedulerConfig()
 	conf.RemoveSchedulerCfg(s.GetType())
@@ -312,7 +325,11 @@ func (c *Controller) RemoveScheduler(name string) error {
 	// Both may persist config, so deleting it before they finish can resurrect
 	// the deleted config or overwrite the config of a replacement instance.
 	s.Stop()
+	// The registered instance reserves its name, and concurrent removals join
+	// this attempt. Do not block unrelated scheduler APIs while it shuts down.
+	c.Unlock()
 	<-s.done
+	c.Lock()
 
 	// nolint:errcheck
 	// SetDisable will not work now, because the config is removed. We can't
@@ -525,6 +542,13 @@ func (c *Controller) GetAllSchedulerConfigs() (sches, configs []string, err erro
 	return c.storage.LoadAllSchedulerConfigs()
 }
 
+// schedulerRemoval records the result of one removal attempt. Closing done
+// publishes err to concurrent callers, even if a later attempt starts.
+type schedulerRemoval struct {
+	done chan struct{}
+	err  error
+}
+
 // ScheduleController is used to manage a scheduler.
 type ScheduleController struct {
 	Scheduler
@@ -533,7 +557,8 @@ type ScheduleController struct {
 	nextInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc
-	done               chan struct{} // Closed by runScheduler after CleanConfig returns.
+	done               chan struct{}     // Closed by runScheduler after CleanConfig returns.
+	removal            *schedulerRemoval // Guarded by the owning Controller's lock.
 	delayAt            atomic.Int64
 	delayUntil         atomic.Int64
 	diagnosticRecorder *DiagnosticRecorder
