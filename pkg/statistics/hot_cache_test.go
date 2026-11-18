@@ -63,8 +63,8 @@ func TestHotCacheReleasesConsumedTasks(t *testing.T) {
 				}))
 				<-started
 
-				// Overflow Out into the ring buffer without growing it. Draining an
-				// initial-sized ring does not reset its consumed slots in chanx.
+				// Overflow Out into the ring buffer without growing it, so growth
+				// cannot release references retained in consumed slots.
 				const taskCount = queueCap + 8
 				seen := make([]int, 0, taskCount)
 				meta := func() weak.Pointer[metapb.Region] {
@@ -94,73 +94,6 @@ func TestHotCacheReleasesConsumedTasks(t *testing.T) {
 				re.Nil(meta.Value(), "consumed tasks must release their captured region")
 				runtime.KeepAlive(cache)
 			})
-		})
-	}
-}
-
-func BenchmarkHotCacheEnqueue(b *testing.B) {
-	for _, kind := range []utils.RWType{utils.Read, utils.Write} {
-		for _, batchSize := range []int{1, 1024} {
-			b.Run(fmt.Sprintf("%s/batch-%d", kind, batchSize), func(b *testing.B) {
-				ctx, cancel := context.WithCancel(b.Context())
-				defer cancel()
-				cache := NewHotCache(ctx, core.NewBasicCluster())
-				enqueue := cache.CheckReadAsync
-				if kind == utils.Write {
-					enqueue = cache.CheckWriteAsync
-				}
-				drained := make(chan struct{})
-				remaining, completed := 0, 0
-				task := func(*HotPeerCache) {
-					completed++
-					remaining--
-					if remaining == 0 {
-						drained <- struct{}{}
-					}
-				}
-				b.ReportAllocs()
-				b.ResetTimer()
-				for sent := 0; sent < b.N; {
-					count := min(batchSize, b.N-sent)
-					remaining = count
-					for range count {
-						if !enqueue(task) {
-							b.Fatal("enqueue rejected a batch smaller than the input capacity")
-						}
-					}
-					<-drained
-					sent += count
-				}
-				b.StopTimer()
-				require.Equal(b, b.N, completed)
-			})
-		}
-		b.Run(kind.String()+"/rejected", func(b *testing.B) {
-			ctx, cancel := context.WithCancel(b.Context())
-			defer cancel()
-			cache := NewHotCache(ctx, core.NewBasicCluster())
-			enqueue := cache.CheckReadAsync
-			if kind == utils.Write {
-				enqueue = cache.CheckWriteAsync
-			}
-			// Stop consumers and fill the input so every attempt takes the
-			// nonblocking rejection path, independent of consumer scheduling.
-			cancel()
-			for range cache.readCache.taskQueue.Out {
-			}
-			for range cache.writeCache.taskQueue.Out {
-			}
-			task := func(*HotPeerCache) {}
-			for range queueCap {
-				require.True(b, enqueue(task))
-			}
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				if enqueue(task) {
-					b.Fatal("enqueue accepted a task with a full input")
-				}
-			}
 		})
 	}
 }

@@ -28,12 +28,6 @@ import (
 
 const chanMaxLength = 6000000
 
-// hotCacheTask lets the consumer release a task's captures even while chanx's
-// ring buffer retains a pointer to the consumed entry.
-type hotCacheTask struct {
-	run func(*HotPeerCache)
-}
-
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx        context.Context
@@ -55,12 +49,11 @@ func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckWriteAsync(task func(cache *HotPeerCache)) bool {
-	queue := w.writeCache.taskQueue
-	if len(queue.In) == cap(queue.In) || queue.Len() > chanMaxLength {
+	if w.writeCache.taskQueue.Len() > chanMaxLength {
 		return false
 	}
 	select {
-	case queue.In <- &hotCacheTask{run: task}:
+	case w.writeCache.taskQueue.In <- task:
 		return true
 	default:
 		return false
@@ -69,12 +62,11 @@ func (w *HotCache) CheckWriteAsync(task func(cache *HotPeerCache)) bool {
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
-	queue := w.readCache.taskQueue
-	if len(queue.In) == cap(queue.In) || queue.Len() > chanMaxLength {
+	if w.readCache.taskQueue.Len() > chanMaxLength {
 		return false
 	}
 	select {
-	case queue.In <- &hotCacheTask{run: task}:
+	case w.readCache.taskQueue.In <- task:
 		return true
 	default:
 		return false
@@ -277,7 +269,7 @@ func ResetHotCacheStatusMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 
-func (w *HotCache) updateItems(queue *chanx.UnboundedChan[*hotCacheTask], runTask func(task func(*HotPeerCache))) {
+func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], runTask func(task func(*HotPeerCache))) {
 	defer logutil.LogPanic()
 
 	for {
@@ -288,9 +280,7 @@ func (w *HotCache) updateItems(queue *chanx.UnboundedChan[*hotCacheTask], runTas
 			if !ok {
 				return
 			}
-			run := task.run
-			task.run = nil
-			runTask(run)
+			runTask(task)
 		}
 	}
 }
