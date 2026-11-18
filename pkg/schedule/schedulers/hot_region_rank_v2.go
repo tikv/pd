@@ -272,13 +272,13 @@ func (r *rankV2) getScoreByPriorities(dim int, rs *rankRatios) int {
 	srcPendingRate, dstPendingRate := r.cur.getPendingLoad(dim)
 	peersRate := r.cur.getPeersRateFromCache(dim)
 	highRate, lowRate := srcRate, dstRate
-	topnHotPeer := r.nthHotPeer[r.cur.srcStore.GetID()][dim]
+	topnHotPeer := r.getNthHotPeer(r.cur.srcStore.GetID(), dim)
 	reverse := false
 	if srcRate < dstRate {
 		highRate, lowRate = dstRate, srcRate
 		peersRate = -peersRate
 		reverse = true
-		topnHotPeer = r.nthHotPeer[r.cur.dstStore.GetID()][dim]
+		topnHotPeer = r.getNthHotPeer(r.cur.dstStore.GetID(), dim)
 	}
 	topnRate := math.MaxFloat64
 	if topnHotPeer != nil {

@@ -116,6 +116,8 @@ type SharedConfigProvider interface {
 	GetRegionScoreFormulaVersion() string
 	GetSchedulerMaxWaitingOperator() uint64
 	GetStoreLimitByType(uint64, storelimit.Type) float64
+	// PeekStoreLimitByType reads the latest snapshot without creating a store entry.
+	PeekStoreLimitByType(uint64, storelimit.Type) float64
 	IsWitnessAllowed() bool
 	IsPlacementRulesCacheEnabled() bool
 	SetHaltScheduling(bool, string)
@@ -149,4 +151,5 @@ type StoreConfigProvider interface {
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool
 	IsRaftKV2() bool
+	GetUnifiedReadPoolMaxThreadCount() uint64
 }

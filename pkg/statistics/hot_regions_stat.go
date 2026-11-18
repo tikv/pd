@@ -43,5 +43,5 @@ type HotPeerStatShow struct {
 	QueryRate      float64   `json:"flow_query"`
 	CPURate        float64   `json:"flow_cpu"`
 	AntiCount      int       `json:"anti_count"`
-	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
+	LastUpdateTime time.Time `json:"last_update_time"`
 }

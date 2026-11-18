@@ -150,6 +150,11 @@ func (mc *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return mc.HotStat.GetStoresLoads()
 }
 
+// GetStoreReadCPURecentMax returns the recent max read CPU usage of a store.
+func (mc *Cluster) GetStoreReadCPURecentMax(storeID uint64) float64 {
+	return mc.HotStat.GetStoreReadCPURecentMax(storeID)
+}
+
 // IsRegionHot checks if the region is hot.
 func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
@@ -835,8 +840,8 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 	region := &metapb.Region{
 		Id:          regionID,
-		StartKey:    []byte(fmt.Sprintf("%20d0", regionID)),
-		EndKey:      []byte(fmt.Sprintf("%20d0", regionID+1)),
+		StartKey:    fmt.Appendf(nil, "%20d0", regionID),
+		EndKey:      fmt.Appendf(nil, "%20d0", regionID+1),
 		RegionEpoch: epoch,
 	}
 	var leader *metapb.Peer

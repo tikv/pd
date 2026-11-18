@@ -24,6 +24,7 @@ import (
 
 // MetaServiceGroupStorage defines storage operations on meta-service group related data.
 type MetaServiceGroupStorage interface {
+	LoadConfigWithRevision(ctx context.Context, cfg any) (int64, error)
 	SaveMetaServiceGroupStatus(txn kv.Txn, id string, status *MetaServiceGroupStatus) error
 	LoadMetaServiceGroupStatus(txn kv.Txn, ids map[string]string) (map[string]*MetaServiceGroupStatus, error)
 	RemoveMetaServiceGroupStatus(txn kv.Txn, id string) error

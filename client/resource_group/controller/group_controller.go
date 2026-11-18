@@ -52,6 +52,10 @@ type groupCostController struct {
 		storeCounter  map[uint64]*rmpb.Consumption
 		globalCounter *rmpb.Consumption
 	}
+	// ruTimeline records the consumption gc reports by natural second. It is
+	// nil for a tombstone controller: those requests are for a deleted group
+	// and are not part of any group's RU peak.
+	ruTimeline *ruTimeline
 
 	// fast path to make once token limit with un-limit burst.
 	burstable *atomic.Bool
@@ -94,6 +98,8 @@ type groupCostController struct {
 	tombstone atomic.Bool
 	// inactive is set to true when the resource group has not been updated for a long time.
 	inactive bool
+	// lastCleanupConsumption is the consumption observed by the previous cleanup pass.
+	lastCleanupConsumption rmpb.Consumption
 }
 
 type groupMetricsCollection struct {
@@ -351,6 +357,7 @@ func newGroupCostController(
 	gc.mu.consumption = &rmpb.Consumption{}
 	gc.mu.storeCounter = make(map[uint64]*rmpb.Consumption)
 	gc.mu.globalCounter = &rmpb.Consumption{}
+	gc.ruTimeline = newRUTimeline(time.Now())
 	// TODO: re-init the state if user change mode from RU to RAW mode.
 	gc.initRunState()
 	return gc, nil
@@ -413,6 +420,7 @@ func (gc *groupCostController) applyDegradedMode() {
 		cfg.newFillRate = 99999999
 	})
 	counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
+	failpoint.InjectCall("degradedModeApplied", gc.name)
 	log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("name", gc.name))
 }
 
@@ -741,10 +749,9 @@ retryLoop:
 func (gc *groupCostController) onRequestWaitImpl(
 	ctx context.Context, info RequestInfo,
 ) (delta, penalty *rmpb.Consumption, waitDuration time.Duration, priority uint32, err error) {
+	collector, detail := newRUCalculationDetail(info)
 	delta = &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(delta, info)
-	}
+	calculateBeforeKVRequest(gc.calculators, delta, detail, info)
 	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
 
 	gc.mu.Lock()
@@ -775,6 +782,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 		gc.metrics.observePagingRequest(bytesForEst)
 	}
 
+	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	gc.mu.Lock()
 	// Calculate the penalty of the store
 	penalty = &rmpb.Consumption{}
@@ -789,6 +797,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 	gc.mu.Unlock()
 	gc.metrics.addRequestSourceRUDelta(requestSource(info), reportedDelta)
+	collectRUCalculation(collector, detail, delta)
 
 	return delta, penalty, waitDuration, gc.getMeta().GetPriority(), nil
 }
@@ -796,17 +805,14 @@ func (gc *groupCostController) onRequestWaitImpl(
 func (gc *groupCostController) onResponseImpl(
 	req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, error) {
+	collector, detail := newRUCalculationDetail(req)
 	delta := &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.AfterKVRequest(delta, req, resp)
-	}
+	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
+	calculateBeforeKVRequest(gc.calculators, count, nil, req)
 	bytesForEst, isPagingRead := pagingReadEstimate(req)
 	if isPagingRead {
 		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
@@ -821,6 +827,7 @@ func (gc *groupCostController) onResponseImpl(
 		}
 	}
 
+	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	gc.mu.Lock()
 	add(gc.mu.consumption, reportedDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
@@ -828,6 +835,7 @@ func (gc *groupCostController) onResponseImpl(
 	gc.mu.Unlock()
 
 	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
+	collectRUCalculation(collector, detail, delta)
 
 	return delta, nil
 }
@@ -835,17 +843,17 @@ func (gc *groupCostController) onResponseImpl(
 func (gc *groupCostController) onResponseWaitImpl(
 	ctx context.Context, req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, time.Duration, error) {
+	collector, detail := newRUCalculationDetail(req)
 	delta := &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.AfterKVRequest(delta, req, resp)
-	}
+	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
+	// TiKV has already done the work, so the timeline records it even if the
+	// wait below fails.
+	gc.ruTimeline.record(reportedDelta.RRU, reportedDelta.WRU)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
+	calculateBeforeKVRequest(gc.calculators, count, nil, req)
 	bytesForEst, isPagingRead := pagingReadEstimate(req)
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
@@ -890,10 +898,31 @@ func (gc *groupCostController) onResponseWaitImpl(
 	gc.mu.Unlock()
 
 	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
+	collectRUCalculation(collector, detail, delta)
 
 	return delta, waitDuration, nil
 }
 
+func newRUCalculationDetail(req RequestInfo) (RUCalculationCollector, *RUCalculation) {
+	collector, ok := req.(RUCalculationCollector)
+	if !ok {
+		return nil, nil
+	}
+	return collector, &RUCalculation{}
+}
+
+func collectRUCalculation(collector RUCalculationCollector, detail *RUCalculation, consumption *rmpb.Consumption) {
+	if collector == nil {
+		return
+	}
+	detail.RRU = consumption.RRU
+	detail.WRU = consumption.WRU
+	collector.CollectRUCalculation(*detail)
+}
+
+// addRUConsumption adds consumption measured after a query finishes, such as
+// TiFlash MPP cost. It has no seconds, so it counts toward tokens and counters
+// but stays out of the RU timeline.
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)

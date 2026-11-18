@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -136,7 +137,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	c.adjustLog(configMetaData.Child("log"))
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 
@@ -294,7 +295,10 @@ func (o *PersistConfig) SetSchedulers(schedulers sc.SchedulerConfigs) {
 	defer o.scheduleMu.Unlock()
 
 	next := o.GetScheduleConfig().Clone()
-	next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+	next.Schedulers = slices.Clone(schedulers)
+	if len(next.Schedulers) == 0 {
+		next.Schedulers = nil
+	}
 	o.installScheduleConfig(next)
 }
 
@@ -546,11 +550,28 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	limit := o.GetStoreLimit(storeID)
+	return storeLimitByType(limit, typ)
+}
+
+// PeekStoreLimitByType reads a store limit from the latest schedule snapshot,
+// falling back to its defaults without creating a store entry.
+func (o *PersistConfig) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	cfg := o.GetScheduleConfig()
+	limit, ok := cfg.StoreLimit[storeID]
+	if !ok {
+		limit = cfg.GetDefaultStoreLimit()
+	}
+	return storeLimitByType(limit, typ)
+}
+
+func storeLimitByType(limit sc.StoreLimitConfig, typ storelimit.Type) float64 {
 	switch typ {
 	case storelimit.AddPeer:
 		return limit.AddPeer
 	case storelimit.RemovePeer:
 		return limit.RemovePeer
+	case storelimit.TransferLeaderIn:
+		return limit.TransferLeaderIn
 	// todo: impl it in store limit v2.
 	case storelimit.SendSnapshot:
 		return 0.0
@@ -612,21 +633,10 @@ func (o *PersistConfig) IsTikvRegionSplitEnabled() bool {
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
 	v := o.GetScheduleConfig().Clone()
-	switch typ {
-	case storelimit.AddPeer:
-		v.DefaultStoreLimit.AddPeer = ratePerMin
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
-			v.StoreLimit[storeID] = sc
-		}
-	case storelimit.RemovePeer:
-		v.DefaultStoreLimit.RemovePeer = ratePerMin
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
-		for storeID := range v.StoreLimit {
-			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
-			v.StoreLimit[storeID] = sc
-		}
+	v.DefaultStoreLimit = v.DefaultStoreLimit.SetLimit(typ, ratePerMin)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(typ, ratePerMin)
+	for storeID, limit := range v.StoreLimit {
+		v.StoreLimit[storeID] = limit.SetLimit(typ, ratePerMin)
 	}
 
 	o.SetScheduleConfig(v)
@@ -730,6 +740,11 @@ func (o *PersistConfig) IsRaftKV2() bool {
 	return o.GetStoreConfig().IsRaftKV2()
 }
 
+// GetUnifiedReadPoolMaxThreadCount returns TiKV unified read pool max thread count.
+func (o *PersistConfig) GetUnifiedReadPoolMaxThreadCount() uint64 {
+	return o.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
+}
+
 // TODO: implement the following methods
 
 // AddSchedulerCfg adds the scheduler configurations.
@@ -740,7 +755,9 @@ func (*PersistConfig) AddSchedulerCfg(types.CheckerSchedulerType, []string) {}
 // This method is a no-op since we only use configurations derived from one-way synchronization from PD now.
 func (*PersistConfig) RemoveSchedulerCfg(types.CheckerSchedulerType) {}
 
-// CheckLabelProperty checks if the label property is satisfied.
+// CheckLabelProperty always returns false. The scheduling service does not
+// support label-property, which has been deprecated since v5.2. Use placement
+// rules or evict-leader-scheduler to keep leaders off a store.
 func (*PersistConfig) CheckLabelProperty(string, []*metapb.StoreLabel) bool {
 	return false
 }

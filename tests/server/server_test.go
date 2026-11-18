@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
@@ -47,13 +48,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestUpdateAdvertiseUrls(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -93,8 +93,7 @@ func TestUpdateAdvertiseUrls(t *testing.T) {
 
 func TestClusterID(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -123,8 +122,7 @@ func TestClusterID(t *testing.T) {
 
 func TestLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -144,8 +142,7 @@ func TestLeader(t *testing.T) {
 
 func TestGRPCRateLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -231,7 +228,7 @@ func TestGRPCRateLimit(t *testing.T) {
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
 		})
-		re.Empty(resp.GetHeader().GetError())
+		assert.Empty(t, resp.GetHeader().GetError())
 		if err != nil {
 			errCh <- err.Error()
 		} else {
@@ -247,7 +244,7 @@ func TestGRPCRateLimit(t *testing.T) {
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
 		})
-		re.Empty(resp.GetHeader().GetError())
+		assert.Empty(t, resp.GetHeader().GetError())
 		if err != nil {
 			errCh <- err.Error()
 		} else {
@@ -307,7 +304,7 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mockHandler := createMockHandler(re, "127.0.0.1")
+	mockHandler := createMockHandler(suite.Assert(), "127.0.0.1")
 	// Repeat registering the same handler should return error.
 	_, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{mockHandler, mockHandler})
 	re.Error(err)
@@ -337,7 +334,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mockHandler := createMockHandler(re, "127.0.0.2")
+	mockHandler := createMockHandler(suite.Assert(), "127.0.0.2")
 	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{mockHandler})
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -367,7 +364,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mockHandler := createMockHandler(re, "127.0.0.2")
+	mockHandler := createMockHandler(suite.Assert(), "127.0.0.2")
 	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{mockHandler})
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -397,7 +394,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mockHandler := createMockHandler(re, "127.0.0.2")
+	mockHandler := createMockHandler(suite.Assert(), "127.0.0.2")
 	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{mockHandler})
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -425,8 +422,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 
 func TestAPIService(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	re.NoError(err)
@@ -456,8 +452,7 @@ func TestIsPathInDirectory(t *testing.T) {
 
 func TestCheckClusterID(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Start a standalone cluster A
 	clusterA, err := tests.NewTestCluster(ctx, 1)
@@ -490,7 +485,7 @@ func TestCheckClusterID(t *testing.T) {
 	cfgA := clusterA.GetServer(leaderA).GetConfig()
 	cfgB := clusterB.GetServer(leaderB).GetConfig()
 
-	mockHandler := createMockHandler(re, "127.0.0.1")
+	mockHandler := createMockHandler(assert.New(t), "127.0.0.1")
 	svr, err := server.CreateServer(ctx, cfgA, nil, mockHandler)
 	re.NoError(err)
 
@@ -512,8 +507,7 @@ func TestCheckClusterID(t *testing.T) {
 
 func TestMeteringWriter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		// Ensure the metering writer can be started.
@@ -542,8 +536,7 @@ func TestMeteringWriter(t *testing.T) {
 
 func TestSetPDServerConfigWithDashboard(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
@@ -554,10 +547,17 @@ func TestSetPDServerConfigWithDashboard(t *testing.T) {
 
 	leader := cluster.WaitLeader()
 	re.NotEmpty(leader)
-	svr := cluster.GetServer(leader).GetServer()
+	testServer := cluster.GetServer(leader)
+	svr := testServer.GetServer()
+
+	// Use a concrete member URL so the dashboard manager cannot asynchronously
+	// resolve "auto" between the update and the assertion.
+	cfg := svr.GetPDServerConfig()
+	cfg.DashboardAddress = testServer.GetConfig().AdvertiseClientUrls
+	re.NoError(svr.SetPDServerConfig(*cfg))
 
 	// Test updating config without changing dashboard address
-	cfg := svr.GetPDServerConfig()
+	cfg = svr.GetPDServerConfig()
 	originalDashboard := cfg.DashboardAddress
 	originalUseRegionStorage := cfg.UseRegionStorage
 
@@ -578,14 +578,14 @@ func TestSetPDServerConfigWithDashboard(t *testing.T) {
 }
 
 // createMockHandler creates a mock handler for test.
-func createMockHandler(re *require.Assertions, ip string) server.HandlerBuilder {
+func createMockHandler(as *assert.Assertions, ip string) server.HandlerBuilder {
 	return func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 			// test getting ip
 			clientIP, _ := apiutil.GetIPPortFromHTTPRequest(r)
-			re.Equal(ip, clientIP)
+			as.Equal(ip, clientIP)
 		})
 		info := apiutil.APIServiceGroup{
 			Name:    "mock",

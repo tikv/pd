@@ -25,18 +25,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 func TestTSLessEqual(t *testing.T) {
@@ -77,6 +77,7 @@ func TestIsRetryableGetTSError(t *testing.T) {
 
 	re.True(isRetryableGetTSError(fmt.Errorf("%s", errs.NotLeaderErr)))
 	re.True(isRetryableGetTSError(fmt.Errorf("%s", errs.MismatchCalleeIDErr)))
+	re.True(isRetryableGetTSError(perrors.WithStack(errs.ErrClientTSOStreamClosed)))
 	re.False(isRetryableGetTSError(errors.New("other error")))
 }
 

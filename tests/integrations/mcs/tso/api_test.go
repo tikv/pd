@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -135,8 +135,8 @@ func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map
 func TestTSOServerStartFirst(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(func() { re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop")) })
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
@@ -145,17 +145,14 @@ func TestTSOServerStartFirst(t *testing.T) {
 	defer cluster.Destroy()
 	re.NoError(err)
 	addr := cluster.GetConfig().GetClientURL()
-	ch := make(chan struct{})
-	defer close(ch)
-	clusterCh := make(chan *tests.TestTSOCluster)
-	defer close(clusterCh)
+	type clusterResult struct {
+		cluster *tests.TestTSOCluster
+		err     error
+	}
+	clusterCh := make(chan clusterResult, 1)
 	go func() {
 		tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, addr)
-		re.NoError(err)
-		primary := tsoCluster.WaitForDefaultPrimaryServing(re)
-		re.NotNil(primary)
-		clusterCh <- tsoCluster
-		ch <- struct{}{}
+		clusterCh <- clusterResult{cluster: tsoCluster, err: err}
 	}()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
@@ -164,9 +161,12 @@ func TestTSOServerStartFirst(t *testing.T) {
 	pdLeaderServer := cluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	re.NoError(err)
-	tsoCluster := <-clusterCh
+	result := <-clusterCh
+	re.NoError(result.err)
+	tsoCluster := result.cluster
 	defer tsoCluster.Destroy()
-	<-ch
+	primary := tsoCluster.WaitForDefaultPrimaryServing(re)
+	re.NotNil(primary)
 
 	var keyspace2ID uint32
 	testutil.Eventually(re, func() bool {
@@ -177,7 +177,14 @@ func TestTSOServerStartFirst(t *testing.T) {
 		keyspace2ID = ks.GetId()
 		return true
 	})
-	time.Sleep(time.Second * 1)
+	testutil.Eventually(re, func() bool {
+		group, err := pdLeaderServer.GetServer().GetKeyspaceGroupManager().GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+		if err != nil || group == nil || len(group.Members) != 2 || !slices.Contains(group.Keyspaces, keyspace2ID) {
+			return false
+		}
+		_, group, _, _, err = primary.GetKeyspaceGroupManager().FindGroupByKeyspaceID(keyspace2ID)
+		return err == nil && group != nil && slices.Contains(group.Keyspaces, keyspace2ID)
+	})
 	input := make(map[string]any)
 	input["new-id"] = 1
 	input["keyspaces"] = []uint32{keyspace2ID}
@@ -203,14 +210,11 @@ func TestTSOServerStartFirst(t *testing.T) {
 	re.NoError(json.Unmarshal(data, &group))
 	re.Len(group.Keyspaces, 2)
 	re.Len(group.Members, 2)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
 
 func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -321,6 +325,10 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 		}
 	}
 	re.NotNil(follower)
+	// Primary readiness does not wait for the follower's membership watcher.
+	testutil.Eventually(re, func() bool {
+		return follower.GetKeyspaceGroupManager().GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID) != nil
+	})
 	re.True(primary.IsServing())
 	re.False(follower.IsServing())
 	re.NotEqual(follower.GetConfig().GetListenAddr(), primary.GetConfig().GetListenAddr())

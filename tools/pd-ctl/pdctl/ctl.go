@@ -102,7 +102,7 @@ func MainStart(args []string) {
 	}
 
 	rootCmd.SetArgs(args)
-	rootCmd.ParseFlags(args)
+	_ = rootCmd.ParseFlags(args)
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
 
@@ -130,13 +130,13 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 		rootCmd := GetRootCmd()
 		persistentFlags.VisitAll(func(flag *pflag.Flag) {
 			if flag.Changed {
-				rootCmd.PersistentFlags().Set(flag.Name, flag.Value.String())
+				_ = rootCmd.PersistentFlags().Set(flag.Name, flag.Value.String())
 			}
 		})
-		rootCmd.LocalFlags().MarkHidden("pd")
-		rootCmd.LocalFlags().MarkHidden("cacert")
-		rootCmd.LocalFlags().MarkHidden("cert")
-		rootCmd.LocalFlags().MarkHidden("key")
+		_ = rootCmd.LocalFlags().MarkHidden("pd")
+		_ = rootCmd.LocalFlags().MarkHidden("cacert")
+		_ = rootCmd.LocalFlags().MarkHidden("cert")
+		_ = rootCmd.LocalFlags().MarkHidden("key")
 		rootCmd.SetOut(os.Stdout)
 		return rootCmd
 	}
@@ -162,7 +162,7 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 
 		rootCmd := getREPLCmd()
 		rootCmd.SetArgs(args)
-		rootCmd.ParseFlags(args)
+		_ = rootCmd.ParseFlags(args)
 		if err := rootCmd.Execute(); err != nil {
 			rootCmd.Println(err)
 		}

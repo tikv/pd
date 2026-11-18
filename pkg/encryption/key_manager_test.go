@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 // #nosec G101
@@ -328,14 +329,19 @@ func TestLoadKeyEmpty(t *testing.T) {
 func TestWatcher(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
+	watchStarted := make(chan struct{})
+	notifyWatchStarted := sync.OnceFunc(func() { close(watchStarted) })
+	helper.tick = func(ticker *time.Ticker) <-chan time.Time {
+		notifyWatchStarted()
+		return ticker.C
+	}
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
 		reloadEvent <- struct{}{}
@@ -365,8 +371,11 @@ func TestWatcher(t *testing.T) {
 			},
 		},
 	}
-	// wait watch to start
-	time.Sleep(time.Second)
+	select {
+	case <-watchStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("encryption key watcher did not start")
+	}
 	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	<-reloadEvent
@@ -430,8 +439,7 @@ func TestSetLeadershipWithEncryptionOff(t *testing.T) {
 func TestSetLeadershipWithEncryptionEnabling(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -483,8 +491,7 @@ func TestSetLeadershipWithEncryptionEnabling(t *testing.T) {
 func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -559,8 +566,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -627,11 +633,155 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	re.True(proto.Equal(loadedKeys, storedKeys))
 }
 
+func TestPlaintextMasterKeyStartupCompatibility(t *testing.T) {
+	re := require.New(t)
+	client := newTestEtcd(t)
+	leadership := newTestLeader(re, client)
+	keyFile := newTestKeyFile(t, re)
+	plaintextMaster := &encryptionpb.MasterKey{
+		Backend: &encryptionpb.MasterKey_Plaintext{Plaintext: &encryptionpb.MasterKeyPlaintext{}},
+	}
+	for _, method := range []string{methodAes128Ctr, methodAes192Ctr, methodAes256Ctr} {
+		for _, masterType := range []string{"", masterKeyTypePlaintext} {
+			for _, state := range []string{"missing", "empty", "disabled", "missing-current", "plaintext-current", "active-aes", "protected-aes"} {
+				t.Run(method+"/"+masterType+"/"+state, func(t *testing.T) {
+					re := require.New(t)
+					_, err := client.Delete(t.Context(), EncryptionKeysPath)
+					re.NoError(err)
+					if state != "missing" {
+						keys := &encryptionpb.KeyDictionary{
+							CurrentKeyId: 123,
+							Keys: map[uint64]*encryptionpb.DataKey{
+								123: {Key: getTestDataKey(re), Method: encryptionpb.EncryptionMethod_AES128_CTR, WasExposed: true},
+							},
+						}
+						switch state {
+						case "empty":
+							keys = &encryptionpb.KeyDictionary{}
+						case "disabled":
+							keys.CurrentKeyId = disableEncryptionKeyID
+						case "missing-current":
+							keys.CurrentKeyId = 456
+						case "plaintext-current":
+							keys.Keys[123].Method = encryptionpb.EncryptionMethod_PLAINTEXT
+						}
+						meta := plaintextMaster
+						if state == "protected-aes" {
+							meta = newTestMasterKey(keyFile)
+						}
+						re.NoError(saveKeys(leadership, meta, keys, defaultKeyManagerHelper()))
+					}
+					before, err := etcdutil.GetValue(client, EncryptionKeysPath)
+					re.NoError(err)
+					config := &Config{DataEncryptionMethod: method, MasterKey: MasterKeyConfig{Type: masterType}}
+					re.NoError(config.Adjust())
+					m, err := NewManager(client, config)
+					if state == "active-aes" {
+						re.NoError(err)
+						id, key, err := m.GetCurrentKey()
+						re.NoError(err)
+						re.Equal(uint64(123), id)
+						re.Equal(getTestDataKey(re), key.Key)
+					} else {
+						re.ErrorContains(err, "data encryption requires a file or KMS master key")
+						re.Nil(m)
+					}
+					after, err := etcdutil.GetValue(client, EncryptionKeysPath)
+					re.NoError(err)
+					re.Equal(before, after)
+				})
+			}
+		}
+	}
+}
+
+func TestMigratePlaintextKeyDictionary(t *testing.T) {
+	re := require.New(t)
+	client := newTestEtcd(t)
+	leadership := newTestLeader(re, client)
+	keyFile := newTestKeyFile(t, re)
+	keys := &encryptionpb.KeyDictionary{
+		CurrentKeyId: 123,
+		Keys: map[uint64]*encryptionpb.DataKey{
+			123: {
+				Key:          getTestDataKey(re),
+				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
+				CreationTime: uint64(time.Now().Unix()),
+			},
+		},
+	}
+	plaintextMaster := &encryptionpb.MasterKey{
+		Backend: &encryptionpb.MasterKey_Plaintext{Plaintext: &encryptionpb.MasterKeyPlaintext{}},
+	}
+	re.NoError(saveKeys(leadership, plaintextMaster, keys, defaultKeyManagerHelper()))
+	re.True(keys.Keys[123].WasExposed)
+
+	// Upgrade with the unchanged legacy config before introducing a protected master key.
+	legacyConfig := &Config{DataEncryptionMethod: methodAes128Ctr}
+	re.NoError(legacyConfig.Adjust())
+	legacy, err := NewManager(client, legacyConfig)
+	re.NoError(err)
+	re.NoError(legacy.SetLeadership(leadership))
+	legacyID, legacyKey, err := legacy.GetCurrentKey()
+	re.NoError(err)
+	re.True(legacyKey.WasExposed)
+	restartedLegacy, err := NewManager(client, legacyConfig)
+	re.NoError(err)
+	key, err := restartedLegacy.GetKey(legacyID)
+	re.NoError(err)
+	re.True(proto.Equal(legacyKey, key))
+
+	config := &Config{
+		DataEncryptionMethod: methodAes128Ctr,
+		MasterKey: MasterKeyConfig{
+			Type:                masterKeyTypeFile,
+			MasterKeyFileConfig: MasterKeyFileConfig{FilePath: keyFile},
+		},
+	}
+	re.NoError(config.Adjust())
+	m, err := NewManager(client, config)
+	re.NoError(err)
+	oldKey, err := m.GetKey(123)
+	re.NoError(err)
+	re.True(proto.Equal(keys.Keys[123], oldKey))
+	re.NoError(m.SetLeadership(leadership))
+	currentID, currentKey, err := m.GetCurrentKey()
+	re.NoError(err)
+	re.NotEqual(uint64(123), currentID)
+	re.False(currentKey.WasExposed)
+
+	resp, err := etcdutil.EtcdKVGet(client, EncryptionKeysPath)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	content := &encryptionpb.EncryptedContent{}
+	re.NoError(content.Unmarshal(resp.Kvs[0].Value))
+	re.Equal(keyFile, content.MasterKey.GetFile().GetPath())
+	storedKeys, err := extractKeysFromKV(resp.Kvs[0], defaultKeyManagerHelper())
+	re.NoError(err)
+	re.Equal(currentID, storedKeys.CurrentKeyId)
+	re.True(proto.Equal(keys.Keys[123], storedKeys.Keys[123]))
+
+	restarted, err := NewManager(client, config)
+	re.NoError(err)
+	oldKey, err = restarted.GetKey(123)
+	re.NoError(err)
+	re.True(proto.Equal(keys.Keys[123], oldKey))
+	keyID, key, err := restarted.GetCurrentKey()
+	re.NoError(err)
+	re.Equal(currentID, keyID)
+	re.True(proto.Equal(currentKey, key))
+	legacyKeyAfterMigration, err := restarted.GetKey(legacyID)
+	re.NoError(err)
+	re.True(proto.Equal(legacyKey, legacyKeyAfterMigration))
+	// A stale plaintext config must not undo the master-key migration on restart.
+	_, err = NewManager(client, legacyConfig)
+	re.ErrorContains(err, "data encryption requires a file or KMS master key")
+}
+
 func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -705,8 +855,7 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	keyFile2 := newTestKeyFile(t, re, testMasterKey2)
@@ -850,8 +999,7 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -906,8 +1054,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 func TestKeyRotation(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
@@ -1002,8 +1149,7 @@ func TestKeyRotation(t *testing.T) {
 func TestKeyRotationConflict(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)

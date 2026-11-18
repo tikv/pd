@@ -20,6 +20,7 @@ import (
 	"runtime/trace"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -149,32 +150,36 @@ type Client interface {
 var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
+// resourceManagerDiscovery is written under the mutex but may be read lock-free
+// from synchronous discovery callbacks that run while the write lock is held
+// (see innerClient.setServiceMode -> TSO Setup -> CheckMemberChanged ->
+// switchLeader -> onPDLeaderChanged), so it is stored as an atomic pointer.
 type serviceModeKeeper struct {
 	sync.RWMutex
 	serviceMode              pdpb.ServiceMode
 	tsoClient                *tso.Cli
 	tsoSvcDiscovery          sd.ServiceDiscovery
 	routerClient             *router.Cli
-	resourceManagerDiscovery *sd.ResourceManagerDiscovery
+	resourceManagerDiscovery atomic.Pointer[sd.ResourceManagerDiscovery]
 	msDiscovery              sd.ServiceDiscovery
 }
 
 func (k *serviceModeKeeper) close() {
 	k.Lock()
 	defer k.Unlock()
+	// Stop TSO connection updates before closing the discovery's connections.
+	k.tsoClient.Close()
 	if k.tsoSvcDiscovery != nil {
 		k.tsoSvcDiscovery.Close()
 		k.tsoSvcDiscovery = nil
 	}
-	if k.resourceManagerDiscovery != nil {
-		k.resourceManagerDiscovery.Close()
-		k.resourceManagerDiscovery = nil
+	if resourceManagerDiscovery := k.resourceManagerDiscovery.Load(); resourceManagerDiscovery != nil {
+		resourceManagerDiscovery.Close()
+		k.resourceManagerDiscovery.Store(nil)
 	}
 	if k.msDiscovery != nil {
 		k.msDiscovery.Close()
 	}
-
-	k.tsoClient.Close()
 }
 
 type client struct {
@@ -609,7 +614,9 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 }
 
 func isRetryableGetTSError(err error) bool {
-	return errs.IsLeaderChange(err) || errs.IsCalleeMismatch(err)
+	// A closed TSO stream, such as one evicted when the client switches to a new leader, does
+	// not mean that the TSO service fails, so retry on another stream.
+	return errs.IsLeaderChange(err) || errs.IsCalleeMismatch(err) || errs.ErrClientTSOStreamClosed.Equal(err)
 }
 
 // GetLocalTS implements the TSOClient interface.

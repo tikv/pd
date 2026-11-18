@@ -15,11 +15,15 @@
 package statistics
 
 import (
+	"math"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
@@ -60,4 +64,75 @@ func TestHistoryLoads(t *testing.T) {
 	historyLoads = NewStoreHistoryLoads(0, 0)
 	historyLoads.Add(1, rwTp, kind, loads)
 	re.Empty(historyLoads.Get(1, rwTp, kind)[0])
+}
+
+func TestHistoryLoadsAllocationBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		duration time.Duration
+		interval time.Duration
+		samples  int
+	}{
+		{"negative duration", -time.Minute, time.Second, 0},
+		{"negative interval", time.Minute, -time.Second, 0},
+		{"both negative", -time.Minute, -time.Second, 0},
+		{"disabled", 0, time.Second, 0},
+		{"zero interval", DefaultHistorySampleDuration, 0, 10},
+		{"one hour", time.Hour, time.Second, 3600},
+		{"two hours", 2 * time.Hour, time.Second, 7200},
+		{"maximum duration", time.Duration(math.MaxInt64), time.Duration(math.MaxInt64), 1},
+		{"minimum duration", time.Duration(math.MinInt64), time.Nanosecond, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			history := NewStoreHistoryLoads(tc.duration, tc.interval)
+			for range 2 {
+				re.NotPanics(func() {
+					history.Add(1, utils.Read, constant.LeaderKind, Loads{1, 2, 3, 4})
+				})
+			}
+			for _, loads := range history.Get(1, utils.Read, constant.LeaderKind) {
+				re.Len(loads, tc.samples)
+			}
+			updated := NewStoreHistoryLoads(DefaultHistorySampleDuration, DefaultHistorySampleInterval).UpdateConfig(tc.duration, tc.interval)
+			for range 2 {
+				updated.Add(1, utils.Read, constant.LeaderKind, Loads{1, 2, 3, 4})
+			}
+			for _, loads := range updated.Get(1, utils.Read, constant.LeaderKind) {
+				re.Len(loads, tc.samples)
+			}
+		})
+	}
+}
+
+func TestHistoryGCDoesNotReaddRemovedStore(t *testing.T) {
+	re := require.New(t)
+	history := NewStoreHistoryLoads(time.Minute, 0)
+	rw := utils.Read
+	kind := constant.RegionKind
+	storeID := uint64(1)
+
+	live := core.NewStoreInfo(&metapb.Store{
+		Id:        storeID,
+		NodeState: metapb.NodeState_Serving,
+	})
+	infos := map[uint64]*StoreSummaryInfo{
+		storeID: {StoreInfo: live},
+	}
+	loads := map[uint64]StoreKindLoads{
+		storeID: {1, 0, 0, 0, 0},
+	}
+
+	SummaryStoresLoad(infos, loads, history, nil, false, rw, kind)
+	re.NotEmpty(history.Get(storeID, rw, kind)[0])
+
+	removed := live.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	history.GC([]*core.StoreInfo{removed})
+	re.Empty(history.Get(storeID, rw, kind)[0])
+
+	SummaryStoresLoad(
+		map[uint64]*StoreSummaryInfo{storeID: {StoreInfo: removed}},
+		loads, history, nil, false, rw, kind,
+	)
+	re.Empty(history.Get(storeID, rw, kind)[0])
 }

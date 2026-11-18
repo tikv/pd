@@ -546,6 +546,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 		filter.NewRegionDownFilter(),
 		filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium),
 		filter.NewRegionPendingFilter(),
+		filter.NewAffinityFilter(cluster),
 		replicaFilter,
 	}
 

@@ -22,6 +22,7 @@ package timerutil
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"go.uber.org/goleak"
@@ -32,39 +33,41 @@ func TestMain(m *testing.M) {
 }
 
 func TestTimerPool(t *testing.T) {
-	var tp timerPool
+	synctest.Test(t, func(t *testing.T) {
+		var tp timerPool
 
-	for range 100 {
-		timer := tp.Get(20 * time.Millisecond)
+		for range 100 {
+			timer := tp.Get(20 * time.Millisecond)
 
-		select {
-		case <-timer.C:
-			t.Errorf("timer expired too early")
-			continue
-		default:
+			select {
+			case <-timer.C:
+				t.Errorf("timer expired too early")
+				continue
+			default:
+			}
+
+			select {
+			case <-time.After(100 * time.Millisecond):
+				t.Errorf("timer didn't expire on time")
+			case <-timer.C:
+			}
+
+			tp.Put(timer)
 		}
-
-		select {
-		case <-time.After(100 * time.Millisecond):
-			t.Errorf("timer didn't expire on time")
-		case <-timer.C:
-		}
-
-		tp.Put(timer)
-	}
+	})
 }
 
 const timeout = 10 * time.Millisecond
 
 func BenchmarkTimerUtilization(b *testing.B) {
 	b.Run("TimerWithPool", func(b *testing.B) {
-		for range b.N {
+		for b.Loop() {
 			t := GlobalTimerPool.Get(timeout)
 			GlobalTimerPool.Put(t)
 		}
 	})
 	b.Run("TimerWithoutPool", func(b *testing.B) {
-		for range b.N {
+		for b.Loop() {
 			t := time.NewTimer(timeout)
 			t.Stop()
 		}

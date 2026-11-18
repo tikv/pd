@@ -54,7 +54,7 @@ func TestMaintenanceSetCommand_Success(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Maintenance task started successfully")
 }
@@ -72,7 +72,7 @@ func TestMaintenanceSetCommand_Error(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Failed to start maintenance task:")
 	re.Contains(result, "mock error")
@@ -94,7 +94,7 @@ func TestMaintenanceDeleteCommand_Success(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Maintenance task deleted successfully")
 }
@@ -111,7 +111,7 @@ func TestMaintenanceDeleteCommand_Error(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Failed to delete maintenance task:")
 	re.Contains(result, "mock error")
@@ -134,7 +134,7 @@ func TestMaintenanceShowCommand_Success(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 
 	// Check that the raw JSON response is printed
@@ -153,7 +153,7 @@ func TestMaintenanceShowCommand_Error(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Failed to get maintenance task:")
 	re.Contains(result, "mock error")
@@ -176,7 +176,7 @@ func TestMaintenanceShowCommand_AllTasks(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, `{"type":"tikv","id":"task1","start_timestamp":1234567890,"description":"rolling restart for TiKV store-1"}`)
 }
@@ -198,7 +198,7 @@ func TestMaintenanceShowCommand_SpecificTaskType(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, `{"type":"tikv","id":"task1","start_timestamp":1234567890,"description":"specific task"}`)
 }
@@ -220,7 +220,7 @@ func TestMaintenanceShowCommand_NotFound_AllTasks(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "No maintenance tasks are currently running.")
 }
@@ -242,7 +242,7 @@ func TestMaintenanceShowCommand_NotFound_SpecificType(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "No maintenance task found for type: tikv")
 }
@@ -264,7 +264,7 @@ func TestMaintenanceShowCommand_InvalidJSON(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "invalid json response")
 }
@@ -281,7 +281,7 @@ func TestMaintenanceShowCommand_NetworkError(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Failed to get maintenance task:")
 	re.Contains(result, "network error")
@@ -311,7 +311,7 @@ func TestMaintenanceShowCommand_ReadBodyError(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Failed to get maintenance task:")
 	re.Contains(result, "read error")
@@ -334,7 +334,7 @@ func TestMaintenanceSetCommand_Conflict(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Failed to start maintenance task:")
 	re.Contains(result, "[409]")
@@ -357,7 +357,7 @@ func TestMaintenanceDeleteCommand_NotFound(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Failed to delete maintenance task:")
 	re.Contains(result, "[404]")
@@ -380,7 +380,7 @@ func TestMaintenanceDeleteCommand_Conflict(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.Execute()
+	re.NoError(cmd.Execute())
 	result := out.String()
 	re.Contains(result, "Failed to delete maintenance task:")
 	re.Contains(result, "[409]")

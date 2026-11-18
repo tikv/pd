@@ -68,10 +68,7 @@ func newHistoryBuffer(baseCapacity, maxCapacity int, kv kv.Base) *historyBuffer 
 
 func newHistoryBufferWithConfig(baseCapacity, maxCapacity, capacityUnit int, kv kv.Base) *historyBuffer {
 	baseCapacity = normalizeHistoryBufferCapacity(baseCapacity, capacityUnit)
-	maxCapacity = normalizeHistoryBufferCapacity(maxCapacity, capacityUnit)
-	if maxCapacity < baseCapacity {
-		maxCapacity = baseCapacity
-	}
+	maxCapacity = max(normalizeHistoryBufferCapacity(maxCapacity, capacityUnit), baseCapacity)
 	// use an empty space to simplify operation
 	size := baseCapacity + 1
 	records := make([]*core.RegionInfo, size)
@@ -284,10 +281,7 @@ func (h *historyBuffer) maybeShrink() {
 		h.observedRequiredWindow = 0
 		return
 	}
-	target := h.capacity() / 2
-	if target < h.baseCapacity {
-		target = h.baseCapacity
-	}
+	target := max(h.capacity()/2, h.baseCapacity)
 	if target < h.capacity() {
 		h.resizeLocked(target)
 	}
@@ -363,30 +357,18 @@ func (h *historyBuffer) persist() {
 }
 
 func (h *historyBuffer) growForWindowLocked(window uint64) {
-	target := normalizeHistoryBufferCapacity(int(window), h.capacityUnit)
-	if target > h.maxCapacity {
-		target = h.maxCapacity
-	}
+	target := min(normalizeHistoryBufferCapacity(int(window), h.capacityUnit), h.maxCapacity)
 	if target > h.capacity() {
 		h.resizeLocked(target)
 	}
 }
 
 func (h *historyBuffer) resizeLocked(newCapacity int) {
-	newCapacity = normalizeHistoryBufferCapacity(newCapacity, h.capacityUnit)
-	if newCapacity < h.baseCapacity {
-		newCapacity = h.baseCapacity
-	}
-	if newCapacity > h.maxCapacity {
-		newCapacity = h.maxCapacity
-	}
+	newCapacity = min(max(normalizeHistoryBufferCapacity(newCapacity, h.capacityUnit), h.baseCapacity), h.maxCapacity)
 	if newCapacity == h.capacity() {
 		return
 	}
-	keep := h.len()
-	if keep > newCapacity {
-		keep = newCapacity
-	}
+	keep := min(h.len(), newCapacity)
 	startIndex := h.index - uint64(keep)
 	records := make([]*core.RegionInfo, newCapacity+1)
 	for i := range keep {

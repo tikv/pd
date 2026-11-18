@@ -1,0 +1,28 @@
+[
+  {
+    "module": "github.com/alibabacloud-go/endpoint-util",
+    "version": "v1.1.0",
+    "license": "Apache-2.0",
+    "license_path": "evidence/Apache-2.0",
+    "license_path_scope": "override-directory",
+    "notice_paths": ["README.md"],
+    "source_urls": [
+      "https://github.com/aliyun/endpoint-util/blob/v1.1.0/README.md",
+      "https://www.apache.org/licenses/LICENSE-2.0.txt"
+    ],
+    "reason": "The module README declares Apache-2.0 and its copyright but no license text is shipped. The canonical Apache-2.0 text is retained locally and the README is reproduced as an upstream notice."
+  },
+  {
+    "module": "github.com/golang/freetype",
+    "version": "v0.0.0-20170609003504-e2365dfdc4a0",
+    "license": "FTL",
+    "license_path": "licenses/ftl.txt",
+    "license_encoding": "iso-8859-1",
+    "notice_paths": ["LICENSE"],
+    "source_urls": [
+      "https://github.com/golang/freetype/blob/e2365dfdc4a0/LICENSE",
+      "https://github.com/golang/freetype/blob/e2365dfdc4a0/licenses/ftl.txt"
+    ],
+    "reason": "The module offers the FreeType License or GPL-2.0-or-later. This notice selects the FreeType License, renders its ISO-8859-1 text as UTF-8, and retains the license-choice declaration."
+  }
+]

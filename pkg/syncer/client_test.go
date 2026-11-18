@@ -37,7 +37,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 // For issue https://github.com/tikv/pd/issues/3936
@@ -59,18 +59,28 @@ func TestLoadRegion(t *testing.T) {
 		err = rs.SaveRegion(&metapb.Region{Id: uint64(i) + 1})
 		re.NoError(err)
 	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion", "return(true)"))
+	loading := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion", func(ctx context.Context, rangeLimit *int) {
+		*rangeLimit = 1
+		close(loading)
+		<-ctx.Done()
+	}))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion"))
 	}()
 
 	rc := NewRegionSyncer(server)
-	start := time.Now()
 	rc.StartSyncWithLeader("")
-	time.Sleep(time.Second)
+	defer rc.StopSyncWithLeader()
+	select {
+	case <-loading:
+	case <-time.After(5 * time.Second):
+		t.Fatal("region loading did not start")
+	}
+	start := time.Now()
 	rc.StopSyncWithLeader()
-	re.Greater(time.Since(start), time.Second) // make sure failpoint is injected
-	re.Less(time.Since(start), time.Second*2)
+	re.Less(time.Since(start), time.Second)
+	re.Zero(server.GetBasicCluster().GetTotalRegionCount())
 }
 
 func TestErrorCode(t *testing.T) {
@@ -90,6 +100,9 @@ func TestErrorCode(t *testing.T) {
 	rc := NewRegionSyncer(server)
 	conn, err := grpcutil.GetClientConn(ctx, "http://127.0.0.1", nil)
 	re.NoError(err)
+	defer func() {
+		re.NoError(conn.Close())
+	}()
 	cancel()
 	_, err = rc.syncRegion(ctx, conn)
 	ev, ok := status.FromError(err)

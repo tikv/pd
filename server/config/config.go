@@ -18,9 +18,10 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -57,7 +58,7 @@ type Config struct {
 	Name              string `toml:"name" json:"name"`
 	DataDir           string `toml:"data-dir" json:"data-dir"`
 	ForceNewCluster   bool   `json:"force-new-cluster"`
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
+	EnableGRPCGateway bool   `toml:"enable-grpc-gateway" json:"enable-grpc-gateway"`
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
@@ -143,6 +144,8 @@ type Config struct {
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
+	// LabelProperty has been deprecated since v5.2, and the scheduling service
+	// in microservice mode does not support it. Use placement rules instead.
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
 	// For all warnings during parsing.
@@ -213,8 +216,14 @@ const (
 
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
 	DefaultMinResolvedTSPersistenceInterval = time.Second
+	// DefaultGCKeyspaceIndexLoadConcurrency is the default metadata scan concurrency.
+	DefaultGCKeyspaceIndexLoadConcurrency = 4
+	maxGCKeyspaceIndexLoadConcurrency     = 16
+	// DefaultGCStateCacheWarmupConcurrency is the default GC state warmup concurrency.
+	DefaultGCStateCacheWarmupConcurrency = 4
+	maxGCStateCacheWarmupConcurrency     = 16
 
-	defaultEnableGRPCGateway   = true
+	defaultEnableGRPCGateway   = false
 	defaultDisableErrorVerbose = true
 
 	defaultDashboardAddress = "auto"
@@ -346,12 +355,38 @@ func (c *Config) Validate() error {
 		return errors.New("log directory shouldn't be the subdirectory of data directory")
 	}
 
+	if len(c.Security.ClientCertAllowedCNs) > 0 {
+		if c.EnableGRPCGateway {
+			return errors.New("security.client-cert-allowed-cn requires enable-grpc-gateway = false")
+		}
+		if slices.Contains(c.Security.ClientCertAllowedCNs, "") {
+			return errors.New("security.client-cert-allowed-cn must not contain empty CNs")
+		}
+		if c.Security.CAPath == "" || c.Security.CertPath == "" || c.Security.KeyPath == "" {
+			return errors.New("security.client-cert-allowed-cn requires cacert-path, cert-path and key-path")
+		}
+		urls, err := parseUrls(c.ClientUrls)
+		if err != nil {
+			return err
+		}
+		for _, u := range urls {
+			if u.Scheme != "https" {
+				return errors.New("security.client-cert-allowed-cn requires HTTPS client URLs")
+			}
+		}
+	}
+
 	return nil
 }
 
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
-	configMetaData := configutil.NewConfigMetadata(meta)
+	return c.AdjustWithMetadata(configutil.NewConfigMetadata(meta), reloading)
+}
+
+// AdjustWithMetadata is used to adjust the PD configurations whose metadata may
+// be nested in a larger configuration file.
+func (c *Config) AdjustWithMetadata(configMetaData *configutil.ConfigMetaData, reloading bool) error {
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
 	}
@@ -391,8 +426,12 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustString(&c.InitialClusterState, defaultInitialClusterState)
 	configutil.AdjustString(&c.InitialClusterToken, defaultInitialClusterToken)
 
+	// Join is a comma-separated list of endpoints (see the field comment and
+	// server/join, which splits it on ","), so validate it per endpoint rather
+	// than passing the whole list to a single url.Parse, which accepts it as
+	// one malformed URL with a host of "pd-0:2379,http:".
 	if len(c.Join) > 0 {
-		if _, err := url.Parse(c.Join); err != nil {
+		if _, err := parseUrls(c.Join); err != nil {
 			return errors.Errorf("failed to parse join addr:%s, err:%v", c.Join, err)
 		}
 	}
@@ -464,7 +503,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.Microservice.adjust(configMetaData.Child("micro-service"))
 
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 
@@ -526,9 +565,19 @@ type PDServerConfig struct {
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
 	// BlockSafePointV1 is used to control gc safe point v1 and service safe point v1 can not be updated.
 	BlockSafePointV1 bool `toml:"block-safe-point-v1" json:"block-safe-point-v1,string"`
+	// GCKeyspaceIndexLoadConcurrency limits metadata scans in each full-load attempt.
+	GCKeyspaceIndexLoadConcurrency int `toml:"gc-keyspace-index-load-concurrency" json:"gc-keyspace-index-load-concurrency"`
+	// GCStateCacheWarmupConcurrency limits GC state reads in each initial warmup campaign.
+	GCStateCacheWarmupConcurrency int `toml:"gc-state-cache-warmup-concurrency" json:"gc-state-cache-warmup-concurrency"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
+	if !meta.IsDefined("gc-keyspace-index-load-concurrency") {
+		configutil.AdjustInt(&c.GCKeyspaceIndexLoadConcurrency, DefaultGCKeyspaceIndexLoadConcurrency)
+	}
+	if !meta.IsDefined("gc-state-cache-warmup-concurrency") {
+		configutil.AdjustInt(&c.GCStateCacheWarmupConcurrency, DefaultGCStateCacheWarmupConcurrency)
+	}
 	configutil.AdjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
@@ -594,7 +643,7 @@ func migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
 
 // Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
-	runtimeServices := append(c.RuntimeServices[:0:0], c.RuntimeServices...)
+	runtimeServices := slices.Clone(c.RuntimeServices)
 	cfg := *c
 	cfg.RuntimeServices = runtimeServices
 	return &cfg
@@ -602,6 +651,9 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 
 // Validate is used to validate if some pd-server configurations are right.
 func (c *PDServerConfig) Validate() error {
+	if err := c.validateGCConcurrency(); err != nil {
+		return err
+	}
 	switch c.DashboardAddress {
 	case "auto":
 	case "none":
@@ -627,6 +679,16 @@ func (c *PDServerConfig) Validate() error {
 		return errors.New(fmt.Sprintf("gc-tuner-threshold should between %v and %v", minGCTunerThreshold, maxGCTunerThreshold))
 	}
 
+	return nil
+}
+
+func (c *PDServerConfig) validateGCConcurrency() error {
+	if c.GCKeyspaceIndexLoadConcurrency < 1 || c.GCKeyspaceIndexLoadConcurrency > maxGCKeyspaceIndexLoadConcurrency {
+		return errors.Errorf("gc-keyspace-index-load-concurrency must be between 1 and %d", maxGCKeyspaceIndexLoadConcurrency)
+	}
+	if c.GCStateCacheWarmupConcurrency < 1 || c.GCStateCacheWarmupConcurrency > maxGCStateCacheWarmupConcurrency {
+		return errors.Errorf("gc-state-cache-warmup-concurrency must be between 1 and %d", maxGCStateCacheWarmupConcurrency)
+	}
 	return nil
 }
 
@@ -705,9 +767,11 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
-	// Keep compatibility with https://github.com/tikv/pd/pull/2305
-	// Only check client cert when there are multiple CNs.
-	if len(c.Security.CertAllowedCNs) > 1 {
+	if len(c.Security.ClientCertAllowedCNs) > 0 {
+		cfg.ClientTLSInfo.AllowedCNs = c.Security.ClientCertAllowedCNs
+	} else if len(c.Security.CertAllowedCNs) > 1 {
+		// Preserve the legacy single-CN behavior for existing configurations.
+		// See https://github.com/tikv/pd/pull/2305.
 		cfg.ClientTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
 	}
 	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
@@ -944,22 +1008,19 @@ func AdjustMetaServiceGroups(metaGroups map[string]string) error {
 	for groupID := range metaGroups {
 		delete(metaGroups, groupID)
 	}
-	for groupID, endpoint := range dict {
-		metaGroups[groupID] = endpoint
-	}
+	maps.Copy(metaGroups, dict)
 
 	return nil
 }
 
 // Clone makes a deep copy of the keyspace config.
 func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
+	preAlloc := slices.Clone(c.PreAlloc)
 	cfg := *c
-	cfg.PreAlloc = append(c.PreAlloc[:0:0], c.PreAlloc...)
+	cfg.PreAlloc = preAlloc
 	if c.MetaServiceGroups != nil {
 		cfg.MetaServiceGroups = make(map[string]string, len(c.MetaServiceGroups))
-		for name, endpoint := range c.MetaServiceGroups {
-			cfg.MetaServiceGroups[name] = endpoint
-		}
+		maps.Copy(cfg.MetaServiceGroups, c.MetaServiceGroups)
 	}
 	return &cfg
 }
@@ -989,9 +1050,7 @@ func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 // GetMetaServiceGroups returns the current meta-service-group configuration.
 func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
 	ret := make(map[string]string, len(c.MetaServiceGroups))
-	for name, endpoint := range c.MetaServiceGroups {
-		ret[name] = endpoint
-	}
+	maps.Copy(ret, c.MetaServiceGroups)
 	return ret
 }
 

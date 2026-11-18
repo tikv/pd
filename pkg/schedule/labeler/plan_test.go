@@ -15,7 +15,6 @@
 package labeler
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -29,8 +28,7 @@ import (
 func TestPlanSetLabelRule(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 
@@ -75,8 +73,7 @@ func TestPlanSetLabelRule(t *testing.T) {
 func TestPlanDeleteLabelRule(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 
@@ -98,8 +95,7 @@ func TestPlanDeleteLabelRule(t *testing.T) {
 func TestPlanCommitOps(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 
@@ -140,8 +136,7 @@ func TestPlanCommitOps(t *testing.T) {
 func TestPlanApply(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 
@@ -212,8 +207,7 @@ func TestPlanApply(t *testing.T) {
 func TestPlanApplyWithError(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 
@@ -242,8 +236,7 @@ func TestPlanApplyWithError(t *testing.T) {
 func TestPlanMultipleOperations(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 
@@ -295,8 +288,7 @@ func TestPlanMultipleOperations(t *testing.T) {
 func TestPlanDeleteNonExistentRule(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 

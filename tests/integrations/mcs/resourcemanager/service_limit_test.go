@@ -87,6 +87,8 @@ func (suite *serviceLimitTestSuite) SetupTest() {
 }
 
 func (suite *serviceLimitTestSuite) TearDownTest() {
+	suite.Require().NoError(suite.controller.Stop())
+	suite.client.Close()
 	suite.cancel()
 	suite.cluster.Destroy()
 }

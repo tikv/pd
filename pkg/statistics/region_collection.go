@@ -15,7 +15,12 @@
 package statistics
 
 import (
+	"maps"
+	"slices"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -169,6 +174,9 @@ func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 	if r.IsRegionStatsType(regionID, LearnerPeer) != (len(region.GetLearners()) != 0) {
 		return true
 	}
+	if r.IsRegionStatsType(regionID, EmptyRegion) != core.IsEmptyRegion(region.GetApproximateSize(), region.GetApproximateKeys()) {
+		return true
+	}
 
 	// merge
 	return r.IsRegionStatsType(regionID, UndersizedRegion) !=
@@ -249,7 +257,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	if len(learners) > 0 {
 		conditions |= LearnerPeer
 	}
-	if regionSize <= core.EmptyRegionApproximateSize {
+	if core.IsEmptyRegion(regionSize, region.GetApproximateKeys()) {
 		conditions |= EmptyRegion
 	}
 	if region.IsOversized(regionMaxSize, regionMaxKeys) {
@@ -436,9 +444,7 @@ func (l *LabelStatistics) GetLabelCounter() map[string]int {
 	l.RLock()
 	defer l.RUnlock()
 	clonedLabelCounter := make(map[string]int, len(l.labelCounter))
-	for k, v := range l.labelCounter {
-		clonedLabelCounter[k] = v
-	}
+	maps.Copy(clonedLabelCounter, l.labelCounter)
 	return clonedLabelCounter
 }
 
@@ -473,12 +479,7 @@ func IsRegionLabelIsolationSatisfied(stores []*core.StoreInfo, labels []string, 
 	if level == -1 {
 		return false
 	}
-	for _, key := range labels[level:] {
-		if key == isolationLevel {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(labels[level:], isolationLevel)
 }
 
 func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {
@@ -486,7 +487,7 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 	valueStoresMap := make(map[string][]*core.StoreInfo)
 
 	for _, s := range stores {
-		labelValue := s.GetLabelValue(label)
+		labelValue := labelGroupKey(s.GetLabelValue(label))
 		if labelValue == "" {
 			emptyValueStores = append(emptyValueStores, s)
 		} else {
@@ -519,6 +520,29 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 		}
 	}
 	return res
+}
+
+// labelGroupKey returns a key under which label values are equal iff they are
+// equal under strings.EqualFold, as compared by StoreInfo.CompareLocation.
+func labelGroupKey(value string) string {
+	for i := range len(value) {
+		c := value[i]
+		if c >= utf8.RuneSelf {
+			// Map each rune to the smallest rune in its simple-fold orbit.
+			return strings.Map(func(r rune) rune {
+				canonical := r
+				for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+					canonical = min(canonical, next)
+				}
+				if canonical >= 'A' && canonical <= 'Z' {
+					return canonical + ('a' - 'A')
+				}
+				return canonical
+			}, value)
+		}
+	}
+	// For ASCII values, the key above reduces to ASCII lowercase.
+	return strings.ToLower(value)
 }
 
 // logDownPeerWithNoDisconnectedStore logs down peers on connected stores.

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -229,7 +230,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		re.Equal(priority, gc.meta.Priority)
 		expectedConsumption := &rmpb.Consumption{}
 		if testCase.req.IsWrite() {
-			kvCalculator.calculateWriteCost(expectedConsumption, testCase.req)
+			kvCalculator.calculateWriteCostWithDetail(expectedConsumption, nil, testCase.req)
 			re.Equal(expectedConsumption.WRU, consumption.WRU)
 			if testCase.req.AccessLocationType() != AccessUnknown {
 				re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
@@ -237,8 +238,8 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		}
 		consumption, err = gc.onResponseImpl(testCase.req, testCase.resp)
 		re.NoError(err, caseNum)
-		kvCalculator.calculateReadCost(expectedConsumption, testCase.resp)
-		kvCalculator.calculateCPUCost(expectedConsumption, testCase.resp)
+		kvCalculator.calculateReadCostWithDetail(expectedConsumption, nil, testCase.resp)
+		kvCalculator.calculateCPUCostWithDetail(expectedConsumption, nil, testCase.resp)
 		calculateCrossAZTraffic(expectedConsumption, testCase.req, testCase.resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
@@ -251,6 +252,141 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 			re.Equal(expectedConsumption.WriteCrossAzTrafficBytes, uint64(0), caseNum)
 		}
 	}
+}
+
+func TestRUCalculationDetail(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	cfg := *DefaultRUConfig()
+	cfg.ReadBaseCost = 1
+	cfg.ReadPerBatchBaseCost = 2
+	cfg.ReadBytesCost = 0.1
+	cfg.WriteBaseCost = 3
+	cfg.WritePerBatchBaseCost = 5
+	cfg.WriteBytesCost = 0.2
+	cfg.CPUMsCost = 0.5
+	gc.mainCfg = &cfg
+	gc.calculators = []ResourceCalculator{newKVCalculator(&cfg), newSQLCalculator(&cfg)}
+
+	readReq := &ruCalculationCollectingRequest{TestRequestInfo: &TestRequestInfo{
+		predictedReadBytes: 10,
+		isCop:              true,
+	}}
+	requestConsumption, _, _, _, err := gc.onRequestWaitImpl(context.Background(), readReq)
+	re.NoError(err)
+	re.Len(readReq.calculations, 1)
+	requestDetail := readReq.calculations[0]
+	re.InDelta(3.4, requestConsumption.RRU, 1e-12)
+	re.Equal(RUFactorSnapshot{
+		ReadBaseCost:          1,
+		ReadPerBatchBaseCost:  2,
+		ReadBytesCost:         0.1,
+		WriteBaseCost:         3,
+		WritePerBatchBaseCost: 5,
+		WriteBytesCost:        0.2,
+		CPUMsCost:             0.5,
+		BatchProportion:       0.7,
+	}, requestDetail.Factors)
+	re.Equal(float64(1), requestDetail.Inputs.ReadRPCCount)
+	re.Equal(float64(10), requestDetail.Inputs.ReadBytes)
+	re.InDelta(requestConsumption.RRU, requestDetail.RRU, 1e-12)
+
+	readResp := &TestResponseInfo{
+		readBytes: 4,
+		kvCPU:     time.Millisecond,
+		succeed:   true,
+	}
+	responseConsumption, _, err := gc.onResponseWaitImpl(context.Background(), readReq, readResp)
+	re.NoError(err)
+	re.Len(readReq.calculations, 2)
+	responseDetail := readReq.calculations[1]
+	re.InDelta(-0.1, responseConsumption.RRU, 1e-12)
+	re.Equal(requestDetail.Factors, responseDetail.Factors)
+	re.Equal(float64(-6), responseDetail.Inputs.ReadBytes)
+	re.Equal(float64(1), responseDetail.Inputs.KVCPUTimeMs)
+	re.InDelta(responseConsumption.RRU, responseDetail.RRU, 1e-12)
+
+	requestDetail.Add(responseDetail)
+	re.Equal(float64(1), requestDetail.Inputs.ReadRPCCount)
+	re.Equal(float64(4), requestDetail.Inputs.ReadBytes)
+	re.Equal(float64(1), requestDetail.Inputs.KVCPUTimeMs)
+	re.InDelta(requestConsumption.RRU+responseConsumption.RRU, requestDetail.RRU, 1e-12)
+
+	nonWaitingReq := &ruCalculationCollectingRequest{TestRequestInfo: &TestRequestInfo{
+		predictedReadBytes: 10,
+		isCop:              true,
+	}}
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), nonWaitingReq)
+	re.NoError(err)
+	nonWaitingConsumption, err := gc.onResponseImpl(nonWaitingReq, readResp)
+	re.NoError(err)
+	re.Len(nonWaitingReq.calculations, 2)
+	re.InDelta(nonWaitingConsumption.RRU, nonWaitingReq.calculations[1].RRU, 1e-12)
+
+	writeReq := &ruCalculationCollectingRequest{TestRequestInfo: &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  10,
+		numReplicas: 3,
+	}}
+	writeConsumption, _, _, _, err := gc.onRequestWaitImpl(context.Background(), writeReq)
+	re.NoError(err)
+	re.Len(writeReq.calculations, 1)
+	writeDetail := writeReq.calculations[0]
+	re.InDelta(25.5, writeConsumption.WRU, 1e-12)
+	re.Equal(float64(3), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
+	re.Equal(float64(30), writeDetail.Inputs.ReplicaWeightedWriteBytes)
+	re.InDelta(writeConsumption.WRU, writeDetail.WRU, 1e-12)
+
+	paybackConsumption, _, err := gc.onResponseWaitImpl(
+		context.Background(), writeReq, &TestResponseInfo{succeed: false},
+	)
+	re.NoError(err)
+	re.Len(writeReq.calculations, 2)
+	paybackDetail := writeReq.calculations[1]
+	re.InDelta(-5, paybackConsumption.WRU, 1e-12)
+	re.Equal(float64(1), paybackDetail.Inputs.FailedWriteBaseCostRefundCount)
+	re.Equal(float64(10), paybackDetail.Inputs.FailedWriteRefundBytes)
+	re.InDelta(
+		-paybackDetail.Inputs.FailedWriteBaseCostRefundCount*paybackDetail.Factors.WriteBaseCost-
+			paybackDetail.Inputs.FailedWriteRefundBytes*paybackDetail.Factors.WriteBytesCost,
+		paybackDetail.WRU,
+		1e-12,
+	)
+	re.InDelta(paybackConsumption.WRU, paybackDetail.WRU, 1e-12)
+
+	writeDetail.Add(paybackDetail)
+	re.Equal(float64(3), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
+	re.Equal(float64(30), writeDetail.Inputs.ReplicaWeightedWriteBytes)
+	re.Equal(float64(1), writeDetail.Inputs.FailedWriteBaseCostRefundCount)
+	re.Equal(float64(10), writeDetail.Inputs.FailedWriteRefundBytes)
+	re.InDelta(writeConsumption.WRU+paybackConsumption.WRU, writeDetail.WRU, 1e-12)
+
+	retryConsumption, _, _, _, err := gc.onRequestWaitImpl(context.Background(), writeReq)
+	re.NoError(err)
+	re.Len(writeReq.calculations, 3)
+	retryDetail := writeReq.calculations[2]
+	re.InDelta(25.5, retryConsumption.WRU, 1e-12)
+	_, _, err = gc.onResponseWaitImpl(
+		context.Background(), writeReq, &TestResponseInfo{succeed: true},
+	)
+	re.NoError(err)
+	re.Len(writeReq.calculations, 4)
+	retryResponseDetail := writeReq.calculations[3]
+	writeDetail.Add(retryDetail)
+	writeDetail.Add(retryResponseDetail)
+	re.Equal(float64(6), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
+	re.Equal(float64(60), writeDetail.Inputs.ReplicaWeightedWriteBytes)
+	re.Equal(float64(1), writeDetail.Inputs.FailedWriteBaseCostRefundCount)
+	re.InDelta(writeConsumption.WRU+paybackConsumption.WRU+retryConsumption.WRU, writeDetail.WRU, 1e-12)
+}
+
+type ruCalculationCollectingRequest struct {
+	*TestRequestInfo
+	calculations []RUCalculation
+}
+
+func (r *ruCalculationCollectingRequest) CollectRUCalculation(calculation RUCalculation) {
+	r.calculations = append(r.calculations, calculation)
 }
 
 func TestOnResponseWaitConsumption(t *testing.T) {
@@ -271,7 +407,7 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	verify := func() {
 		expectedConsumption := &rmpb.Consumption{}
 		kvCalculator := gc.getKVCalculator()
-		kvCalculator.calculateReadCost(expectedConsumption, resp)
+		kvCalculator.calculateReadCostWithDetail(expectedConsumption, nil, resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU)
 	}
 	verify()
@@ -372,6 +508,8 @@ func TestPagingPrechargeDoesNotEnterReportedRequestConsumption(t *testing.T) {
 	re.NotNil(report)
 	re.InDelta(baseCost, report.GetConsumptionSinceLastRequest().GetRRU(), 1e-6,
 		"reported request consumption must keep metering aligned with master and exclude predicted-read reservation")
+	timelineRRU, _ := timelineTotals(gc)
+	re.InDelta(baseCost, timelineRRU, 1e-6)
 }
 
 func TestPagingPrechargeRefundDoesNotEnterReportedResponseConsumption(t *testing.T) {
@@ -412,6 +550,9 @@ func TestPagingPrechargeRefundDoesNotEnterReportedResponseConsumption(t *testing
 	expectedReportedResponseRU := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
 	re.InDelta(expectedReportedResponseRU, responseReport.GetConsumptionSinceLastRequest().GetRRU(), 1e-6,
 		"reported response consumption must expose actual read usage, not the paging refund")
+	timelineRRU, _ := timelineTotals(gc)
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+	re.InDelta(baseCost+expectedReportedResponseRU, timelineRRU, 1e-6)
 	re.GreaterOrEqual(responseReport.GetConsumptionSinceLastRequest().GetRRU(), 0.0)
 }
 
@@ -936,71 +1077,73 @@ func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
 }
 
 func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {
-	re := require.New(t)
-	gc := createTestGroupCostController(re)
-	counter := gc.run.requestUnitTokens
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		gc := createTestGroupCostController(re)
+		counter := gc.run.requestUnitTokens
 
-	counter.notify.mu.Lock()
-	counter.notify.setupNotificationTimer = time.NewTimer(time.Hour)
-	counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
-	counter.notify.setupNotificationThreshold = 1
-	counter.notify.cancelCh = make(chan struct{})
-	counter.notify.mu.Unlock()
-	defer initCounterNotify(counter)
+		counter.notify.mu.Lock()
+		counter.notify.setupNotificationTimer = time.NewTimer(time.Hour)
+		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
+		counter.notify.setupNotificationThreshold = 1
+		counter.notify.cancelCh = make(chan struct{})
+		counter.notify.mu.Unlock()
+		defer initCounterNotify(counter)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan struct{})
-	go func() {
-		gc.handleTokenBucketUpdateEvent(ctx)
-		close(done)
-	}()
+		ctx := t.Context()
+		done := make(chan struct{})
+		go func() {
+			gc.handleTokenBucketUpdateEvent(ctx)
+			close(done)
+		}()
 
-	require.Never(t, func() bool {
-		return isClosed(done)
-	}, 50*time.Millisecond, 5*time.Millisecond)
+		require.Never(t, func() bool {
+			return isClosed(done)
+		}, 50*time.Millisecond, 5*time.Millisecond)
 
-	initCounterNotify(counter)
-	require.Eventually(t, func() bool {
-		return isClosed(done)
-	}, time.Second, 10*time.Millisecond)
+		initCounterNotify(counter)
+		require.Eventually(t, func() bool {
+			return isClosed(done)
+		}, time.Second, 10*time.Millisecond)
+	})
 }
 
 func TestHandleTokenBucketUpdateEventCleansNotifyOnTimer(t *testing.T) {
-	re := require.New(t)
-	gc := createTestGroupCostController(re)
-	counter := gc.run.requestUnitTokens
-	threshold := 42.0
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		gc := createTestGroupCostController(re)
+		counter := gc.run.requestUnitTokens
+		threshold := 42.0
 
-	counter.notify.mu.Lock()
-	counter.notify.setupNotificationTimer = time.NewTimer(10 * time.Millisecond)
-	counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
-	counter.notify.setupNotificationThreshold = threshold
-	counter.notify.cancelCh = make(chan struct{})
-	counter.notify.mu.Unlock()
-	defer initCounterNotify(counter)
+		counter.notify.mu.Lock()
+		counter.notify.setupNotificationTimer = time.NewTimer(10 * time.Millisecond)
+		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
+		counter.notify.setupNotificationThreshold = threshold
+		counter.notify.cancelCh = make(chan struct{})
+		counter.notify.mu.Unlock()
+		defer initCounterNotify(counter)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan struct{})
-	go func() {
-		gc.handleTokenBucketUpdateEvent(ctx)
-		close(done)
-	}()
+		ctx := t.Context()
+		done := make(chan struct{})
+		go func() {
+			gc.handleTokenBucketUpdateEvent(ctx)
+			close(done)
+		}()
 
-	require.Eventually(t, func() bool {
-		return isClosed(done)
-	}, time.Second, 10*time.Millisecond)
+		require.Eventually(t, func() bool {
+			return isClosed(done)
+		}, time.Second, 10*time.Millisecond)
 
-	counter.notify.mu.Lock()
-	re.Nil(counter.notify.setupNotificationTimer)
-	re.Nil(counter.notify.setupNotificationCh)
-	re.Nil(counter.notify.cancelCh)
-	counter.notify.mu.Unlock()
+		counter.notify.mu.Lock()
+		re.Nil(counter.notify.setupNotificationTimer)
+		re.Nil(counter.notify.setupNotificationCh)
+		re.Nil(counter.notify.cancelCh)
+		counter.notify.mu.Unlock()
 
-	counter.limiter.mu.Lock()
-	re.Equal(threshold, counter.limiter.notifyThreshold)
-	counter.limiter.mu.Unlock()
+		counter.limiter.mu.Lock()
+		re.Equal(threshold, counter.limiter.notifyThreshold)
+		counter.limiter.mu.Unlock()
+	})
 }
 
 func isClosed(ch <-chan struct{}) bool {
@@ -1051,98 +1194,102 @@ func TestPagingPrechargeNotObservedOnThrottle(t *testing.T) {
 }
 
 func TestAcquireTokensSignalAwareWait(t *testing.T) {
-	re := require.New(t)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
 
-	// Build controller with a buffered lowRUNotifyChan so the test can
-	// observe the notify() call inside reserveN as a synchronization point.
-	group := &rmpb.ResourceGroup{
-		Name: "test",
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{FillRate: 1000},
+		// Build controller with a buffered lowRUNotifyChan so the test can
+		// observe the notify() call inside reserveN as a synchronization point.
+		group := &rmpb.ResourceGroup{
+			Name: "test",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{FillRate: 1000},
+				},
 			},
-		},
-	}
-	notifyCh := make(chan notifyMsg, 1)
-	cfg := DefaultRUConfig()
-	cfg.WaitRetryInterval = 5 * time.Second
-	cfg.WaitRetryTimes = 3
-	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1), newRequestSourceMetricsState(group.Name))
-	re.NoError(err)
+		}
+		notifyCh := make(chan notifyMsg, 1)
+		cfg := DefaultRUConfig()
+		cfg.WaitRetryInterval = 5 * time.Second
+		cfg.WaitRetryTimes = 3
+		gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1), newRequestSourceMetricsState(group.Name))
+		re.NoError(err)
 
-	// Set fillRate=0 so reservation always fails with InfDuration,
-	// which is the exact scenario described in issue #10251.
-	counter := gc.run.requestUnitTokens
-	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
-		newTokens:   1000,
-		newFillRate: 0,
-		newBurst:    0,
+		// Set fillRate=0 so reservation always fails with InfDuration,
+		// which is the exact scenario described in issue #10251.
+		counter := gc.run.requestUnitTokens
+		counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+			newTokens:   1000,
+			newFillRate: 0,
+			newBurst:    0,
+		})
+
+		delta := &rmpb.Consumption{RRU: 5000}
+		type acquireResult struct {
+			err          error
+			waitDuration time.Duration
+		}
+		resultCh := make(chan acquireResult, 1)
+		go func() {
+			var waitDuration time.Duration
+			_, err := gc.acquireTokens(context.Background(), delta, &waitDuration, false)
+			resultCh <- acquireResult{err, waitDuration}
+		}()
+
+		// Wait for notify — Reserve has failed and the retry path is entered.
+		select {
+		case <-notifyCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for low-RU notification")
+		}
+
+		// Now reconfigure with enough tokens and a real fillRate.
+		// This closes the reconfiguredCh (waking the select) and provides
+		// tokens so the next Reserve() succeeds.
+		counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+			newTokens:   100000,
+			newFillRate: 100000,
+			newBurst:    0,
+		})
+
+		select {
+		case r := <-resultCh:
+			re.NoError(r.err)
+			re.Less(r.waitDuration, cfg.WaitRetryInterval)
+		case <-time.After(cfg.WaitRetryInterval):
+			t.Fatal("acquireTokens was not woken up promptly by Reconfigure signal")
+		}
 	})
-
-	delta := &rmpb.Consumption{RRU: 5000}
-	type acquireResult struct {
-		err          error
-		waitDuration time.Duration
-	}
-	resultCh := make(chan acquireResult, 1)
-	go func() {
-		var waitDuration time.Duration
-		_, err := gc.acquireTokens(context.Background(), delta, &waitDuration, false)
-		resultCh <- acquireResult{err, waitDuration}
-	}()
-
-	// Wait for notify — Reserve has failed and the retry path is entered.
-	select {
-	case <-notifyCh:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for low-RU notification")
-	}
-
-	// Now reconfigure with enough tokens and a real fillRate.
-	// This closes the reconfiguredCh (waking the select) and provides
-	// tokens so the next Reserve() succeeds.
-	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
-		newTokens:   100000,
-		newFillRate: 100000,
-		newBurst:    0,
-	})
-
-	select {
-	case r := <-resultCh:
-		re.NoError(r.err)
-		re.Less(r.waitDuration, cfg.WaitRetryInterval)
-	case <-time.After(cfg.WaitRetryInterval):
-		t.Fatal("acquireTokens was not woken up promptly by Reconfigure signal")
-	}
 }
 
 func TestAcquireTokensFallbackToTimer(t *testing.T) {
-	re := require.New(t)
-	gc := createTestGroupCostController(re)
-	// Short retry interval so the test runs fast.
-	gc.mainCfg.WaitRetryInterval = 50 * time.Millisecond
-	gc.mainCfg.WaitRetryTimes = 3
-	gc.mainCfg.LTBMaxWaitDuration = 100 * time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		gc := createTestGroupCostController(re)
+		// Short retry interval so the test runs fast.
+		gc.mainCfg.WaitRetryInterval = 50 * time.Millisecond
+		gc.mainCfg.WaitRetryTimes = 3
+		gc.mainCfg.LTBMaxWaitDuration = 100 * time.Millisecond
 
-	// Set fillRate=0 and never reconfigure — no signal will arrive.
-	counter := gc.run.requestUnitTokens
-	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
-		newTokens:   1000,
-		newFillRate: 0,
-		newBurst:    0,
+		// Set fillRate=0 and never reconfigure — no signal will arrive.
+		counter := gc.run.requestUnitTokens
+		counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+			newTokens:   1000,
+			newFillRate: 0,
+			newBurst:    0,
+		})
+
+		delta := &rmpb.Consumption{RRU: 5000}
+		ctx := context.Background()
+		var waitDuration time.Duration
+		_, err := gc.acquireTokens(ctx, delta, &waitDuration, false)
+
+		// Without a Reconfigure signal, all retries should exhaust and return an error.
+		re.Error(err)
+		re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+		// waitDuration should be roughly retryTimes * retryInterval.
+		re.GreaterOrEqual(waitDuration, gc.mainCfg.WaitRetryInterval*time.Duration(gc.mainCfg.WaitRetryTimes))
 	})
-
-	delta := &rmpb.Consumption{RRU: 5000}
-	ctx := context.Background()
-	var waitDuration time.Duration
-	_, err := gc.acquireTokens(ctx, delta, &waitDuration, false)
-
-	// Without a Reconfigure signal, all retries should exhaust and return an error.
-	re.Error(err)
-	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
-	// waitDuration should be roughly retryTimes * retryInterval.
-	re.GreaterOrEqual(waitDuration, gc.mainCfg.WaitRetryInterval*time.Duration(gc.mainCfg.WaitRetryTimes))
 }
 
 // TestAcquireTokensCancelKeepsLastMonotonic checks that a stale CancelAt does

@@ -202,7 +202,12 @@ func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 
 	raft.conn.Nodes[s.ID] = n
 	n.raftEngine = raft
-	n.client = newRetryClient(n)
+	n.client, err = newRetryClient(n)
+	if err != nil {
+		delete(raft.conn.Nodes, s.ID)
+		simutil.Logger.Error("create client failed", zap.Uint64("node-id", s.ID), zap.Error(err))
+		return false
+	}
 
 	err = n.Start()
 	if err != nil {

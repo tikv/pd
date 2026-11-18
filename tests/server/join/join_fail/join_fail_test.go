@@ -15,7 +15,6 @@
 package join_fail_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,13 +29,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestFailedPDJoinInStep1(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -55,8 +53,7 @@ func TestFailedPDJoinInStep1(t *testing.T) {
 
 func TestFailedToStartPDAfterSuccessfulJoin(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)

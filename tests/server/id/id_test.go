@@ -19,6 +19,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -33,7 +34,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type idAllocatorTestSuite struct {
@@ -63,6 +64,7 @@ func (s *idAllocatorTestSuite) TestID() {
 }
 
 func (s *idAllocatorTestSuite) checkID(cluster *tests.TestCluster) {
+	as := assert.New(s.T())
 	re := s.Require()
 	leaderServer := cluster.GetLeaderServer()
 	var last uint64
@@ -77,19 +79,22 @@ func (s *idAllocatorTestSuite) checkID(cluster *tests.TestCluster) {
 	var m syncutil.Mutex
 	ids := make(map[uint64]struct{})
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 200 {
 				id, _, err := leaderServer.GetAllocator().Alloc(1)
-				re.NoError(err)
+				if err != nil {
+					s.T().Errorf("allocate ID: %v", err)
+					return
+				}
 				m.Lock()
 				_, ok := ids[id]
 				ids[id] = struct{}{}
 				m.Unlock()
-				re.False(ok)
+				if !as.False(ok) {
+					return
+				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -148,6 +153,7 @@ func (s *idAllocatorTestSuite) TestBatchAllocID() {
 }
 
 func (s *idAllocatorTestSuite) checkBatchAllocID(cluster *tests.TestCluster) {
+	as := assert.New(s.T())
 	re := s.Require()
 
 	leaderServer := cluster.GetLeaderServer()
@@ -163,23 +169,27 @@ func (s *idAllocatorTestSuite) checkBatchAllocID(cluster *tests.TestCluster) {
 	var m syncutil.Mutex
 	ids := make(map[uint64]struct{})
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 200 {
 				id, count, err := leaderServer.GetAllocator().Alloc(10)
 				curID := id - uint64(count)
-				re.NoError(err)
+				if err != nil {
+					s.T().Errorf("allocate ID batch: %v", err)
+					return
+				}
 				m.Lock()
 				for range count {
 					_, ok := ids[curID]
 					ids[curID] = struct{}{}
 					curID++
-					re.False(ok, curID)
+					if !as.False(ok, curID) {
+						m.Unlock()
+						return
+					}
 				}
 				m.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -192,8 +202,7 @@ func TestMonotonicID(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
 	defer cluster.Destroy()

@@ -15,12 +15,15 @@
 package core_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -34,7 +37,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type hotRegionStorageTestSuite struct {
@@ -128,45 +131,48 @@ func (s *hotRegionStorageTestSuite) checkHotRegionStorage(cluster *tests.TestClu
 		err := leaderServer.GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: storeStats}, &pdpb.StoreHeartbeatResponse{})
 		re.NoError(err)
 	}
-	var (
-		iter storage.HotRegionStorageIterator
-		next *storage.HistoryHotRegion
-		err  error
-	)
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
+	var writeRegions, readRegions []*storage.HistoryHotRegion
 	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
-		iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
-		next, err = iter.Next()
-		return err == nil && next != nil
+		var err error
+		writeRegions, err = loadHistoryHotRegions(hotRegionStorage, utils.Write.String(), startTime*1000)
+		if err != nil || len(writeRegions) != 2 {
+			return false
+		}
+		readRegions, err = loadHistoryHotRegions(hotRegionStorage, utils.Read.String(), startTime*1000)
+		return err == nil && len(readRegions) == 2
 	})
-	re.Equal(uint64(1), next.RegionID)
-	re.Equal(uint64(1), next.StoreID)
-	re.Equal(utils.Write.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
-	re.Equal(uint64(2), next.RegionID)
-	re.Equal(uint64(2), next.StoreID)
-	re.Equal(utils.Write.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.Nil(next)
-	iter = hotRegionStorage.NewIterator([]string{utils.Read.String()}, startTime*1000, time.Now().UnixMilli())
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
-	re.Equal(uint64(3), next.RegionID)
-	re.Equal(uint64(1), next.StoreID)
-	re.Equal(utils.Read.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
-	re.Equal(uint64(4), next.RegionID)
-	re.Equal(uint64(2), next.StoreID)
-	re.Equal(utils.Read.String(), next.HotRegionType)
-	next, err = iter.Next()
-	re.NoError(err)
-	re.Nil(next)
+	re.Equal(uint64(1), writeRegions[0].RegionID)
+	re.Equal(uint64(1), writeRegions[0].StoreID)
+	re.Equal(utils.Write.String(), writeRegions[0].HotRegionType)
+	re.Equal(uint64(2), writeRegions[1].RegionID)
+	re.Equal(uint64(2), writeRegions[1].StoreID)
+	re.Equal(utils.Write.String(), writeRegions[1].HotRegionType)
+	re.Equal(uint64(3), readRegions[0].RegionID)
+	re.Equal(uint64(1), readRegions[0].StoreID)
+	re.Equal(utils.Read.String(), readRegions[0].HotRegionType)
+	re.Equal(uint64(4), readRegions[1].RegionID)
+	re.Equal(uint64(2), readRegions[1].StoreID)
+	re.Equal(utils.Read.String(), readRegions[1].HotRegionType)
+}
+
+func loadHistoryHotRegions(
+	hotRegionStorage *storage.HotRegionStorage,
+	hotRegionType string,
+	startTime int64,
+) ([]*storage.HistoryHotRegion, error) {
+	iter := hotRegionStorage.NewIterator([]string{hotRegionType}, startTime, time.Now().UnixMilli())
+	regions := make([]*storage.HistoryHotRegion, 0)
+	for {
+		next, err := iter.Next()
+		if err != nil {
+			return nil, err
+		}
+		if next == nil {
+			return regions, nil
+		}
+		regions = append(regions, next)
+	}
 }
 
 func (s *hotRegionStorageTestSuite) TestHotRegionStorageReservedDayConfigChange() {
@@ -201,7 +207,7 @@ func (s *hotRegionStorageTestSuite) checkHotRegionStorageReservedDayConfigChange
 	schedule.HotRegionsReservedDays = 0
 	err = leaderServer.GetServer().SetScheduleConfig(schedule)
 	re.NoError(err)
-	time.Sleep(3 * s.interval)
+	waitHotRegionStorageConfig(re, leaderServer.GetServer().GetHistoryHotRegionStorage(), schedule.HotRegionsReservedDays, schedule.HotRegionsWriteInterval.Duration)
 	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
 		core.SetReportInterval(uint64(time.Now().Unix()-utils.RegionHeartBeatReportInterval), uint64(time.Now().Unix())))
 	time.Sleep(10 * s.interval)
@@ -220,8 +226,24 @@ func (s *hotRegionStorageTestSuite) checkHotRegionStorageReservedDayConfigChange
 	schedule.HotRegionsReservedDays = 1
 	err = leaderServer.GetServer().SetScheduleConfig(schedule)
 	re.NoError(err)
-	time.Sleep(3 * s.interval)
+	waitHotRegionStorageConfig(re, leaderServer.GetServer().GetHistoryHotRegionStorage(), schedule.HotRegionsReservedDays, schedule.HotRegionsWriteInterval.Duration)
+
 	hotRegionStorage = leaderServer.GetServer().GetHistoryHotRegionStorage()
+	testutil.Eventually(re, func() bool {
+		iter := hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
+		found, valid := false, true
+		for {
+			region, err := iter.Next()
+			if err != nil {
+				valid = false
+				continue
+			}
+			if region == nil {
+				return valid && found
+			}
+			found = found || region.RegionID == 2
+		}
+	})
 	iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
 	next, err = iter.Next()
 	re.NoError(err)
@@ -270,7 +292,7 @@ func (s *hotRegionStorageTestSuite) checkHotRegionStorageWriteIntervalConfigChan
 	schedule.HotRegionsWriteInterval.Duration = 20 * s.interval
 	err = leaderServer.GetServer().SetScheduleConfig(schedule)
 	re.NoError(err)
-	time.Sleep(3 * s.interval)
+	waitHotRegionStorageConfig(re, leaderServer.GetServer().GetHistoryHotRegionStorage(), schedule.HotRegionsReservedDays, schedule.HotRegionsWriteInterval.Duration)
 	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
 		core.SetReportInterval(uint64(time.Now().Unix()-utils.RegionHeartBeatReportInterval), uint64(time.Now().Unix())))
 	time.Sleep(10 * s.interval)
@@ -286,4 +308,21 @@ func (s *hotRegionStorageTestSuite) checkHotRegionStorageWriteIntervalConfigChan
 	next, err = iter.Next()
 	re.NoError(err)
 	re.Nil(next)
+}
+
+func waitHotRegionStorageConfig(re *require.Assertions, expected *storage.HotRegionStorage, days uint64, interval time.Duration) {
+	applied := make(chan struct{})
+	notify := sync.OnceFunc(func() { close(applied) })
+	const hook = "github.com/tikv/pd/pkg/storage/hotRegionStorageConfigUpdated"
+	re.NoError(failpoint.EnableCall(hook, func(actual *storage.HotRegionStorage, actualDays uint64, actualInterval time.Duration) {
+		if actual == expected && actualDays == days && actualInterval == interval {
+			notify()
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
+	select {
+	case <-applied:
+	case <-time.After(5 * time.Second):
+		re.FailNow("hot region storage configuration was not applied")
+	}
 }

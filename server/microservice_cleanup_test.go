@@ -384,8 +384,8 @@ func TestCleanupMicroserviceMetadataIsFencedByLeadershipTerm(t *testing.T) {
 	svr.member.PromoteSelf()
 	newTerm, ok := svr.captureMicroserviceMetadataCleanupTerm()
 	re.True(ok)
-	re.Equal(oldTerm.leaderValue, newTerm.leaderValue)
-	re.NotEqual(oldTerm.leaseID, newTerm.leaseID)
+	re.Equal(oldTerm.LeaderValue(), newTerm.LeaderValue())
+	re.NotEqual(oldTerm.LeaseID(), newTerm.LeaseID())
 
 	releaseCleanup()
 	re.ErrorIs(waitMicroserviceMetadataCleanupResult(t, resultCh), errs.ErrEtcdTxnConflict)

@@ -52,7 +52,7 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) (*metapb.Region
 			"region already encrypted, region id = %d", region.Id)
 	}
 	if keyManager == nil ||
-		(reflect.TypeOf(keyManager).Kind() == reflect.Ptr && reflect.ValueOf(keyManager).IsNil()) {
+		(reflect.TypeOf(keyManager).Kind() == reflect.Pointer && reflect.ValueOf(keyManager).IsNil()) {
 		// encryption is not enabled.
 		return region, nil
 	}
@@ -97,7 +97,7 @@ func DecryptRegion(region *metapb.Region, keyManager KeyManager) error {
 		return nil
 	}
 	if keyManager == nil ||
-		(reflect.TypeOf(keyManager).Kind() == reflect.Ptr && reflect.ValueOf(keyManager).IsNil()) {
+		(reflect.TypeOf(keyManager).Kind() == reflect.Pointer && reflect.ValueOf(keyManager).IsNil()) {
 		return errs.ErrEncryptionDecryptRegion.GenWithStack(
 			"unable to decrypt region without encryption keys")
 	}

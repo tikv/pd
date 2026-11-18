@@ -22,7 +22,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
@@ -179,10 +178,7 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	regions := rc.GetRegions()
-	failpoint.Inject("slowRequest", func() {
-		// Simulate a slow request.
-		<-time.After(5 * time.Second)
-	})
+	failpoint.InjectCall("slowRequest", r.Context())
 
 	b, err := response.MarshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
@@ -821,7 +817,7 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter
 		}
 		startKeys = append(startKeys, startKey)
 		endKeys = append(endKeys, endKey)
-		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", startKeyHex, endKeyHex))
+		fmt.Fprintf(&msgBuilder, "[%s,%s), ", startKeyHex, endKeyHex)
 	}
 	err = h.Handler.AccelerateRegionsScheduleInRanges(startKeys, endKeys, limit)
 	if err != nil {

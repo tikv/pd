@@ -15,8 +15,8 @@
 package checker
 
 import (
-	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -26,23 +26,24 @@ import (
 )
 
 func TestCheckPriorityRegions(t *testing.T) {
-	re := require.New(t)
-	opt := mockconfig.NewTestOptions()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 0)
-	tc.AddRegionStore(2, 0)
-	tc.AddRegionStore(3, 0)
-	tc.AddLeaderRegion(1, 2, 1, 3)
-	tc.AddLeaderRegion(2, 2, 3)
-	tc.AddLeaderRegion(3, 2)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		opt := mockconfig.NewTestOptions()
+		ctx := t.Context()
+		tc := mockcluster.NewCluster(ctx, opt)
+		tc.AddRegionStore(1, 0)
+		tc.AddRegionStore(2, 0)
+		tc.AddRegionStore(3, 0)
+		tc.AddLeaderRegion(1, 2, 1, 3)
+		tc.AddLeaderRegion(2, 2, 3)
+		tc.AddLeaderRegion(3, 2)
 
-	pc := NewPriorityInspector(tc, tc.GetCheckerConfig())
-	checkPriorityRegionTest(re, pc, tc)
-	opt.SetPlacementRuleEnabled(true)
-	re.True(opt.IsPlacementRulesEnabled())
-	checkPriorityRegionTest(re, pc, tc)
+		pc := NewPriorityInspector(tc, tc.GetCheckerConfig())
+		checkPriorityRegionTest(re, pc, tc)
+		opt.SetPlacementRuleEnabled(true)
+		re.True(opt.IsPlacementRulesEnabled())
+		checkPriorityRegionTest(re, pc, tc)
+	})
 }
 
 func checkPriorityRegionTest(re *require.Assertions, pc *PriorityInspector, tc *mockcluster.Cluster) {
@@ -63,7 +64,8 @@ func checkPriorityRegionTest(re *require.Assertions, pc *PriorityInspector, tc *
 	region = tc.GetRegion(3)
 	pc.Inspect(region)
 	re.Equal(2, pc.getQueueLen())
-	time.Sleep(opt.GetPatrolRegionInterval() * 10)
+	// The retry condition is strictly after the deadline.
+	synctest.Sleep(opt.GetPatrolRegionInterval()*10 + time.Nanosecond)
 	// region 3 has higher priority
 	ids := pc.GetPriorityRegions()
 	re.Len(ids, 2)
@@ -79,7 +81,8 @@ func checkPriorityRegionTest(re *require.Assertions, pc *PriorityInspector, tc *
 	// case5: inspect region 3 again
 	region = tc.GetRegion(3)
 	pc.Inspect(region)
-	time.Sleep(opt.GetPatrolRegionInterval() * 10)
+	// The retry condition is strictly after the deadline.
+	synctest.Sleep(opt.GetPatrolRegionInterval()*10 + time.Nanosecond)
 	ids = pc.GetPriorityRegions()
 	re.Empty(ids)
 

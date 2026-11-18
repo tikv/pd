@@ -17,6 +17,7 @@ package storage
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -30,40 +31,48 @@ import (
 )
 
 func TestRegionReload(t *testing.T) {
-	re := require.New(t)
-	se := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	regionCount := 10
-	for id := range regionCount {
-		region := newTestRegionMeta(uint64(id))
-		re.NoError(se.SaveRegion(region))
-	}
-	re.Equal(uint64(0), se.NextRegionID())
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		se := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+		regionCount := 10
+		for id := range regionCount {
+			region := newTestRegionMeta(uint64(id))
+			re.NoError(se.SaveRegion(region))
+		}
+		re.Equal(uint64(0), se.NextRegionID())
 
-	// load region will fail after load 5 regions
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion"))
-	}()
-	re.Error(se.LoadRegions(ctx, func(_ *core.RegionInfo) []*core.RegionInfo {
-		return nil
-	}))
-	re.NotEqual(uint64(regionCount), se.NextRegionID())
+		// Time out during batched loading, then resume from the first unloaded region.
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		defer cancel()
+		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion", func(_ context.Context, rangeLimit *int) {
+			*rangeLimit = 1
+			synctest.Sleep(time.Second)
+		}))
+		defer func() {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion"))
+		}()
+		loaded := make([]uint64, 0, regionCount)
+		re.ErrorIs(se.LoadRegions(ctx, func(region *core.RegionInfo) []*core.RegionInfo {
+			loaded = append(loaded, region.GetID())
+			return nil
+		}), context.DeadlineExceeded)
+		re.NotEqual(uint64(regionCount), se.NextRegionID())
 
-	// load regions will success and the loading cost will less than 10s
-	ctx, cancel = context.WithTimeout(context.Background(), time.Second*8)
-	defer cancel()
-	re.NoError(se.LoadRegions(ctx, func(_ *core.RegionInfo) []*core.RegionInfo {
-		return nil
-	}))
-	re.Equal(uint64(regionCount), se.NextRegionID())
+		// load regions will success and the loading cost will less than 10s
+		ctx, cancel = context.WithTimeout(context.Background(), time.Second*8)
+		defer cancel()
+		re.NoError(se.LoadRegions(ctx, func(region *core.RegionInfo) []*core.RegionInfo {
+			loaded = append(loaded, region.GetID())
+			return nil
+		}))
+		re.Equal(uint64(regionCount), se.NextRegionID())
+		re.Equal([]uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, loaded)
+	})
 }
 
 func TestRegionStorage(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	var (
 		regionStorage endpoint.RegionStorage
 		err           error

@@ -33,9 +33,10 @@ const (
 
 // RegionInfluence represents the influence of an operator step, which is used by store limit.
 var RegionInfluence = []int64{
-	AddPeer:      influence,
-	RemovePeer:   influence,
-	SendSnapshot: influence,
+	AddPeer:          influence,
+	RemovePeer:       influence,
+	SendSnapshot:     influence,
+	TransferLeaderIn: influence,
 }
 
 // SmallRegionInfluence represents the influence of an operator step
@@ -47,9 +48,10 @@ var SmallRegionInfluence = []int64{
 
 // TypeNameValue indicates the name of store limit type and the enum value
 var TypeNameValue = map[string]Type{
-	"add-peer":      AddPeer,
-	"remove-peer":   RemovePeer,
-	"send-snapshot": SendSnapshot,
+	"add-peer":           AddPeer,
+	"remove-peer":        RemovePeer,
+	"send-snapshot":      SendSnapshot,
+	"transfer-leader-in": TransferLeaderIn,
 }
 
 // String returns the representation of the Type
@@ -72,7 +74,7 @@ type StoreRateLimit struct {
 // NewStoreRateLimit creates a StoreRateLimit.
 func NewStoreRateLimit(ratePerSec float64) StoreLimit {
 	limits := make([]*limit, storeLimitTypeLen)
-	for i := 0; i < len(limits); i++ {
+	for i := range limits {
 		l := &limit{}
 		l.Reset(ratePerSec)
 		limits[i] = l
@@ -127,6 +129,24 @@ func (l *StoreRateLimit) Reset(rate float64, typ Type) {
 	l.limits[typ].Reset(rate)
 }
 
+// Refresh updates a rate from getRate, re-reading it under the reset lock so an
+// older configuration read cannot overwrite a concurrent Reset. getRate must
+// only read configuration snapshots, without writing configuration or acquiring
+// locks whose holders may access this limiter.
+func (l *StoreRateLimit) Refresh(typ Type, getRate func() float64) {
+	if typ == SendSnapshot {
+		return
+	}
+	rate := getRate()
+	limit := l.limits[typ]
+	if limit.GetRatePerSec() == rate {
+		return
+	}
+	limit.ratePerSecMutex.Lock()
+	defer limit.ratePerSecMutex.Unlock()
+	limit.resetLocked(getRate())
+}
+
 // limit the operators of a store
 type limit struct {
 	limiter         *ratelimit.RateLimiter
@@ -138,6 +158,10 @@ type limit struct {
 func (l *limit) Reset(ratePerSec float64) {
 	l.ratePerSecMutex.Lock()
 	defer l.ratePerSecMutex.Unlock()
+	l.resetLocked(ratePerSec)
+}
+
+func (l *limit) resetLocked(ratePerSec float64) {
 	if l.ratePerSec == ratePerSec {
 		return
 	}

@@ -43,6 +43,8 @@ const (
 	StatusStoreAddLimitThrottled
 	// StatusStoreRemoveLimitThrottled represents the store cannot be selected due to the remove peer limitation.
 	StatusStoreRemoveLimitThrottled
+	// StatusStoreTransferLeaderInLimitThrottled represents the store cannot be selected due to the leader transfer-in limitation.
+	StatusStoreTransferLeaderInLimitThrottled
 )
 
 // config limitation
@@ -112,10 +114,11 @@ var statusText = map[StatusCode]string{
 	StatusStoreNotMatchRule:    "StoreNotMatchRule",
 
 	// store is limited by soft constraint
-	StatusStoreSnapshotThrottled:    "StoreSnapshotThrottled",
-	StatusStorePendingPeerThrottled: "StorePendingPeerThrottled",
-	StatusStoreAddLimitThrottled:    "StoreAddPeerThrottled",
-	StatusStoreRemoveLimitThrottled: "StoreRemovePeerThrottled",
+	StatusStoreSnapshotThrottled:              "StoreSnapshotThrottled",
+	StatusStorePendingPeerThrottled:           "StorePendingPeerThrottled",
+	StatusStoreAddLimitThrottled:              "StoreAddPeerThrottled",
+	StatusStoreRemoveLimitThrottled:           "StoreRemovePeerThrottled",
+	StatusStoreTransferLeaderInLimitThrottled: "StoreTransferLeaderInThrottled",
 
 	// store is limited by specified configuration
 	StatusStoreRejectLeader:      "StoreRejectLeader",

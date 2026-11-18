@@ -27,6 +27,8 @@ static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
+	@ echo "modernize ..."
+	@ GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@v0.52.0 -test ./...
 
 tidy:
 	@ GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go mod tidy

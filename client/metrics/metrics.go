@@ -24,7 +24,7 @@ import (
 )
 
 // make sure register metrics only once
-var initialized int32
+var initialized atomic.Int32
 
 func init() {
 	initMetrics(prometheus.Labels{})
@@ -55,7 +55,7 @@ func initRegisteredConsumers() {
 
 // InitAndRegisterMetrics initializes and registers the metrics manually.
 func InitAndRegisterMetrics(constLabels prometheus.Labels) {
-	if atomic.CompareAndSwapInt32(&initialized, 0, 1) {
+	if initialized.CompareAndSwap(0, 1) {
 		// init metrics with constLabels
 		initMetrics(constLabels)
 		initLabelValues()
@@ -415,7 +415,7 @@ func initLabelValues() {
 	CmdFailedDurationGetGCState = cmdFailedDuration.WithLabelValues("get_gc_state")
 	CmdFailedDurationSetGlobalGCBarrier = cmdFailedDuration.WithLabelValues("set_global_gc_barrier")
 	CmdFailedDurationDeleteGlobalGCBarrier = cmdFailedDuration.WithLabelValues("delete_global_gc_barrier")
-	CmdFailedDurationGetAllKeyspacesGCStates = cmdDuration.WithLabelValues("get_all_keyspaces_gc_states")
+	CmdFailedDurationGetAllKeyspacesGCStates = cmdFailedDuration.WithLabelValues("get_all_keyspaces_gc_states")
 
 	InternalCmdDurationGetClusterInfo = internalCmdDuration.WithLabelValues("get_cluster_info")
 	InternalCmdDurationGetMembers = internalCmdDuration.WithLabelValues("get_members")

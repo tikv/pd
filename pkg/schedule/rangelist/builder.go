@@ -16,6 +16,7 @@ package rangelist
 
 import (
 	"bytes"
+	"slices"
 	"sort"
 )
 
@@ -80,7 +81,7 @@ func (si *sortedItems) insertItem(item any, comparer compareFunc) {
 func (si *sortedItems) deleteItem(del any) {
 	for i, item := range si.items {
 		if item == del {
-			si.items = append(si.items[:i], si.items[i+1:]...)
+			si.items = slices.Delete(si.items, i, i+1)
 			return
 		}
 	}
@@ -106,7 +107,7 @@ func (b *Builder) Build() List {
 			// next key is different, push si to l
 			seg := segment{
 				startKey: p.key,
-				data:     append(si.items[:0:0], si.items...),
+				data:     slices.Clone(si.items),
 			}
 			l.segments = append(l.segments, seg)
 		}

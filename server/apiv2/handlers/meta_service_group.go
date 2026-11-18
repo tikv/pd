@@ -139,7 +139,7 @@ func PatchMetaServiceGroups(c *gin.Context) {
 	}, func() {
 		svr.UpdateKeyspaceConfig(newCfg)
 	}); err != nil {
-		if errors.Is(err, keyspace.ErrGroupHasAssignedKeyspaces) {
+		if errors.Is(err, errs.ErrGroupHasAssignedKeyspaces) || errors.Is(err, errs.ErrMetaServiceGroupUnhealthy) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -212,11 +212,11 @@ func PatchMetaServiceGroupStatus(c *gin.Context) {
 		return
 	}
 	if err := manager.PatchStatus(c.Request.Context(), groupID, patch); err != nil {
-		if errors.Is(err, keyspace.ErrUnknownMetaServiceGroup) {
+		if errors.Is(err, errs.ErrUnknownMetaServiceGroup) {
 			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
 			return
 		}
-		if errors.Is(err, keyspace.ErrInvalidAssignmentCount) {
+		if errors.Is(err, errs.ErrInvalidAssignmentCount) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}

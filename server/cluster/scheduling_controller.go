@@ -233,6 +233,7 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 			id := strconv.FormatUint(s.GetID(), 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
 		}
 	}
 	sc.coordinator.GetSchedulersController().CollectSchedulerMetrics()
@@ -311,6 +312,11 @@ func (sc *schedulingController) GetStoresStats() *statistics.StoresStats {
 // GetStoresLoads returns load stats of all stores.
 func (sc *schedulingController) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return sc.hotStat.GetStoresLoads()
+}
+
+// GetStoreReadCPURecentMax returns the recent max read CPU usage of a store.
+func (sc *schedulingController) GetStoreReadCPURecentMax(storeID uint64) float64 {
+	return sc.hotStat.GetStoreReadCPURecentMax(storeID)
 }
 
 // IsRegionHot checks if a region is in hot state.

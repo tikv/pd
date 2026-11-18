@@ -112,7 +112,7 @@ func NewTestEtcdCluster(t testing.TB, count int, opt *TestEtcdClusterOptions) (s
 				select {
 				case _, ok := <-server.Err():
 					if !ok {
-						return
+						continue
 					}
 				default:
 				}

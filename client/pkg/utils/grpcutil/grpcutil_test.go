@@ -15,16 +15,18 @@
 package grpcutil
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/pingcap/failpoint"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m)
 }
 
 func TestGetCallerID(t *testing.T) {
@@ -67,4 +69,20 @@ func TestGetCallerID(t *testing.T) {
 			re.Equal(tt.expectedHost, actual)
 		})
 	}
+}
+
+func TestGetOrCreateGRPCConnClosesInjectedFailure(t *testing.T) {
+	re := require.New(t)
+	const (
+		addr          = "http://127.0.0.1:1"
+		failpointName = "github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2"
+	)
+	re.NoError(failpoint.Enable(failpointName, `return("http://127.0.0.1:1")`))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable(failpointName))
+	})
+
+	conn, err := GetOrCreateGRPCConn(context.Background(), &sync.Map{}, addr, nil)
+	re.Nil(conn)
+	re.EqualError(err, "unreachable network")
 }

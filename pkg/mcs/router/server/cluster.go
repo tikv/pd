@@ -32,6 +32,7 @@ func NewCluster(
 	parentCtx context.Context,
 	basicCluster *core.BasicCluster,
 ) *Cluster {
+	// #nosec G118 -- Preserve the existing cluster context lifecycle.
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &Cluster{
 		ctx:          ctx,

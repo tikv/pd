@@ -22,9 +22,11 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -404,6 +406,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestClientDoesNotFallbackToDefaul
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeyspaceGroup() {
 	// There is only default keyspace group. Any keyspace, which hasn't been assigned to
 	// a keyspace group before, will be served by the default keyspace group.
+	as := assert.New(suite.T())
 	re := suite.Require()
 	testutil.Eventually(re, func() bool {
 		for _, keyspaceID := range []uint32{0, 1, 2} {
@@ -452,7 +455,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	clients := utils.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Len(keyspaceIDs, len(clients))
-	utils.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+	utils.CheckMultiKeyspacesTSO(suite.ctx, as, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
 	for _, client := range clients {
@@ -497,6 +500,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) waitKeyspaceReady(groupIDs []uint
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKeyspaceGroups() {
 	// Create multiple keyspace groups, and every keyspace should be served by one of them
 	// on a tso server.
+	as := assert.New(suite.T())
 	re := suite.Require()
 
 	// Create 3 keyspace groups with 2 keyspaces each.
@@ -560,7 +564,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 	clients := utils.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Len(keyspaceIDs, len(clients))
-	utils.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+	utils.CheckMultiKeyspacesTSO(suite.ctx, as, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
 	for _, client := range clients {
@@ -767,6 +771,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 	re *require.Assertions, keyspaceID, keyspaceGroupID uint32,
 ) context.CancelFunc {
+	as := assert.New(suite.T())
 	// Make sure the primary of the keyspace group is elected.
 	primary, err := suite.tsoCluster.
 		WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID).
@@ -782,10 +787,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 		wg                        sync.WaitGroup
 		ctx, cancel               = context.WithCancel(suite.ctx)
 		lastPhysical, lastLogical int64
+		successfulRequests        atomic.Uint64
 	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer tsoClient.Close()
 		for {
 			select {
@@ -805,23 +809,35 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 					errors.Is(err, clierrs.ErrClientTSOStreamClosed) {
 					continue
 				}
-				re.FailNow(fmt.Sprintf("%+v", err))
+				as.Fail(fmt.Sprintf("%+v", err))
+				return
 			}
 			if physical == lastPhysical {
-				re.Greater(logical, lastLogical)
+				if !as.Greater(logical, lastLogical) {
+					return
+				}
 			} else {
-				re.Greater(physical, lastPhysical)
+				if !as.Greater(physical, lastPhysical) {
+					return
+				}
 			}
 			lastPhysical, lastLogical = physical, logical
+			successfulRequests.Add(1)
 		}
-	}()
-	return func() {
-		// Wait for a while to make sure the client has sent more TSO requests.
-		time.Sleep(time.Second)
-		// Cancel the context to stop the client.
+	})
+	stop := sync.OnceFunc(func() {
 		cancel()
-		// Wait for the client to stop.
 		wg.Wait()
+	})
+	suite.T().Cleanup(stop)
+	const requestCount = 10
+	// Establish monotonic requests before the caller changes group membership.
+	testutil.Eventually(re, func() bool { return successfulRequests.Load() >= requestCount })
+	return func() {
+		defer stop()
+		completed := successfulRequests.Load()
+		// Keep the same client running until it has also served requests after the transition.
+		testutil.Eventually(re, func() bool { return successfulRequests.Load() >= completed+requestCount })
 	}
 }
 
@@ -855,8 +871,7 @@ func waitFinishAllocNodes(re *require.Assertions, server *tests.TestServer, grou
 
 func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
@@ -1068,8 +1083,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeBeforeIn
 // See https://github.com/tikv/pd/issues/6748
 func TestGetTSOImmediately(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))

@@ -437,8 +437,7 @@ func evictPrimary(c *gin.Context) {
 	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxEvictPrimaryRequestBytes))
 	if err != nil {
 		status := http.StatusBadRequest
-		var maxBytesError *http.MaxBytesError
-		if errors.As(err, &maxBytesError) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			status = http.StatusRequestEntityTooLarge
 		}
 		c.String(status, err.Error())

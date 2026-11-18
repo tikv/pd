@@ -119,7 +119,7 @@ func (suite *tsoServerTestSuite) resetTS(ts uint64, ignoreSmaller, skipUpperBoun
 	}
 	// Only this error is acceptable.
 	if err != nil {
-		suite.Require().ErrorContains(err, "is smaller than now")
+		suite.ErrorContains(err, "is smaller than now")
 	}
 }
 

@@ -31,10 +31,11 @@ var (
 	statusStoreBusy         = plan.NewStatus(plan.StatusStoreBusy)
 
 	// store soft limitation
-	statusStoreSnapshotThrottled    = plan.NewStatus(plan.StatusStoreSnapshotThrottled)
-	statusStorePendingPeerThrottled = plan.NewStatus(plan.StatusStorePendingPeerThrottled)
-	statusStoreAddLimit             = plan.NewStatus(plan.StatusStoreAddLimitThrottled)
-	statusStoreRemoveLimit          = plan.NewStatus(plan.StatusStoreRemoveLimitThrottled)
+	statusStoreSnapshotThrottled     = plan.NewStatus(plan.StatusStoreSnapshotThrottled)
+	statusStorePendingPeerThrottled  = plan.NewStatus(plan.StatusStorePendingPeerThrottled)
+	statusStoreAddLimit              = plan.NewStatus(plan.StatusStoreAddLimitThrottled)
+	statusStoreRemoveLimit           = plan.NewStatus(plan.StatusStoreRemoveLimitThrottled)
+	statusStoreTransferLeaderInLimit = plan.NewStatus(plan.StatusStoreTransferLeaderInLimitThrottled)
 
 	// store config limitation
 	statusStoreRejectLeader = plan.NewStatus(plan.StatusStoreRejectLeader)

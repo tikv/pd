@@ -160,8 +160,7 @@ func (suite *resourceManagerWatcherMatrixTestSuite) TestWatcherRecoversAfterComp
 	defer pdConn.Close()
 	rmClient, rmConn := suite.newRMClient(primary.GetAddr())
 	defer rmConn.Close()
-	logFile := testutil.InitTempFileLogger("debug")
-	defer os.Remove(logFile)
+	logFile := testutil.InitTempFileLogger(suite.T(), "debug")
 
 	group := newWatcherMatrixResourceGroup("compaction_group", 5, 500, &suite.keyspaceID)
 	suite.putResourceGroup(re, pdClient, group)

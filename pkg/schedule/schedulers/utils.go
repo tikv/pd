@@ -109,7 +109,7 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 		sourceDelta := influence - tolerantResource
 		score = p.Source.LeaderScore(p.kind.Policy, sourceDelta)
 	case constant.RegionKind:
-		sourceDelta := influence*influenceAmp - tolerantResource
+		sourceDelta := influence*influenceAmp - p.getRegionScoreDelta()
 		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
 	case constant.WitnessKind:
 		sourceDelta := influence - tolerantResource
@@ -139,7 +139,7 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 		targetDelta := influence + tolerantResource
 		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
 	case constant.RegionKind:
-		targetDelta := influence*influenceAmp + tolerantResource
+		targetDelta := influence*influenceAmp + p.getRegionScoreDelta()
 		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
 	case constant.WitnessKind:
 		targetDelta := influence + tolerantResource
@@ -160,12 +160,20 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 	shouldBalance := p.sourceScore > p.targetScore
 
 	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
+		// For RegionKind, the delta actually applied to sourceScore/targetScore
+		// is getRegionScoreDelta(), not the bare tolerant margin, whenever the
+		// candidate region is larger than that margin — log the value that
+		// actually drove the decision instead of the one that may not have.
+		tolerantResource := p.getTolerantResource()
+		if p.kind.Resource == constant.RegionKind {
+			tolerantResource = p.getRegionScoreDelta()
+		}
 		log.Debug("skip balance "+p.kind.Resource.String(),
 			zap.String("scheduler", scheduleName), zap.Uint64("region-id", p.Region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", p.Source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
 			zap.Int64("target-size", p.Target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
 			zap.Int64("average-region-size", p.GetAverageRegionSize()),
-			zap.Int64("tolerant-resource", p.getTolerantResource()))
+			zap.Int64("tolerant-resource", tolerantResource))
 	}
 	return shouldBalance
 }
@@ -182,6 +190,19 @@ func (p *solver) getTolerantResource() int64 {
 		p.tolerantSource = int64(float64(regionSize) * p.tolerantSizeRatio)
 	}
 	return p.tolerantSource
+}
+
+// getRegionScoreDelta returns the delta used to score a candidate move for
+// RegionKind balancing. It is the larger of the general tolerant margin and
+// the candidate region's own size, applied symmetrically to both the source
+// and target side, so a projected post-move comparison isn't skewed by one
+// side knowing the candidate's size and the other not.
+func (p *solver) getRegionScoreDelta() int64 {
+	delta := p.getTolerantResource()
+	if p.Region != nil {
+		delta = max(delta, p.Region.GetApproximateSize())
+	}
+	return delta
 }
 
 func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKind) float64 {
@@ -209,10 +230,7 @@ func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKi
 				maxRegionCount = regionCount
 			}
 		}
-		tolerantSizeRatio = maxRegionCount * adjustRatio
-		if tolerantSizeRatio < minTolerantSizeRatio {
-			tolerantSizeRatio = minTolerantSizeRatio
-		}
+		tolerantSizeRatio = max(maxRegionCount*adjustRatio, minTolerantSizeRatio)
 	}
 	return tolerantSizeRatio
 }
@@ -255,48 +273,6 @@ func newPendingInfluence(op *operator.Operator, froms []uint64, to uint64, infl 
 	}
 }
 
-// stLdRate returns a function to get the load rate of the store with the specified dimension.
-func stLdRate(dim int) func(ld *statistics.StoreLoad) float64 {
-	return func(ld *statistics.StoreLoad) float64 {
-		return ld.Loads[dim]
-	}
-}
-
-func stLdCount(ld *statistics.StoreLoad) float64 {
-	return ld.HotPeerCount
-}
-
-type storeLoadCmp func(ld1, ld2 *statistics.StoreLoad) int
-
-// negLoadCmp returns a cmp that returns the negation of cmps.
-func negLoadCmp(cmp storeLoadCmp) storeLoadCmp {
-	return func(ld1, ld2 *statistics.StoreLoad) int {
-		return -cmp(ld1, ld2)
-	}
-}
-
-// sliceLoadCmp returns function with running cmps in order.
-// If the cmp returns 0, which means equal, the next cmp will be used.
-// If all cmps return 0, the two loads are considered equal.
-func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
-	return func(ld1, ld2 *statistics.StoreLoad) int {
-		for _, cmp := range cmps {
-			if r := cmp(ld1, ld2); r != 0 {
-				return r
-			}
-		}
-		return 0
-	}
-}
-
-// stLdRankCmp returns a cmp that compares the two loads with discretized data.
-// For example, if the rank function discretize data by step 10 , the load 11 and 19 will be considered equal.
-func stLdRankCmp(dim func(ld *statistics.StoreLoad) float64, rank func(value float64) int64) storeLoadCmp {
-	return func(ld1, ld2 *statistics.StoreLoad) int {
-		return rankCmp(dim(ld1), dim(ld2), rank)
-	}
-}
-
 // rankCmp compares the two values with discretized data.
 func rankCmp(a, b float64, rank func(value float64) int64) int {
 	aRk, bRk := rank(a), rank(b)
@@ -306,43 +282,6 @@ func rankCmp(a, b float64, rank func(value float64) int64) int {
 		return 1
 	}
 	return 0
-}
-
-type storeLPCmp func(lp1, lp2 *statistics.StoreLoadPred) int
-
-// sliceLPCmp returns function with running cmps in order.
-// If the cmp returns 0, which means equal, the next cmp will be used.
-// If all cmps return 0, the two loads are considered equal.
-func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
-	return func(lp1, lp2 *statistics.StoreLoadPred) int {
-		for _, cmp := range cmps {
-			if r := cmp(lp1, lp2); r != 0 {
-				return r
-			}
-		}
-		return 0
-	}
-}
-
-// minLPCmp is a function to select the min load of the store between current and future when comparing.
-func minLPCmp(ldCmp storeLoadCmp) storeLPCmp {
-	return func(lp1, lp2 *statistics.StoreLoadPred) int {
-		return ldCmp(lp1.Min(), lp2.Min())
-	}
-}
-
-// maxLPCmp is a function to select the max load of the store between current and future when comparing.
-func maxLPCmp(ldCmp storeLoadCmp) storeLPCmp {
-	return func(lp1, lp2 *statistics.StoreLoadPred) int {
-		return ldCmp(lp1.Max(), lp2.Max())
-	}
-}
-
-// diffCmp is a function to select the diff load of the store between current and future when comparing.
-func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
-	return func(lp1, lp2 *statistics.StoreLoadPred) int {
-		return ldCmp(lp1.Diff(), lp2.Diff())
-	}
 }
 
 type retryQuota struct {
@@ -376,10 +315,7 @@ func (q *retryQuota) resetLimit(store *core.StoreInfo) {
 }
 
 func (q *retryQuota) attenuate(store *core.StoreInfo) {
-	newLimit := q.getLimit(store) / q.attenuation
-	if newLimit < q.minLimit {
-		newLimit = q.minLimit
-	}
+	newLimit := max(q.getLimit(store)/q.attenuation, q.minLimit)
 	q.limits[store.GetID()] = newLimit
 }
 
@@ -497,7 +433,7 @@ func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, stor
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
 			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
 			zap.Uint64("store-id", store.GetID()),
-			zap.String("rule", rule.String()),
+			logutil.ZapRedactString("rule", rule.String()),
 			zap.Int("region-count", regionCount),
 			zap.Float64("weight", weight),
 			zap.Float64("store-count", storeCount),

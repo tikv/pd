@@ -27,6 +27,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -34,7 +35,9 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	pdClient "github.com/tikv/pd/client"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -57,12 +60,13 @@ type httpClientTestSuite struct {
 	suite.Suite
 	// 1. Using `NewClient` will create a `DefaultPDServiceDiscovery` internal.
 	// 2. Using `NewClientWithServiceDiscovery` will need a `PDServiceDiscovery` to be passed in.
-	withServiceDiscovery bool
-	ctx                  context.Context
-	cancelFunc           context.CancelFunc
-	cluster              *tests.TestCluster
-	endpoints            []string
-	client               pd.Client
+	withServiceDiscovery   bool
+	ctx                    context.Context
+	cancelFunc             context.CancelFunc
+	cluster                *tests.TestCluster
+	endpoints              []string
+	client                 pd.Client
+	serviceDiscoveryClient pdClient.Client
 }
 
 func TestHTTPClientTestSuite(t *testing.T) {
@@ -79,6 +83,8 @@ func TestHTTPClientTestSuiteWithServiceDiscovery(t *testing.T) {
 
 func (suite *httpClientTestSuite) SetupSuite() {
 	re := suite.Require()
+	// Initialize client metrics before background discovery can observe them.
+	metrics.InitAndRegisterMetrics(nil)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
@@ -128,6 +134,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	if suite.withServiceDiscovery {
 		// Run test with specific service discovery.
 		cli := setupCli(suite.ctx, re, suite.endpoints)
+		suite.serviceDiscoveryClient = cli
 		sd := cli.GetServiceDiscovery()
 		suite.client = pd.NewClientWithServiceDiscovery("pd-http-client-it-grpc", sd)
 	} else {
@@ -141,6 +148,9 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	suite.cancelFunc()
 	suite.client.Close()
+	if suite.serviceDiscoveryClient != nil {
+		suite.serviceDiscoveryClient.Close()
+	}
 	suite.cluster.Destroy()
 }
 
@@ -1144,14 +1154,13 @@ func (suite *httpClientTestSuite) TestGetHealthStatus() {
 }
 
 func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
+	as := assert.New(suite.T())
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		bo := retry.InitialBackoffer(100*time.Millisecond, time.Second, 0)
 		client := suite.client.WithBackoffer(bo)
 		for {
@@ -1159,15 +1168,20 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 			if err != nil && strings.Contains(err.Error(), "context canceled") {
 				return
 			}
-			re.NoError(err)
-			re.Len(healths, 2)
+			if err != nil {
+				suite.T().Errorf("get health status: %v", err)
+				return
+			}
+			if !as.Len(healths, 2) {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
 		}
-	}()
+	})
 
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
@@ -1289,6 +1303,40 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	msg, err = client.DeleteGCSafePoint(ctx, "non_exist")
 	re.NoError(err)
 	re.Equal("Delete service GC safepoint successfully.", msg)
+
+	suite.Run("force-delete-observation", func() {
+		re := suite.Require()
+		const serviceID = "http-force-delete-observed"
+		now := time.Now()
+		ts := uint64(now.Add(-80*time.Hour).UnixMilli()) << 18
+		_, err := gcStateManager.SetGCBarrier(constant.NullKeyspaceID, serviceID, ts, time.Duration(math.MaxInt64), now)
+		re.NoError(err)
+		_, err = gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, ts, now)
+		re.NoError(err)
+		gather := func() []*dto.Metric {
+			families, err := prometheus.DefaultGatherer.Gather()
+			re.NoError(err)
+			var samples []*dto.Metric
+			for _, family := range families {
+				if family.GetName() != "pd_gc_barrier_timestamp_seconds" {
+					continue
+				}
+				for _, metric := range family.GetMetric() {
+					for _, label := range metric.GetLabel() {
+						if label.GetName() == "barrier_id" && label.GetValue() == serviceID {
+							samples = append(samples, metric)
+						}
+					}
+				}
+			}
+			return samples
+		}
+		re.Len(gather(), 1, "successful advancement publishes the nonexpiring barrier")
+		msg, err := client.DeleteGCSafePoint(ctx, serviceID)
+		re.NoError(err)
+		re.Equal("Delete service GC safepoint successfully.", msg)
+		re.Empty(gather(), "successful HTTP deletion must remove the sample without another advancement")
+	})
 }
 
 func (suite *httpClientTestSuite) TestGetSiblingsRegions() {

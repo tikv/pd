@@ -18,13 +18,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/response"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
@@ -66,7 +65,7 @@ func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -98,7 +97,7 @@ func (h *storeHandler) DeleteStore(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -130,7 +129,7 @@ func (h *storeHandler) SetStoreState(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errParse))
 		return
 	}
 	stateStr := r.URL.Query().Get("state")
@@ -184,7 +183,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -195,7 +194,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 
 	// EngineKey is set by TiKV/TiFlash and should not be modified by user
 	if _, ok := input[core.EngineKey]; ok {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.Errorf("label key %q is reserved", core.EngineKey)))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errors.Errorf("label key %q is reserved", core.EngineKey)))
 		return
 	}
 
@@ -208,7 +207,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := sc.ValidateLabels(labels); err != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(err))
 		return
 	}
 
@@ -237,7 +236,7 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -246,12 +245,12 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := sc.ValidateLabelKey(labelKey); err != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(err))
 		return
 	}
 	// EngineKey is set by TiKV/TiFlash and should not be modified by user
 	if labelKey == core.EngineKey {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.Errorf("can't modify label key %q", core.EngineKey)))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errors.Errorf("can't modify label key %q", core.EngineKey)))
 		return
 	}
 	if err := rc.DeleteStoreLabel(storeID, labelKey); err != nil {
@@ -279,7 +278,7 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -344,7 +343,7 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -468,17 +467,26 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 			}
 		}
 	} else {
-		labelMap := input["labels"].(map[string]any)
+		labelMap, ok := input["labels"].(map[string]any)
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "invalid labels which should be an object")
+			return
+		}
 		labels := make([]*metapb.StoreLabel, 0, len(input))
 		for k, v := range labelMap {
+			value, ok := v.(string)
+			if !ok {
+				h.rd.JSON(w, http.StatusBadRequest, "invalid label value which should be a string")
+				return
+			}
 			labels = append(labels, &metapb.StoreLabel{
 				Key:   k,
-				Value: v.(string),
+				Value: value,
 			})
 		}
 
 		if err := sc.ValidateLabels(labels); err != nil {
-			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+			apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(err))
 			return
 		}
 		for _, typ := range typeValues {
@@ -556,7 +564,7 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 	if v := r.URL.Query().Get("id"); v != "" {
 		storeID, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+			apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(err))
 			return
 		}
 
@@ -665,7 +673,7 @@ func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request)
 	if v, ok := r.URL.Query()["state"]; ok {
 		for _, s := range v {
 			stateName := strings.ToLower(s)
-			if stateName != "" && !slice.Contains(lowerStateName, stateName) {
+			if stateName != "" && !slices.Contains(lowerStateName, stateName) {
 				h.rd.JSON(w, http.StatusBadRequest, "unknown StoreState: "+s)
 				return
 			} else if stateName != "" {
@@ -684,7 +692,7 @@ func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request)
 		}
 
 		storeInfo := response.BuildStoreInfo(cfg, store)
-		if queryStates != nil && !slice.Contains(queryStates, strings.ToLower(storeInfo.Store.StateName)) {
+		if queryStates != nil && !slices.Contains(queryStates, strings.ToLower(storeInfo.Store.StateName)) {
 			continue
 		}
 		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
@@ -731,11 +739,8 @@ func (filter *storeStateFilter) Filter(stores []*metapb.Store) []*metapb.Store {
 	ret := make([]*metapb.Store, 0, len(stores))
 	for _, s := range stores {
 		state := s.GetState()
-		for _, accept := range filter.accepts {
-			if state == accept {
-				ret = append(ret, s)
-				break
-			}
+		if slices.Contains(filter.accepts, state) {
+			ret = append(ret, s)
 		}
 	}
 	return ret

@@ -18,10 +18,10 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -45,6 +45,52 @@ type operatorTestSuite struct {
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
+}
+
+func TestAdjustStepCostUsesRegionKeys(t *testing.T) {
+	tests := []struct {
+		size int64
+		keys int64
+		cost int64
+	}{
+		{size: 1, keys: 0, cost: 0},
+		{size: 1, keys: 1, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
+		{size: 1, keys: 2, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
+		{size: 2, keys: 1, cost: storelimit.SmallRegionInfluence[storelimit.AddPeer]},
+		{size: 21, keys: 2, cost: storelimit.RegionInfluence[storelimit.AddPeer]},
+	}
+	for _, tt := range tests {
+		var influence StoreInfluence
+		influence.AdjustStepCost(storelimit.AddPeer, tt.size, tt.keys)
+		require.Equal(t, tt.cost, influence.GetStepCost(storelimit.AddPeer))
+	}
+}
+
+func TestPeerInfluenceUsesRegionKeys(t *testing.T) {
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2}).Clone(
+		core.SetApproximateSize(1),
+		core.SetApproximateKeys(2),
+	)
+
+	addInfluence := NewOpInfluence()
+	AddPeer{ToStore: 3}.Influence(addInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], addInfluence.GetStoreInfluence(3).GetStepCost(storelimit.AddPeer))
+
+	addLearnerInfluence := NewOpInfluence()
+	AddLearner{ToStore: 3}.Influence(addLearnerInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], addLearnerInfluence.GetStoreInfluence(3).GetStepCost(storelimit.AddPeer))
+
+	removeInfluence := NewOpInfluence()
+	RemovePeer{FromStore: 1}.Influence(removeInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.RemovePeer], removeInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
+
+	witnessInfluence := NewOpInfluence()
+	BecomeWitness{StoreID: 1, PeerID: 1}.Influence(witnessInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.RemovePeer], witnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.RemovePeer))
+
+	nonWitnessInfluence := NewOpInfluence()
+	BecomeNonWitness{StoreID: 1, PeerID: 1}.Influence(nonWitnessInfluence, region)
+	require.Equal(t, storelimit.SmallRegionInfluence[storelimit.AddPeer], nonWitnessInfluence.GetStoreInfluence(1).GetStepCost(storelimit.AddPeer))
 }
 
 func (suite *operatorTestSuite) SetupTest() {
@@ -136,7 +182,7 @@ func (suite *operatorTestSuite) TestOperator() {
 	checkSteps(re, op, steps)
 	op.Start()
 	re.Equal(RemovePeer{FromStore: 2}, op.Check(region))
-	re.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
+	re.Equal(int32(2), op.currentStep.Load())
 	re.False(op.CheckTimeout())
 	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-2*FastStepWaitTime+time.Second))
 	re.False(op.CheckTimeout())
@@ -156,7 +202,7 @@ func (suite *operatorTestSuite) TestOperator() {
 
 	// case2: check timeout operator will return false not panic.
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 1, FromStore: 4})
-	op.currentStep = 1
+	op.currentStep.Store(1)
 	re.True(op.status.To(STARTED))
 	re.True(op.status.To(TIMEOUT))
 	re.False(op.CheckSuccess())
@@ -174,6 +220,26 @@ func (suite *operatorTestSuite) TestInfluence() {
 	resetInfluence := func() {
 		storeOpInfluence[1] = &StoreInfluence{}
 		storeOpInfluence[2] = &StoreInfluence{}
+	}
+
+	// Leader-transfer cost is independent of region size.
+	for _, size := range []int64{1, 1024} {
+		TransferLeader{FromStore: 1, ToStore: 2}.Influence(&opInfluence, region.Clone(core.SetApproximateSize(size)))
+		re.Zero(storeOpInfluence[1].GetStepCost(storelimit.TransferLeaderIn))
+		re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storeOpInfluence[2].GetStepCost(storelimit.TransferLeaderIn))
+		resetInfluence()
+	}
+
+	for _, targets := range [][]uint64{{2, 3}, {3}, {2, 3, 3}} {
+		influence := NewOpInfluence()
+		TransferLeader{FromStore: 1, ToStore: 2, ToStores: targets}.Influence(influence, region)
+		re.Zero(influence.GetStoreInfluence(1).GetStepCost(storelimit.TransferLeaderIn))
+		for _, id := range []uint64{2, 3} {
+			re.Equal(storelimit.RegionInfluence[storelimit.TransferLeaderIn], influence.GetStoreInfluence(id).GetStepCost(storelimit.TransferLeaderIn))
+		}
+		re.Equal(int64(1), influence.GetStoreInfluence(2).LeaderCount)
+		re.Zero(influence.GetStoreInfluence(3).LeaderCount)
+		re.Zero(influence.GetStoreInfluence(3).LeaderSize)
 	}
 
 	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(&opInfluence, region)
@@ -235,7 +301,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
 	RemovePeer{FromStore: 1}.Influence(&opInfluence, region)
@@ -251,7 +320,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: false}.Influence(&opInfluence, region)
@@ -267,7 +339,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: true}.Influence(&opInfluence, region)
@@ -283,7 +358,10 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 0,
-		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer:          1000,
+			storelimit.TransferLeaderIn: 1000,
+		},
 	}, *storeOpInfluence[2])
 }
 
@@ -313,7 +391,7 @@ func (suite *operatorTestSuite) TestCheckSuccess() {
 		re.False(op.CheckSuccess())
 		re.True(op.Start())
 		re.False(op.CheckSuccess())
-		op.currentStep = int32(len(op.steps))
+		op.currentStep.Store(int32(len(op.steps)))
 		re.True(op.CheckSuccess())
 		re.True(op.CheckSuccess())
 	}
@@ -324,7 +402,7 @@ func (suite *operatorTestSuite) TestCheckSuccess() {
 			RemovePeer{FromStore: 2},
 		}
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
-		op.currentStep = int32(len(op.steps))
+		op.currentStep.Store(int32(len(op.steps)))
 		re.Equal(CREATED, op.Status())
 		re.False(op.CheckSuccess())
 		re.True(op.Start())
@@ -344,7 +422,7 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.Equal(CREATED, op.Status())
 		re.True(op.Start())
-		op.currentStep = int32(len(op.steps))
+		op.currentStep.Store(int32(len(op.steps)))
 		re.False(op.CheckTimeout())
 		re.Equal(SUCCESS, op.Status())
 	}
@@ -357,7 +435,7 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.Equal(CREATED, op.Status())
 		re.True(op.Start())
-		op.currentStep = int32(len(op.steps))
+		op.currentStep.Store(int32(len(op.steps)))
 		op.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime))
 		re.False(op.CheckTimeout())
 		re.Equal(SUCCESS, op.Status())
@@ -579,7 +657,6 @@ func (suite *operatorTestSuite) TestRecord() {
 	re := suite.Require()
 	operator := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
 	now := time.Now()
-	time.Sleep(time.Second)
 	ob := operator.Record(now)
 	re.Equal(now, ob.FinishTime)
 	re.Greater(ob.duration.Seconds(), time.Second.Seconds())
@@ -634,11 +711,78 @@ func TestOperatorCheckConcurrently(t *testing.T) {
 	op.Start()
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			re.Nil(op.Check(region))
-		}()
+		wg.Go(func() {
+			assert.Nil(t, op.Check(region))
+		})
 	}
 	wg.Wait()
+}
+
+// pausedAddPeer pauses IsFinish on the given region until resume is closed.
+type pausedAddPeer struct {
+	AddPeer
+	region  *core.RegionInfo
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (s pausedAddPeer) IsFinish(region *core.RegionInfo) bool {
+	if region == s.region {
+		close(s.entered)
+		<-s.resume
+	}
+	return s.AddPeer.IsFinish(region)
+}
+
+// TestOperatorCheckDoesNotMoveBack checks that a Check with an older region does not move the
+// progress back after a Check with a newer region has finished the operator.
+func TestOperatorCheckDoesNotMoveBack(t *testing.T) {
+	re := require.New(t)
+	older := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	newer := older.Clone(core.WithLeader(older.GetStorePeer(2)))
+	entered, resume := make(chan struct{}), make(chan struct{})
+	addPeer := pausedAddPeer{ToStore: 2, PeerID: 2, region: older, entered: entered, resume: resume}
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, addPeer, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(op.Start())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// It finds the first step finished, then is paused before advancing the progress.
+		op.Check(older)
+	}()
+	<-entered
+	step := op.Check(newer)
+	close(resume)
+	<-done
+
+	re.Nil(step)
+	re.Equal(SUCCESS, op.Status())
+	re.Equal(int32(2), op.currentStep.Load())
+}
+
+func TestOperatorTotalInfluenceConcurrently(t *testing.T) {
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			influence := NewOpInfluence()
+			op.TotalInfluence(influence, region)
+			assert.Equal(t, int64(-1), influence.GetStoreInfluence(1).LeaderCount)
+			assert.Equal(t, int64(1), influence.GetStoreInfluence(2).LeaderCount)
+		})
+	}
+	wg.Wait()
+}
+
+func TestOperatorStoreHealthCheck(t *testing.T) {
+	re := require.New(t)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 1, PeerID: 1})
+	// Not tied to creation: defaults to false, and can be toggled any time after Build/NewOperator.
+	re.False(op.NeedStoreHealthCheck())
+	op.SetStoreHealthCheck(true)
+	re.True(op.NeedStoreHealthCheck())
+	op.SetStoreHealthCheck(false)
+	re.False(op.NeedStoreHealthCheck())
 }

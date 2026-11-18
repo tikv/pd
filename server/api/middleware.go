@@ -17,6 +17,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/unrolled/render"
@@ -59,12 +60,13 @@ func newRequestInfoMiddleware(s *server.Server) negroni.Handler {
 }
 
 func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !rm.svr.GetServiceMiddlewarePersistOptions().IsAuditEnabled() && !rm.svr.GetServiceMiddlewarePersistOptions().IsRateLimitEnabled() {
+	if !rm.svr.GetServiceMiddlewarePersistOptions().IsAuditEnabled() &&
+		!rm.svr.GetServiceMiddlewarePersistOptions().IsRateLimitEnabled() {
 		next(w, r)
 		return
 	}
 
-	requestInfo := requestutil.GetRequestInfo(r)
+	requestInfo := requestutil.GetRequestInfoWithoutBody(r)
 	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
 	failpoint.Inject("addRequestInfoMiddleware", func() {
@@ -77,6 +79,38 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	})
 
 	next(w, r)
+}
+
+func captureRequestBodyForAudit(
+	r *http.Request,
+	requestInfo *requestutil.RequestInfo,
+	labels *audit.BackendLabels,
+) bool {
+	if requestInfo.BodyParam != "" || !auditNeedsRequestBody(labels) {
+		return false
+	}
+	requestInfo.CaptureBody(r)
+	return true
+}
+
+func auditNeedsRequestBody(labels *audit.BackendLabels) bool {
+	return labels != nil && slices.Contains(labels.Labels, audit.LocalLogLabel)
+}
+
+func prepareRequestForAudit(
+	r *http.Request,
+	requestInfo requestutil.RequestInfo,
+	hasRequestInfo bool,
+	labels *audit.BackendLabels,
+) *http.Request {
+	contextNeedsUpdate := !hasRequestInfo
+	if captureRequestBodyForAudit(r, &requestInfo, labels) {
+		contextNeedsUpdate = true
+	}
+	if contextNeedsUpdate {
+		return r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
+	}
+	return r
 }
 
 type clusterMiddleware struct {
@@ -185,14 +219,14 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
-		requestInfo = requestutil.GetRequestInfo(r)
+		requestInfo = requestutil.GetRequestInfoWithoutBody(r)
 	}
-
 	labels := s.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)
 	if labels == nil {
 		next(w, r)
 		return
 	}
+	r = prepareRequestForAudit(r, requestInfo, ok, labels)
 
 	beforeNextBackends := make([]audit.Backend, 0)
 	afterNextBackends := make([]audit.Backend, 0)
@@ -234,7 +268,7 @@ func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, 
 	}
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
-		requestInfo = requestutil.GetRequestInfo(r)
+		requestInfo = requestutil.GetRequestInfoWithoutBody(r)
 	}
 
 	// There is no need to check whether rateLimiter is nil. CreateServer ensures that it is created

@@ -39,13 +39,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestInitial(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeMajority}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
@@ -76,8 +75,7 @@ func TestInitial(t *testing.T) {
 
 func TestStatus(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey: "dr-label",
@@ -182,8 +180,7 @@ func assertLastData(t *testing.T, data string, state string, stateID uint64, ava
 
 func TestStateSwitch(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
@@ -395,8 +392,7 @@ func TestStateSwitch(t *testing.T) {
 
 func TestReplicateState(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
@@ -445,8 +441,7 @@ func TestReplicateState(t *testing.T) {
 
 func TestAsynctimeout(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
@@ -490,8 +485,7 @@ func setStoreState(cluster *mockcluster.Cluster, states ...string) {
 
 func TestRecoverProgress(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	regionScanBatchSize = 10
 	regionMinSampleSize = 5
@@ -557,8 +551,7 @@ func TestRecoverProgress(t *testing.T) {
 
 func TestRecoverProgressWithSplitAndMerge(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	regionScanBatchSize = 10
 	regionMinSampleSize = 5
 
@@ -629,8 +622,7 @@ func TestRecoverProgressWithSplitAndMerge(t *testing.T) {
 
 func TestComplexPlacementRules(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
@@ -691,8 +683,7 @@ func TestComplexPlacementRules(t *testing.T) {
 
 func TestComplexPlacementRules2(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",
@@ -743,8 +734,7 @@ func TestComplexPlacementRules2(t *testing.T) {
 
 func TestComplexPlacementRules3(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey:         "zone",

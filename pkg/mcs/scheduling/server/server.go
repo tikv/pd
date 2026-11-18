@@ -28,6 +28,7 @@ import (
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/spf13/cobra"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -48,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/keyspace_meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/server"
@@ -84,7 +86,7 @@ type Server struct {
 	diagnosticspb.DiagnosticsServer
 
 	// Server state. 0 is not running, 1 is running.
-	isRunning int64
+	isRunning atomic.Int64
 
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
@@ -198,38 +200,27 @@ func (s *Server) updatePDMemberLoop() {
 			log.Warn("failed to list members", errs.ZapError(err))
 			continue
 		}
-		for _, ep := range members.Members {
-			if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
-				log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
-				continue
-			}
-			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
-			if err != nil {
-				log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
-				continue
-			}
-			if status.Leader == ep.ID {
+		etcdutil.ScanEtcdLeader(ctx, s.GetClient(), members.Members, requestTimeout,
+			func(ep *etcdserverpb.Member, status *clientv3.StatusResponse) bool {
 				cc, err := s.GetDelegateClient(ctx, s.GetTLSConfig(), ep.ClientURLs[0])
 				if err != nil {
 					log.Info("failed to get delegate client", errs.ZapError(err))
-					continue
+					return false
 				}
 				if !s.IsServing() {
 					// double check
-					break
+					return true
 				}
 				cluster := s.GetCluster()
-				if cluster != nil {
-					if cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
-						if status.Leader != curLeader {
-							log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
-						}
-						curLeader = ep.ID
-						break
-					}
+				if cluster == nil || !cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
+					return false
 				}
-			}
-		}
+				if status.Leader != curLeader {
+					log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+				}
+				curLeader = ep.ID
+				return true
+			})
 	}
 }
 
@@ -306,11 +297,14 @@ func (s *Server) campaignPrimary(expectedPrimary string) {
 	// Start keepalive the leadership and enable Scheduling service.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetPrimaryOnce sync.Once
-	defer resetPrimaryOnce.Do(func() {
+	// A named function rather than an inline defer because the step-down branch
+	// below calls it before it logs; see the comment there.
+	resetPrimary := func() {
 		cancel()
 		s.participant.Resign()
 		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
-	})
+	}
+	defer resetPrimaryOnce.Do(resetPrimary)
 
 	// maintain the leadership, after this, Scheduling could be ready to provide service.
 	s.participant.GetLeadership().Keep(ctx)
@@ -333,10 +327,13 @@ func (s *Server) campaignPrimary(expectedPrimary string) {
 			cb()
 		}
 	}()
+	// The ready log is written before the promotion for the same reason as in
+	// PD's campaignLeader: between the promotion and the loop below nothing
+	// checks the lease, so nothing that can block may sit there.
+	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 	s.participant.PromoteSelf()
 
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
-	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
 	primaryTicker := time.NewTicker(constant.PrimaryTickInterval)
 	defer primaryTicker.Stop()
@@ -348,11 +345,19 @@ func (s *Server) campaignPrimary(expectedPrimary string) {
 			// expiration and a `{service}/primary/transfer` API call, which resigns
 			// this primary by revoking its leader lease.
 			if !s.participant.IsServing() {
+				// Resign before logging, not in the deferred reset above. The
+				// log can block for an unbounded time on a stalled volume, and
+				// the primary is reported through GetServingUrls without
+				// consulting IsServing, so a primary that is still waiting on
+				// that log would keep being handed out.
+				resetPrimaryOnce.Do(resetPrimary)
 				log.Info("no longer a primary because lease has expired or transferred, the scheduling primary will step down")
 				return
 			}
 		case <-ctx.Done():
-			// Server is closed and it should return nil.
+			// Server is closed. A shutdown log can block just as long as a
+			// step-down log, so the resign comes first here too.
+			resetPrimaryOnce.Do(resetPrimary)
 			log.Info("server is closed")
 			return
 		}
@@ -361,7 +366,7 @@ func (s *Server) campaignPrimary(expectedPrimary string) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
+	if !s.isRunning.CompareAndSwap(1, 0) {
 		// server is already closed
 		return
 	}
@@ -397,7 +402,7 @@ func (s *Server) IsServing() bool {
 
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
-	return s != nil && atomic.LoadInt64(&s.isRunning) == 0
+	return s != nil && s.isRunning.Load() == 0
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the primary.
@@ -505,7 +510,7 @@ func (s *Server) startServer() (err error) {
 		cb()
 	}
 
-	atomic.StoreInt64(&s.isRunning, 1)
+	s.isRunning.Store(1)
 	return nil
 }
 
@@ -519,6 +524,7 @@ func (s *Server) startCluster(ctx context.Context) error {
 		metaWatcher     *meta.Watcher
 		ruleWatcher     *rule.Watcher
 		affinityWatcher *affinity.Watcher
+		keyspaceWatcher *keyspace_meta.Watcher
 		cluster         *Cluster
 		err             error
 	)
@@ -553,6 +559,10 @@ func (s *Server) startCluster(ctx context.Context) error {
 			affinityWatcher.Close()
 			affinityWatcher = nil
 		}
+		if keyspaceWatcher != nil {
+			keyspaceWatcher.Close()
+			keyspaceWatcher = nil
+		}
 		if storage != nil {
 			storage.Close()
 		}
@@ -572,7 +582,7 @@ func (s *Server) startCluster(ctx context.Context) error {
 	am := cluster.GetAffinityManager()
 	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	ruleWatcher, err = rule.NewWatcher(ctx, s.GetClient(), cluster.GetStorage(),
-		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), am)
 	if err != nil {
 		return err
 	}
@@ -580,14 +590,17 @@ func (s *Server) startCluster(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// keyspaceWatcher is not started yet: nothing consumes cluster.GetKeyspaceCache()
+	// for merge/split decisions. A follow-up PR wires it up and starts it here.
 
-	cluster.SetRuntimeResources(metaWatcher, configWatcher, ruleWatcher, affinityWatcher)
+	cluster.SetRuntimeResources(metaWatcher, configWatcher, ruleWatcher, affinityWatcher, keyspaceWatcher)
 	// Set watchers to nil to avoid being closed in defer when cluster initialization is successful,
 	// since cluster will take over the ownership of these watchers and close them when stopping cluster.
 	metaWatcher = nil
 	configWatcher = nil
 	ruleWatcher = nil
 	affinityWatcher = nil
+	keyspaceWatcher = nil
 	cluster.StartBackgroundJobs()
 	s.cluster.Store(cluster)
 	initSucceeded = true
@@ -610,7 +623,7 @@ func (s *Server) startMetaConfWatcher(
 	if err != nil {
 		return nil, nil, err
 	}
-	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, storage)
+	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, basicCluster, storage)
 	if err != nil {
 		metaWatcher.Close()
 		return nil, nil, err

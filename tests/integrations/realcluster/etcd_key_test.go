@@ -33,18 +33,14 @@ type etcdKeySuite struct {
 
 func TestEtcdKey(t *testing.T) {
 	suite.Run(t, &etcdKeySuite{
-		clusterSuite: clusterSuite{
-			suiteName: "etcd_key",
-		},
+		suiteName: "etcd_key",
 	})
 }
 
 func TestMSEtcdKey(t *testing.T) {
 	suite.Run(t, &etcdKeySuite{
-		clusterSuite: clusterSuite{
-			suiteName: "etcd_key",
-			mode:      "ms",
-		},
+		suiteName: "etcd_key",
+		mode:      "ms",
 	})
 }
 

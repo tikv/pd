@@ -43,7 +43,7 @@ func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolved
 type MinResolvedTS struct {
 	IsRealTime          bool              `json:"is_real_time,omitempty"`
 	MinResolvedTS       uint64            `json:"min_resolved_ts"`
-	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
+	PersistInterval     typeutil.Duration `json:"persist_interval"`
 	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 }
 

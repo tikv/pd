@@ -287,6 +287,8 @@ var (
 	splitScatterDispatchScheduleDisabledCounter  = splitScatterCheckerCounterWithEvent("dispatch-schedule-disabled")
 	splitScatterDispatchNotReplicatedCounter     = splitScatterCheckerCounterWithEvent("dispatch-not-fully-replicated")
 	splitScatterDispatchScatterFailedCounter     = splitScatterCheckerCounterWithEvent("dispatch-scatter-failed")
+	splitScatterDispatchHotRegionCounter         = splitScatterCheckerCounterWithEvent("dispatch-hot-region")
+	splitScatterDispatchBalancedReadCPUCounter   = splitScatterCheckerCounterWithEvent("dispatch-balanced-read-cpu")
 	splitScatterDispatchStoreLimitCounter        = splitScatterCheckerCounterWithEvent("dispatch-store-limit")
 	splitScatterDispatchAddOperatorFailedCounter = splitScatterCheckerCounterWithEvent("dispatch-add-operator-failed")
 	splitScatterDispatchOperatorCreatedCounter   = splitScatterCheckerCounterWithEvent("dispatch-operator-created")
@@ -301,6 +303,7 @@ var (
 	affinityCheckerCreateOpFailedCounter          = checkerCounter.WithLabelValues(affinityChecker, "create-operator-failed")
 	affinityCheckerUnhealthyRegionCounter         = checkerCounter.WithLabelValues(affinityChecker, "unhealthy-region")
 	affinityCheckerAbnormalReplicaCounter         = checkerCounter.WithLabelValues(affinityChecker, "abnormal-replica")
+	affinityCheckerLearnerMoveCounter             = checkerCounter.WithLabelValues(affinityChecker, "learner-move")
 	affinityCheckerLearnerPeerConflictCounter     = checkerCounter.WithLabelValues(affinityChecker, "learner-peer-conflict")
 
 	// Affinity merge checker metrics

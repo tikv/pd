@@ -15,7 +15,6 @@
 package checker
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,8 +29,7 @@ import (
 
 func TestLeaveJointState(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	jsc := NewJointStateChecker(cluster)
 	for id := uint64(1); id <= 10; id++ {

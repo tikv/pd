@@ -17,6 +17,7 @@ package utils
 import (
 	"testing"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -28,7 +29,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	// Keep deadlock detection enabled without reusing timers across synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestGetLoads(t *testing.T) {

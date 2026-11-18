@@ -57,7 +57,7 @@ func showSSPs(cmd *cobra.Command, _ []string) {
 
 func deleteSSP(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Usage()
+		_ = cmd.Usage()
 		return
 	}
 	r, err := PDCli.DeleteGCSafePoint(cmd.Context(), args[0])

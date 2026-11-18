@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
@@ -117,9 +118,9 @@ func (l *RegionLabeler) loadRules() error {
 		r, err := NewLabelRuleFromJSON([]byte(v))
 		if err != nil {
 			if errs.ErrRegionRuleContent.Equal(err) {
-				log.Warn("failed to adjust label rule", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(err))
+				log.Warn("failed to adjust label rule", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), zap.Error(err))
 			} else {
-				log.Warn("failed to unmarshal label rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+				log.Warn("failed to unmarshal label rule value", zap.String("rule-key", k), logutil.ZapRedactString("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			}
 			toDelete = append(toDelete, k)
 			return
@@ -502,11 +503,7 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 
 // MakeKeyRanges is a helper function to make key ranges.
 func MakeKeyRanges(keys ...string) []any {
-	var res []any
-	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
-	}
-	return res
+	return keyutil.BuildKeyRangeMaps(keys...)
 }
 
 // IterateLabelRules iterates the label rules. It will return once the iterator returns false.

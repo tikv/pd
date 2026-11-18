@@ -81,7 +81,7 @@ type Operator struct {
 	kind             OpKind
 	steps            []OpStep
 	stepsTime        []int64 // step finish time
-	currentStep      int32
+	currentStep      atomic.Int32
 	status           OpStatusTracker
 	level            constant.PriorityLevel
 	Counters         []prometheus.Counter
@@ -89,7 +89,25 @@ type Operator struct {
 	additionalInfos  opAdditionalInfo
 	ApproximateSize  int64
 	timeout          time.Duration
-	influence        *OpInfluence
+	influence        atomic.Pointer[OpInfluence]
+	// needStoreHealthCheck marks whether the in-progress check should also
+	// reject a target store that has become unhealthy mid-execution. It is
+	// not set at creation time; callers opt in after the operator is built
+	// (see SetStoreHealthCheck), similar to additionalInfos.
+	needStoreHealthCheck atomic.Bool
+}
+
+// SetStoreHealthCheck marks whether the operator's in-progress steps should
+// additionally reject a target store that has become unhealthy. It can be
+// called at any time after the operator is created.
+func (o *Operator) SetStoreHealthCheck(need bool) {
+	o.needStoreHealthCheck.Store(need)
+}
+
+// NeedStoreHealthCheck returns whether the operator's in-progress steps
+// should additionally reject a target store that has become unhealthy.
+func (o *Operator) NeedStoreHealthCheck() bool {
+	return o.needStoreHealthCheck.Load()
 }
 
 // NewOperator creates a new operator.
@@ -134,7 +152,7 @@ func (o *Operator) String() string {
 	}
 	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v, %v), createAt:%s, startAt:%s, currentStep:%v, size:%d, steps:[%s], timeout:[%s])",
 		o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(),
-		o.GetStartTime(), atomic.LoadInt32(&o.currentStep), o.ApproximateSize, strings.Join(stepStrs, ", "), o.timeout.String())
+		o.GetStartTime(), o.currentStep.Load(), o.ApproximateSize, strings.Join(stepStrs, ", "), o.timeout.String())
 	if o.CheckSuccess() {
 		s += " finished"
 	}
@@ -300,7 +318,7 @@ func (o *Operator) IsEnd() bool {
 
 // CheckSuccess checks if all steps are finished, and update the status.
 func (o *Operator) CheckSuccess() bool {
-	if atomic.LoadInt32(&o.currentStep) >= int32(len(o.steps)) {
+	if o.currentStep.Load() >= int32(len(o.steps)) {
 		return o.status.To(SUCCESS) || o.Status() == SUCCESS
 	}
 	return false
@@ -363,7 +381,7 @@ func (o *Operator) ContainNonWitnessStep() bool {
 // opStep is nil if the i-th step is not found.
 func (o *Operator) getCurrentTimeAndStep() (startTime time.Time, opStep OpStep) {
 	startTime = o.GetStartTime()
-	currentStep := atomic.LoadInt32(&o.currentStep)
+	currentStep := o.currentStep.Load()
 	if int(currentStep) < len(o.steps) {
 		opStep = o.steps[currentStep]
 		// we should use the finished time of the previous step if the first step is finished.
@@ -384,7 +402,7 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	}
 	// CheckTimeout will call CheckSuccess first
 	defer func() { _ = o.CheckTimeout() }()
-	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
+	for step := o.currentStep.Load(); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
 			current := time.Now()
 			if atomic.CompareAndSwapInt64(&(o.stepsTime[step]), 0, current.UnixNano()) {
@@ -392,7 +410,10 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 				operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
 					Observe(current.Sub(startTime).Seconds())
 			}
-			atomic.StoreInt32(&o.currentStep, step+1)
+			// Another Check may have advanced the operator with a newer region.
+			// Never move the progress back, or a Check that has seen every step
+			// finish could find the operator unfinished and return no step.
+			o.currentStep.CompareAndSwap(step, step+1)
 		} else {
 			return o.steps[int(step)]
 		}
@@ -402,7 +423,7 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 
 // ConfVerChanged returns the number of confver has consumed by steps
 func (o *Operator) ConfVerChanged(region *core.RegionInfo) (total uint64) {
-	current := atomic.LoadInt32(&o.currentStep)
+	current := o.currentStep.Load()
 	if current == int32(len(o.steps)) {
 		current--
 	}
@@ -425,7 +446,7 @@ func (o *Operator) GetPriorityLevel() constant.PriorityLevel {
 
 // UnfinishedInfluence calculates the store difference which unfinished operator steps make.
 func (o *Operator) UnfinishedInfluence(opInfluence *OpInfluence, region *core.RegionInfo) {
-	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
+	for step := o.currentStep.Load(); int(step) < len(o.steps); step++ {
 		if !o.steps[int(step)].IsFinish(region) {
 			o.steps[int(step)].Influence(opInfluence, region)
 		}
@@ -433,18 +454,24 @@ func (o *Operator) UnfinishedInfluence(opInfluence *OpInfluence, region *core.Re
 }
 
 // TotalInfluence calculates the store difference which whole operator steps make.
+// It's safe to be called by multiple goroutine concurrently.
 func (o *Operator) TotalInfluence(opInfluence *OpInfluence, region *core.RegionInfo) {
-	// skip if region is nil and not cache influence.
-	if region == nil && o.influence == nil {
-		return
-	}
-	if o.influence == nil {
-		o.influence = NewOpInfluence()
+	influence := o.influence.Load()
+	if influence == nil {
+		// skip if region is nil and not cache influence.
+		if region == nil {
+			return
+		}
+		// Build the cache completely before publishing it to other callers.
+		influence = NewOpInfluence()
 		for step := range o.steps {
-			o.steps[step].Influence(o.influence, region)
+			o.steps[step].Influence(influence, region)
+		}
+		if !o.influence.CompareAndSwap(nil, influence) {
+			influence = o.influence.Load()
 		}
 	}
-	opInfluence.Add(o.influence)
+	opInfluence.Add(influence)
 }
 
 // OpHistory is used to log and visualize completed operators.
@@ -508,7 +535,7 @@ func (o *OpRecord) MarshalJSON() ([]byte, error) {
 
 // Record transfers the operator to OpRecord.
 func (o *Operator) Record(finishTime time.Time) *OpRecord {
-	step := atomic.LoadInt32(&o.currentStep)
+	step := o.currentStep.Load()
 	record := &OpRecord{
 		Operator:   o,
 		FinishTime: finishTime,

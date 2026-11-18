@@ -16,7 +16,6 @@ package tests
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -31,8 +30,7 @@ import (
 
 func TestBackup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -40,7 +38,7 @@ func TestBackup(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
-	leaderServer.BootstrapCluster()
+	re.NoError(leaderServer.BootstrapCluster())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	urls := strings.Split(pdAddr, ",")
 	client, err := clientv3.New(clientv3.Config{

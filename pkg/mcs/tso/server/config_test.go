@@ -15,7 +15,6 @@
 package server
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -25,11 +24,12 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestConfigBasic(t *testing.T) {
@@ -102,8 +102,7 @@ max-gap-reset-ts = "1h"
 func TestGetAdvertiseListenHost(t *testing.T) {
 	re := require.New(t)
 
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string
@@ -157,5 +156,22 @@ func TestGetAdvertiseListenHost(t *testing.T) {
 				re.Equal(tt.expectedHost, svr.advertiseListenHost)
 			}
 		})
+	}
+}
+
+func TestRedactInfoLogDefault(t *testing.T) {
+	re := require.New(t)
+	for _, tc := range []struct {
+		data     string
+		expected logutil.RedactInfoLogType
+	}{
+		{"", logutil.RedactInfoLogON},
+		{"[security]\nredact-info-log = false", logutil.RedactInfoLogOFF},
+	} {
+		cfg := NewConfig()
+		meta, err := toml.Decode(tc.data, cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta))
+		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
 	}
 }

@@ -15,11 +15,42 @@
 package etcdutil
 
 import (
+	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestHealthCheckerInspectorWaitsForSyncerOnClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		syncerDone := make(chan struct{})
+		inspectorDone := make(chan struct{})
+		checker := &healthChecker{tickerInterval: time.Hour}
+		go func() {
+			checker.inspector(ctx, syncerDone)
+			close(inspectorDone)
+		}()
+
+		cancel()
+		synctest.Wait()
+		select {
+		case <-inspectorDone:
+			t.Fatal("health checker inspector exited before the syncer")
+		default:
+		}
+
+		close(syncerDone)
+		synctest.Wait()
+		select {
+		case <-inspectorDone:
+		default:
+			t.Fatal("health checker inspector did not exit after the syncer")
+		}
+	})
+}
 
 type testCase struct {
 	healthProbes       []healthProbe

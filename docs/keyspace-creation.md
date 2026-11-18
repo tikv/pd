@@ -39,7 +39,9 @@ from enabling a new object that reused the original ID after deletion.
 - A manual enable of a disabled pending keyspace is rejected while the current
   server setting requires waiting. Retry Create to finish it instead.
 - With waiting disabled in the current server setting, manual enable is allowed
-  and removes the token atomically.
+  after restoring the group and region label caches. A refresh failure returns
+  an error and preserves the token. The enable transaction rechecks the creation
+  identity and current state before removing the token atomically.
 - Reapplying `DISABLED` remains a no-op; it does not cancel pending creation.
 - Archiving cancels creation and removes the token in the same transaction.
   Deletion and recreation retain the existing lifecycle rules.

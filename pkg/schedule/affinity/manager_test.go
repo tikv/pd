@@ -15,16 +15,18 @@
 package affinity
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -37,8 +39,7 @@ import (
 // TestGetRegionAffinityGroupState tests the GetRegionAffinityGroupState method of Manager.
 func TestGetRegionAffinityGroupState(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -144,8 +145,7 @@ func TestGetRegionAffinityGroupState(t *testing.T) {
 // TestBasicGroupOperations tests basic group CRUD operations
 func TestBasicGroupOperations(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -178,8 +178,7 @@ func TestBasicGroupOperations(t *testing.T) {
 // TestSyncLabelRuleBeforeGroup ensures label rules arriving before group sync are applied after group creation.
 func TestSyncLabelRuleBeforeGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -219,8 +218,7 @@ func TestSyncLabelRuleBeforeGroup(t *testing.T) {
 // TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.
 func TestRegionCountStaleCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -288,8 +286,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 // TestDeleteGroupClearsCache verifies that deleting a group clears all related region caches.
 func TestDeleteGroupClearsCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -348,11 +345,165 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	re.Zero(globalAffinityCount, "global affinity region count should be 0")
 }
 
+// TestLookupRacingWithLabelRuleChange verifies that a lookup which reads the region labeler
+// before a label rule change does not cache its outdated result.
+func TestLookupRacingWithLabelRuleChange(t *testing.T) {
+	const lookupHook = "github.com/tikv/pd/pkg/schedule/affinity/afterRegionLabelLookup"
+	const groupID = "g"
+	oldRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
+	otherRange := keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}
+	testCases := []struct {
+		name   string
+		ranges []keyutil.KeyRange
+		change func(re *require.Assertions, m *Manager)
+	}{
+		{
+			name:   "remove key range",
+			ranges: []keyutil.KeyRange{oldRange, otherRange},
+			change: func(re *require.Assertions, m *Manager) {
+				re.NoError(m.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{
+					{GroupID: groupID, KeyRanges: []keyutil.KeyRange{oldRange}},
+				}))
+			},
+		},
+		{
+			name:   "recreate group with another key range",
+			ranges: []keyutil.KeyRange{oldRange},
+			change: func(re *require.Assertions, m *Manager) {
+				re.NoError(m.DeleteAffinityGroups([]string{groupID}, true))
+				re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{
+					{GroupID: groupID, KeyRanges: []keyutil.KeyRange{otherRange}},
+				}))
+			},
+		},
+		{
+			// In the scheduling service, the region label watcher updates the labeler and then clears the cache.
+			name:   "update region labeler in scheduling service",
+			ranges: []keyutil.KeyRange{oldRange, otherRange},
+			change: func(re *require.Assertions, m *Manager) {
+				re.NoError(m.regionLabeler.SetLabelRule(MakeLabelRule(GroupKeyRanges{
+					GroupID: groupID, KeyRanges: []keyutil.KeyRange{otherRange},
+				})))
+				m.InvalidCacheByLabelRules([]string{GetLabelRuleID(groupID)})
+			},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			storeInfos := core.NewStoresInfo()
+			storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"}, core.SetLastHeartbeatTS(time.Now())))
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+			re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: groupID, KeyRanges: tc.ranges}}))
+			_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1})
+			re.NoError(err)
+			region := generateRegionForTest(100, []uint64{1}, oldRange)
+
+			changed := false
+			// Change the group after the lookup reads the labeler but before it reads the group.
+			re.NoError(failpoint.EnableCall(lookupHook, func() {
+				if !changed {
+					changed = true
+					tc.change(re, manager)
+				}
+			}))
+			defer func() { re.NoError(failpoint.Disable(lookupHook)) }()
+			manager.GetAndCacheRegionAffinityGroupState(region)
+			re.True(changed)
+
+			cache, _ := manager.getCache(region)
+			re.Nil(cache, "the outdated lookup result must not be cached")
+			group := manager.GetAffinityGroupState(groupID)
+			re.Zero(group.RegionCount)
+			re.Zero(group.AffinityRegionCount)
+			state, _ := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(state, "the region is no longer covered by the group")
+		})
+	}
+}
+
+// TestInvalidCacheByLabelRules verifies that the Region cache and counts are correct after the scheduling
+// service applies a label rule change to the Manager and the region labeler, in either order.
+func TestInvalidCacheByLabelRules(t *testing.T) {
+	const groupID = "g"
+	oldRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
+	otherRange := keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}
+	testCases := []struct {
+		name         string
+		managerFirst bool
+	}{
+		{name: "manager first", managerFirst: true},
+		{name: "region labeler first", managerFirst: false},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			storeInfos := core.NewStoresInfo()
+			storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"}, core.SetLastHeartbeatTS(time.Now())))
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+
+			// syncManager applies a label rule to the Manager as the affinity label watcher does.
+			syncManager := func(ranges ...keyutil.KeyRange) {
+				b, err := json.Marshal(MakeLabelRule(GroupKeyRanges{GroupID: groupID, KeyRanges: ranges}))
+				re.NoError(err)
+				labelRule, err := labeler.NewLabelRuleFromJSON(b)
+				re.NoError(err)
+				re.NoError(manager.SyncKeyRangesFromEtcd(labelRule))
+			}
+			// syncRegionLabeler applies a label rule to the region labeler as the region label watcher does.
+			syncRegionLabeler := func(ranges ...keyutil.KeyRange) {
+				re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(GroupKeyRanges{GroupID: groupID, KeyRanges: ranges})))
+				manager.InvalidCacheByLabelRules([]string{GetLabelRuleID(groupID)})
+			}
+			manager.SyncGroupFromEtcd(&Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+			manager.RestoreAffinityGroup(groupID)
+			syncRegionLabeler(oldRange, otherRange)
+			syncManager(oldRange, otherRange)
+			region := generateRegionForTest(100, []uint64{1}, oldRange)
+			state, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.NotNil(state)
+			re.True(isAffinity)
+			group := manager.GetAffinityGroupState(groupID)
+			re.Equal(1, group.RegionCount)
+			re.Equal(1, group.AffinityRegionCount)
+
+			// Remove oldRange.
+			if tc.managerFirst {
+				syncManager(otherRange)
+				state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
+				re.NotNil(state, "the region labeler still has the old label rule")
+				syncRegionLabeler(otherRange)
+			} else {
+				syncRegionLabeler(otherRange)
+				state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
+				re.Nil(state)
+				syncManager(otherRange)
+			}
+			cache, _ := manager.getCache(region)
+			re.Nil(cache)
+			group = manager.GetAffinityGroupState(groupID)
+			re.Zero(group.RegionCount)
+			re.Zero(group.AffinityRegionCount)
+			state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(state)
+		})
+	}
+}
+
 // TestAvailabilityChangeRegionCount verifies that changing group availability clears region cache.
 func TestAvailabilityChangeRegionCount(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -413,8 +564,7 @@ func TestAvailabilityChangeRegionCount(t *testing.T) {
 // TestInvalidCacheMultipleTimes verifies that InvalidCache can be called multiple times safely.
 func TestInvalidCacheMultipleTimes(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -474,121 +624,119 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 // TestConcurrentOperations verifies concurrent operations don't cause race conditions.
 // Run with: go test -race
 func TestConcurrentOperations(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	store := storage.NewStorageWithMemoryBackend()
-	storeInfos := core.NewStoresInfo()
-	for i := 1; i <= 5; i++ {
-		storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i), NodeState: metapb.NodeState_Serving})
-		storeInfo = storeInfo.Clone(core.SetLastHeartbeatTS(time.Now()))
-		storeInfos.PutStore(storeInfo)
-	}
-
-	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
-	re.NoError(err)
-	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	re.NoError(err)
-
-	// Create initial groups
-	groups := make([][]keyutil.KeyRange, 3)
-	for i := range 3 {
-		groupID := fmt.Sprintf("concurrent-group-%d", i)
-		groups[i] = createGroupForTest(re, manager, groupID, 10)
-		_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
-		re.NoError(err)
-	}
-
-	// Create test regions
-	regions := make([]*core.RegionInfo, 10)
-	for i := range uint64(10) {
-		regions[i] = generateRegionForTest(100+i, []uint64{1, 2, 3}, groups[i%3][i])
-	}
-
-	// Run concurrent operations
-	var wg sync.WaitGroup
-	errChan := make(chan error, 100)
-
-	// Goroutine 1: Read operations
-	for i := range 10 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			for range 50 {
-				region := regions[idx%len(regions)]
-				_, _ = manager.GetRegionAffinityGroupState(region)
-				groupID := fmt.Sprintf("concurrent-group-%d", idx%3)
-				_ = manager.GetAffinityGroupState(groupID)
-				_ = manager.IsGroupExist(groupID)
-			}
-		}(i)
-	}
-
-	// Goroutine 2: Update peers
-	for i := range 3 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			groupID := fmt.Sprintf("concurrent-group-%d", idx)
-			for j := range 10 {
-				_, err := manager.UpdateAffinityGroupPeers(groupID, uint64((j%3)+1), []uint64{1, 2, 3})
-				if err != nil {
-					errChan <- err
-					return
-				}
-				time.Sleep(time.Millisecond)
-			}
-		}(i)
-	}
-
-	// Goroutine 3: InvalidCache operations
-	for i := range 5 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			for j := range 30 {
-				regionID := uint64(100 + (idx*2+j)%10)
-				manager.InvalidCache(regionID)
-				time.Sleep(time.Millisecond)
-			}
-		}(i)
-	}
-
-	// Goroutine 4: Check availability
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for range 20 {
-			manager.checkGroupsAvailability()
-			time.Sleep(2 * time.Millisecond)
+		store := storage.NewStorageWithMemoryBackend()
+		storeInfos := core.NewStoresInfo()
+		for i := 1; i <= 5; i++ {
+			storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i), NodeState: metapb.NodeState_Serving})
+			storeInfo = storeInfo.Clone(core.SetLastHeartbeatTS(time.Now()))
+			storeInfos.PutStore(storeInfo)
 		}
-	}()
 
-	// Wait for all goroutines
-	wg.Wait()
-	close(errChan)
+		conf := mockconfig.NewTestOptions()
+		regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+		re.NoError(err)
+		manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+		re.NoError(err)
 
-	// Check for errors
-	for err := range errChan {
-		re.NoError(err, "concurrent operation failed")
-	}
+		// Create initial groups
+		groups := make([][]keyutil.KeyRange, 3)
+		for i := range 3 {
+			groupID := fmt.Sprintf("concurrent-group-%d", i)
+			groups[i] = createGroupForTest(re, manager, groupID, 10)
+			_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+			re.NoError(err)
+		}
 
-	// Verify final state is consistent
-	for i := range 3 {
-		groupID := fmt.Sprintf("concurrent-group-%d", i)
-		re.True(manager.IsGroupExist(groupID))
-		state := manager.GetAffinityGroupState(groupID)
-		re.NotNil(state)
-	}
+		// Create test regions
+		regions := make([]*core.RegionInfo, 10)
+		for i := range uint64(10) {
+			regions[i] = generateRegionForTest(100+i, []uint64{1, 2, 3}, groups[i%3][i])
+		}
+
+		// Run concurrent operations
+		var wg sync.WaitGroup
+		errChan := make(chan error, 100)
+
+		// Goroutine 1: Read operations
+		for i := range 10 {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				for range 50 {
+					region := regions[idx%len(regions)]
+					_, _ = manager.GetRegionAffinityGroupState(region)
+					groupID := fmt.Sprintf("concurrent-group-%d", idx%3)
+					_ = manager.GetAffinityGroupState(groupID)
+					_ = manager.IsGroupExist(groupID)
+				}
+			}(i)
+		}
+
+		// Goroutine 2: Update peers
+		for i := range 3 {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				groupID := fmt.Sprintf("concurrent-group-%d", idx)
+				for j := range 10 {
+					_, err := manager.UpdateAffinityGroupPeers(groupID, uint64((j%3)+1), []uint64{1, 2, 3})
+					if err != nil {
+						errChan <- err
+						return
+					}
+					time.Sleep(time.Millisecond)
+				}
+			}(i)
+		}
+
+		// Goroutine 3: InvalidCache operations
+		for i := range 5 {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				for j := range 30 {
+					regionID := uint64(100 + (idx*2+j)%10)
+					manager.InvalidCache(regionID)
+					time.Sleep(time.Millisecond)
+				}
+			}(i)
+		}
+
+		// Goroutine 4: Check availability
+		wg.Go(func() {
+			for range 20 {
+				manager.checkGroupsAvailability()
+				time.Sleep(2 * time.Millisecond)
+			}
+		})
+
+		// Wait for all goroutines
+		wg.Wait()
+		close(errChan)
+
+		// Check for errors
+		for err := range errChan {
+			re.NoError(err, "concurrent operation failed")
+		}
+
+		// Verify final state is consistent
+		for i := range 3 {
+			groupID := fmt.Sprintf("concurrent-group-%d", i)
+			re.True(manager.IsGroupExist(groupID))
+			state := manager.GetAffinityGroupState(groupID)
+			re.NotNil(state)
+		}
+	})
 }
 
 // TestDegradedExpiration verifies that a degraded group automatically expires after the configured duration.
 func TestDegradedExpiration(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -651,4 +799,150 @@ func TestDegradedExpiration(t *testing.T) {
 	groupState2 := manager.GetAffinityGroupState("expiration-test")
 	re.NotNil(groupState2)
 	re.False(groupState2.AffinitySchedulingAllowed)
+}
+
+// TestSyncGroupPrefersBufferedLabelRule checks that a group synced after its
+// label rule takes the buffered rule, even if the region labeler, which another
+// watcher syncs, still holds an older rule of the group.
+func TestSyncGroupPrefersBufferedLabelRule(t *testing.T) {
+	re := require.New(t)
+	const groupID = "g"
+	newer := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}
+	older := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}}
+	store := storage.NewStorageWithMemoryBackend()
+	stores := core.NewStoresInfo()
+	stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(older)))
+	// The affinity watcher decodes its own copy of the newer rule.
+	data, err := json.Marshal(MakeLabelRule(newer))
+	re.NoError(err)
+	rule, err := labeler.NewLabelRuleFromJSON(data)
+	re.NoError(err)
+	re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+	re.Contains(manager.labelRuleBuffer, groupID)
+
+	manager.SyncGroupFromEtcd(&Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+	re.NotContains(manager.labelRuleBuffer, groupID)
+	re.Equal(newer, manager.keyRanges[groupID])
+	re.Equal(1, manager.GetAffinityGroupState(groupID).RangeCount)
+}
+
+// TestSyncGroupAndLabelRuleInAnyOrder applies the events of the affinity group
+// watcher and the affinity label watcher in every order the two watchers can
+// deliver them. The region labeler, which another watcher syncs, still holds
+// the old rule. The group must end up with the ranges of the latest rule.
+func TestSyncGroupAndLabelRuleInAnyOrder(t *testing.T) {
+	const groupID = "g"
+	oldRanges := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}
+	newRanges := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("c"), EndKey: []byte("d")}}}
+	type event struct {
+		name  string
+		apply func(re *require.Assertions, m *Manager)
+	}
+	putGroup := event{"put group", func(_ *require.Assertions, m *Manager) {
+		m.SyncGroupFromEtcd(&Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+	}}
+	deleteGroup := event{"delete group", func(_ *require.Assertions, m *Manager) {
+		m.SyncGroupDeleteFromEtcd(groupID)
+	}}
+	putRule := func(name string, ranges GroupKeyRanges) event {
+		return event{"put " + name, func(re *require.Assertions, m *Manager) {
+			// The affinity label watcher decodes its own copy of the rule.
+			data, err := json.Marshal(MakeLabelRule(ranges))
+			re.NoError(err)
+			rule, err := labeler.NewLabelRuleFromJSON(data)
+			re.NoError(err)
+			re.NoError(m.SyncKeyRangesFromEtcd(rule))
+		}}
+	}
+	deleteRule := event{"delete rule", func(_ *require.Assertions, m *Manager) {
+		m.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID(groupID))
+	}}
+	testCases := []struct {
+		name string
+		// synced is applied by both watchers before the events.
+		synced      []event
+		groupEvents []event
+		labelEvents []event
+		// expected is nil if the group must not exist.
+		expected *GroupKeyRanges
+	}{
+		{
+			// Removing all ranges of a group deletes its label rule.
+			name:        "create group and remove all ranges",
+			groupEvents: []event{putGroup},
+			labelEvents: []event{putRule("old rule", oldRanges), deleteRule},
+			expected:    &GroupKeyRanges{GroupID: groupID},
+		},
+		{
+			// PD deletes the group and its rule in one transaction, then creates
+			// both again in another.
+			name:        "recreate group with other ranges",
+			synced:      []event{putGroup, putRule("old rule", oldRanges)},
+			groupEvents: []event{deleteGroup, putGroup},
+			labelEvents: []event{deleteRule, putRule("new rule", newRanges)},
+			expected:    &newRanges,
+		},
+		{
+			name:        "delete group",
+			synced:      []event{putGroup, putRule("old rule", oldRanges)},
+			groupEvents: []event{deleteGroup},
+			labelEvents: []event{deleteRule},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, events := range interleave(tc.groupEvents, tc.labelEvents) {
+				names := make([]string, 0, len(events))
+				for _, e := range events {
+					names = append(names, e.name)
+				}
+				t.Run(strings.Join(names, ", "), func(t *testing.T) {
+					re := require.New(t)
+					store := storage.NewStorageWithMemoryBackend()
+					stores := core.NewStoresInfo()
+					stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+					regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, time.Second*5)
+					re.NoError(err)
+					manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
+					re.NoError(err)
+					re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(oldRanges)))
+					for _, e := range slices.Concat(tc.synced, events) {
+						e.apply(re, manager)
+					}
+
+					re.NotContains(manager.labelRuleBuffer, groupID)
+					state := manager.GetAffinityGroupState(groupID)
+					if tc.expected == nil {
+						re.Nil(state)
+						re.NotContains(manager.keyRanges, groupID)
+						return
+					}
+					re.NotNil(state)
+					re.Equal(tc.expected.KeyRanges, manager.keyRanges[groupID].KeyRanges)
+					re.Equal(len(tc.expected.KeyRanges), state.RangeCount)
+				})
+			}
+		})
+	}
+}
+
+// interleave returns every merge of a and b that keeps the order within each.
+func interleave[T any](a, b []T) [][]T {
+	if len(a) == 0 || len(b) == 0 {
+		return [][]T{slices.Concat(a, b)}
+	}
+	var result [][]T
+	for _, rest := range interleave(a[1:], b) {
+		result = append(result, slices.Concat([]T{a[0]}, rest))
+	}
+	for _, rest := range interleave(a, b[1:]) {
+		result = append(result, slices.Concat([]T{b[0]}, rest))
+	}
+	return result
 }

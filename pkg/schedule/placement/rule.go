@@ -17,6 +17,7 @@ package placement
 import (
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -91,14 +92,31 @@ func (r *Rule) String() string {
 func (r *Rule) Clone() *Rule {
 	var clone Rule
 	_ = json.Unmarshal([]byte(r.String()), &clone)
-	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
-	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
+	clone.StartKey = slices.Clone(r.StartKey)
+	clone.EndKey = slices.Clone(r.EndKey)
 	return &clone
 }
 
 // Key returns (groupID, ID) as the global unique key of a rule.
 func (r *Rule) Key() [2]string {
 	return [2]string{r.GroupID, r.ID}
+}
+
+// isolationPrefix returns the rule's location labels up to and including its isolation
+// level, which is the granularity replicas are actually isolated at (see NewIsolationFilter):
+// with location labels ["zone","rack","host"] and isolation level "rack", replicas are forced
+// into distinct "zone,rack" domains, so that prefix names one isolation domain.
+// It reports false when the rule enforces no isolation level, or when the isolation level is
+// not one of the rule's location labels, because then the domain is undefined.
+func (r *Rule) isolationPrefix() ([]string, bool) {
+	if r.IsolationLevel == "" {
+		return nil, false
+	}
+	idx := slices.Index(r.LocationLabels, r.IsolationLevel)
+	if idx < 0 {
+		return nil, false
+	}
+	return r.LocationLabels[:idx+1], true
 }
 
 // StoreKey returns the rule's key for persistent store.

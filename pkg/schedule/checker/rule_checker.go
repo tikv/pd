@@ -16,6 +16,7 @@ package checker
 
 import (
 	"context"
+	"errors"
 	"math"
 	"time"
 
@@ -132,7 +133,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	if c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() {
 		if placement.ValidateFit(fit) && placement.ValidateRegion(region) && placement.ValidateStores(fit.GetRegionStores()) {
 			// If there is no need to fix, we will cache the fit
-			c.ruleManager.SetRegionFitCache(region, fit)
+			c.ruleManager.SetRegionFitCache(c.cluster, region, fit)
 			ruleCheckerSetCacheCounter.Inc()
 		}
 	}
@@ -191,12 +192,18 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 }
 
 func (c *RuleChecker) fixMissingTiFlashLearnerPeer(region *core.RegionInfo, fit *placement.RegionFit) (*operator.Operator, error) {
+	var noStoreErr error
 	for _, rf := range fit.RuleFits {
 		if len(rf.Peers) < rf.Rule.Count && isTiFlashLearnerRule(rf.Rule) {
-			return c.addTiFlashLearnerPeer(region, fit, rf)
+			op, err := c.addTiFlashLearnerPeer(region, fit, rf)
+			if errors.Is(err, errs.ErrNoStoreToAdd) {
+				noStoreErr = err
+				continue
+			}
+			return op, err
 		}
 	}
-	return nil, nil
+	return nil, noStoreErr
 }
 
 func isTiFlashLearnerRule(rule *placement.Rule) bool {
@@ -693,7 +700,7 @@ func (o *recorder) refresh(cluster sche.CheckerCluster) {
 	// re-count the offlineLeaderCounter if the store is already tombstone or store is gone.
 	if len(o.offlineLeaderCounter) > 0 && time.Since(o.lastUpdateTime) > offlineCounterTTL {
 		needClean := false
-		for _, storeID := range o.offlineLeaderCounter {
+		for storeID := range o.offlineLeaderCounter {
 			store := cluster.GetStore(storeID)
 			if store == nil || store.IsRemoved() {
 				needClean = true

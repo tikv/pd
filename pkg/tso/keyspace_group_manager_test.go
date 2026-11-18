@@ -22,7 +22,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"reflect"
-	"sort"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -54,7 +54,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 type keyspaceGroupManagerTestSuite struct {
@@ -83,6 +83,66 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		groupID    = uint32(1)
+		keyspaceID = uint32(100)
+	)
+	splitGroup := &endpoint.KeyspaceGroup{
+		ID:                  groupID,
+		Keyspaces:           []uint32{keyspaceID},
+		KeyspaceLookupTable: map[uint32]struct{}{keyspaceID: {}},
+		SplitState: &endpoint.SplitState{
+			SplitSource: constant.DefaultKeyspaceGroupID,
+		},
+	}
+	newerSplitGroup := *splitGroup
+	newerSplitGroup.SplitState = &endpoint.SplitState{SplitSource: groupID + 1}
+
+	var kgm *KeyspaceGroupManager
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			re.Equal(http.MethodDelete, req.Method)
+			re.Equal("/pd/api/v2/tso/keyspace-groups/1/split", req.URL.Path)
+
+			re.True(kgm.TryRLock(), "state lock should remain available while the finish request is in flight")
+			kgm.RUnlock()
+			_, _, currentGroupID, _, err := kgm.FindGroupByKeyspaceID(keyspaceID)
+			re.NoError(err)
+			re.Equal(groupID, currentGroupID)
+
+			kgm.Lock()
+			kgm.kgs[groupID] = &newerSplitGroup
+			kgm.Unlock()
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+		}),
+	}
+
+	ctx := t.Context()
+	kgm = &KeyspaceGroupManager{
+		ctx:        ctx,
+		httpClient: client,
+		cfg: &TestServiceConfig{
+			BackendEndpoints: "http://backend.test",
+		},
+		metrics: newKeyspaceGroupMetrics(),
+	}
+	kgm.initialize()
+	kgm.kgs[groupID] = splitGroup
+	kgm.allocators[groupID] = &Allocator{}
+	kgm.keyspaceLookupTable[keyspaceID] = groupID
+
+	re.NoError(kgm.finishSplitKeyspaceGroup(groupID))
+
+	kgm.RLock()
+	currentGroup := kgm.kgs[groupID]
+	kgm.RUnlock()
+	re.Same(&newerSplitGroup, currentGroup)
+	re.Equal(groupID+1, currentGroup.SplitSource())
 }
 
 func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
@@ -569,9 +629,14 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, event.ksg)
 	re.NoError(err)
 
-	// Sleep for a while to wait for the events to propagate. If the logic doesn't work
-	// as expected, it will cause random failure.
-	time.Sleep(1 * time.Second)
+	resp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(event.ksg.ID))
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	testutil.Eventually(re, func() bool {
+		mgr.RLock()
+		defer mgr.RUnlock()
+		return mgr.modRevision >= uint64(resp.Kvs[0].ModRevision)
+	})
 	oldModRevision := modRevision
 	// Behavior differs between Classic and NextGen modes
 	if kerneltype.IsNextGen() {
@@ -662,9 +727,14 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, event.ksg)
 	re.NoError(err)
 
-	// Sleep for a while to wait for the events to propagate. If the restriction is not working,
-	// it will cause random failure.
-	time.Sleep(1 * time.Second)
+	resp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(event.ksg.ID))
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	testutil.Eventually(re, func() bool {
+		mgr.RLock()
+		defer mgr.RUnlock()
+		return mgr.modRevision >= uint64(resp.Kvs[0].ModRevision)
+	})
 	// Should still be able to get the allocator for keyspace 10 in keyspace group 1.
 	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
 	re.NoError(err)
@@ -793,10 +863,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 		go func(startID int) {
 			defer wg.Done()
 
-			endID := startID + step
-			if endID > numberOfKeyspaceGroupsToAdd {
-				endID = numberOfKeyspaceGroupsToAdd
-			}
+			endID := min(startID+step, numberOfKeyspaceGroupsToAdd)
 
 			for j := startID; j < endID; j++ {
 				assignToMe := false
@@ -819,7 +886,9 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 				err := addKeyspaceGroupAssignment(
 					suite.ctx, suite.etcdClient, uint32(j),
 					svcAddrs, []int{0}, []uint32{uint32(j)})
-				re.NoError(err)
+				if !suite.NoError(err) {
+					return
+				}
 			}
 		}(i)
 	}
@@ -835,9 +904,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 
 	// Verify the keyspace group assignment.
 	// Sort the keyspaces in ascending order
-	sort.Slice(expectedGroupIDs, func(i, j int) bool {
-		return expectedGroupIDs[i] < expectedGroupIDs[j]
-	})
+	slices.Sort(expectedGroupIDs)
 	assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
 	re.Equal(expectedGroupIDs, assignedGroupIDs)
 }
@@ -978,9 +1045,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	kgm := &KeyspaceGroupManager{
-		state: state{
-			keyspaceLookupTable: make(map[uint32]uint32),
-		}}
+		keyspaceLookupTable: make(map[uint32]uint32)}
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
 	verifyLocalKeyspaceLookupTable(re, newGroup.KeyspaceLookupTable, newGroup.Keyspaces)
@@ -1834,9 +1899,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestStaleCache() {
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
 	kgm := &KeyspaceGroupManager{
-		state: state{
-			keyspaceLookupTable: make(map[uint32]uint32),
-		},
+		keyspaceLookupTable: make(map[uint32]uint32),
 	}
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)

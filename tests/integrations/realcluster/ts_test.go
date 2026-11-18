@@ -27,9 +27,7 @@ type tsSuite struct {
 
 func TestTS(t *testing.T) {
 	suite.Run(t, &tsSuite{
-		clusterSuite: clusterSuite{
-			suiteName: "ts",
-		},
+		suiteName: "ts",
 	})
 }
 
@@ -59,9 +57,7 @@ func (s *tsSuite) TestTS() {
 
 func TestMSTS(t *testing.T) {
 	suite.Run(t, &tsSuite{
-		clusterSuite: clusterSuite{
-			suiteName: "ts",
-			mode:      "ms",
-		},
+		suiteName: "ts",
+		mode:      "ms",
 	})
 }

@@ -14,7 +14,11 @@
 
 package kv
 
-import "context"
+import (
+	"context"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+)
 
 // RawTxnCmpType represents the comparison type that is used in the condition of RawTxn.
 type RawTxnCmpType int
@@ -31,6 +35,7 @@ const (
 	RawTxnCmpGreater
 	RawTxnCmpExists
 	RawTxnCmpNotExists
+	RawTxnCmpModRevisionEqual
 )
 
 // nolint:revive
@@ -45,8 +50,10 @@ const (
 type RawTxnCondition struct {
 	Key     string
 	CmpType RawTxnCmpType
-	// The value to compare with. It's not used when CmpType is RawTxnCmpExists or RawTxnCmpNotExists.
+	// The value to compare with for value comparisons.
 	Value string
+	// The key modification revision to compare with when CmpType is RawTxnCmpModRevisionEqual.
+	ModRevision int64
 }
 
 // RawTxnOp represents an operation in a RawTxn's `Then` or `Else` branch and will be executed according to
@@ -63,8 +70,9 @@ type RawTxnOp struct {
 
 // KeyValuePair represents a pair of key and value.
 type KeyValuePair struct {
-	Key   string
-	Value string
+	Key         string
+	Value       string
+	ModRevision int64
 }
 
 // RawTxnResponseItem represents a single result of a read operation in a RawTxn.
@@ -102,6 +110,12 @@ type RawTxnCapable interface {
 	CreateRawTxn() RawTxn
 }
 
+// RawTxnWithContextCapable is implemented by KV backends that support creating
+// raw transactions bound to a caller's context.
+type RawTxnWithContextCapable interface {
+	CreateRawTxnWithContext(context.Context) RawTxn
+}
+
 // BaseReadWrite is the API set, shared by Base and Txn interfaces, that provides basic KV read and write operations.
 type BaseReadWrite interface {
 	Save(key, value string) error
@@ -114,6 +128,20 @@ type BaseReadWrite interface {
 // It enables kv to atomically apply a set of updates.
 type Txn interface {
 	BaseReadWrite
+}
+
+// RevisionTxn is a transaction that can guard a point read by the key's mod revision
+// instead of its value. It avoids copying a large value into the commit request and
+// detects same-value rewrites as conflicts.
+type RevisionTxn interface {
+	Txn
+	LoadWithRevision(key string) (string, error)
+}
+
+// ConditionalTxnRunner runs a transaction with additional etcd comparisons.
+// The comparisons and the transaction operations are committed atomically.
+type ConditionalTxnRunner interface {
+	RunInTxnWithConditions(ctx context.Context, conditions []clientv3.Cmp, f func(txn Txn) error) error
 }
 
 // Base is an abstract interface for load/save pd cluster data.

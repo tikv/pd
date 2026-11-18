@@ -7,7 +7,7 @@
 
 ## Quick Facts
 - Language: Go modules (root + `client/` submodule).
-- Go version: CI uses 1.25 (install >=1.25).
+- Go version: CI uses 1.27 (install >=1.27.3).
 - Main binaries: `pd-server`, `pd-ctl`, `pd-recover`, tool suite.
 
 ## Build Shortcuts
@@ -89,7 +89,7 @@
 - No ignored errors unless allowed in `.golangci.yml` errcheck exclusions.
 - Error strings: lowercase, no trailing punctuation.
 - Prefer sentinel errors over panic; panic only on programmer bugs/impossible states.
-- HTTP handlers: use errcode + `errorResp`; avoid `http.Error`.
+- HTTP handlers: use `apiutil.ErrorResp` with `errs.NewInvalidInputErr` or `errs.NewInternalErr`; avoid `http.Error`.
 
 ## Logging
 - Use existing structured logging (zap/log); avoid `fmt.Println`.
@@ -127,7 +127,7 @@
 - Do not disable lint/security checks without discussion.
 
 ## Dependencies & Tools
-- Tools live in `.tools/bin`; `make install-tools` installs pinned versions (golangci-lint v2.6.0, etc.).
+- Tools live in `.tools/bin`; `make install-tools` installs pinned versions (golangci-lint v2.14.0, etc.).
 - `tools.go` pins tool deps; avoid adding runtime deps without justification; run `make tidy` after changes and ensure clean diff.
 
 ## Dashboard / UI
@@ -178,6 +178,6 @@ Reusable agent skills live under `.agents/skills/`. Each skill has a `SKILL.md` 
 - Keep imports ordered, gofmt clean, modules tidy.
 - Respect depguard bans, revive/testifylint findings; fix before submission.
 - Ensure `PD_EDITION` set correctly; enable failpoints where required.
-- Keep error handling consistent with `pingcap/errors` and errcode usage.
+- Keep error handling consistent with `pingcap/errors` and the `pkg/errs` HTTP helpers.
 - Avoid new global state; keep concurrency safe; close resources.
 - Leave workspace clean (no stray tmp, coverage, or generated dashboard files).

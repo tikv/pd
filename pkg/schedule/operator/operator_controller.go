@@ -154,6 +154,11 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 		failpoint.Inject("concurrentRemoveOperator", func() {
 			time.Sleep(500 * time.Millisecond)
 		})
+		// addOperatorInner publishes an operator before it starts the operator.
+		// Leave a CREATED operator to the add, which starts it and checks it.
+		if op.Status() == CREATED {
+			return
+		}
 		// Update operator status:
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
@@ -208,7 +213,20 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 }
 
 func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core.RegionInfo) bool {
-	err := step.CheckInProgress(oc.cluster, oc.config, region)
+	// needStoreHealthCheck is the operator's opt-in permission to also reject
+	// a target that has gone Unhealthy, on top of the unconditional Down
+	// check. Only TransferLeader is ever asked for it: it creates no peer
+	// and no irreversible conf change, so rejecting it on an Unhealthy
+	// target is always safe. AddPeer/AddLearner/BecomeNonWitness stream a
+	// snapshot to the target, and their command is dispatched synchronously
+	// at operator creation -- before any heartbeat-driven check can run --
+	// so by the time this runs, rejecting them on an Unhealthy target can't
+	// undo a conf change that may already be landing and would only orphan
+	// the peer. Safely extending the check to them needs an orphan-cleanup
+	// / replacement design that is a follow-up to #11143.
+	_, isTransferLeader := step.(TransferLeader)
+	needStoreHealthCheck := op.NeedStoreHealthCheck() && isTransferLeader
+	err := step.CheckInProgress(oc.cluster, oc.config, region, needStoreHealthCheck)
 	if err != nil {
 		log.Info("operator is stale", zap.Uint64("region-id", op.RegionID()), errs.ZapError(err))
 		if oc.RemoveOperator(op, StaleStatus) {
@@ -561,6 +579,8 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		oc.buryOperator(oldOp)
 	}
 
+	failpoint.InjectCall("afterPublishOperator")
+
 	oc.counts.inc(op.SchedulerKind())
 	// Now start the operator after successfully adding it to the map
 	if !op.Start() {
@@ -824,16 +844,15 @@ func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 
 // SendScheduleCommand sends a command to the region.
 func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, source string) {
-	log.Info("send schedule command",
-		zap.Uint64("region-id", region.GetID()),
-		zap.Stringer("step", step),
-		zap.String("source", source))
-
 	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
 	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
 		return
 	}
+	log.Info("send schedule command",
+		zap.Uint64("region-id", region.GetID()),
+		zap.Stringer("step", step),
+		zap.String("source", source))
 	oc.hbStreams.SendMsg(region, cmd)
 }
 
@@ -1052,15 +1071,18 @@ func (oc *Controller) ExceedStoreLimit(ops ...*Operator) bool {
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *Controller) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) storelimit.StoreLimit {
-	ratePerSec := oc.config.GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
 	if s == nil {
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
 		return nil
 	}
 	// The other limits do not need to update by config exclude StoreRateLimit.
-	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok && limit.Rate(limitType) != ratePerSec {
-		oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
+	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok {
+		limit.Refresh(limitType, func() float64 {
+			// Refresh calls this under the limiter lock. A create-on-miss lookup
+			// could acquire the persistence lock and invert the store-lock order.
+			return oc.config.PeekStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
+		})
 	}
 	return s.GetStoreLimit()
 }

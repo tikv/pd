@@ -288,10 +288,12 @@ func (s *tsoProxyTestSuite) TestProxyClientIsCancelledQuicklyOnServerShutdown() 
 	// open a proxy stream
 	s.verifyProxyIsHealthy()
 
+	start := time.Now()
 	s.serverCancel()
 
-	start := time.Now()
-	s.assertReceiveError(re, "Canceled")
+	// Read the final status directly; sending after shutdown can return EOF.
+	_, err := s.proxyClient.Recv()
+	re.Equal(codes.Canceled, status.Code(err))
 
 	// verify fails faster than timeout, otherwise the unavailable time will be too long.
 	re.Less(time.Since(start), time.Second)

@@ -208,7 +208,9 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, url string,
 	cc, err := GetClientConn(dCtx, url, tlsCfg, opt...)
 	failpoint.Inject("unreachableNetwork2", func(val failpoint.Value) {
 		if val, ok := val.(string); ok && val == url {
-			cc = nil
+			if cc != nil {
+				_ = cc.Close()
+			}
 			err = errors.Errorf("unreachable network")
 		}
 	})
@@ -230,7 +232,7 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, url string,
 // The callee ID is used to identify the callee in gRPC communication, and it is usually the host:port of the advertise address. If the advertise address is invalid, it will panic.
 func GetCalleeID(addr string) string {
 	parsed, err := url.Parse(addr)
-	callerID := ""
+	var callerID string
 	if err != nil {
 		if _, _, splitErr := net.SplitHostPort(addr); splitErr != nil {
 			return ""

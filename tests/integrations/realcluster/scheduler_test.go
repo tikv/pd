@@ -16,6 +16,7 @@ package realcluster
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"testing"
@@ -38,9 +39,7 @@ type schedulerSuite struct {
 
 func TestScheduler(t *testing.T) {
 	suite.Run(t, &schedulerSuite{
-		clusterSuite: clusterSuite{
-			suiteName: "scheduler",
-		},
+		suiteName: "scheduler",
 	})
 }
 
@@ -77,8 +76,10 @@ func (s *schedulerSuite) TestTransferLeader() {
 	oldSchedulersLen := len(res)
 
 	re.NoError(pdHTTPCli.TransferLeader(ctx, newLeader))
-	// wait for transfer leader to new leader
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		leader, err := pdHTTPCli.GetLeader(ctx)
+		return err == nil && leader.Name == newLeader
+	})
 	resp, err = pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	re.Equal(newLeader, resp.Name)
@@ -89,8 +90,10 @@ func (s *schedulerSuite) TestTransferLeader() {
 
 	// transfer leader to old leader
 	re.NoError(pdHTTPCli.TransferLeader(ctx, oldLeader))
-	// wait for transfer leader
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		leader, err := pdHTTPCli.GetLeader(ctx)
+		return err == nil && leader.Name == oldLeader
+	})
 	resp, err = pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	re.Equal(oldLeader, resp.Name)
@@ -109,8 +112,23 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	defer pdHTTPCli.Close()
 	regions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)
-	re.NotEmpty(regions.Regions)
+	re.GreaterOrEqual(len(regions.Regions), 2)
 	region1 := regions.Regions[0]
+	makeKeyRange := func(region http.RegionInfo) *http.KeyRange {
+		startKey, err := hex.DecodeString(region.StartKey)
+		re.NoError(err)
+		endKey, err := hex.DecodeString(region.EndKey)
+		re.NoError(err)
+		return http.NewKeyRange(startKey, endKey)
+	}
+	deniedKeyRange := makeKeyRange(region1)
+	controlKeyRange := makeKeyRange(regions.Regions[1])
+	getLeaderStoreID := func(keyRange *http.KeyRange) int64 {
+		regions, err := pdHTTPCli.GetRegionsByKeyRange(ctx, keyRange, 1)
+		re.NoError(err)
+		re.NotEmpty(regions.Regions)
+		return regions.Regions[0].Leader.StoreID
+	}
 
 	err = pdHTTPCli.DeleteScheduler(ctx, types.BalanceLeaderScheduler.String())
 	if err == nil {
@@ -130,14 +148,8 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 
 	// wait leader transfer
 	testutil.Eventually(re, func() bool {
-		regions, err := pdHTTPCli.GetRegions(ctx)
-		re.NoError(err)
-		for _, region := range regions.Regions {
-			if region.Leader.StoreID != region1.Leader.StoreID {
-				return false
-			}
-		}
-		return true
+		return getLeaderStoreID(deniedKeyRange) == region1.Leader.StoreID &&
+			getLeaderStoreID(controlKeyRange) == region1.Leader.StoreID
 	}, testutil.WithWaitFor(time.Minute))
 
 	// disable schedule for region1
@@ -172,14 +184,8 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 		}
 	}()
 	testutil.Eventually(re, func() bool {
-		regions, err := pdHTTPCli.GetRegions(ctx)
-		re.NoError(err)
-		for _, region := range regions.Regions {
-			if region.Leader.StoreID == region1.Leader.StoreID {
-				return false
-			}
-		}
-		return true
+		return getLeaderStoreID(deniedKeyRange) != region1.Leader.StoreID &&
+			getLeaderStoreID(controlKeyRange) != region1.Leader.StoreID
 	}, testutil.WithWaitFor(time.Minute))
 
 	re.NoError(pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String()))
@@ -190,18 +196,12 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 			re.ErrorContains(err, "scheduler not found")
 		}
 	}()
+	// Verify that the scheduler can grant an unlabeled region while leaving the
+	// labeled region unchanged. Tracking the ranges instead of every region
+	// avoids depending on unrelated pending regions and survives region splits.
 	testutil.Eventually(re, func() bool {
-		regions, err := pdHTTPCli.GetRegions(ctx)
-		re.NoError(err)
-		for _, region := range regions.Regions {
-			if region.ID == region1.ID {
-				continue
-			}
-			if region.Leader.StoreID != region1.Leader.StoreID {
-				return false
-			}
-		}
-		return true
+		return getLeaderStoreID(deniedKeyRange) != region1.Leader.StoreID &&
+			getLeaderStoreID(controlKeyRange) == region1.Leader.StoreID
 	}, testutil.WithWaitFor(time.Minute))
 
 	err = pdHTTPCli.PatchRegionLabelRules(ctx, &http.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
@@ -211,14 +211,7 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	re.Len(labelRules, 1)
 
 	testutil.Eventually(re, func() bool {
-		regions, err := pdHTTPCli.GetRegions(ctx)
-		re.NoError(err)
-		for _, region := range regions.Regions {
-			if region.Leader.StoreID != region1.Leader.StoreID {
-				return false
-			}
-		}
-		return true
+		return getLeaderStoreID(deniedKeyRange) == region1.Leader.StoreID
 	}, testutil.WithWaitFor(time.Minute))
 }
 

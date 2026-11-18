@@ -17,6 +17,7 @@ package scheduling
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -26,11 +27,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -88,6 +89,7 @@ func (suite *configTestSuite) TestConfigWatch() {
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
+		core.NewBasicCluster(),
 		endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
 	)
 	re.NoError(err)
@@ -111,12 +113,8 @@ func (suite *configTestSuite) TestConfigWatch() {
 		return watcher.GetScheduleConfig().SplitMergeInterval.Duration == 2*sc.DefaultSplitMergeInterval
 	})
 	persistOpts.SetStoreConfig(&sc.StoreConfig{
-		Coprocessor: sc.Coprocessor{
-			RegionMaxSize: "144MiB",
-		},
-		Storage: sc.Storage{
-			Engine: sc.RaftstoreV2,
-		},
+		RegionMaxSize: "144MiB",
+		Engine:        sc.RaftstoreV2,
 	})
 	persistConfig(re, suite.pdLeaderServer)
 	testutil.Eventually(re, func() bool {
@@ -147,6 +145,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
+		core.NewBasicCluster(),
 		storage,
 	)
 	re.NoError(err)
@@ -173,7 +172,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
-		return slice.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
+		return slices.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1})
 	// Update the scheduler by adding a store.
@@ -201,7 +200,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
-		return !slice.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
+		return !slices.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
 	})
 	watcher.Close()
 }

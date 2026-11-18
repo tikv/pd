@@ -151,6 +151,67 @@ func TestAddResourceGroup(t *testing.T) {
 	re.Equal(group.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), addedGroup.RUSettings.RU.getBurstLimitSetting())
 }
 
+func TestResourceGroupRejectsUnsupportedModes(t *testing.T) {
+	for _, mode := range []rmpb.GroupMode{
+		rmpb.GroupMode_Unknown,
+		rmpb.GroupMode_RawMode,
+		rmpb.GroupMode(-1),
+		rmpb.GroupMode(3),
+	} {
+		for _, operation := range []struct {
+			name     string
+			existing bool
+			apply    func(*keyspaceResourceGroupManager, *rmpb.ResourceGroup) error
+		}{
+			{name: "add", apply: (*keyspaceResourceGroupManager).addResourceGroup},
+			{name: "load", apply: func(krgm *keyspaceResourceGroupManager, group *rmpb.ResourceGroup) error {
+				return krgm.addResourceGroupFromRaw(group.Name, mustMarshalResourceGroup(t, group))
+			}},
+			{name: "watch_insert", apply: func(krgm *keyspaceResourceGroupManager, group *rmpb.ResourceGroup) error {
+				return krgm.upsertResourceGroupFromRaw(group.Name, mustMarshalResourceGroup(t, group))
+			}},
+			{name: "watch_update", existing: true, apply: func(krgm *keyspaceResourceGroupManager, group *rmpb.ResourceGroup) error {
+				return krgm.upsertResourceGroupFromRaw(group.Name, mustMarshalResourceGroup(t, group))
+			}},
+			{name: "modify", existing: true, apply: (*keyspaceResourceGroupManager).modifyResourceGroup},
+		} {
+			t.Run(fmt.Sprintf("mode_%d/%s", mode, operation.name), func(t *testing.T) {
+				re := require.New(t)
+				store := storage.NewStorageWithMemoryBackend()
+				krgm := newKeyspaceResourceGroupManager(1, store)
+				group := newTestResourceGroup("test_group", 5, 100, 200)
+				var original *ResourceGroup
+				if operation.existing {
+					re.NoError(krgm.addResourceGroup(group))
+					original = krgm.groups[group.Name].Clone(true)
+				}
+				settingsPath := keypath.KeyspaceResourceGroupSettingPath(1, group.Name)
+				originalSettings, err := store.Load(settingsPath)
+				re.NoError(err)
+				statesPath := keypath.KeyspaceResourceGroupStatePath(1, group.Name)
+				originalStates, err := store.Load(statesPath)
+				re.NoError(err)
+
+				group.Mode = mode
+				group.Priority = 9
+				err = operation.apply(krgm, group)
+				re.ErrorIs(err, errs.ErrInvalidGroup)
+				if original != nil {
+					re.Equal(original, krgm.groups[group.Name].Clone(true))
+				} else {
+					re.Empty(krgm.groups)
+				}
+				settings, err := store.Load(settingsPath)
+				re.NoError(err)
+				re.Equal(originalSettings, settings)
+				states, err := store.Load(statesPath)
+				re.NoError(err)
+				re.Equal(originalStates, states)
+			})
+		}
+	}
+}
+
 func TestModifyResourceGroup(t *testing.T) {
 	re := require.New(t)
 
@@ -1106,5 +1167,66 @@ func TestConciliateFillRate(t *testing.T) {
 			re.Equal(float64(-1), group.getOverrideFillRate(), "check fill rate of case %s, group %d", tc.name, i)
 			re.Equal(int64(-1), group.getOverrideBurstLimit(), "check burst limit of case %s, group %d", tc.name, i)
 		}
+	}
+}
+
+func TestRUTrackerPreservesPositiveFractionalDemand(t *testing.T) {
+	re := require.New(t)
+	rt := newRUTracker(defaultRUTrackerTimeConstant)
+	now := time.Now()
+	rt.sample(0, now, 0)
+	rt.sample(0, now.Add(5*time.Second), 0)
+	re.True(rt.isInitialized())
+	re.Zero(rt.getRUPerSec())
+	rt.sample(0, now.Add(10*time.Second), 1)
+	re.InDelta(0.1, rt.getRUPerSec(), 1e-12)
+	// Preserve the existing cleanup of negligible demand on a zero sample.
+	rt.sample(0, now.Add(15*time.Second), 0)
+	re.Zero(rt.getRUPerSec())
+	re.True(rt.isInitialized())
+}
+
+func TestConciliateFractionalDemand(t *testing.T) {
+	for _, clients := range []uint64{1, 2} {
+		t.Run(fmt.Sprintf("clients-%d", clients), func(t *testing.T) {
+			re := require.New(t)
+			krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+			krgm.setServiceLimit(50)
+			now := time.Now()
+			for _, name := range []string{"cold", "hot"} {
+				re.NoError(krgm.addResourceGroup(newTestResourceGroup(name, 8, 100, 100)))
+				grt := krgm.getOrCreateGroupRUTracker(name)
+				grt.sample(1, now, 0)
+				grt.sample(1, now.Add(5*time.Second), 0)
+				tokens := 1.0
+				if name == "hot" {
+					tokens = 800
+				}
+				grt.sample(1, now.Add(10*time.Second), tokens)
+			}
+			krgm.conciliateFillRates()
+			cold := krgm.getMutableResourceGroup("cold")
+			re.InDelta(0.1, cold.getOverrideFillRate(), 1e-12)
+			re.Zero(cold.getOverrideBurstLimit())
+			re.InDelta(50.0, cold.getOverrideFillRate()+krgm.getMutableResourceGroup("hot").getOverrideFillRate(), 1e-12)
+			// Consume the allocated rate over time, beyond the initial borrowing allowance.
+			// A zero burst capacity must not prevent replenishment from repaying loans.
+			for round := range 20 {
+				at := now.Add(time.Duration(10+5*round) * time.Second)
+				for clientID := uint64(1); clientID <= clients; clientID++ {
+					requested := 0.5 / float64(clients)
+					result := cold.RequestRU(at, requested, 5000, clientID,
+						krgm.getGroupRUTracker("cold"), krgm.getServiceLimiter())
+					re.NotNil(result)
+					re.InDelta(requested, result.GrantedTokens.Tokens, 1e-12, "round %d", round)
+				}
+				re.InDelta(-0.5, cold.RUSettings.RU.Tokens, 1e-12)
+			}
+			var sum float64
+			for _, slot := range cold.RUSettings.RU.tokenSlots {
+				sum += slot.fillRate
+			}
+			re.InDelta(0.1, sum, 1e-12)
+		})
 	}
 }

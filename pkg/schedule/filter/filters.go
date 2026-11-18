@@ -16,6 +16,7 @@ package filter
 
 import (
 	"strconv"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -458,6 +459,19 @@ func (f *StoreStateFilter) exceedAddLimit(_ config.SharedConfigProvider, store *
 	return statusOK
 }
 
+func (f *StoreStateFilter) exceedTransferLeaderInLimit(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	// Target selection intentionally checks the budget regardless of operator priority,
+	// including when this filter is used by Builder. Controller admission retains its
+	// existing Urgent exemption; passing this filter does not reserve tokens.
+	// TODO: Reconcile leader-transfer priorities with store-limit admission semantics.
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.TransferLeaderIn, f.OperatorLevel) {
+		f.Reason = storeStateExceedTransferLeaderInLimit
+		return statusStoreTransferLeaderInLimit
+	}
+	f.Reason = storeStateOK
+	return statusOK
+}
+
 func (f *StoreStateFilter) tooManySnapshots(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > conf.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > conf.GetMaxSnapshotCount()) {
@@ -523,7 +537,8 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 		funcs = []conditionFunc{f.isBusy}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransferIn,
-			f.slowStoreEvicted, f.stoppingStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+			f.slowStoreEvicted, f.stoppingStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy,
+			f.hasRejectLeaderProperty, f.exceedTransferLeaderInLimit}
 	case regionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
@@ -717,13 +732,17 @@ type ruleLeaderFitFilter struct {
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
 // the isolation level will not decrease.
-func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, srcLeaderStoreID uint64, allowMoveLeader bool) Filter {
+func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, oldFit *placement.RegionFit, srcLeaderStoreID uint64, allowMoveLeader bool) Filter {
+	if oldFit == nil {
+		oldFit = ruleManager.FitRegion(cluster, region)
+	}
 	return &ruleLeaderFitFilter{
 		scope:            scope,
 		cluster:          cluster,
 		ruleManager:      ruleManager,
 		region:           region,
-		oldFit:           ruleManager.FitRegion(cluster, region),
+		oldFit:           oldFit,
 		srcLeaderStoreID: srcLeaderStoreID,
 		allowMoveLeader:  allowMoveLeader,
 	}
@@ -830,9 +849,16 @@ func NewPlacementSafeguard(scope string, conf config.SharedConfigProvider, clust
 // NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
 // existed peer, the placement restriction will not become worse.
 // Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
-func NewPlacementLeaderSafeguard(scope string, conf config.SharedConfigProvider, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo, allowMoveLeader bool) Filter {
+func NewPlacementLeaderSafeguard(scope string, conf config.SharedConfigProvider, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, sourceStore *core.StoreInfo, allowMoveLeader bool) Filter {
+	return NewPlacementLeaderSafeguardWithFit(scope, conf, cluster, ruleManager, region, sourceStore, nil, allowMoveLeader)
+}
+
+// NewPlacementLeaderSafeguardWithFit creates a placement leader safeguard with a reusable region fit.
+func NewPlacementLeaderSafeguardWithFit(scope string, conf config.SharedConfigProvider, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, sourceStore *core.StoreInfo, oldFit *placement.RegionFit, allowMoveLeader bool) Filter {
 	if conf.IsPlacementRulesEnabled() {
-		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID(), allowMoveLeader)
+		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, oldFit, sourceStore.GetID(), allowMoveLeader)
 	}
 	return nil
 }
@@ -1013,7 +1039,7 @@ func (f *isolationFilter) Target(_ config.SharedConfigProvider, store *core.Stor
 		match := true
 		for idx, constraint := range constrainList {
 			// Check every constraint in constrainList
-			match = store.GetLabelValue(f.locationLabels[idx]) == constraint && match
+			match = strings.EqualFold(store.GetLabelValue(f.locationLabels[idx]), constraint) && match
 		}
 		if len(constrainList) > 0 && match {
 			return statusStoreNotMatchIsolation

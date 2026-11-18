@@ -51,17 +51,19 @@ type LabelConstraint struct {
 
 // MatchStore checks if a store matches the constraint.
 func (c *LabelConstraint) MatchStore(store *core.StoreInfo) bool {
+	return c.matchValue(store.GetLabelValue(c.Key))
+}
+
+func (c *LabelConstraint) matchValue(value string) bool {
 	switch c.Op {
 	case In:
-		label := store.GetLabelValue(c.Key)
-		return label != "" && slice.AnyOf(c.Values, func(i int) bool { return c.Values[i] == label })
+		return value != "" && slice.AnyOf(c.Values, func(i int) bool { return c.Values[i] == value })
 	case NotIn:
-		label := store.GetLabelValue(c.Key)
-		return label == "" || slice.NoneOf(c.Values, func(i int) bool { return c.Values[i] == label })
+		return value == "" || slice.NoneOf(c.Values, func(i int) bool { return c.Values[i] == value })
 	case Exists:
-		return store.GetLabelValue(c.Key) != ""
+		return value != ""
 	case NotExists:
-		return store.GetLabelValue(c.Key) == ""
+		return value == ""
 	}
 	return false
 }

@@ -50,6 +50,7 @@ type creationTestStorage struct {
 	failEnable       bool
 	lostResponse     string
 	writePhase       string
+	onGroupRead      func()
 }
 
 func (s *creationTestStorage) LoadRegionRule(id string) (string, error) {
@@ -61,6 +62,9 @@ func (s *creationTestStorage) LoadRegionRule(id string) (string, error) {
 }
 
 func (s *creationTestStorage) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*endpoint.KeyspaceGroup, error) {
+	if s.onGroupRead != nil {
+		s.onGroupRead()
+	}
 	if s.groupReadErr {
 		return nil, errCreationStorage
 	}
@@ -372,6 +376,185 @@ func TestPendingCreationManagement(t *testing.T) {
 	re.ErrorIs(err, errs.ErrKeyspaceExists)
 }
 
+func TestPendingManualEnableRestoresCaches(t *testing.T) {
+	for _, api := range []string{"name", "id"} {
+		for _, cache := range []string{"rule", "group"} {
+			t.Run(api+"/"+cache, func(t *testing.T) {
+				re := require.New(t)
+				manager, store, cluster, cfg := newPendingCreationManager(t)
+				store.ruleReadErr = cache == "rule"
+				store.failGroupRefresh = cache == "group"
+				_, err := manager.CreateKeyspace(&CreateKeyspaceRequest{Name: "manual_enable"})
+				re.ErrorIs(err, errCreationStorage)
+				pending, err := manager.LoadKeyspace("manual_enable")
+				re.NoError(err)
+				cfg.WaitRegionSplit = false
+				enable := func() (*keyspacepb.KeyspaceMeta, error) {
+					if api == "id" {
+						return manager.UpdateKeyspaceStateByID(pending.GetId(), keyspacepb.KeyspaceState_ENABLED, 2)
+					}
+					return manager.UpdateKeyspaceState(pending.GetName(), keyspacepb.KeyspaceState_ENABLED, 2)
+				}
+				// A persistent cache read failure must not discard the recovery token.
+				_, err = enable()
+				re.ErrorIs(err, errCreationStorage)
+				loaded, err := manager.LoadKeyspace(pending.GetName())
+				re.NoError(err)
+				re.Equal(keyspacepb.KeyspaceState_DISABLED, loaded.GetState())
+				re.Equal(pending.GetConfig()[creationPendingKey], loaded.GetConfig()[creationPendingKey])
+				store.ruleReadErr, store.failGroupRefresh, store.groupReadErr = false, false, false
+				enabled, err := enable()
+				re.NoError(err)
+				re.Equal(keyspacepb.KeyspaceState_ENABLED, enabled.GetState())
+				re.Equal(int64(2), enabled.GetStateChangedAt())
+				re.NotContains(enabled.GetConfig(), creationPendingKey)
+				re.NotNil(cluster.GetLabelRule(getRegionLabelID(enabled.GetId())))
+				_, _, err = manager.kgm.GetGroupByKeyspaceID(enabled.GetId())
+				re.NoError(err)
+				re.False(manager.CheckKeyspaceRegionBound(enabled), "manual enable must not invent completed region boundaries")
+			})
+		}
+	}
+}
+
+func TestPendingManualEnableRechecksCreation(t *testing.T) {
+	for _, api := range []string{"name", "id"} {
+		for _, change := range []string{"archive", "reuse", "wait_enabled", "config"} {
+			t.Run(api+"/"+change, func(t *testing.T) {
+				re := require.New(t)
+				manager, store, _, cfg := newPendingCreationManager(t)
+				request := &CreateKeyspaceRequest{Name: "manual_race"}
+				_, err := manager.CreateKeyspace(request)
+				re.ErrorIs(err, errs.ErrRegionSplitTimeout)
+				original, err := manager.LoadKeyspace(request.Name)
+				re.NoError(err)
+				cfg.WaitRegionSplit = false
+				reached, release := make(chan struct{}), make(chan struct{})
+				var reachedOnce, releaseOnce sync.Once
+				point := "github.com/tikv/pd/pkg/keyspace/afterManualEnableCacheRefresh"
+				re.NoError(failpoint.EnableCall(point, func() {
+					reachedOnce.Do(func() { close(reached) })
+					<-release
+				}))
+				defer func() {
+					releaseOnce.Do(func() { close(release) })
+					re.NoError(failpoint.Disable(point))
+				}()
+				result := make(chan error, 1)
+				go func() {
+					var err error
+					if api == "id" {
+						_, err = manager.UpdateKeyspaceStateByID(original.GetId(), keyspacepb.KeyspaceState_ENABLED, 2)
+					} else {
+						_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
+					}
+					result <- err
+				}()
+				select {
+				case <-reached:
+				case <-time.After(5 * time.Second):
+					t.Fatal("manual enable did not finish cache refresh")
+				}
+				switch change {
+				case "wait_enabled":
+					cfg.WaitRegionSplit = true
+				case "config":
+					_, err = manager.UpdateKeyspaceConfig(request.Name, []*Mutation{{Op: OpPut, Key: "setting", Value: "updated"}})
+					re.NoError(err)
+				default:
+					_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ARCHIVED, 3)
+					re.NoError(err)
+					if change == "reuse" {
+						groupID, _, err := manager.kgm.GetGroupByKeyspaceID(original.GetId())
+						re.NoError(err)
+						_, err = manager.kgm.RemoveKeyspacesFromGroup(t.Context(), groupID, manager, nil, []uint32{original.GetId()})
+						re.NoError(err)
+						// A replacement creation must remain pending, so the old
+						// manual-enable transaction must distinguish its generation.
+						store.failEnable = true
+						id := original.GetId()
+						_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: request.Name})
+						re.ErrorIs(err, errCreationStorage)
+						store.failEnable = false
+					}
+				}
+				releaseOnce.Do(func() { close(release) })
+				select {
+				case err := <-result:
+					switch change {
+					case "wait_enabled":
+						re.ErrorContains(err, "region split is pending")
+					case "config":
+						re.NoError(err)
+					default:
+						re.ErrorContains(err, "creation changed after cache refresh")
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("manual enable did not finish")
+				}
+				loaded, err := manager.LoadKeyspace(request.Name)
+				re.NoError(err)
+				switch change {
+				case "archive":
+					re.Equal(keyspacepb.KeyspaceState_ARCHIVED, loaded.GetState())
+					re.NotContains(loaded.GetConfig(), creationPendingKey)
+				case "config":
+					re.Equal(keyspacepb.KeyspaceState_ENABLED, loaded.GetState())
+					re.NotContains(loaded.GetConfig(), creationPendingKey)
+					re.Equal("updated", loaded.GetConfig()["setting"])
+				default:
+					re.Equal(keyspacepb.KeyspaceState_DISABLED, loaded.GetState())
+					re.NotEmpty(loaded.GetConfig()[creationPendingKey])
+					if change == "reuse" {
+						re.NotEqual(original.GetConfig()[creationPendingKey], loaded.GetConfig()[creationPendingKey])
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestPendingManualEnableRefreshDoesNotHoldMetaLock(t *testing.T) {
+	re := require.New(t)
+	manager, store, _, cfg := newPendingCreationManager(t)
+	_, err := manager.CreateKeyspace(&CreateKeyspaceRequest{Name: "manual_lock"})
+	re.ErrorIs(err, errs.ErrRegionSplitTimeout)
+	pending, err := manager.LoadKeyspace("manual_lock")
+	re.NoError(err)
+	cfg.WaitRegionSplit = false
+	readStarted, releaseRead := make(chan struct{}), make(chan struct{})
+	var readOnce, releaseOnce, unlockOnce sync.Once
+	store.onGroupRead = func() {
+		readOnce.Do(func() { close(readStarted) })
+		<-releaseRead
+	}
+	manager.metaLock.Lock(pending.GetId())
+	defer func() {
+		unlockOnce.Do(func() { manager.metaLock.Unlock(pending.GetId()) })
+		releaseOnce.Do(func() { close(releaseRead) })
+	}()
+	result := make(chan error, 1)
+	go func() {
+		_, err := manager.UpdateKeyspaceStateByID(pending.GetId(), keyspacepb.KeyspaceState_ENABLED, 2)
+		result <- err
+	}()
+	select {
+	case <-readStarted:
+		// The group refresh can start while another goroutine owns metaLock.
+		// It therefore cannot be holding metaLock while acquiring the group lock.
+	case <-time.After(5 * time.Second):
+		t.Fatal("cache refresh was blocked behind metaLock")
+	}
+	unlockOnce.Do(func() { manager.metaLock.Unlock(pending.GetId()) })
+	releaseOnce.Do(func() { close(releaseRead) })
+	select {
+	case err := <-result:
+		re.NoError(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("manual enable did not finish after locks were released")
+	}
+}
+
 func TestPendingCreationArchiveAndIDReuse(t *testing.T) {
 	for _, reuse := range []bool{false, true} {
 		t.Run(map[bool]string{false: "archive", true: "reuse"}[reuse], func(t *testing.T) {
@@ -411,7 +594,7 @@ func TestPendingCreationArchiveAndIDReuse(t *testing.T) {
 			if reuse {
 				groupID, _, err := manager.kgm.GetGroupByKeyspaceID(original.GetId())
 				re.NoError(err)
-				_, err = manager.kgm.RemoveKeyspacesFromGroup(groupID, manager, []uint32{original.GetId()})
+				_, err = manager.kgm.RemoveKeyspacesFromGroup(t.Context(), groupID, manager, nil, []uint32{original.GetId()})
 				re.NoError(err)
 				// Keep the replacement pending by failing its cache read, before
 				// it reaches the old request's enable barrier.

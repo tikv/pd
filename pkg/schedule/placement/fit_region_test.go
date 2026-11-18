@@ -108,6 +108,88 @@ func mockRegion(votersNum, learnerNums int) *core.RegionInfo {
 	return region
 }
 
+func makeUnusedRuleSuffix(suffixRules, constraintCount int, distinctLastPeer bool) ([]*core.StoreInfo, *core.RegionInfo, []*Rule) {
+	region := mockRegion(8, 0)
+	stores := make([]*core.StoreInfo, 0, 8)
+	for id := uint64(1); id <= 8; id++ {
+		labels := []*metapb.StoreLabel{{Key: "zone", Value: "zone-a"}}
+		for label := range constraintCount {
+			labels = append(labels, &metapb.StoreLabel{
+				Key:   fmt.Sprintf("key-%02d", label),
+				Value: fmt.Sprintf("value-%02d", label),
+			})
+		}
+		extra := "y"
+		if distinctLastPeer && id == 8 {
+			extra = "x"
+		}
+		labels = append(labels, &metapb.StoreLabel{Key: "extra", Value: extra})
+		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: id, Labels: labels}))
+	}
+	constraints := make([]LabelConstraint, 0, constraintCount)
+	for label := range constraintCount {
+		constraints = append(constraints, LabelConstraint{
+			Key:    fmt.Sprintf("key-%02d", label),
+			Op:     In,
+			Values: []string{fmt.Sprintf("value-%02d", label)},
+		})
+	}
+	rules := []*Rule{
+		{GroupID: DefaultGroupID, ID: "first", Role: Voter, Count: 1, LocationLabels: []string{"zone"}},
+		{GroupID: DefaultGroupID, ID: "consume-rest", Role: Voter, Count: 7},
+	}
+	for i := range suffixRules {
+		rules = append(rules, &Rule{
+			GroupID:          DefaultGroupID,
+			ID:               fmt.Sprintf("suffix-%03d", i),
+			Role:             Voter,
+			Count:            1,
+			LabelConstraints: constraints,
+		})
+	}
+	rules = append(rules, &Rule{
+		GroupID: DefaultGroupID, ID: "last", Role: Voter, Count: 1,
+		LabelConstraints: []LabelConstraint{{Key: "extra", Op: In, Values: []string{"y"}}},
+	})
+	return stores, region, rules
+}
+
+// BenchmarkFitRegionWithUnusedRuleSuffix covers both equivalent peers and a
+// difference at the last peer and rule. The first two rules consume every peer,
+// so the remaining constraints cannot affect the assignment.
+func BenchmarkFitRegionWithUnusedRuleSuffix(b *testing.B) {
+	for _, distinctLastPeer := range []bool{false, true} {
+		for _, suffixRules := range []int{4, 20, 100} {
+			for _, constraintCount := range []int{1, 20} {
+				b.Run(fmt.Sprintf("distinct-last-peer=%t/suffix=%d/constraints=%d", distinctLastPeer, suffixRules, constraintCount), func(b *testing.B) {
+					stores, region, rules := makeUnusedRuleSuffix(suffixRules, constraintCount, distinctLastPeer)
+					fit := fitRegion(stores, region, rules, false)
+					if len(fit.RuleFits) != len(rules) || len(fit.OrphanPeers) != 0 || fit.IsSatisfied() {
+						b.Fatal("unexpected fit for rules awaiting more replicas")
+					}
+					if len(fit.RuleFits[0].Peers) != 1 || fit.RuleFits[0].Peers[0].GetId() != 1 || len(fit.RuleFits[1].Peers) != 7 {
+						b.Fatal("unexpected assignment to the first two rules")
+					}
+					for i, peer := range fit.RuleFits[1].Peers {
+						if peer.GetId() != uint64(i+2) {
+							b.Fatal("unexpected peer order in the second rule")
+						}
+					}
+					for _, rf := range fit.RuleFits[2:] {
+						if len(rf.Peers) != 0 {
+							b.Fatal("unused suffix unexpectedly contains a peer")
+						}
+					}
+					b.ReportAllocs()
+					for b.Loop() {
+						fitRegion(stores, region, rules, false)
+					}
+				})
+			}
+		}
+	}
+}
+
 func BenchmarkFitRegion(b *testing.B) {
 	region := mockRegion(3, 0)
 	rules := []*Rule{
@@ -121,8 +203,8 @@ func BenchmarkFitRegion(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -140,8 +222,8 @@ func BenchmarkFitRegionMoreStores(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(200)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -159,8 +241,8 @@ func BenchmarkFitRegionMorePeers(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -185,8 +267,8 @@ func BenchmarkFitRegionMorePeersEquals(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -213,8 +295,8 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -241,8 +323,8 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -252,8 +334,8 @@ func BenchmarkFitRegionTiflash(b *testing.B) {
 	rules := addExtraRules(1)
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -279,8 +361,8 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 	}
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -343,8 +425,8 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 		storelists: lists,
 	}
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -401,8 +483,8 @@ func BenchmarkFitRegionWithLocationLabels(b *testing.B) {
 		storelists: lists,
 	}
 	stores := getStoresByRegion(storesSet, region)
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		fitRegion(stores, region, rules, false)
 	}
 }

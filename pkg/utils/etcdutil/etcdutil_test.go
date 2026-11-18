@@ -38,17 +38,20 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
 func TestAddMember(t *testing.T) {
@@ -93,6 +96,103 @@ func TestMemberHelpers(t *testing.T) {
 	re.NoError(err)
 	re.Len(listResp3.Members, 1)
 	re.Equal(uint64(etcd1.Server.ID()), listResp3.Members[0].ID)
+}
+
+type fakeMaintenance struct {
+	clientv3.Maintenance
+	status func(ctx context.Context, endpoint string) (*clientv3.StatusResponse, error)
+}
+
+func (f *fakeMaintenance) Status(ctx context.Context, endpoint string) (*clientv3.StatusResponse, error) {
+	return f.status(ctx, endpoint)
+}
+
+func newMember(id uint64, urls ...string) *etcdserverpb.Member {
+	return &etcdserverpb.Member{ID: id, ClientURLs: urls}
+}
+
+func TestScanEtcdLeaderSkipsStalledMember(t *testing.T) {
+	re := require.New(t)
+	// Like an etcd client waiting for a stopped member, the first member never
+	// answers until its request context ends.
+	maintenance := &fakeMaintenance{status: func(ctx context.Context, endpoint string) (*clientv3.StatusResponse, error) {
+		if endpoint == "stopped" {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return &clientv3.StatusResponse{Leader: 2}, nil
+	}}
+	members := []*etcdserverpb.Member{newMember(1, "stopped"), newMember(2, "alive")}
+
+	// The outer context is much longer than the timeout, so the scan can only
+	// reach the second member if the first probe is bounded by the timeout.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	var found []uint64
+	ScanEtcdLeader(ctx, maintenance, members, 50*time.Millisecond,
+		func(member *etcdserverpb.Member, _ *clientv3.StatusResponse) bool {
+			found = append(found, member.ID)
+			return true
+		})
+	re.Equal([]uint64{2}, found)
+	re.Less(time.Since(start), 5*time.Second)
+}
+
+func TestScanEtcdLeaderSkipsUnusableMembers(t *testing.T) {
+	re := require.New(t)
+	maintenance := &fakeMaintenance{status: func(_ context.Context, endpoint string) (*clientv3.StatusResponse, error) {
+		if endpoint == "broken" {
+			return nil, errors.New("unreachable")
+		}
+		return &clientv3.StatusResponse{Leader: 4}, nil
+	}}
+	members := []*etcdserverpb.Member{
+		newMember(1), // not started yet
+		newMember(2, "broken"),
+		newMember(3, "follower"),
+		newMember(4, "leader"),
+	}
+
+	var found []uint64
+	ScanEtcdLeader(t.Context(), maintenance, members, time.Second,
+		func(member *etcdserverpb.Member, status *clientv3.StatusResponse) bool {
+			found = append(found, member.ID)
+			re.Equal(member.ID, status.Leader)
+			return true
+		})
+	re.Equal([]uint64{4}, found)
+}
+
+func TestScanEtcdLeaderCallbackControlsScan(t *testing.T) {
+	re := require.New(t)
+	var probed []string
+	maintenance := &fakeMaintenance{status: func(_ context.Context, endpoint string) (*clientv3.StatusResponse, error) {
+		probed = append(probed, endpoint)
+		// Both members claim to be the leader, as a stale old leader may.
+		if endpoint == "a" {
+			return &clientv3.StatusResponse{Leader: 1}, nil
+		}
+		return &clientv3.StatusResponse{Leader: 2}, nil
+	}}
+	members := []*etcdserverpb.Member{newMember(1, "a"), newMember(2, "b")}
+
+	var found []uint64
+	ScanEtcdLeader(t.Context(), maintenance, members, time.Second,
+		func(member *etcdserverpb.Member, _ *clientv3.StatusResponse) bool {
+			found = append(found, member.ID)
+			return member.ID == 2
+		})
+	re.Equal([]uint64{1, 2}, found)
+
+	probed, found = nil, nil
+	ScanEtcdLeader(t.Context(), maintenance, members, time.Second,
+		func(member *etcdserverpb.Member, _ *clientv3.StatusResponse) bool {
+			found = append(found, member.ID)
+			return true
+		})
+	re.Equal([]uint64{1}, found)
+	re.Equal([]string{"a"}, probed)
 }
 
 func TestEtcdKVGet(t *testing.T) {
@@ -143,7 +243,10 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl2", "val2", 4)
 	re.NoError(err)
 
-	time.Sleep(3 * time.Second)
+	testutil.Eventually(re, func() bool {
+		resp, err := EtcdKVGet(client, "test/ttl1")
+		return err == nil && resp.Count == 0
+	})
 	// test/ttl1 is outdated
 	resp, err := EtcdKVGet(client, "test/ttl1")
 	re.NoError(err)
@@ -153,7 +256,10 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	re.NoError(err)
 	re.Equal("val2", string(resp.Kvs[0].Value))
 
-	time.Sleep(2 * time.Second)
+	testutil.Eventually(re, func() bool {
+		resp, err := EtcdKVGet(client, "test/ttl2")
+		return err == nil && resp.Count == 0
+	})
 
 	// test/ttl2 is also outdated
 	resp, err = EtcdKVGet(client, "test/ttl2")
@@ -630,6 +736,73 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
 	})
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherLoadLogRedact() {
+	const payload = `{"start_key":"736563726574","end_key":"7a"}`
+	callbackErr := errors.New("put callback failed")
+	for _, consistent := range []bool{false, true} {
+		for _, mode := range []struct {
+			name string
+			typ  logutil.RedactInfoLogType
+		}{
+			{"off", logutil.RedactInfoLogOFF},
+			{"on", logutil.RedactInfoLogON},
+			{"marker", logutil.RedactInfoLogMarker},
+		} {
+			suite.Run(fmt.Sprintf("consistent-%t/%s", consistent, mode.name), func() {
+				re := suite.Require()
+				prefix := suite.T().Name() + "/"
+				suite.put(re, prefix+"a", payload)
+				suite.put(re, prefix+"b", payload)
+				values := make([]string, 0, 2)
+				watcher := NewLoopWatcher(
+					suite.ctx, &suite.wg, suite.client, "redact", prefix,
+					func([]*clientv3.Event) error { return nil },
+					func(kv *mvccpb.KeyValue) error {
+						values = append(values, string(kv.Value))
+						if string(kv.Key) == prefix+"b" {
+							return callbackErr
+						}
+						return nil
+					},
+					func(*mvccpb.KeyValue) error { return nil },
+					func([]*clientv3.Event) error { return nil },
+					true, /* withPrefix */
+				)
+				if consistent {
+					watcher.SetConsistentLoad()
+				}
+				fname := testutil.InitTempFileLogger(suite.T(), "debug")
+				var (
+					lg    *zap.Logger
+					props *log.ZapProperties
+				)
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+				suite.T().Cleanup(func() {
+					re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+				})
+
+				_, err := watcher.load(suite.ctx)
+				re.Same(callbackErr, err)
+				re.Equal([]string{payload, payload}, values)
+				output, err := os.ReadFile(fname)
+				re.NoError(err)
+				re.Contains(string(output), "put successfully in watch loop when loading")
+				re.Contains(string(output), "put failed in watch loop when loading")
+				re.Contains(string(output), `[error="put callback failed"]`)
+				if mode.typ == logutil.RedactInfoLogON {
+					re.Equal(2, strings.Count(string(output), "[value=?]"))
+					re.NotContains(string(output), "736563726574")
+				} else {
+					re.Contains(string(output), "736563726574")
+					if mode.typ == logutil.RedactInfoLogMarker {
+						re.Equal(2, strings.Count(string(output), `[value="‹`))
+					}
+				}
+			})
+		}
+	}
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultCallbackSemantics() {
 	preErr := errors.New("pre callback failed")
 	firstPutErr := errors.New("first put callback failed")
@@ -787,7 +960,11 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	for i := range 10 {
 		suite.put(re, fmt.Sprintf("TestCallBack%d", i), "")
 	}
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		cache.RLock()
+		defer cache.RUnlock()
+		return len(cache.data) == 10
+	})
 	cache.RLock()
 	re.Len(cache.data, 10)
 	cache.RUnlock()
@@ -798,7 +975,11 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 		_, err = suite.client.Delete(ctx, key)
 		re.NoError(err)
 	}
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		cache.RLock()
+		defer cache.RUnlock()
+		return len(cache.data) == 0
+	})
 	cache.RLock()
 	re.Empty(cache.data)
 	cache.RUnlock()
@@ -1375,6 +1556,263 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompactionWhenEnabled(
 	re.GreaterOrEqual(result.revision, updatedResp.Header.Revision+1)
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherUsesCustomCompactionReload() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	const key = "TestWatcherUsesCustomCompactionReload"
+	initialResp, err := suite.client.Put(ctx, key, "before-compaction")
+	re.NoError(err)
+	updatedResp, err := suite.client.Put(ctx, key, "after-compaction")
+	re.NoError(err)
+	_, err = suite.etcd.Server.Compact(ctx, &etcdserverpb.CompactionRequest{Revision: updatedResp.Header.Revision})
+	re.NoError(err)
+
+	reloadValues := make(chan string, 1)
+	liveValues := make(chan string, 1)
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			liveValues <- string(kv.Value)
+			cancel()
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.SetCompactionReloadFn(func(ctx context.Context) (int64, error) {
+		resp, err := EtcdKVGetWithContext(ctx, suite.client, key)
+		if err != nil {
+			return 0, err
+		}
+		if len(resp.Kvs) != 1 {
+			return 0, fmt.Errorf("expected one key, got %d", len(resp.Kvs))
+		}
+		reloadValues <- string(resp.Kvs[0].Value)
+		return resp.Header.Revision + 1, nil
+	})
+
+	watchDone := make(chan error, 1)
+	go func() {
+		_, watchErr := watcher.watch(ctx, initialResp.Header.Revision)
+		watchDone <- watchErr
+	}()
+
+	select {
+	case value := <-reloadValues:
+		re.Equal("after-compaction", value)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("custom compaction reload was not called")
+	}
+	_, err = suite.client.Put(suite.ctx, key, "after-reload-live")
+	re.NoError(err)
+	select {
+	case value := <-liveValues:
+		re.Equal("after-reload-live", value)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not resume after custom compaction reload")
+	}
+	re.NoError(<-watchDone)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherDoesNotAdvanceAfterLivePostCallbackFailure() {
+	re := suite.Require()
+	ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
+	defer cancel()
+
+	const key = "TestWatcherDoesNotAdvanceAfterLivePostCallbackFailure"
+	initialResp, err := suite.client.Put(ctx, key, "initial")
+	re.NoError(err)
+
+	postErr := errors.New("post callback failed")
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return postErr },
+		false, /* withPrefix */
+	)
+	watcher.SetRetryOnPostEventError()
+
+	type watchResult struct {
+		revision int64
+		err      error
+	}
+	watchDone := make(chan watchResult, 1)
+	go func() {
+		nextRevision, watchErr := watcher.watch(ctx, initialResp.Header.Revision+1)
+		watchDone <- watchResult{revision: nextRevision, err: watchErr}
+	}()
+	_, err = suite.client.Put(suite.ctx, key, "updated")
+	re.NoError(err)
+
+	select {
+	case result := <-watchDone:
+		re.ErrorIs(result.err, postErr)
+		re.Equal(initialResp.Header.Revision+1, result.revision)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher advanced after the failed live event batch")
+	}
+}
+
+func (suite *loopWatcherTestSuite) TestCustomCompactionReloadDoesNotEnableLivePostRetry() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
+
+	const key = "TestCustomCompactionReloadDoesNotEnableLivePostRetry"
+	_, err := suite.client.Put(ctx, key, "initial")
+	re.NoError(err)
+
+	postErr := errors.New("post callback failed")
+	observedValues := make(chan string, 3)
+	watcher := NewLoopWatcher(
+		ctx,
+		&watcherWG,
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(events []*clientv3.Event) error {
+			if len(events) == 0 {
+				return nil
+			}
+			value := string(events[0].Kv.Value)
+			observedValues <- value
+			if value == "first" {
+				return postErr
+			}
+			return nil
+		},
+		false, /* withPrefix */
+	)
+	watcher.SetCompactionReloadFn(func(context.Context) (int64, error) {
+		return 0, errors.New("unexpected compaction reload")
+	})
+	watcher.watchChangeRetryInterval = 10 * time.Millisecond
+	watcher.StartWatchLoop()
+	re.NoError(watcher.WaitLoad())
+
+	readObservedValue := func() string {
+		select {
+		case value := <-observedValues:
+			return value
+		case <-time.After(3 * time.Second):
+			suite.T().Fatal("watcher did not process the live event")
+			return ""
+		}
+	}
+
+	_, err = suite.client.Put(suite.ctx, key, "first")
+	re.NoError(err)
+	re.Equal("first", readObservedValue())
+
+	_, err = suite.client.Put(suite.ctx, key, "second")
+	re.NoError(err)
+	re.Equal("second", readObservedValue())
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherRetriesLivePostCallbackFailure() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
+
+	const key = "TestWatcherRetriesLivePostCallbackFailure"
+	_, err := suite.client.Put(ctx, key, "initial")
+	re.NoError(err)
+
+	state := struct {
+		sync.Mutex
+		committed    string
+		pending      string
+		failNext     bool
+		failureCount int
+	}{}
+	replayed := make(chan struct{}, 1)
+	postErr := errors.New("post callback failed")
+	watcher := NewLoopWatcher(
+		ctx,
+		&watcherWG,
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error {
+			state.Lock()
+			defer state.Unlock()
+			state.pending = state.committed
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			state.Lock()
+			defer state.Unlock()
+			state.pending = string(kv.Value)
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func(events []*clientv3.Event) error {
+			state.Lock()
+			defer state.Unlock()
+			if len(events) > 0 && state.failNext {
+				state.failNext = false
+				state.failureCount++
+				return postErr
+			}
+			state.committed = state.pending
+			if len(events) > 0 && state.committed == "updated" {
+				select {
+				case replayed <- struct{}{}:
+				default:
+				}
+			}
+			return nil
+		},
+		false, /* withPrefix */
+	)
+	watcher.SetRetryOnPostEventError()
+	watcher.watchChangeRetryInterval = 10 * time.Millisecond
+	watcher.StartWatchLoop()
+	re.NoError(watcher.WaitLoad())
+
+	state.Lock()
+	re.Equal("initial", state.committed)
+	state.failNext = true
+	state.Unlock()
+	_, err = suite.client.Put(ctx, key, "updated")
+	re.NoError(err)
+
+	select {
+	case <-replayed:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not replay the failed live event batch")
+	}
+	state.Lock()
+	defer state.Unlock()
+	re.Equal("updated", state.committed)
+	re.Equal(1, state.failureCount)
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherStopsCompactionReloadWhenContextCanceled() {
 	re := suite.Require()
 	const key = "TestWatcherStopsCompactionReloadWhenContextCanceled"
@@ -1409,13 +1847,13 @@ func (suite *loopWatcherTestSuite) TestWatcherStopsCompactionReloadWhenContextCa
 	)
 	watcher.SetReloadOnCompaction()
 
-	revision, shouldContinue := watcher.reloadWithRetry(ctx)
+	revision, shouldContinue := watcher.reloadAfterCompaction(ctx)
 	re.False(shouldContinue)
 	re.GreaterOrEqual(revision, putResp.Header.Revision+1)
 	re.Equal(1, putCalls)
 	re.Equal(1, postCalls)
 
-	revision, shouldContinue = watcher.reloadWithRetry(ctx)
+	revision, shouldContinue = watcher.reloadAfterCompaction(ctx)
 	re.False(shouldContinue)
 	re.Zero(revision)
 	re.Equal(1, putCalls)
@@ -1742,8 +2180,7 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		ctx, cancel := context.WithCancel(suite.ctx)
 		defer cancel()
-		fname := testutil.InitTempFileLogger("debug")
-		defer os.RemoveAll(fname)
+		fname := testutil.InitTempFileLogger(suite.T(), "debug")
 		watcherName := "request-progress-test"
 		if injectWatchChanBlock {
 			watcherName = "request-progress-block-test"
@@ -1840,9 +2277,9 @@ func (suite *loopWatcherTestSuite) put(re *require.Assertions, key, value string
 
 func TestWriteKeyToFile(t *testing.T) {
 	re := require.New(t)
-	tempFile, err := os.CreateTemp("", "testfile")
+	tempFile, err := os.CreateTemp(t.TempDir(), "testfile")
 	re.NoError(err)
-	defer os.Remove(tempFile.Name())
+	re.NoError(tempFile.Close())
 
 	key := "test/key123"
 	op := "get"
@@ -1857,9 +2294,9 @@ func TestWriteKeyToFile(t *testing.T) {
 
 func TestWriteKeyToFileMultipleKeys(t *testing.T) {
 	re := require.New(t)
-	tempFile, err := os.CreateTemp("", "testfile")
+	tempFile, err := os.CreateTemp(t.TempDir(), "testfile")
 	re.NoError(err)
-	defer os.Remove(tempFile.Name())
+	re.NoError(tempFile.Close())
 
 	keys := []string{"test/key123", "another/key456", "key789"}
 	op := "put"

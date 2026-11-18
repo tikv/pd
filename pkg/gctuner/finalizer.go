@@ -16,7 +16,7 @@ package gctuner
 
 import (
 	"runtime"
-	"sync/atomic"
+	"sync"
 )
 
 type finalizerCallback func()
@@ -24,7 +24,8 @@ type finalizerCallback func()
 type finalizer struct {
 	ref      *finalizerRef
 	callback finalizerCallback
-	stopped  atomic.Int32
+	mu       sync.Mutex
+	stopped  bool
 }
 
 type finalizerRef struct {
@@ -32,8 +33,10 @@ type finalizerRef struct {
 }
 
 func finalizerHandler(f *finalizerRef) {
+	f.parent.mu.Lock()
+	defer f.parent.mu.Unlock()
 	// stop calling callback
-	if f.parent.stopped.Load() > 0 {
+	if f.parent.stopped {
 		return
 	}
 	f.parent.callback()
@@ -52,6 +55,10 @@ func newFinalizer(callback finalizerCallback) *finalizer {
 	return f
 }
 
+// stop prevents further callbacks and waits for an in-flight callback to finish.
+// It must not be called from the callback itself.
 func (f *finalizer) stop() {
-	f.stopped.Store(1)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopped = true
 }

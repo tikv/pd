@@ -15,17 +15,19 @@
 package cluster_test
 
 import (
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -130,8 +132,7 @@ func (s *raftClusterTestSuite) checkAskSplit(cluster *tests.TestCluster) {
 	_, err = rc.HandleAskBatchSplit(req1)
 	re.ErrorIs(err, errs.ErrSchedulerTiKVSplitDisabled)
 	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]any{"schedule.enable-tikv-split-region": 0}, 0))
-	// wait ttl config takes effect
-	time.Sleep(time.Second)
+	testutil.Eventually(re, leaderServer.GetPersistOptions().IsTikvRegionSplitEnabled)
 
 	_, err = rc.HandleAskSplit(req)
 	re.NoError(err)
@@ -151,7 +152,16 @@ func (s *raftClusterTestSuite) checkAskSplit(cluster *tests.TestCluster) {
 }
 
 func (s *raftClusterTestSuite) TestPendingProcessedRegions() {
-	s.env.RunTestInNonMicroserviceEnv(s.checkPendingProcessedRegions)
+	re := s.Require()
+	// Keep the batch-split entries pending until the assertion. Use a fresh
+	// environment so no patrol pass is already in flight when it is disabled.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions"))
+	}()
+	env := tests.NewSchedulingTestEnvironment(s.T())
+	defer env.Cleanup()
+	env.RunTestInNonMicroserviceEnv(s.checkPendingProcessedRegions)
 }
 
 func (s *raftClusterTestSuite) checkPendingProcessedRegions(cluster *tests.TestCluster) {
@@ -186,8 +196,8 @@ func (s *raftClusterTestSuite) checkPendingProcessedRegions(cluster *tests.TestC
 	res, err := rc.HandleAskBatchSplit(req)
 	re.NoError(err)
 	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	pendingProcessedRegions := rc.GetPendingProcessedRegions()
-	sort.Slice(pendingProcessedRegions, func(i, j int) bool { return pendingProcessedRegions[i] < pendingProcessedRegions[j] })
+	slices.Sort(pendingProcessedRegions)
 	re.Equal(ids, pendingProcessedRegions)
 }

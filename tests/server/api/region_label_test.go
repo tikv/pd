@@ -25,8 +25,12 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
 
@@ -66,9 +70,9 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 	re.Empty(resp)
 
 	rules := []*labeler.LabelRule{
-		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
-		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
-		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: makeKeyRanges("abcd", "efef")},
+		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("1234", "5678")},
+		{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("ab12", "cd12")},
+		{ID: "rule3", Labels: []labeler.RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("abcd", "efef")},
 	}
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
@@ -98,7 +102,7 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 
 	patch := labeler.LabelRulePatch{
 		SetRules: []*labeler.LabelRule{
-			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: makeKeyRanges("ab12", "cd12")},
+			{ID: "rule2/a/b", Labels: []labeler.RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: keyutil.BuildKeyRangeMaps("ab12", "cd12")},
 		},
 		DeleteRules: []string{"rule1"},
 	}
@@ -115,10 +119,123 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 	re.NoError(err)
 }
 
-func makeKeyRanges(keys ...string) []any {
-	var res []any
-	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
-	}
-	return res
+func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		prefix := leader.GetAddr() + "/pd/api/v1/config/region-label"
+		affinityURL := leader.GetAddr() + "/pd/api/v2/affinity-groups"
+		const groupID = "protected-group"
+		ruleID := affinity.GetLabelRuleID(groupID)
+		ruleURL := prefix + "/rule/" + url.QueryEscape(ruleID)
+		data, err := json.Marshal(handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				groupID: {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+			},
+		})
+		re.NoError(err)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
+		var original labeler.LabelRule
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &original))
+
+		ordinary := &labeler.LabelRule{
+			ID: "ordinary-protected-batch", Labels: []labeler.RegionLabel{{Key: "k", Value: "v"}},
+			RuleType: labeler.KeyRange, Data: keyutil.BuildKeyRangeMaps("30", "40"),
+		}
+		data, err = json.Marshal(ordinary)
+		re.NoError(err)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.StatusOK(re)))
+		unwritten := *ordinary
+		unwritten.ID = "ordinary-rejected-batch"
+		expectedData, err := json.Marshal(errs.ErrAffinityLabelProtected.FastGenByArgs())
+		re.NoError(err)
+		protectedErrorChecks := []func([]byte, int, http.Header){
+			testutil.Status(re, http.StatusBadRequest),
+			testutil.WithHeader(re, "TiDB-Error-Code", "input"),
+			func(body []byte, _ int, _ http.Header) {
+				var response struct {
+					Code string          `json:"code"`
+					Msg  string          `json:"msg"`
+					Data json.RawMessage `json:"data"`
+				}
+				re.NoError(json.Unmarshal(body, &response))
+				re.Equal("input", response.Code)
+				re.Contains(response.Msg, "PD:affinity:ErrAffinityLabelProtected")
+				re.Contains(response.Msg, "affinity API")
+				re.JSONEq(string(expectedData), string(response.Data))
+			},
+		}
+
+		for _, rule := range []*labeler.LabelRule{
+			{ID: affinity.GetLabelRuleID("missing"), Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data},
+			{ID: "affinity-alias", Labels: []labeler.RegionLabel{{Key: affinity.AffinityLabelKey, Value: groupID}}, RuleType: labeler.KeyRange, Data: ordinary.Data},
+			{ID: ruleID, Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data},
+		} {
+			data, err = json.Marshal(rule)
+			re.NoError(err)
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, protectedErrorChecks...))
+			// Reject ordinary writes and deletions in the same batch too.
+			data, err = json.Marshal(labeler.LabelRulePatch{SetRules: []*labeler.LabelRule{&unwritten, rule}, DeleteRules: []string{ordinary.ID}})
+			re.NoError(err)
+			re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, protectedErrorChecks...))
+		}
+		re.NoError(testutil.CheckDelete(tests.TestDialClient, ruleURL, protectedErrorChecks...))
+		data, err = json.Marshal(labeler.LabelRulePatch{SetRules: []*labeler.LabelRule{&unwritten}, DeleteRules: []string{ordinary.ID, ruleID}})
+		re.NoError(err)
+		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, protectedErrorChecks...))
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, prefix+"/rule/ordinary-rejected-batch", nil, testutil.Status(re, http.StatusNotFound)))
+		var kept labeler.LabelRule
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, prefix+"/rule/"+ordinary.ID, &kept))
+		re.Equal(*ordinary, kept)
+
+		// Custom IDs are not owned by the affinity manager. Legacy rules may
+		// be replaced with ordinary labels or deleted through either endpoint.
+		for _, batch := range []bool{false, true} {
+			leftover := &labeler.LabelRule{
+				ID: "affinity-leftover", Labels: []labeler.RegionLabel{{Key: affinity.AffinityLabelKey, Value: "leftover"}},
+				RuleType: labeler.KeyRange, Data: keyutil.BuildKeyRangeMaps("50", "60"),
+			}
+			re.NoError(leader.GetRaftCluster().GetRegionLabeler().SetLabelRule(leftover))
+			replacement := &labeler.LabelRule{ID: leftover.ID, Labels: ordinary.Labels, RuleType: labeler.KeyRange, Data: ordinary.Data}
+			data, err = json.Marshal(replacement)
+			re.NoError(err)
+			if batch {
+				data, err = json.Marshal(labeler.LabelRulePatch{SetRules: []*labeler.LabelRule{replacement}})
+				re.NoError(err)
+				re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, testutil.StatusOK(re)))
+			} else {
+				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.StatusOK(re)))
+			}
+			re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, prefix+"/rule/"+leftover.ID, &kept))
+			re.Equal(ordinary.Labels, kept.Labels)
+			leftover.Data = keyutil.BuildKeyRangeMaps("50", "60")
+			re.NoError(leader.GetRaftCluster().GetRegionLabeler().SetLabelRule(leftover))
+			if batch {
+				data, err = json.Marshal(labeler.LabelRulePatch{DeleteRules: []string{leftover.ID}})
+				re.NoError(err)
+				re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, testutil.StatusOK(re)))
+			} else {
+				re.NoError(testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+leftover.ID, testutil.StatusOK(re)))
+			}
+			re.NoError(testutil.CheckGetJSON(tests.TestDialClient, prefix+"/rule/"+leftover.ID, nil, testutil.Status(re, http.StatusNotFound)))
+		}
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
+		re.Equal(original, kept)
+
+		// The owning API can still update its protected label rule's ranges.
+		data, err = json.Marshal(handlers.BatchModifyAffinityGroupsRequest{
+			Add: []handlers.GroupRangesModification{
+				{ID: groupID, Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+			},
+		})
+		re.NoError(err)
+		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
+		re.Equal(original.Labels, kept.Labels)
+		re.ElementsMatch(keyutil.BuildKeyRangeMaps("10", "20", "20", "30"), kept.Data)
+
+		re.NoError(testutil.CheckDelete(tests.TestDialClient, affinityURL+"/"+groupID+"?force=true", testutil.StatusOK(re)))
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, ruleURL, nil, testutil.Status(re, http.StatusNotFound)))
+		re.NoError(testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+ordinary.ID, testutil.StatusOK(re)))
+	})
 }

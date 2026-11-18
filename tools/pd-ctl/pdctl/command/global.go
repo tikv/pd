@@ -284,7 +284,7 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]any
 	err = tryURLs(cmd, endpoints, func(endpoint string) error {
 		var req *http.Request
 		var resp *http.Response
-		url := endpoint + "/" + prefix
+		url := strings.TrimRight(endpoint, "/") + "/" + strings.TrimLeft(prefix, "/")
 		switch method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodGet:
 			req, err = http.NewRequest(method, url, bytes.NewBuffer(data))
@@ -329,7 +329,7 @@ func patchJSON(cmd *cobra.Command, prefix string, input map[string]any) {
 // do send a request to server. Default is Get.
 func do(endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
 	var err error
-	url := endpoint + "/" + prefix
+	url := strings.TrimRight(endpoint, "/") + "/" + strings.TrimLeft(prefix, "/")
 	if method == "" {
 		method = http.MethodGet
 	}
