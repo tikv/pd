@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -124,6 +125,16 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		prefix := leader.GetAddr() + "/pd/api/v1/config/region-label"
+		waitLabelRuleSync := func(id string) {
+			if scheduling := cluster.GetSchedulingPrimaryServer(); scheduling != nil {
+				testutil.Eventually(re, func() bool {
+					return reflect.DeepEqual(
+						leader.GetRaftCluster().GetRegionLabeler().GetLabelRule(id),
+						scheduling.GetCluster().GetRegionLabeler().GetLabelRule(id),
+					)
+				})
+			}
+		}
 		affinityURL := leader.GetAddr() + "/pd/api/v2/affinity-groups"
 		const groupID = "protected-group"
 		ruleID := affinity.GetLabelRuleID(groupID)
@@ -135,6 +146,7 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		})
 		re.NoError(err)
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
+		waitLabelRuleSync(ruleID)
 		var original labeler.LabelRule
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &original))
 
@@ -145,6 +157,7 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		data, err = json.Marshal(ordinary)
 		re.NoError(err)
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.StatusOK(re)))
+		waitLabelRuleSync(ordinary.ID)
 		unwritten := *ordinary
 		unwritten.ID = "ordinary-rejected-batch"
 		protectedErrorChecks := []func([]byte, int, http.Header){
@@ -204,6 +217,7 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 			} else {
 				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.StatusOK(re)))
 			}
+			waitLabelRuleSync(leftover.ID)
 			re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, prefix+"/rule/"+leftover.ID, &kept))
 			re.Equal(ordinary.Labels, kept.Labels)
 			leftover.Data = keyutil.BuildKeyRangeMaps("50", "60")
@@ -215,6 +229,7 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 			} else {
 				re.NoError(testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+leftover.ID, testutil.StatusOK(re)))
 			}
+			waitLabelRuleSync(leftover.ID)
 			re.NoError(testutil.CheckGetJSON(tests.TestDialClient, prefix+"/rule/"+leftover.ID, nil, testutil.Status(re, http.StatusNotFound)))
 		}
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
@@ -228,12 +243,15 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		})
 		re.NoError(err)
 		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
+		waitLabelRuleSync(ruleID)
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
 		re.Equal(original.Labels, kept.Labels)
 		re.ElementsMatch(keyutil.BuildKeyRangeMaps("10", "20", "20", "30"), kept.Data)
 
 		re.NoError(testutil.CheckDelete(tests.TestDialClient, affinityURL+"/"+groupID+"?force=true", testutil.StatusOK(re)))
+		waitLabelRuleSync(ruleID)
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, ruleURL, nil, testutil.Status(re, http.StatusNotFound)))
 		re.NoError(testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+ordinary.ID, testutil.StatusOK(re)))
+		waitLabelRuleSync(ordinary.ID)
 	})
 }
