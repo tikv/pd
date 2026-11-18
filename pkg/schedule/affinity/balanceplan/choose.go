@@ -88,21 +88,26 @@ type solution struct {
 	leader        int
 }
 
-// Bounds shared by all leader rules, conflict branches and directed repairs
-// of one choice. After the first node, cancellation and work also stop search.
+// Bounds for one rule search. Directed repairs share the node bound but each
+// fixed target has its own assignment-step budget.
 const (
 	maxSearchNodes = 64
 	maxAssignSteps = 1024
 )
 
-// ruleSearch counts the work of one choice's rule search.
+// ruleSearch counts the work of a rule search and records any cutoff.
 type ruleSearch struct {
 	p            *planner
 	nodes, steps int
+	limited      bool
 }
 
 func (rs *ruleSearch) done() bool {
-	return rs.nodes >= maxSearchNodes || rs.steps >= maxAssignSteps || rs.nodes > 0 && rs.p.stopped()
+	if rs.nodes >= maxSearchNodes || rs.steps >= maxAssignSteps || rs.nodes > 0 && rs.p.stopped() {
+		rs.limited = true
+		return true
+	}
+	return false
 }
 
 // choose collects improving complete rule assignments before checking or
@@ -390,30 +395,64 @@ func (p *planner) repairs(g *groupState, sol solution, feedback TargetFeedback) 
 // assignTarget reuses the bounded rule assignment for a fixed physical target.
 // The checker's fitted rule need not be the planner's previous assignment.
 func (p *planner) assignTarget(g *groupState, voters []int, rs *ruleSearch) solution {
-	var sol solution
-	for _, host := range p.leaderHosts(g) {
-		if rs.done() {
-			break
+	if p.stopped() {
+		p.placementLimited = true
+		return solution{}
+	}
+	hosts := p.leaderHosts(g)
+	if len(hosts) == 0 {
+		return solution{}
+	}
+	// Charge one repair attempt to the caller; its internal assignments cannot
+	// exhaust the step budget needed to reach subsequent repair candidates.
+	rs.steps++
+	local := &ruleSearch{p: p}
+	var best solution
+	assignments := 0
+	p.assignForced(g, voters, make([][]int, len(g.Rules)), local, func(must [][]int) bool {
+		if p.stopped() {
+			p.placementLimited = true
+			return true
 		}
-		if p.assignForced(g, voters, make([][]int, len(g.Rules)), rs, func(must [][]int) bool {
-			if g.LeaderPinned && !slices.Contains(must[host], g.Leader) {
+		sels := make([]choice, len(g.Rules))
+		for ri := range g.Rules {
+			c, ok := p.pickRule(g, ri, must[ri], nil, false)
+			if !ok {
 				return false
 			}
-			sels := make([]choice, len(g.Rules))
-			for ri := range g.Rules {
-				c, ok := p.pickRule(g, ri, must[ri], nil, ri == host)
-				if !ok {
-					return false
-				}
-				sels[ri] = c
-			}
-			sol = combine(sels)
-			return true
-		}) {
-			break
+			sels[ri] = c
 		}
+		if assignments >= maxSearchNodes {
+			p.placementLimited = true
+			return true
+		}
+		assignments++
+		for _, host := range hosts {
+			if p.stopped() {
+				p.placementLimited = true
+				return true
+			}
+			if g.LeaderPinned && !slices.Contains(must[host], g.Leader) {
+				continue
+			}
+			leadChoice, ok := p.pickRule(g, host, must[host], nil, true)
+			if !ok {
+				continue
+			}
+			base := sels[host]
+			sels[host] = leadChoice
+			sol := combine(sels)
+			sels[host] = base
+			if !best.ok || sol.c.cmp(best.c) < 0 {
+				best = sol
+			}
+		}
+		return false
+	})
+	if local.limited {
+		p.placementLimited = true
 	}
-	return sol
+	return best
 }
 
 // pickRule selects one rule's stores, with the leader when host is set. The
@@ -424,15 +463,32 @@ func (p *planner) assignTarget(g *groupState, voters []int, rs *ruleSearch) solu
 // keeps voters and only picks a leader.
 func (p *planner) pickRule(g *groupState, ri int, must, forbid []int, host bool) (choice, bool) {
 	r := g.Rules[ri]
-	var skip func(int) bool
-	if len(forbid) > 0 {
-		skip = func(s int) bool { return slices.Contains(forbid, s) }
+	target, ok := p.isolation(g, ri)
+	if !ok {
+		return choice{}, false
 	}
-	cands := p.candidates(p.candBuf, g, ri, skip)
-	p.candBuf = cands // reused: the pick below does not keep cands
-	for _, s := range must {
-		if _, found := slices.BinarySearch(cands, s); !found {
-			return choice{}, false
+	var cands []int
+	if len(must) == r.Count {
+		// The full candidate set is only needed for the cached isolation target.
+		// A fixed rule can evaluate its mandatory stores directly.
+		cands = slices.Clone(must)
+		slices.Sort(cands)
+		for i, s := range cands {
+			if i > 0 && cands[i-1] == s || slices.Contains(forbid, s) || slices.Contains(g.Exclude, s) || !p.accepts(g, ri, s) {
+				return choice{}, false
+			}
+		}
+	} else {
+		var skip func(int) bool
+		if len(forbid) > 0 {
+			skip = func(s int) bool { return slices.Contains(forbid, s) }
+		}
+		cands = p.candidates(p.candBuf, g, ri, skip)
+		p.candBuf = cands // reused: the pick below does not keep cands
+		for _, s := range must {
+			if _, found := slices.BinarySearch(cands, s); !found {
+				return choice{}, false
+			}
 		}
 	}
 	var lead func(int) bool
@@ -446,8 +502,7 @@ func (p *planner) pickRule(g *groupState, ri int, must, forbid []int, host bool)
 	if host {
 		c = res[1][r.Count]
 	}
-	target, ok := p.isolation(g, ri)
-	if !ok || !c.ok || c.v.cmpIsolation(target) != 0 {
+	if !c.ok || c.v.cmpIsolation(target) != 0 {
 		return choice{}, false
 	}
 	return c, true

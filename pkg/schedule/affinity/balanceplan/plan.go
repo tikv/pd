@@ -273,6 +273,9 @@ func validRule(r *Rule, stores int) bool {
 	if r == nil || r.Count <= 0 || r.Count > maxCount || r.depth() > maxDepth {
 		return false
 	}
+	if r.Role > RoleFollower || r.Role == RoleLeader && r.Count != 1 {
+		return false
+	}
 	if r.IsolationDepth < 0 || r.IsolationDepth > r.depth() {
 		return false
 	}
@@ -310,11 +313,21 @@ func supported(g *Group, stores int, valid func(*Rule) bool) bool {
 		seen[s] = true
 		counts[ri]++
 	}
+	leaders := 0
 	for ri, r := range g.Rules {
 		if !valid(r) || counts[ri] != r.Count {
 			return false
 		}
+		if r.Role == RoleLeader {
+			leaders++
+			if leaders > 1 {
+				return false
+			}
+		}
 		for k, s := range g.Voters {
+			if ruleIndex(g, k) == ri && (s == g.Leader && r.Role == RoleFollower || s != g.Leader && r.Role == RoleLeader) {
+				return false
+			}
 			if r.IsolationDepth == 0 || ruleIndex(g, k) != ri {
 				continue
 			}

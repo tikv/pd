@@ -15,6 +15,7 @@
 package balanceplan
 
 import (
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"testing"
@@ -1054,4 +1055,267 @@ func TestRevertRestoresRuleAssignment(t *testing.T) {
 	re.Equal(Score{2, 1}, p.revert(origV, origL, voters, leaders))
 	re.Equal([]int{2, 0}, g.cur)
 	re.Equal([]int{1, 0}, g.curRule)
+}
+
+// Fixed voters can assign their leader to any voter rule, not just the first.
+func TestAssignTargetChoosesCheapestLeaderRule(t *testing.T) {
+	re := require.New(t)
+	in := &Input{Stores: 2, BaseLeaders: []int{8, 0}, Groups: []Group{{
+		Rules:  []*Rule{{Role: RoleVoter, Count: 1, Stores: []int{0}}, {Role: RoleVoter, Count: 1, Stores: []int{1}}},
+		Voters: []int{0, 1}, RuleOf: []int{0, 1}, Leader: 0, CanLead: allTrue(2),
+	}}}
+	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
+	g := &p.gs[0]
+	sol := p.assignTarget(g, []int{0, 1}, &ruleSearch{p: p})
+	re.True(sol.ok)
+	re.Equal(1, sol.leader, "the second voter rule has the cheaper leader")
+	re.Equal([]int{0, 1}, sol.rules)
+}
+
+func TestInvalidLeaderRulesStayFixed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		rules  []*Rule
+		ruleOf []int
+	}{
+		{"unknown role", []*Rule{{Role: RoleFollower + 1, Count: 2}}, []int{0, 0}},
+		{"multiple leaders", []*Rule{{Role: RoleLeader, Count: 1}, {Role: RoleLeader, Count: 1}}, []int{0, 1}},
+		{"leader count", []*Rule{{Role: RoleLeader, Count: 2}}, []int{0, 0}},
+		{"follower leader", []*Rule{{Role: RoleFollower, Count: 1}, {Role: RoleVoter, Count: 1}}, []int{0, 1}},
+		{"leader in voter rule", []*Rule{{Role: RoleVoter, Count: 1}, {Role: RoleLeader, Count: 1}}, []int{0, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			g := Group{Rules: tc.rules, RuleOf: tc.ruleOf, Voters: []int{0, 1}, Leader: 0, CanLead: allTrue(2)}
+			result := Plan(&Input{Stores: 2, Groups: []Group{g}}, Options{})
+			re.Equal(StopNoGroups, result.Stop)
+			re.Equal(g.Voters, result.Voters[0])
+			re.Equal(g.Leader, result.Leaders[0])
+		})
+	}
+}
+
+// Repair candidates have independent assignment budgets, even with overlapping rules.
+func TestAssignTargetRepairBudget(t *testing.T) {
+	in := general(1, 20, 5, 1)
+	g := &in.Groups[0]
+	stores := g.Rules[0].Stores
+	g.Rules = []*Rule{
+		{Role: RoleVoter, Count: 2, Stores: stores},
+		{Role: RoleVoter, Count: 2, Stores: stores},
+		{Role: RoleVoter, Count: 1, Stores: stores},
+	}
+	g.RuleOf = []int{0, 0, 1, 1, 2}
+	// Four forced voters leave enough outer search nodes for all eight repairs.
+	g.Forced, g.LeaderPinned = []int{0, 1, 2, 3}, true
+	for s := range 5 {
+		in.BaseVoters[s] = 10
+	}
+	var tried []int
+	g.CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
+		if slices.Contains(voters, 4) {
+			return TargetFeedback{}
+		}
+		for s := 10; s <= 17; s++ {
+			if slices.Contains(voters, s) {
+				tried = append(tried, s)
+				if s == 15 {
+					return TargetFeedback{}
+				}
+				return TargetFeedback{Status: TargetRejected}
+			}
+		}
+		return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{
+			{Old: voters[len(voters)-1], Candidates: []int{10, 11, 12, 13, 14, 15, 16, 17}},
+		}}
+	}
+	r := Plan(in, Options{Seed: 7})
+	t.Logf("repair: changed=%d limited=%v work=%d tried=%v voters=%v", r.Changed, r.PlacementLimited, r.Work, tried, r.Voters[0])
+	require.Equal(t, 1, r.Changed)
+	require.Contains(t, r.Voters[0], 15)
+	require.GreaterOrEqual(t, len(tried), 6)
+	require.Equal(t, []int{10, 11, 12, 13, 14, 15}, tried[:6])
+	require.True(t, r.Score.Less(r.Baseline))
+	require.False(t, r.PlacementLimited)
+
+	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
+	rs := &ruleSearch{p: p}
+	sol := p.assignTarget(&p.gs[0], []int{0, 1, 2, 3, 15}, rs)
+	require.True(t, sol.ok)
+	require.LessOrEqual(t, rs.steps, 1, "internal assignments must not consume later repairs' steps")
+}
+
+func TestAssignTargetFixedWork(t *testing.T) {
+	in := general(1, 300, 5, 3)
+	g := &in.Groups[0]
+	r := g.Rules[0]
+	for s := range in.Stores {
+		r.Location[s] = []int32{int32(s % 3), int32(s % 15), int32(s)} // zone, rack, host
+	}
+	g.Rules = []*Rule{
+		{Role: RoleVoter, Count: 2, Stores: r.Stores, Location: r.Location},
+		{Role: RoleVoter, Count: 2, Stores: r.Stores, Location: r.Location},
+		{Role: RoleVoter, Count: 1, Stores: r.Stores, Location: r.Location},
+	}
+	g.Voters, g.RuleOf = []int{0, 1, 3, 4, 2}, []int{0, 0, 1, 1, 2}
+	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
+	for ri := range g.Rules {
+		_, ok := p.isolation(&p.gs[0], ri)
+		require.True(t, ok)
+	}
+	p.work = 0
+	sol := p.assignTarget(&p.gs[0], g.Voters, &ruleSearch{p: p})
+	t.Logf("fixed five-voter assignment on 300 stores: work=%d", p.work)
+	require.True(t, sol.ok)
+	require.ElementsMatch(t, g.Voters, sol.voters)
+	require.Less(t, p.work, int64(500), "cached fixed assignments must only scan their five voters")
+}
+
+func TestAssignTargetLimits(t *testing.T) {
+	for _, reason := range []string{"assignments", "steps", "canceled", "work"} {
+		t.Run(reason, func(t *testing.T) {
+			count, rules := 1, 5
+			if reason == "steps" {
+				count, rules = 2, 6
+			}
+			in := general(1, 30, count*rules, 2)
+			g := &in.Groups[0]
+			base := g.Rules[0]
+			g.Rules = nil
+			for range rules {
+				g.Rules = append(g.Rules, &Rule{Role: RoleVoter, Count: count, Stores: base.Stores, Location: base.Location})
+			}
+			for k := range g.RuleOf {
+				g.RuleOf[k] = k / count
+			}
+			voters := slices.Clone(g.Voters)
+			if reason == "steps" {
+				// Every complete assignment misses the best isolation, so the
+				// step budget must stop the search before the valid-leaf bound.
+				for i := range voters {
+					voters[i] = 2 * i
+				}
+			}
+			p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget, Cancel: func() bool { return reason == "canceled" }})
+			if reason == "work" {
+				p.work = p.opt.WorkBudget
+			}
+			rs := &ruleSearch{p: p}
+			sol := p.assignTarget(&p.gs[0], voters, rs)
+			require.Equal(t, reason == "assignments", sol.ok)
+			require.True(t, p.placementLimited)
+			require.LessOrEqual(t, rs.steps, 1)
+			require.Zero(t, rs.nodes)
+		})
+	}
+}
+
+// fullRulePick retains the full candidate scan as a reference for fixed-rule picks.
+func fullRulePick(p *planner, g *groupState, ri int, must, forbid []int, host bool) (choice, bool) {
+	r := g.Rules[ri]
+	target, ok := p.isolation(g, ri)
+	if !ok {
+		return choice{}, false
+	}
+	cands := p.candidates(nil, g, ri, func(s int) bool { return slices.Contains(forbid, s) })
+	for _, s := range must {
+		if !slices.Contains(cands, s) {
+			return choice{}, false
+		}
+	}
+	var lead func(int) bool
+	if host {
+		lead = func(s int) bool { return p.leaderCapable(g, r, s) && (!g.LeaderPinned || s == g.Leader) }
+	}
+	picks := p.pickAll(g, r, cands, must, 0, r.Count, lead)
+	c := picks[0][r.Count]
+	if host {
+		c = picks[1][r.Count]
+	}
+	return c, c.ok && c.v.cmpIsolation(target) == 0
+}
+
+func TestPickRuleFixedMatchesFullScan(t *testing.T) {
+	rng := rand.New(rand.NewPCG(17, 38))
+	for i := range 400 {
+		in := general(1, 300, 1+rng.IntN(maxCount), 1)
+		original := &in.Groups[0]
+		r := original.Rules[0]
+		for s := range in.Stores {
+			zone := s % 5
+			switch i % 3 {
+			case 0:
+				zone = 0 // Exercise recursive picks below a shared prefix.
+			case 1:
+				zone = s // Many domains and only a few mandatory stores.
+			}
+			r.Location[s] = []int32{int32(zone), int32(s % 25), int32(s)}
+			in.BaseVoters[s], in.BaseLeaders[s] = rng.IntN(9), rng.IntN(5)
+			original.CanLead[s] = rng.IntN(2) == 0
+		}
+		r.IsolationDepth = []int{0, 2, 3}[i%3]
+		// Original voters remain candidates even outside the shared store list.
+		r.Stores = r.Stores[maxCount:]
+		original.Exclude = []int{298}
+		original.LeaderPinned = i%4 == 0
+		p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
+		require.Len(t, p.gs, 1)
+		g := &p.gs[0]
+		g.startV, g.startLd = g.Voters, g.Leader
+		forbid := []int{299}
+		for _, host := range []bool{false, true} {
+			full, ok := fullRulePick(p, g, 0, nil, forbid, host)
+			require.True(t, ok)
+			must := slices.Clone(full.sel)
+			if i%2 == 0 {
+				must = rng.Perm(in.Stores)[:r.Count]
+			}
+			rng.Shuffle(len(must), func(a, b int) { must[a], must[b] = must[b], must[a] })
+			before := slices.Clone(must)
+			want, wantOK := fullRulePick(p, g, 0, must, forbid, host)
+			work := p.work
+			got, gotOK := p.pickRule(g, 0, must, forbid, host)
+			require.Equal(t, wantOK, gotOK, "case %d host=%v must=%v", i, host, must)
+			if gotOK {
+				require.Equal(t, want.v, got.v, "case %d host=%v", i, host)
+				require.Equal(t, want.leader, got.leader, "case %d host=%v", i, host)
+				require.ElementsMatch(t, want.sel, got.sel)
+			}
+			require.Equal(t, before, must)
+			require.LessOrEqual(t, p.work-work, int64(r.Count*(r.depth()+1)), "case %d must not scan all stores", i)
+		}
+	}
+}
+
+func TestPickRuleFixedMembership(t *testing.T) {
+	in := general(1, 8, 3, 1)
+	g := &in.Groups[0]
+	g.Rules = []*Rule{{Role: RoleVoter, Count: 2, Stores: []int{3, 4, 5}}, {Role: RoleVoter, Count: 1, Stores: []int{6}}}
+	g.RuleOf = []int{0, 0, 1}
+	g.Exclude = []int{4}
+	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
+	for _, tc := range []struct {
+		name string
+		must []int
+		ok   bool
+	}{
+		{"original voters", []int{1, 0}, true},
+		{"shared member", []int{3, 0}, true},
+		{"other rule's original voter", []int{2, 0}, false},
+		{"nonmember", []int{7, 0}, false},
+		{"excluded", []int{4, 0}, false},
+		{"forbidden", []int{5, 0}, false},
+		{"duplicate", []int{0, 0}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := p.pickRule(&p.gs[0], 0, tc.must, []int{5}, false)
+			require.Equal(t, tc.ok, ok)
+		})
+	}
+	for ri := range g.Rules {
+		cands := p.candidates(nil, &p.gs[0], ri, nil)
+		for s := range in.Stores {
+			require.Equal(t, slices.Contains(cands, s), p.accepts(&p.gs[0], ri, s) && !slices.Contains(g.Exclude, s))
+		}
+	}
 }

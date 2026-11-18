@@ -71,12 +71,16 @@ type choice struct {
 // joinInto stores a+b in cells[i] when it beats the current cell.
 func joinInto(cells []choice, i int, a, b *choice) {
 	v := a.v.add(b.v)
-	if cells[i].ok && v.cmp(cells[i].v) >= 0 {
-		return
-	}
 	leader := a.leader
 	if leader < 0 {
 		leader = b.leader
+	}
+	// Match picker's leader tie-break even when a fixed candidate slice skips
+	// a DP level that the full candidate set would traverse.
+	if cells[i].ok {
+		if c := v.cmp(cells[i].v); c > 0 || c == 0 && leader >= cells[i].leader {
+			return
+		}
 	}
 	sel := make([]int, 0, len(a.sel)+len(b.sel))
 	cells[i] = choice{ok: true, v: v, sel: append(append(sel, a.sel...), b.sel...), leader: leader}
@@ -366,7 +370,7 @@ func (pk *picker) finish(res *[2][]choice) {
 func (p *planner) partition(r *Rule, stores []int, level int) [][]int {
 	sc := &p.parts[level]
 	sorted := append(sc.sorted[:0], stores...)
-	if level == r.level && r.domainOf != nil {
+	if level == r.level && r.domainOf != nil && len(stores) > r.domains {
 		start := slices.Grow(sc.start[:0], r.domains+1)[:r.domains+1]
 		clear(start)
 		for _, s := range stores {
