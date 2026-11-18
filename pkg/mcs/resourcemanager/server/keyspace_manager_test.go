@@ -659,7 +659,6 @@ func TestRUTracker(t *testing.T) {
 	})
 }
 
-// getRUPerSecAt decays the EMA from the last sample time without changing the tracker.
 func TestRUTrackerGetRUPerSecAt(t *testing.T) {
 	const floatDelta = 0.1
 	re := require.New(t)
@@ -672,7 +671,6 @@ func TestRUTrackerGetRUPerSecAt(t *testing.T) {
 	rt.sample(0, now, 100)
 	re.Equal(100.0, rt.getRUPerSecAt(now))
 	re.Equal(100.0, rt.getRUPerSecAt(now.Add(-time.Second)))
-	// Without new samples, the RU/s halves every time constant.
 	re.InDelta(50.0, rt.getRUPerSecAt(now.Add(5*time.Second)), floatDelta)
 	re.InDelta(25.0, rt.getRUPerSecAt(now.Add(10*time.Second)), floatDelta)
 	re.Equal(100.0, rt.getRUPerSec())
