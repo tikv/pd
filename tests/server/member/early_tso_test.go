@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -62,7 +63,11 @@ func pauseAfterTSOInitialization(t *testing.T, memberID uint64) (wait, resume fu
 
 func pauseAtTSOCheckpoint(t *testing.T, memberID uint64, checkpoint string) (wait, resume func()) {
 	t.Helper()
-	hook := "github.com/tikv/pd/server/cluster/" + checkpoint
+	return pauseMemberHook(t, memberID, "github.com/tikv/pd/server/cluster/"+checkpoint)
+}
+
+func pauseMemberHook(t *testing.T, memberID uint64, hook string) (wait, resume func()) {
+	t.Helper()
 	reached := make(chan struct{})
 	release := make(chan struct{})
 	var reachedOnce sync.Once
@@ -82,7 +87,7 @@ func pauseAtTSOCheckpoint(t *testing.T, memberID uint64, checkpoint string) (wai
 		select {
 		case <-reached:
 		case <-time.After(30 * time.Second):
-			t.Fatalf("leader initialization did not reach %s", checkpoint)
+			t.Fatalf("leader did not reach %s", hook)
 		}
 	}, resume
 }
@@ -393,6 +398,7 @@ func checkInitializationFailureCleanup(t *testing.T, failureHook string, corrupt
 	re.NotNil(lease)
 	waitClose, resumeClose := pauseLeaseClose(t, lease)
 	t.Cleanup(resumeClose)
+	waitWithdrawal, resumeWithdrawal := pauseMemberHook(t, leader.GetServerID(), "github.com/tikv/pd/pkg/member/afterMemberLeaderWithdrawn")
 	fname := testutil.InitTempFileLogger(t, "info")
 
 	var clearFailure func()
@@ -422,11 +428,21 @@ func checkInitializationFailureCleanup(t *testing.T, failureHook string, corrupt
 	re.NoError(failpoint.Enable(campaignHook, fmt.Sprintf(`return("%d")`, leader.GetServerID())))
 	t.Cleanup(func() { re.NoError(failpoint.Disable(campaignHook)) })
 	resume()
+	waitWithdrawal()
+	re.Nil(svr.GetMember().GetLeader())
+	re.Same(lease, svr.GetMember().GetLeadership().GetLease())
+	re.False(lease.IsExpired())
+	members, err := client.GetMembers(t.Context(), &pdpb.GetMembersRequest{})
+	re.NoError(err)
+	re.Nil(members.GetLeader())
+	requireEarlyTSORejected(t, stream, leader.GetClusterID())
+	requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+	resumeWithdrawal()
 	waitClose()
 	re.False(svr.IsServing())
 	re.Nil(svr.GetMember().GetLeadership().GetLease())
 	re.True(svr.GetTSOAllocator().IsInitialize())
-	requireEarlyTSORejected(t, stream, leader.GetClusterID())
+	requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 	if failureLog != "" {
 		content, err := os.ReadFile(fname)
 		re.NoError(err)
@@ -447,4 +463,134 @@ func checkInitializationFailureCleanup(t *testing.T, failureHook string, corrupt
 	testutil.Eventually(re, svr.IsServing)
 	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 	re.Negative(tsoutil.CompareTimestamp(previous, next))
+}
+
+func TestEarlyTSOInitializationRetryAfterWithdrawal(t *testing.T) {
+	re := require.New(t)
+	cluster := newEarlyTSOCluster(t, 1)
+	leader := cluster.GetLeaderServer()
+	svr := leader.GetServer()
+	client := earlyTSOClient(t, leader)
+	previous := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+
+	const saveHook = "github.com/tikv/pd/pkg/tso/failedToSaveTimestamp"
+	re.NoError(failpoint.Enable(saveHook, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(saveHook)) })
+	oldLease := svr.GetMember().GetLeadership().GetLease()
+	leader.ResetPDLeader()
+	testutil.Eventually(re, func() bool {
+		return svr.IsServing() && svr.GetMember().GetLeadership().GetLease() != oldLease
+	})
+	re.False(svr.GetTSOAllocator().IsInitialize())
+	lease := svr.GetMember().GetLeadership().GetLease()
+
+	// Let the retry persist its window, then finish it only after the campaign
+	// has withdrawn readiness and PD identity, with the same lease still live.
+	waitRetry, resumeRetry := pauseAtTSOCheckpoint(t, leader.GetServerID(), "afterTSOInitializationBeforeReady")
+	re.NoError(failpoint.Disable(saveHook))
+	waitRetry()
+	waitWithdrawal, resumeWithdrawal := pauseMemberHook(t, leader.GetServerID(), "github.com/tikv/pd/pkg/member/afterMemberLeaderWithdrawn")
+	const exitHook = "github.com/tikv/pd/server/exitCampaignLeader"
+	re.NoError(failpoint.Enable(exitHook, fmt.Sprintf(`return("%d")`, leader.GetServerID())))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(exitHook)) })
+	waitWithdrawal()
+	re.Nil(svr.GetMember().GetLeader())
+	re.Same(lease, svr.GetMember().GetLeadership().GetLease())
+	re.False(lease.IsExpired())
+	waitCheck, resumeCheck := pauseAtTSOCheckpoint(t, leader.GetServerID(), "afterTSOServiceCheck")
+	resumeRetry()
+	waitCheck()
+	re.True(svr.GetTSOAllocator().IsInitialize())
+	members, err := client.GetMembers(t.Context(), &pdpb.GetMembersRequest{})
+	re.NoError(err)
+	re.Nil(members.GetLeader())
+	requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+
+	re.NoError(failpoint.Disable(exitHook))
+	resumeCheck()
+	resumeWithdrawal()
+	testutil.Eventually(re, func() bool {
+		return svr.IsServing() && svr.GetMember().GetLeadership().GetLease() != lease
+	})
+	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+	re.Negative(tsoutil.CompareTimestamp(previous, next))
+}
+
+func TestEarlyTSOInitializationWritesAfterLeadershipLoss(t *testing.T) {
+	for _, atCommit := range []bool{false, true} {
+		name := "before metadata loading"
+		if atCommit {
+			name = "during metadata commit"
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			cluster := newEarlyTSOCluster(t, 1)
+			leader := cluster.GetLeaderServer()
+			svr := leader.GetServer()
+			client := earlyTSOClient(t, leader)
+			previous := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+			wait, resume := pauseAfterTSOInitialization(t, leader.GetServerID())
+			leader.ResetPDLeader()
+			wait()
+			lease := svr.GetMember().GetLeadership().GetLease()
+			// Missing rules make initialization create the default placement rule.
+			_, err := svr.GetClient().Delete(t.Context(), keypath.RulesPathPrefix(), clientv3.WithPrefix())
+			re.NoError(err)
+			waitNext, resumeNext := pauseAtTSOCheckpoint(t, leader.GetServerID(), "beforeTSOInitialized")
+
+			resumeCommit := func() {}
+			if atCommit {
+				const hook = "github.com/tikv/pd/pkg/storage/kv/beforeTxnCommit"
+				reached := make(chan struct{})
+				release := make(chan struct{})
+				var once sync.Once
+				resumeCommit = sync.OnceFunc(func() { close(release) })
+				re.NoError(failpoint.EnableCall(hook, func(ops []clientv3.Op) {
+					for _, op := range ops {
+						if op.IsPut() && strings.HasPrefix(string(op.KeyBytes()), keypath.RulesPathPrefix()) {
+							once.Do(func() { close(reached) })
+							<-release
+							return
+						}
+					}
+				}))
+				t.Cleanup(func() {
+					resumeCommit()
+					re.NoError(failpoint.Disable(hook))
+				})
+				resume()
+				select {
+				case <-reached:
+				case <-time.After(30 * time.Second):
+					t.Fatal("initialization did not attempt to persist placement rules")
+				}
+			}
+
+			const updateHook = "github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"
+			re.NoError(failpoint.Enable(updateHook, "return(true)"))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(updateHook)) })
+			testutil.Eventually(re, func() bool {
+				resp, err := svr.GetClient().Get(t.Context(), svr.GetMember().GetElectionPath())
+				re.NoError(err)
+				return len(resp.Kvs) == 0 && !svr.GetTSOAllocator().IsInitialize()
+			})
+			resume()
+			resumeCommit()
+			// The next campaign is paused before it can initialize anything. Any
+			// persisted rule here would therefore come from the withdrawn term.
+			waitNext()
+			re.NotSame(lease, svr.GetMember().GetLeadership().GetLease())
+			rules, err := svr.GetClient().Get(t.Context(), keypath.RulesPathPrefix(), clientv3.WithPrefix())
+			re.NoError(err)
+			re.Empty(rules.Kvs)
+			re.NoError(failpoint.Disable(updateHook))
+			resumeNext()
+			testutil.Eventually(re, svr.IsServing)
+			rules, err = svr.GetClient().Get(t.Context(), keypath.RulesPathPrefix(), clientv3.WithPrefix())
+			re.NoError(err)
+			re.NotEmpty(rules.Kvs)
+			next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+			re.Negative(tsoutil.CompareTimestamp(previous, next))
+		})
+	}
 }

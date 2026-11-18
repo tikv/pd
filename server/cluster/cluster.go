@@ -43,6 +43,7 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/gctuner"
@@ -200,7 +201,7 @@ type RaftCluster struct {
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
 	tsoAllocator             *tso.Allocator
-	onTSOReady               func(bool)
+	onTSOReady               func(*election.Lease)
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
@@ -228,8 +229,9 @@ func (c *RaftCluster) SetOnStoreBuried(fn func(storeID string)) {
 }
 
 // SetTSOReadyCallback installs the embedded TSO readiness callback before the
-// cluster starts. It is called after initialization succeeds and before reset.
-func (c *RaftCluster) SetTSOReadyCallback(fn func(bool)) {
+// cluster starts. It receives the lease captured before initialization on success,
+// and nil before reset.
+func (c *RaftCluster) SetTSOReadyCallback(fn func(*election.Lease)) {
 	c.onTSOReady = fn
 }
 
@@ -346,6 +348,16 @@ func (c *RaftCluster) InitCluster(
 	opt sc.ConfProvider,
 	hbstreams *hbstream.HeartbeatStreams,
 	keyspaceGroupManager *keyspace.GroupManager) error {
+	return c.initClusterWithStorage(id, opt, hbstreams, keyspaceGroupManager, c.storage)
+}
+
+func (c *RaftCluster) initClusterWithStorage(
+	id id.Allocator,
+	opt sc.ConfProvider,
+	hbstreams *hbstream.HeartbeatStreams,
+	keyspaceGroupManager *keyspace.GroupManager,
+	metadataStorage storage.Storage,
+) error {
 	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
@@ -355,7 +367,7 @@ func (c *RaftCluster) InitCluster(
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
-	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
+	c.ruleManager = placement.NewRuleManager(c.ctx, metadataStorage, c, c.GetOpts())
 	c.keyRangeManager = keyrange.NewManager()
 	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
 	return nil
@@ -379,9 +391,18 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
+	lease := c.member.GetLeadership().GetLease()
+	term, ok := c.member.GetLeadership().CaptureTerm()
+	if !ok || !c.member.IsLeaseValid(lease) || term.LeaseID() != lease.GetID() {
+		return errs.ErrNotLeader
+	}
+	metadataStorage, err := newLeaderStorage(c.storage, c.member, lease, term)
+	if err != nil {
+		return err
+	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
 	initClusterStart := time.Now()
-	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	err = c.initClusterWithStorage(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager(), metadataStorage)
 	if err != nil {
 		log.Warn("failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
 		return err
@@ -406,6 +427,9 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 	})
 	defer func() {
+		if err != nil {
+			c.cancel()
+		}
 		if !bootstrap && err != nil {
 			resignOnFailure()
 			c.stopTSOJobsIfNeeded()
@@ -413,6 +437,9 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}()
 	if !bootstrap && c.tsoAllocator.IsInitialize() {
 		failpoint.InjectCall("afterTSOInitialized", c.member.ID())
+	}
+	if !c.member.IsLeaseValid(lease) {
+		return errs.ErrNotLeader
 	}
 	failpoint.Inject("raftClusterReturn", func(val failpoint.Value) {
 		if val, ok := val.(bool); (ok && val) || !ok {
@@ -434,6 +461,9 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("cluster is not bootstrapped", zap.Duration("cost", loadClusterInfoDuration))
 		return nil
 	}
+	if !c.member.IsLeaseValid(lease) {
+		return errs.ErrNotLeader
+	}
 	if c.opt.IsPlacementRulesEnabled() {
 		ruleInitStart := time.Now()
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
@@ -447,7 +477,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	loadClusterInfoDuration := time.Since(loadClusterInfoStart)
 	log.Info("load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
 	labelerStart := time.Now()
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, metadataStorage, regionLabelGCInterval)
 	labelerDuration := time.Since(labelerStart)
 	if err != nil {
 		resignOnFailure()
@@ -457,7 +487,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	log.Info("region labeler created", zap.Duration("cost", labelerDuration))
 
 	// create affinity manager with region labeler for key range validation and rebuild
-	c.affinityManager, err = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)
+	c.affinityManager, err = affinity.NewManager(c.ctx, metadataStorage, c, c.GetOpts(), c.regionLabeler)
 	if err != nil {
 		return err
 	}
@@ -471,7 +501,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Info("observe slow store status completed", zap.Duration("cost", time.Since(observeSlowStoreStart)))
 	}
 	replicationModeStart := time.Now()
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, metadataStorage, cluster, s)
 	if err != nil {
 		resignOnFailure()
 		log.Warn("failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
@@ -491,13 +521,16 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
 		log.Info("start to bootstrap keyspace group manager")
 		bootstrapKeyspaceStart := time.Now()
-		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
+		err = c.keyspaceGroupManager.BootstrapWithLeadership(c.ctx, term)
 		if err != nil {
 			resignOnFailure()
 			log.Warn("failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 			return err
 		}
 		log.Info("bootstrap keyspace group manager completed", zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
+	}
+	if !c.member.IsLeaseValid(lease) {
+		return errs.ErrNotLeader
 	}
 	checkSchedulingStart := time.Now()
 	c.checkSchedulingService()
@@ -637,15 +670,20 @@ func (c *RaftCluster) runServiceCheckJob() {
 
 func (c *RaftCluster) startTSOJobsIfNeeded() error {
 	if !c.tsoAllocator.IsInitialize() {
+		lease := c.member.GetLeadership().GetLease()
+		if !c.member.IsLeaseValid(lease) {
+			return errs.ErrNotLeader
+		}
 		log.Info("initializing the TSO allocator")
 		if err := c.tsoAllocator.Initialize(); err != nil {
 			log.Error("failed to initialize the TSO allocator", errs.ZapError(err))
 			return err
 		}
+		failpoint.InjectCall("afterTSOInitializationBeforeReady", c.member.ID())
 		// Publish readiness only for a newly initialized timestamp state. A
 		// periodic check must not restore a term that Resign has withdrawn.
 		if c.onTSOReady != nil {
-			c.onTSOReady(true)
+			c.onTSOReady(lease)
 		}
 	} else if !c.running {
 		// If the TSO allocator is already initialized, but the running flag is false,
@@ -657,7 +695,7 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 
 func (c *RaftCluster) stopTSOJobsIfNeeded() {
 	if c.onTSOReady != nil {
-		c.onTSOReady(false)
+		c.onTSOReady(nil)
 	}
 	if c.tsoAllocator == nil || !c.tsoAllocator.IsInitialize() {
 		return

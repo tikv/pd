@@ -318,6 +318,7 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
+	failpoint.InjectCall("beforeTxnCommit", txn.operations)
 	failpoint.Inject("slowTxn", func() {
 		time.Sleep(10 * time.Second)
 	})

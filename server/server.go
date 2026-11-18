@@ -58,6 +58,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
@@ -534,9 +535,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.tsoMember, tsoStorage, s)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
-	s.cluster.SetTSOReadyCallback(func(ready bool) {
-		if ready {
-			s.tsoMember.beginTerm()
+	s.cluster.SetTSOReadyCallback(func(lease *election.Lease) {
+		if lease != nil {
+			s.tsoMember.beginTerm(lease)
 		} else {
 			s.tsoMember.endTerm()
 		}
@@ -886,7 +887,9 @@ func (s *Server) createRaftCluster() error {
 		return nil
 	}
 
-	return s.cluster.Start(s, false)
+	err := s.cluster.Start(s, false)
+	failpoint.InjectCall("afterRaftClusterStart", s.member.ID(), err)
+	return err
 }
 
 func (s *Server) stopRaftCluster() {

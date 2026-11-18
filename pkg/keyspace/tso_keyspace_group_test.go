@@ -577,6 +577,36 @@ func (suite *keyspaceGroupTestSuite) createArchivedKeyspaces(count int) []uint32
 	return keyspaceIDs
 }
 
+func TestBootstrapKeyspaceGroupIsFencedByLeadershipTerm(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := storage.NewCoreStorage(storage.NewStorageWithEtcdBackend(client), nil)
+	manager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer manager.Close()
+	leadership := election.NewLeadership(client, "/test/keyspace-bootstrap-leader", "bootstrap test", "bootstrap test")
+	re.NoError(leadership.Campaign(60, "same-leader"))
+	defer leadership.Reset()
+	oldTerm, ok := leadership.CaptureTerm()
+	re.True(ok)
+	leadership.Reset()
+	re.NoError(leadership.Campaign(60, "same-leader"))
+	term, ok := leadership.CaptureTerm()
+	re.True(ok)
+	re.Equal(oldTerm.LeaderValue(), term.LeaderValue())
+	re.NotEqual(oldTerm.LeaseID(), term.LeaseID())
+	re.ErrorIs(manager.BootstrapWithLeadership(ctx, oldTerm), errs.ErrEtcdTxnConflict)
+	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	re.NoError(err)
+	re.Empty(groups)
+	re.NoError(manager.BootstrapWithLeadership(ctx, term))
+	re.NoError(manager.BootstrapWithLeadership(ctx, term))
+	group, err := manager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.Equal([]uint32{GetBootstrapKeyspaceID()}, group.Keyspaces)
+}
+
 func TestRemoveKeyspacesFromGroupIsFencedByLeadershipTerm(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

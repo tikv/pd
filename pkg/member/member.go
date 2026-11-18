@@ -55,8 +55,8 @@ type Member struct {
 	leadership *election.Leadership
 	leader     atomic.Value // stored as *pdpb.Member
 	leaderMu   sync.Mutex
-	// withdrawnLease fences promotion while Resign is still revoking the lease.
-	withdrawnLease *election.Lease
+	// withdrawnLease fences serving and publication before Reset detaches the lease.
+	withdrawnLease atomic.Pointer[election.Lease]
 	// etcd and cluster information.
 	etcd   *embed.Etcd
 	client *clientv3.Client
@@ -175,11 +175,18 @@ func (m *Member) TryPromoteSelf() bool {
 	m.leaderMu.Lock()
 	defer m.leaderMu.Unlock()
 	lease := m.leadership.GetLease()
-	if lease == nil || lease == m.withdrawnLease || lease.IsExpired() {
+	if !m.IsLeaseValid(lease) {
 		return false
 	}
 	m.setLeader(m.member)
 	return true
+}
+
+// IsLeaseValid reports whether a captured lease still belongs to this member
+// and has not expired or been withdrawn. It does not require full PD readiness.
+func (m *Member) IsLeaseValid(lease *election.Lease) bool {
+	return lease != nil && lease == m.leadership.GetLease() &&
+		!lease.IsExpired() && lease != m.withdrawnLease.Load()
 }
 
 // GetElectionPath returns the path of the PD leader.
@@ -304,7 +311,7 @@ func (m *Member) WatchLeader(ctx context.Context, leader *pdpb.Member, revision 
 // longer serving from still answering as the leader.
 func (m *Member) Resign() {
 	m.leaderMu.Lock()
-	m.withdrawnLease = m.leadership.GetLease()
+	m.withdrawnLease.Store(m.leadership.GetLease())
 	m.unsetLeader()
 	m.leaderMu.Unlock()
 	// Reset can block on etcd or logging. Promotions already reject this lease

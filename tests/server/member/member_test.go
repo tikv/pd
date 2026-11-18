@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -868,26 +869,20 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 			content, err := os.ReadFile(fname)
 			re.NoError(err)
 			re.NotContains(string(content), resetMsg)
+			var startResult chan error
+			const startHook = "github.com/tikv/pd/server/afterRaftClusterStart"
 			if early {
-				attempted := make(chan bool, 1)
-				const promotionHook = "github.com/tikv/pd/server/afterPDLeaderPromotionAttempt"
-				re.NoError(failpoint.EnableCall(promotionHook, func(id uint64, promoted bool) {
+				startResult = make(chan error, 1)
+				re.NoError(failpoint.EnableCall(startHook, func(id uint64, err error) {
 					if id == leader.GetServerID() {
-						attempted <- promoted
+						startResult <- err
 					}
 				}))
-				t.Cleanup(func() { re.NoError(failpoint.Disable(promotionHook)) })
-				// Finish initialization while the old election key still exists but
-				// the local lease has been withdrawn. This campaign must not publish.
+				t.Cleanup(func() { re.NoError(failpoint.Disable(startHook)) })
+				// Initialization must abort before promotion. Its cleanup can wait
+				// for the allocator reset that is still blocked in Lease.Close.
 				resumeInitialization()
-				select {
-				case promoted := <-attempted:
-					re.False(promoted)
-				case <-time.After(30 * time.Second):
-					t.Fatal("PD initialization did not attempt promotion")
-				}
 				re.Nil(m.GetLeader())
-				re.NoError(failpoint.Disable(promotionHook))
 			}
 
 			// The line does arrive once the blocked close returns, which is what keeps
@@ -899,6 +894,15 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 				return strings.Contains(string(content), resetMsg)
 			}, testutil.WithWaitFor(30*time.Second))
 			testutil.Eventually(re, func() bool { return !svr.GetTSOAllocator().IsInitialize() })
+			if early {
+				select {
+				case err := <-startResult:
+					re.ErrorIs(err, errs.ErrNotLeader)
+				case <-time.After(30 * time.Second):
+					t.Fatal("withdrawn initialization did not stop")
+				}
+				re.NoError(failpoint.Disable(startHook))
+			}
 			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"))
 			re.NoError(failpoint.Disable(campaignHook))
 			testutil.Eventually(re, func() bool {

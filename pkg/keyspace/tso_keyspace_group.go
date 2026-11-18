@@ -201,6 +201,16 @@ func NewKeyspaceGroupManager(
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
 func (m *GroupManager) Bootstrap(ctx context.Context) error {
+	return m.bootstrapWithConditions(ctx, nil)
+}
+
+// BootstrapWithLeadership fences creation of the default keyspace group to the
+// campaign that is initializing the cluster.
+func (m *GroupManager) BootstrapWithLeadership(ctx context.Context, term election.LeadershipTerm) error {
+	return m.bootstrapWithConditions(ctx, term.Comparisons())
+}
+
+func (m *GroupManager) bootstrapWithConditions(ctx context.Context, conditions []clientv3.Cmp) error {
 	// Force the membership restriction that the default keyspace must belong to default keyspace group.
 	// Have no information to specify the distribution of the default keyspace group replicas, so just
 	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica
@@ -213,7 +223,7 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 
 	// Ignore the error if default keyspace group already exists in the storage (e.g. PD restart/recover).
 	m.Lock()
-	err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup})
+	err := m.saveKeyspaceGroupsWithConditions(ctx, []*endpoint.KeyspaceGroup{defaultKeyspaceGroup}, conditions)
 	m.Unlock()
 	if err != nil && err != errs.ErrKeyspaceGroupExists {
 		return err
@@ -867,7 +877,11 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 // saveKeyspaceGroups will try to save the given keyspace groups into the storage.
 // If any keyspace group already exists, it will return ErrKeyspaceGroupExists.
 func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
-	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	return m.saveKeyspaceGroupsWithConditions(m.ctx, keyspaceGroups, nil)
+}
+
+func (m *GroupManager) saveKeyspaceGroupsWithConditions(ctx context.Context, keyspaceGroups []*endpoint.KeyspaceGroup, conditions []clientv3.Cmp) error {
+	return m.runKeyspaceGroupTxn(ctx, conditions, func(txn kv.Txn) error {
 		for _, keyspaceGroup := range keyspaceGroups {
 			// Check if keyspace group has already existed.
 			oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
@@ -1049,7 +1063,7 @@ func (m *GroupManager) loadKeyspaceGroupForRemoval(
 	return kg, nil
 }
 
-func (m *GroupManager) runKeyspaceGroupRemovalTxn(
+func (m *GroupManager) runKeyspaceGroupTxn(
 	ctx context.Context,
 	leadershipConditions []clientv3.Cmp,
 	runTxn func(kv.Txn) error,
@@ -1185,7 +1199,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
 
-	err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
+	err = m.runKeyspaceGroupTxn(ctx, leadershipConditions, runTxn)
 	// The commit result can be ambiguous (for example, a client-side timeout
 	// after etcd has committed), so conservatively invalidate every cache entry
 	// whose deletion was staged. If the transaction did not commit, the next
@@ -1288,7 +1302,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
 
-	err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
+	err = m.runKeyspaceGroupTxn(ctx, leadershipConditions, runTxn)
 	// Invalidate staged removals even when the commit result is ambiguous.
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {
@@ -1392,7 +1406,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
-	err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runBatch)
+	err = m.runKeyspaceGroupTxn(ctx, leadershipConditions, runBatch)
 	// Invalidate staged removals even when the commit result is ambiguous.
 	km.evictKeyspacesFromCache(removedIDs)
 	if err != nil {

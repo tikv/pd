@@ -32,10 +32,12 @@ type embeddedTSOMember struct {
 	term atomic.Pointer[election.Lease]
 }
 
-func (m *embeddedTSOMember) beginTerm() {
-	// Timestamp initialization runs after a successful campaign. Capture its
-	// lease so a later granted lease cannot enable TSO before initialization.
-	m.term.Store(m.GetLeadership().GetLease())
+func (m *embeddedTSOMember) beginTerm(lease *election.Lease) {
+	// The caller captures the lease before initialization. A late completion
+	// must not authorize a replacement lease or a withdrawn campaign.
+	if m.IsLeaseValid(lease) {
+		m.term.Store(lease)
+	}
 }
 
 func (m *embeddedTSOMember) endTerm() {
@@ -45,7 +47,9 @@ func (m *embeddedTSOMember) endTerm() {
 // IsServing checks that the initialized TSO still owns its live leadership lease.
 func (m *embeddedTSOMember) IsServing() bool {
 	lease := m.term.Load()
-	return lease != nil && lease == m.GetLeadership().GetLease() && !lease.IsExpired()
+	// Recheck withdrawal here as well: Resign can run between beginTerm's
+	// validity check and store, or be called directly on the shared Member.
+	return m.IsLeaseValid(lease)
 }
 
 // Resign withdraws TSO readiness before releasing the shared PD leadership.
