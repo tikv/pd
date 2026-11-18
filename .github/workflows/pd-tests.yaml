@@ -23,6 +23,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   chunks:
+    name: chunks (${{ matrix.worker_id }}, ${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
