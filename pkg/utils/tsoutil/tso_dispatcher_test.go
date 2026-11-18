@@ -55,13 +55,25 @@ func (s *countRecordingStream) process(_ uint64, count, _, _ uint32) (tsoResp, e
 
 type countResponseStream struct {
 	pdpb.PD_TsoServer
+	ctx      context.Context
+	onSend   func()
 	response *pdpb.TsoResponse
 	err      error
 	done     chan struct{}
 }
 
+func (s *countResponseStream) Context() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
+
 func (s *countResponseStream) Send(response *pdpb.TsoResponse) error {
 	s.response = response
+	if s.onSend != nil {
+		s.onSend()
+	}
 	if s.done != nil {
 		close(s.done)
 	}
@@ -220,6 +232,8 @@ func (m *mockRequest) getClientConn() *grpc.ClientConn {
 func (m *mockRequest) getCount() uint32 {
 	return m.count
 }
+
+func (m *mockRequest) getCountIfActive() (uint32, bool) { return m.count, true }
 
 func (m *mockRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
 	if m.err != nil {
@@ -443,4 +457,50 @@ func TestWatchTSDeadlineIgnoresCompletedBatches(t *testing.T) {
 	cancel()
 	<-finished
 	require.Zero(t, canceled.Load())
+}
+
+func TestTSODispatcherCanceledStream(t *testing.T) {
+	inlineCounts := make([]uint32, 100)
+	for i := range inlineCounts {
+		inlineCounts[i] = 1
+	}
+	for _, test := range []struct {
+		name      string
+		counts    []uint32
+		withOther bool
+		upstream  []uint32
+	}{
+		{"within allocated batch", inlineCounts, true, []uint32{101}},
+		{"later batches", []uint32{logicalBits, logicalBits}, true, []uint32{logicalBits, 1}},
+		{"no remaining live requests", []uint32{logicalBits, logicalBits}, false, []uint32{logicalBits}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "canceled_stream"}), nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			sends := 0
+			closed := &countResponseStream{ctx: ctx, err: errors.New("closed downstream"), onSend: func() { sends++; cancel() }}
+			other := &countResponseStream{}
+			requests := make([]Request, 0, len(test.counts)+1)
+			for _, count := range test.counts {
+				requests = append(requests, NewPDProtoRequest("host", nil, &pdpb.TsoRequest{Count: count}, closed))
+			}
+			if test.withOther {
+				requests = append(requests, NewPDProtoRequest("host", nil, &pdpb.TsoRequest{Count: 1}, other))
+			}
+			forward := &countRecordingStream{}
+			for pending := requests; len(pending) > 0; {
+				var err error
+				pending, err = dispatcher.processRequests(forward, pending)
+				require.NoError(t, err)
+			}
+			require.Equal(t, test.upstream, forward.counts)
+			require.Equal(t, 1, sends)
+			if test.withOther {
+				require.NotNil(t, other.response)
+				require.Equal(t, uint32(1), other.response.GetCount())
+				require.Equal(t, int64(test.upstream[len(test.upstream)-1]), other.response.GetTimestamp().GetLogical())
+			}
+		})
+	}
 }

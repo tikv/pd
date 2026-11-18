@@ -139,7 +139,6 @@ func (s *TSODispatcher) dispatch(
 	requests := make([]Request, 0, maxMergeRequests+2)
 	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
 	noProxyRequestsTimer := time.NewTimer(tsoProxyStreamIdleTimeout)
-	defer noProxyRequestsTimer.Stop()
 	for {
 		noProxyRequestsTimer.Reset(tsoProxyStreamIdleTimeout)
 		failpoint.Inject("tsoProxyStreamIdleTimeout", func() {
@@ -191,25 +190,25 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 		return nil, ValidateTSOCount(0)
 	}
 	var count uint64
+	batchSize := len(requests)
 	for i, request := range requests {
 		requestCount := uint64(request.getCount())
 		if err := ValidateTSOCount(requestCount); err != nil {
 			return nil, err
 		}
 		if count+requestCount > logicalBits {
-			return requests[i:], s.processBatch(forwardStream, requests[:i], uint32(count))
+			batchSize = i
+			break
 		}
 		count += requestCount
 	}
-	return nil, s.processBatch(forwardStream, requests, uint32(count))
-}
-
-func (s *TSODispatcher) processBatch(forwardStream stream, requests []Request, count uint32) error {
+	batch, remaining := requests[:batchSize], requests[batchSize:]
 	start := time.Now()
-	resp, err := requests[0].process(forwardStream, count)
+	resp, err := batch[0].process(forwardStream, uint32(count))
 	if err != nil {
-		return err
+		return nil, err
 	}
+
 	s.tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
 	if s.tsoProxyBatchSize != nil {
 		s.tsoProxyBatchSize.Observe(float64(count))
@@ -221,11 +220,19 @@ func (s *TSODispatcher) processBatch(forwardStream stream, requests []Request, c
 	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
 	// count is 5, then the splitting results should be 5 and 10.
 	firstLogical := logical - int64(count)
-	s.finishRequest(requests, physical, firstLogical)
-	return nil
+	if s.finishRequest(batch, physical, firstLogical) {
+		active := remaining[:0]
+		for _, request := range remaining {
+			if _, ok := request.getCountIfActive(); ok {
+				active = append(active, request)
+			}
+		}
+		remaining = active
+	}
+	return remaining, nil
 }
 
-func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) {
+func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) bool {
 	countSum := int64(0)
 	for i := range requests {
 		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
@@ -233,8 +240,22 @@ func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical i
 		countSum = newCountSum
 		if err != nil {
 			log.Warn("send tso response to client failed", errs.ZapError(err))
+			for _, request := range requests[i+1:] {
+				count, active := request.getCountIfActive()
+				if !active {
+					countSum += int64(count)
+					continue
+				}
+				newCountSum, err := request.postProcess(countSum, physical, firstLogical)
+				countSum = newCountSum
+				if err != nil {
+					log.Warn("send tso response to client failed", errs.ZapError(err))
+				}
+			}
+			return true
 		}
 	}
+	return false
 }
 
 // clearPendingRequests clears all pending requests in the queue to prevent goroutine leakage.
