@@ -223,8 +223,9 @@ func (b *freeIDBitmap) candidates() *freeIDCandidates {
 }
 
 // Next returns the next cached candidate, releasing the lock before the caller
-// checks its Region. A candidate at a bucket's first bit requires a known
-// non-free predecessor; other earlier buckets do not block selection.
+// checks its Region. The preceding ID must be known non-free: selecting from
+// the middle of a consecutive free run could split off its earlier IDs and
+// leave them ineligible for reuse. Unknown predecessors are skipped as well.
 func (c *freeIDCandidates) Next() (uint32, bool) {
 	b := c.bitmap
 	b.mu.Lock()
@@ -244,10 +245,13 @@ func (c *freeIDCandidates) Next() (uint32, bool) {
 			if bitmap[byteIndex]&bitMask == 0 {
 				continue
 			}
-			if bit == 0 && bucket > 0 && !b.previousBucketAllowsSelectionLocked(bucket) {
-				break
-			}
 			id := bucket*idsPerBucket + bit
+			if id > 0 {
+				previousFree, known := b.isFreeLocked(id - 1)
+				if !known || previousFree {
+					continue
+				}
+			}
 			c.nextID = id + 1
 			return id, true
 		}
@@ -256,20 +260,23 @@ func (c *freeIDCandidates) Next() (uint32, bool) {
 	return 0, false
 }
 
-// previousBucketAllowsSelectionLocked checks only the preceding bucket's last
-// bit. Unknown or invalidated state defers a candidate at the current boundary.
-// The caller guarantees that bucket is nonzero.
-func (b *freeIDBitmap) previousBucketAllowsSelectionLocked(bucket uint32) bool {
-	previousBucket := bucket - 1
-	if _, invalid := b.invalid[previousBucket]; invalid {
-		return false
+// isFreeLocked reports an ID's cached free bit and whether it is known.
+// Unknown or invalidated buckets require a reload before their bits can be used.
+func (b *freeIDBitmap) isFreeLocked(id uint32) (free, known bool) {
+	idsPerBucket := uint32(b.bucketBytes * 8)
+	bucket := id / idsPerBucket
+	if _, invalid := b.invalid[bucket]; invalid {
+		return false, false
 	}
-	previous, loaded := b.buckets[previousBucket]
-	if !loaded && previousBucket >= b.nextLoad {
-		return false
+	cached, loaded := b.buckets[bucket]
+	if !loaded && bucket >= b.nextLoad {
+		return false, false
 	}
-	// A known absent bucket is empty; otherwise test its highest bit.
-	return previous.Value == "" || previous.Value[len(previous.Value)-1]&0x80 == 0
+	if cached.Value == "" {
+		return false, true
+	}
+	bit := id % idsPerBucket
+	return cached.Value[bit/8]&(1<<(bit%8)) != 0, true
 }
 
 // update changes one bit and the caller's metadata in the same transaction.
