@@ -140,17 +140,18 @@ func TestFreeIDBitmap(t *testing.T) {
 		require.Equal(t, reads, store.reads)
 	})
 
-	t.Run("empty index skips pages and accepts later updates", func(t *testing.T) {
+	t.Run("empty index loads bounded pages and accepts later updates", func(t *testing.T) {
 		b, store := newBitmap(t)
 		reads := store.reads
 		require.NoError(t, b.loadNextPage(ctx, 64))
 		require.Equal(t, reads+1, store.reads)
-		require.Equal(t, 1, store.lastRead[0].Limit)
-		require.Equal(t, b.bucketCount(), b.nextLoad)
-		require.Empty(t, b.buckets, "known-empty buckets need no cache entries")
+		require.Equal(t, []kv.RawTxnOp{{Key: b.bucketKey(0), EndKey: b.bucketKey(64), Limit: 64, OpType: kv.RawTxnOpGetRange}}, store.lastRead)
+		require.Equal(t, uint32(64), b.nextLoad)
 		require.NoError(t, b.loadNextPage(ctx, 64))
 		require.NoError(t, b.update(ctx, 512, true, noMetadata))
-		require.Equal(t, reads+1, store.reads, "empty pages and later writes need no extra reads")
+		require.Equal(t, reads+2, store.reads, "each page needs one read; cached writes need none")
+		require.Equal(t, uint32(128), b.nextLoad)
+		require.Equal(t, []kv.RawTxnOp{{Key: b.bucketKey(64), EndKey: b.bucketKey(128), Limit: 64, OpType: kv.RawTxnOpGetRange}}, store.lastRead)
 		id, ok := b.firstFree(0, 1024)
 		require.True(t, ok)
 		require.Equal(t, uint32(512), id)
@@ -165,6 +166,19 @@ func TestFreeIDBitmap(t *testing.T) {
 		id, ok = b.firstFree(0, 1024)
 		require.True(t, ok)
 		require.Equal(t, uint32(511), id)
+
+		for b.nextLoad < b.bucketCount() {
+			start := b.nextLoad
+			end := min(start+64, b.bucketCount())
+			reads := store.reads
+			require.NoError(t, b.loadNextPage(ctx, 64))
+			require.Equal(t, reads+1, store.reads)
+			require.Equal(t, end, b.nextLoad)
+			require.Equal(t, []kv.RawTxnOp{{Key: b.bucketKey(start), EndKey: b.bucketKey(end), Limit: int(end - start), OpType: kv.RawTxnOpGetRange}}, store.lastRead)
+		}
+		reads = store.reads
+		require.NoError(t, b.loadNextPage(ctx, 64))
+		require.Equal(t, reads, store.reads, "fully loaded index needs no further reads")
 	})
 
 	t.Run("unknown earlier bucket blocks selection", func(t *testing.T) {

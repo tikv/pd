@@ -132,10 +132,9 @@ func (b *freeIDBitmap) initialize(ctx context.Context) error {
 	return nil
 }
 
-// runLoader is called explicitly by its owner after initialize. An initial
-// existence query skips paging when the whole index is empty. Otherwise each
-// page covers at most pageBuckets numeric bucket positions, even for sparse
-// data. Failed pages are retried without advancing coverage. Once fully loaded,
+// runLoader is called explicitly by its owner after initialize. Each page
+// covers at most pageBuckets numeric bucket positions, including empty ranges.
+// Failed pages are retried without advancing coverage. Once fully loaded,
 // only invalidated buckets require further reads; local writes maintain the cache.
 func (b *freeIDBitmap) runLoader(ctx context.Context, pageBuckets uint32, interval time.Duration) error {
 	if pageBuckets == 0 || interval <= 0 {
@@ -164,29 +163,6 @@ func (b *freeIDBitmap) loadNextPage(ctx context.Context, pageBuckets uint32) err
 	// Reload invalidated buckets before extending the loaded prefix.
 	for bucket := range b.invalid {
 		return b.loadRangeLocked(ctx, bucket, bucket+1)
-	}
-	// A fresh empty index needs one existence query, not a scan of every page.
-	// The query covers the full bucket range; Limit bounds returned records.
-	// Only a successful empty result establishes that the whole range is empty.
-	// The lock excludes local writes; subsequent updates maintain this cache.
-	if b.nextLoad == 0 {
-		resp, err := b.store.CreateRawTxnWithContext(ctx).Then(kv.RawTxnOp{
-			Key: b.bucketKey(0), EndKey: b.bucketKey(b.bucketCount()),
-			OpType: kv.RawTxnOpGetRange, Limit: 1,
-		}).Commit()
-		if err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if len(resp.Responses) != 1 {
-			return errors.New("invalid free ID bitmap range response")
-		}
-		if len(resp.Responses[0].KeyValuePairs) == 0 {
-			b.nextLoad = b.bucketCount()
-			return nil
-		}
 	}
 	start := b.nextLoad
 	end := start + min(pageBuckets, b.bucketCount()-start)
