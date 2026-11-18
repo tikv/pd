@@ -102,6 +102,11 @@ func (m *Manager) drainObservedTargets() {
 			return
 		}
 		now := time.Now()
+		if now.Before(m.targetEndpointUnsupportedUntil) {
+			m.targetWriteMutex.Unlock()
+			m.fallbackObservedTargets(nil)
+			return
+		}
 		for id, state := range m.pendingTargets {
 			if !state.pending && !state.inFlight && !now.Before(state.nextSend) {
 				delete(m.pendingTargets, id)
@@ -135,11 +140,11 @@ func (m *Manager) drainObservedTargets() {
 		}
 		_, err := m.targetWriter.WriteGroupTargets(m.ctx, targets)
 		if errors.Is(err, ErrTargetWriterUnsupported) {
+			m.recordTargetEndpointUnsupported()
 			m.fallbackObservedTargets(batch)
 			return
 		}
 		m.targetWriteMutex.Lock()
-		m.targetEndpointUnsupportedUntil = time.Time{}
 		for _, target := range targets {
 			id := target.Expected.ID
 			state := m.pendingTargets[id]
@@ -163,16 +168,20 @@ func (m *Manager) drainObservedTargets() {
 	}
 }
 
-// fallbackObservedTargets handles both the failed batch and observations queued
-// while it was in flight. The next probe must use fresh observations: local
-// fallback can change the target and invalidate an older queued write.
+// recordTargetEndpointUnsupported defers both remote writers after a 404.
+func (m *Manager) recordTargetEndpointUnsupported() {
+	m.targetWriteMutex.Lock()
+	m.targetEndpointUnsupportedUntil = time.Now().Add(targetCooldown)
+	m.targetWriteMutex.Unlock()
+}
+
+// fallbackObservedTargets handles the failed batch and any queued observations.
+// Local fallback can change the target, so the next probe uses fresh observations.
 func (m *Manager) fallbackObservedTargets(batch []observedTarget) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
 	m.targetWriteMutex.Lock()
-	m.targetWriteRetryAt = time.Now().Add(targetCooldown)
-	m.targetEndpointUnsupportedUntil = m.targetWriteRetryAt
 	for _, id := range m.pendingTargetIDs {
 		batch = append(batch, m.pendingTargets[id].observation)
 	}

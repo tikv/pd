@@ -1081,6 +1081,32 @@ func (suite *createOperatorTestSuite) TestCreateMoveRegionOperator() {
 	}
 }
 
+func (suite *createOperatorTestSuite) TestMoveRegionPreservesWitnessByStore() {
+	re := suite.Require()
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, IsWitness: true},
+		{Id: 3, StoreId: 3}, {Id: 5, StoreId: 5, Role: metapb.PeerRole_Learner},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 10, Peers: peers}, peers[0])
+	roles := map[uint64]placement.PeerRoleType{2: placement.Voter, 3: placement.Leader, 4: placement.Voter, 5: placement.Learner}
+	op, err := CreateMoveRegionOperator("test", suite.cluster, region, OpAffinity, roles)
+	re.NoError(err)
+	re.NotNil(op)
+	for i := range op.Len() {
+		switch step := op.Step(i).(type) {
+		case AddLearner:
+			re.Equal(uint64(4), step.ToStore)
+			re.False(step.IsWitness)
+		case ChangePeerV2Enter:
+			for _, peer := range step.PromoteLearners {
+				re.False(peer.IsWitness)
+			}
+		case BecomeWitness, BecomeNonWitness, BatchSwitchWitness:
+			suite.T().Fatalf("unexpected witness change: %s", step)
+		}
+	}
+}
+
 func (suite *createOperatorTestSuite) TestMoveRegionWithoutJointConsensus() {
 	re := suite.Require()
 	type testCase struct {

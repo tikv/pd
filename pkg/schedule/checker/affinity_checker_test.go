@@ -1415,7 +1415,7 @@ func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
 			cluster.PutRegion(region2)
 
 			affinityManager := cluster.GetAffinityManager()
-			checker := NewAffinityChecker(context.Background(), cluster, opt)
+			checker := NewAffinityChecker(ctx, cluster, opt)
 			group := &affinity.Group{
 				ID:            "test_group",
 				LeaderStoreID: 1,

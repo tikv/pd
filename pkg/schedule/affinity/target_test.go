@@ -91,7 +91,7 @@ func TestUpdateAffinityGroupTargetsRejectsInvalidInput(t *testing.T) {
 		{targetFor(m, "g", 1, 0, 1)},
 		{targetFor(m, "h", 1, 1, 2), {Expected: Group{ID: "bad id"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}},
 	} {
-		_, err := m.UpdateAffinityGroupTargets(targets)
+		_, err := m.UpdateAffinityGroupTargets(t.Context(), targets)
 		re.Error(err)
 	}
 	for _, id := range []string{"g", "h"} {
@@ -105,7 +105,7 @@ func TestUpdateAffinityGroupTargetsRejectsInvalidInput(t *testing.T) {
 		{Expected: Group{ID: "missing"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}},
 		stale, targetFor(m, "g", 1, 1, 4), targetFor(m, "g", 9, 9),
 	} {
-		written, err := m.UpdateAffinityGroupTargets([]GroupTarget{skipped, targetFor(m, "h", 2, 3, 2, 1)})
+		written, err := m.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{skipped, targetFor(m, "h", 2, 3, 2, 1)})
 		re.NoError(err)
 		re.Equal([]string{"h"}, written)
 	}
@@ -136,7 +136,7 @@ func TestSyncRecreatedAffinityGroup(t *testing.T) {
 					target.Expected = recreated
 					recreated.LeaderStoreID = 2
 				}
-				written, err := m.UpdateAffinityGroupTargets([]GroupTarget{target})
+				written, err := m.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{target})
 				re.NoError(err)
 				re.Equal(path == "written", len(written) == 1)
 			case "policy":
@@ -196,7 +196,7 @@ func TestInitialTargetAvailabilityAndRemovedStores(t *testing.T) {
 	re.True(reloaded.GetAffinityGroupState("g").RegularSchedulingAllowed)
 	re.ErrorIs(m.AdjustGroup(group), errs.ErrAffinityGroupContent)
 	re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "healthy"}}))
-	written, err := m.UpdateAffinityGroupTargets([]GroupTarget{targetFor(m, "g", 2, 1, 2), targetFor(m, "healthy", 3, 1, 3)})
+	written, err := m.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{targetFor(m, "g", 2, 1, 2), targetFor(m, "healthy", 3, 1, 3)})
 	re.NoError(err)
 	re.Equal([]string{"healthy"}, written)
 	re.Equal(uint64(1), loadStoredGroup(re, store, "g").LeaderStoreID)
@@ -228,7 +228,7 @@ func TestFirstWinWaitsForStoreConditions(t *testing.T) {
 				calls := 0
 				m.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []GroupTarget) ([]string, error) {
 					calls++
-					return m.UpdateAffinityGroupTargets(targets)
+					return m.UpdateAffinityGroupTargets(t.Context(), targets)
 				}))
 				m.ObserveAvailableRegion(generateRegionForTest(10, []uint64{2, 1}, nonOverlappingRange), m.GetAffinityGroupState("g"))
 				time.Sleep(50 * time.Millisecond)
@@ -278,7 +278,7 @@ func TestChangedTargetStartsDegradedWindow(t *testing.T) {
 					re.NoError(err)
 					group.BalancePolicy = BalancePolicyFixed
 				default:
-					written, err := m.UpdateAffinityGroupTargets([]GroupTarget{stale})
+					written, err := m.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{stale})
 					re.NoError(err)
 					re.Empty(written)
 				}
@@ -290,7 +290,7 @@ func TestChangedTargetStartsDegradedWindow(t *testing.T) {
 				calls := 0
 				m.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []GroupTarget) ([]string, error) {
 					calls++
-					return m.UpdateAffinityGroupTargets(targets)
+					return m.UpdateAffinityGroupTargets(t.Context(), targets)
 				}))
 				region := generateRegionForTest(10, []uint64{1, 3}, nonOverlappingRange)
 				m.ObserveAvailableRegion(region, state)
@@ -299,7 +299,7 @@ func TestChangedTargetStartsDegradedWindow(t *testing.T) {
 				re.Equal(*group, *loadStoredGroup(re, store, "g"))
 				time.Sleep(time.Second)
 				m.SyncGroupFromEtcd(group)
-				written, err := m.updateGroupTarget(targetFor(m, "g", 2, 1, 2))
+				written, err := m.updateGroupTarget(t.Context(), targetFor(m, "g", 2, 1, 2))
 				re.NoError(err)
 				re.True(written)
 				re.Equal(expiresAt, m.groups["g"].degradedExpiredAt, "duplicate targets do not extend the window")
@@ -315,13 +315,13 @@ func TestTargetWriteResetsVersionOnce(t *testing.T) {
 	m.applyStoreConditions(map[uint64]storeCondition{})
 	target := targetFor(m, "g", 1, 1, 2)
 	before := m.GetAffinityGroupState("g").affinityVer
-	written, err := m.UpdateAffinityGroupTargets([]GroupTarget{target})
+	written, err := m.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{target})
 	re.NoError(err)
 	re.Equal([]string{"g"}, written)
 	re.Equal(before+1, m.GetAffinityGroupState("g").affinityVer)
 	m.DegradeAffinityGroup("g")
 	before = m.GetAffinityGroupState("g").affinityVer
-	written, err = m.UpdateAffinityGroupTargets([]GroupTarget{target})
+	written, err = m.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{target})
 	re.NoError(err)
 	re.Equal([]string{"g"}, written)
 	re.Equal(before+1, m.GetAffinityGroupState("g").affinityVer, "an already stored result still confirms the target")
@@ -728,13 +728,13 @@ func TestFirstWinUnsupportedTargetWriter(t *testing.T) {
 			calls, failures := 0, testutil.ToFloat64(targetWriteFailureCounter)
 			supported := false
 			var lastSent []GroupTarget
-			m.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []GroupTarget) ([]string, error) {
+			m.SetTargetWriter(targetWriterFunc(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
 				calls++
 				lastSent = slices.Clone(targets)
 				if !supported {
 					return nil, errors.Annotate(ErrTargetWriterUnsupported, "404 Not Found")
 				}
-				return pdManager.UpdateAffinityGroupTargets(targets)
+				return pdManager.UpdateAffinityGroupTargets(ctx, targets)
 			}))
 
 			regionG := generateRegionForTest(10, []uint64{2, 1}, nonOverlappingRange)
@@ -884,7 +884,7 @@ func TestFirstWinUnsupportedTargetWriter(t *testing.T) {
 
 			supported := false
 			syncInFlightAdmin := false
-			m.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []GroupTarget) ([]string, error) {
+			m.SetTargetWriter(targetWriterFunc(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
 				if syncInFlightAdmin {
 					_, err := pdManager.UpdateAffinityGroupPeers("k", 4, []uint64{1, 4})
 					re.NoError(err)
@@ -893,7 +893,7 @@ func TestFirstWinUnsupportedTargetWriter(t *testing.T) {
 				if !supported {
 					return nil, errors.Annotate(ErrTargetWriterUnsupported, "404 Not Found")
 				}
-				return pdManager.UpdateAffinityGroupTargets(targets)
+				return pdManager.UpdateAffinityGroupTargets(ctx, targets)
 			}))
 
 			region := generateRegionForTest(10, []uint64{2, 1}, nonOverlappingRange)
@@ -987,21 +987,21 @@ func TestTargetCASAndLostReplyWithEtcd(t *testing.T) {
 	}}
 	m.storage = wrapped
 	targets := []GroupTarget{targetFor(m, "h", 1, 1, 2, 3), stale}
-	written, err := m.UpdateAffinityGroupTargets(targets)
+	written, err := m.UpdateAffinityGroupTargets(t.Context(), targets)
 	re.ErrorIs(err, errs.ErrEtcdTxnConflict)
 	re.Empty(written, "an out-of-band conflict aborts the whole chunk")
 	re.Equal(1, commits, "conflicting chunks must not retry individual targets")
 	re.Zero(loadStoredGroup(re, store, "h").LeaderStoreID)
 	re.Zero(m.GetAffinityGroupState("g").LeaderStoreID)
 	wrapped.beforeCommit = nil
-	written, err = m.UpdateAffinityGroupTargets(targets)
+	written, err = m.UpdateAffinityGroupTargets(t.Context(), targets)
 	re.NoError(err, "the next patrol skips the stale group during prefetch")
 	re.Equal([]string{"h"}, written)
 	re.Equal(uint64(1), loadStoredGroup(re, store, "h").LeaderStoreID)
 	re.Equal(uint64(2), loadStoredGroup(re, store, "g").LeaderStoreID)
 	re.Equal(uint64(2), m.GetAffinityGroupState("g").LeaderStoreID)
 	m.applyStoreConditions(map[uint64]storeCondition{2: storeLeaderEvicted})
-	written, err = m.UpdateAffinityGroupTargets([]GroupTarget{stale})
+	written, err = m.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{stale})
 	re.NoError(err)
 	re.Empty(written)
 	re.Equal(uint64(2), m.GetAffinityGroupState("g").LeaderStoreID)
@@ -1010,7 +1010,7 @@ func TestTargetCASAndLostReplyWithEtcd(t *testing.T) {
 
 	target := targetFor(m, "g", 3, 1, 2, 3)
 	wrapped.loseReply = true
-	_, err = m.UpdateAffinityGroupTargets([]GroupTarget{target})
+	_, err = m.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{target})
 	re.ErrorContains(err, "committed reply lost")
 	re.Equal(uint64(2), m.GetAffinityGroupState("g").LeaderStoreID)
 	re.Equal(uint64(3), loadStoredGroup(re, store, "g").LeaderStoreID)
@@ -1018,7 +1018,7 @@ func TestTargetCASAndLostReplyWithEtcd(t *testing.T) {
 	before, err := client.Get(t.Context(), keypath.AffinityGroupPath("g"))
 	re.NoError(err)
 	target.Expected.VoterStoreIDs = []uint64{3, 2, 1}
-	written, err = m.UpdateAffinityGroupTargets([]GroupTarget{target})
+	written, err = m.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{target})
 	re.NoError(err)
 	re.Equal([]string{"g"}, written)
 	re.Equal(*loadStoredGroup(re, store, "g"), m.GetAffinityGroupState("g").Group)
@@ -1055,7 +1055,7 @@ func TestTargetBatchesWithEtcd(t *testing.T) {
 		targets[i] = targetFor(m, change.GroupID, 1, 1, 2)
 	}
 	rpcCount.Store(0)
-	written, err := m.UpdateAffinityGroupTargets(targets)
+	written, err := m.UpdateAffinityGroupTargets(t.Context(), targets)
 	re.NoError(err)
 	re.Len(written, len(changes))
 	re.Equal(int64(6), rpcCount.Load(), "each <=120-group chunk needs exactly one read and one commit")
@@ -1082,7 +1082,7 @@ func TestTargetBatchesWithEtcd(t *testing.T) {
 			}
 		}}
 		rpcCount.Store(0)
-		written, err = m.UpdateAffinityGroupTargets(targets)
+		written, err = m.UpdateAffinityGroupTargets(t.Context(), targets)
 		re.ErrorIs(err, errs.ErrEtcdTxnConflict)
 		re.Equal(conflictChunk+1, commits, "no per-group fallback after an out-of-band conflict")
 		re.Equal(int64(2*(conflictChunk+1)), rpcCount.Load(), "even a conflicting 120-group chunk uses at most two RPCs")
@@ -1098,7 +1098,7 @@ func TestTargetBatchesWithEtcd(t *testing.T) {
 	}
 	m.storage = store
 	rpcCount.Store(0)
-	written, err = m.UpdateAffinityGroupTargets(targets)
+	written, err = m.UpdateAffinityGroupTargets(t.Context(), targets)
 	re.NoError(err)
 	re.Len(written, len(changes)-2, "the next retry skips both stale targets and commits the others")
 	re.Equal(int64(6), rpcCount.Load(), "prefetch skips stale keys without extra RPCs")
@@ -1117,7 +1117,7 @@ func TestUpdateAffinityGroupTargetsChecksPolicy(t *testing.T) {
 	_, err := manager.UpdateAffinityGroupPolicy("g", BalancePolicyFixed)
 	re.NoError(err)
 
-	written, err := manager.UpdateAffinityGroupTargets([]GroupTarget{target})
+	written, err := manager.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{target})
 	re.NoError(err)
 	re.Empty(written)
 	re.Zero(loadStoredGroup(re, store, "g").LeaderStoreID)

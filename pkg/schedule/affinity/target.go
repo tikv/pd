@@ -20,6 +20,8 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -48,6 +50,7 @@ type GroupTargetsRequest struct {
 // GroupTargetsResponse lists targets committed or already stored.
 type GroupTargetsResponse struct {
 	WrittenGroupIDs []string `json:"written_group_ids"`
+	Error           string   `json:"error,omitempty"`
 }
 
 // TargetWriter persists targets in PD. The watcher publishes them locally.
@@ -62,8 +65,8 @@ func (m *Manager) SetTargetWriter(w TargetWriter) {
 
 // UpdateAffinityGroupTargets validates the whole request, then conditionally
 // commits bounded batches. Earlier batches survive a later error.
-func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, error) {
-	return m.updateGroupTargets(m.ctx, targets)
+func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
+	return m.updateGroupTargets(ctx, targets)
 }
 
 func (m *Manager) updateGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
@@ -107,14 +110,15 @@ func (m *Manager) updateGroupTargets(ctx context.Context, targets []GroupTarget)
 		if err != nil {
 			return written, err
 		}
+		failpoint.InjectCall("afterAffinityTargetWritten")
 	}
 	return written, nil
 }
 
-func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
+func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bool, error) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
-	return m.updateGroupTargetLocked(m.ctx, target)
+	return m.updateGroupTargetLocked(ctx, target)
 }
 
 // updateGroupTargetLocked requires metaMutex to serialize metadata changes.

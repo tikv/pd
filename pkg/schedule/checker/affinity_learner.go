@@ -69,7 +69,7 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 	accept := func(target map[uint64]placement.PeerRoleType) affinityPlacementStatus {
 		layout := regionWithRoles(region, group.LeaderStoreID, target)
 		layoutFit := c.ruleManager.FitRegionWithoutCache(c.cluster, layout)
-		return c.checkRegionFitAtBestLocation(layout, layoutFit)
+		return c.checkRegionPlacement(layout, layoutFit, false).status
 	}
 	target, temporary := c.placeLearners(region, fit, roles, isolationStores, conflicts, accept)
 	if target != nil {

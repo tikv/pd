@@ -413,8 +413,8 @@ func TestAffinityCheckerLearnerBusyAndPinned(t *testing.T) {
 	}
 }
 
-// A blocked improvement can explain this rule's insufficient hard isolation,
-// but must not hide another rule's definite rejection, in either rule order.
+// A hard isolation violation is a definite rejection even when its repair
+// is temporarily blocked, in either rule order.
 func TestAffinityCheckerPlacementTemporaryIsolation(t *testing.T) {
 	re := require.New(t)
 	c, tc, _ := newLearnerConflictController(t)
@@ -429,9 +429,12 @@ func TestAffinityCheckerPlacementTemporaryIsolation(t *testing.T) {
 	tc.SetStoreBusy(6, true)
 	fit := tc.GetRuleManager().FitRegionWithoutCache(tc, region)
 	re.True(fit.IsSatisfied())
-	re.Equal(affinityPlacementTemporary, c.affinityChecker.checkRegionFitAtBestLocation(region, fit))
+	re.Equal(affinityPlacementRejected, c.affinityChecker.checkRegionPlacement(region, fit, false).status)
+	re.Equal(affinityPlacementRejected, c.affinityChecker.regionPlacementFeedback(region, fit).status)
 	tc.SetStoreBusy(6, false)
-	re.Equal(affinityPlacementRejected, c.affinityChecker.checkRegionFitAtBestLocation(region, fit), "the improvement is now available")
+	re.Equal(affinityPlacementRejected, c.affinityChecker.checkRegionPlacement(region, fit, false).status, "the improvement is now available")
+	re.NotEmpty(c.affinityChecker.regionPlacementFeedback(region, fit).replacements)
+	re.Empty(c.affinityChecker.checkRegionPlacement(region, fit, false).replacements)
 	moved := region.Clone(core.WithRemoveStorePeer(5), core.WithAddPeer(&metapb.Peer{Id: 202, StoreId: 6, Role: metapb.PeerRole_Learner}))
 	re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(moved, false))
 
@@ -443,7 +446,8 @@ func TestAffinityCheckerPlacementTemporaryIsolation(t *testing.T) {
 	fit = tc.GetRuleManager().FitRegionWithoutCache(tc, region)
 	re.True(fit.IsSatisfied())
 	for range 2 {
-		re.Equal(affinityPlacementRejected, c.affinityChecker.checkRegionFitAtBestLocation(region, fit))
+		re.Equal(affinityPlacementRejected, c.affinityChecker.checkRegionPlacement(region, fit, false).status)
+		re.Equal(affinityPlacementRejected, c.affinityChecker.regionPlacementFeedback(region, fit).status)
 		slices.Reverse(fit.RuleFits)
 	}
 }
@@ -463,8 +467,12 @@ func TestAffinityCheckerLearnerRelearn(t *testing.T) {
 			rule := newLearnerRule("4", "6", "7")
 			initialTarget := []uint64{1, 4, 5}
 			otherRoles := map[uint64]placement.PeerRoleType{1: placement.Leader, 4: placement.Voter, 5: placement.Voter, 6: placement.Learner, 7: placement.Learner}
+			zones := []string{"v1", "v2", "v3", "a", "b", "c", "b"}
 			switch kind {
 			case "rule-refit":
+				// When Region B moves its voter off store 4, freeing the
+				// store must not open a better zone for its learner on 7.
+				zones[3] = zones[5]
 				tc.AddRegionStore(6, 10)
 				tc.AddRegionStore(7, 10)
 				rule = newLearnerRule("4", "5", "6", "7")
@@ -475,7 +483,7 @@ func TestAffinityCheckerLearnerRelearn(t *testing.T) {
 				tc.AddRegionStore(6, 100)
 				tc.AddRegionStore(7, 0)
 			}
-			for i, zone := range []string{"v1", "v2", "v3", "a", "b", "c", "b"} {
+			for i, zone := range zones {
 				tc.SetStoreLabel(uint64(i+1), map[string]string{"ID": strconv.Itoa(i + 1), "zone": zone})
 			}
 			re.NoError(tc.GetRuleManager().SetRule(rule))
@@ -508,6 +516,8 @@ func TestAffinityCheckerLearnerRelearn(t *testing.T) {
 			switch kind {
 			case "rule-refit":
 				wantAdded, wantRemoved = []uint64{3}, []uint64{4}
+				targetB := cloneRegionWithReplacePeerStores(b, 1, wantTarget...)
+				re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(targetB, false), "Region B can keep its learners on the relearned target")
 			case "direct-move":
 				wantTarget, operatorRegion = initialTarget, 1
 				wantAdded, wantRemoved = []uint64{6, 7}, []uint64{2, 3}
