@@ -233,7 +233,7 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("no group ids provided")
 	}
 	for _, groupID := range groupIDs {
-		if err := ValidateGroupID(groupID); err != nil {
+		if err := ValidateExistingGroupID(groupID); err != nil {
 			return err
 		}
 	}
@@ -378,17 +378,22 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 // is not supported because add validation checks overlaps against existing ranges before removals are applied.
 func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRanges) error {
 	// Validate the full batch before planning changes, including empty operations.
-	for _, ops := range [][]GroupKeyRanges{addOps, removeOps} {
-		for _, op := range ops {
-			if err := ValidateGroupID(op.GroupID); err != nil {
-				return err
-			}
+	for _, op := range addOps {
+		if err := ValidateGroupID(op.GroupID); err != nil {
+			return err
+		}
+	}
+	for _, op := range removeOps {
+		if err := ValidateExistingGroupID(op.GroupID); err != nil {
+			return err
 		}
 	}
 	toAdd := make(map[string]GroupKeyRanges, len(addOps))
 	toRemove := make(map[string]GroupKeyRanges, len(removeOps))
 	newAddedLabelRules := make(map[string]*labeler.LabelRule, len(addOps))
 	newRemovedLabelRules := make(map[string]*labeler.LabelRule, len(removeOps))
+	orderedAdd := make([]GroupKeyRanges, 0, len(addOps))
+	orderedRemove := make([]GroupKeyRanges, 0, len(removeOps))
 
 	plan := m.regionLabeler.NewPlan()
 
@@ -413,9 +418,9 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	defer m.metaMutex.Unlock()
 
 	// Step 1: Validate the added KeyRanges.
-	for groupID, op := range toAdd {
+	for _, op := range addOps {
 		if len(op.KeyRanges) == 0 {
-			delete(toAdd, groupID)
+			delete(toAdd, op.GroupID)
 			continue
 		}
 		currentRanges, err := m.getCurrentRanges(op.GroupID)
@@ -437,9 +442,9 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	}
 
 	// Step 2: Validate the removed KeyRanges.
-	for groupID, op := range toRemove {
+	for _, op := range removeOps {
 		if len(op.KeyRanges) == 0 {
-			delete(toRemove, groupID)
+			delete(toRemove, op.GroupID)
 			continue
 		}
 		currentRanges, err := m.getCurrentRanges(op.GroupID)
@@ -452,19 +457,20 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		}
 		toRemove[op.GroupID] = currentRanges
 	}
-	updatedMap := maps.Clone(toAdd)
-	maps.Copy(updatedMap, toRemove)
-	for _, updated := range updatedMap {
+
+	// Step 3: Validate merged ranges and plan labels in request order, adds first.
+	// Keep the operation order identical to CommitOps and the cache updates.
+	for _, op := range addOps {
+		updated, ok := toAdd[op.GroupID]
+		if !ok {
+			continue
+		}
 		if err := validateGroupKeyRanges(updated); err != nil {
 			return err
 		}
-	}
-
-	// Step 3: Create the change plan for the Label
-	for _, op := range toAdd {
 		// For addOps, directly SetLabelRule (Save will overwrite the old value).
 		// No need to Delete first.
-		labelRule := MakeLabelRule(toAdd[op.GroupID])
+		labelRule := MakeLabelRule(updated)
 		if err := plan.SetLabelRule(labelRule); err != nil {
 			log.Error("failed to create label rule",
 				zap.String("failed-group-id", op.GroupID),
@@ -473,9 +479,16 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 			return err
 		}
 		newAddedLabelRules[op.GroupID] = labelRule
+		orderedAdd = append(orderedAdd, updated)
 	}
-	for _, op := range toRemove {
-		ranges := toRemove[op.GroupID]
+	for _, op := range removeOps {
+		ranges, ok := toRemove[op.GroupID]
+		if !ok {
+			continue
+		}
+		if err := validateExistingGroupKeyRanges(ranges); err != nil {
+			return err
+		}
 		var labelRule *labeler.LabelRule
 
 		if len(ranges.KeyRanges) > 0 {
@@ -500,6 +513,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 			}
 		}
 		newRemovedLabelRules[op.GroupID] = labelRule
+		orderedRemove = append(orderedRemove, ranges)
 	}
 
 	// Step 4: Save the Label information in storage.
@@ -513,16 +527,25 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	// Step 5: Save the Group and Label information in memory.
 	plan.Apply()
 
-	for groupID, currentRanges := range updatedMap {
-		if len(currentRanges.KeyRanges) > 0 {
-			m.keyRanges[groupID] = currentRanges
-		} else {
-			delete(m.keyRanges, groupID)
+	for _, ops := range [][]GroupKeyRanges{orderedAdd, orderedRemove} {
+		for _, op := range ops {
+			currentRanges, ok := toAdd[op.GroupID]
+			if !ok {
+				currentRanges, ok = toRemove[op.GroupID]
+			}
+			if !ok {
+				continue
+			}
+			if len(currentRanges.KeyRanges) > 0 {
+				m.keyRanges[op.GroupID] = currentRanges
+			} else {
+				delete(m.keyRanges, op.GroupID)
+			}
 		}
 	}
 
-	m.updateGroupLabelRules(newAddedLabelRules, false)
-	m.updateGroupLabelRules(newRemovedLabelRules, true)
+	m.updateGroupLabelRules(orderedAdd, toAdd, newAddedLabelRules, false)
+	m.updateGroupLabelRules(orderedRemove, toRemove, newRemovedLabelRules, true)
 	return nil
 }
 

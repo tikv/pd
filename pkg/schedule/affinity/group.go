@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -325,9 +325,18 @@ func ValidateGroupID(id string) error {
 	return err
 }
 
-func parseGroupID(id string) (uint32, bool, error) {
+// ValidateExistingGroupID checks the character set and length of a stored group ID.
+// It permits IDs persisted before NextGen required keyspace-aware TiDB IDs.
+func ValidateExistingGroupID(id string) error {
 	if !idRegexp.MatchString(id) {
-		return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+		return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+	}
+	return nil
+}
+
+func parseGroupID(id string) (uint32, bool, error) {
+	if err := ValidateExistingGroupID(id); err != nil {
+		return 0, false, err
 	}
 	if !kerneltype.IsNextGen() {
 		return 0, false, nil
@@ -358,28 +367,47 @@ func parseGroupID(id string) (uint32, bool, error) {
 
 func validateGroupKeyRanges(group GroupKeyRanges) error {
 	keyspaceID, scoped, err := parseGroupID(group.GroupID)
-	if err != nil || !kerneltype.IsNextGen() || len(group.KeyRanges) == 0 {
+	if err != nil {
 		return err
 	}
+	return validateKeyspaceRanges(group, keyspaceID, scoped)
+}
+
+func validateExistingGroupKeyRanges(group GroupKeyRanges) error {
+	if err := ValidateExistingGroupID(group.GroupID); err != nil {
+		return err
+	}
+	// Stored IDs may predate creation rules. If no valid scope is encoded,
+	// infer the keyspace from the remaining ranges, as for a custom group.
+	keyspaceID, scoped, _ := parseGroupID(group.GroupID)
+	return validateKeyspaceRanges(group, keyspaceID, scoped)
+}
+
+func validateKeyspaceRanges(group GroupKeyRanges, keyspaceID uint32, scoped bool) error {
+	if !kerneltype.IsNextGen() || len(group.KeyRanges) == 0 {
+		return nil
+	}
 	if !scoped {
-		// Use the same ordered boundaries as the range checks, including the
-		// exclusive fencepost after the last valid keyspace.
-		end := 1 << (8 * (codec.KeyspacePrefixLen - 1))
-		next := sort.Search(end+1, func(id int) bool {
-			boundary := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, uint32(id))
-			return bytes.Compare(group.KeyRanges[0].StartKey, boundary[:]) < 0
-		})
-		if next == 0 || next > end {
+		startKey := group.KeyRanges[0].StartKey
+		if len(startKey) < codec.EncodedKeyspacePrefixLen || startKey[0] != codec.TxnKeyspaceModePrefix {
 			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s key ranges must belong to one transaction keyspace", group.GroupID))
 		}
-		keyspaceID = uint32(next - 1)
+		keyspaceID = uint32(startKey[1])<<16 | uint32(startKey[2])<<8 | uint32(startKey[3])
+		boundary := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
+		if keyspaceID > 0 && bytes.Compare(startKey, boundary[:]) < 0 {
+			keyspaceID--
+		}
+	}
+	if keyspaceID > constant.MaxValidKeyspaceID {
+		return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s has an invalid keyspace ID", group.GroupID))
 	}
 	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
 	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID+1)
 	// PD receives memcomparable region boundaries. The exclusive upper bound
 	// may be the next keyspace boundary, including the fencepost for the last ID.
 	for _, kr := range group.KeyRanges {
-		if len(kr.EndKey) == 0 || bytes.Compare(kr.StartKey, lower[:]) < 0 ||
+		if len(kr.StartKey) < codec.EncodedKeyspacePrefixLen || kr.StartKey[0] != codec.TxnKeyspaceModePrefix ||
+			len(kr.EndKey) == 0 || bytes.Compare(kr.StartKey, lower[:]) < 0 ||
 			bytes.Compare(kr.StartKey, kr.EndKey) >= 0 || bytes.Compare(kr.EndKey, upper[:]) > 0 {
 			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s key ranges must belong to transaction keyspace %d", group.GroupID, keyspaceID))
 		}

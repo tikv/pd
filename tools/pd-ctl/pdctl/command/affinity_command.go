@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -38,9 +37,6 @@ import (
 const tidbGroupIDPrefix = "_tidb_"
 
 var (
-	// groupIDRegexp is the character set and length of a group ID. Other
-	// checks, such as the NextGen ID format, are left to PD.
-	groupIDRegexp = regexp.MustCompile("^[-A-Za-z0-9_]{1,64}$")
 	// tidbObjectGroupIDRegexp matches the IDs of TiDB table and partition groups,
 	// with or without a keyspace.
 	tidbObjectGroupIDRegexp = regexp.MustCompile(`^_tidb_(?:ks(0|[1-9][0-9]*)_)?(?:t_([1-9][0-9]*)|pt_([1-9][0-9]*)_p([1-9][0-9]*))$`)
@@ -201,7 +197,7 @@ func affinityShowCommandFunc(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Otherwise, show the specific affinity group
-	groupID, err := getGroupID(cmd)
+	groupID, err := getGroupID(cmd, true)
 	if err != nil {
 		return err
 	}
@@ -215,7 +211,7 @@ func affinityShowCommandFunc(cmd *cobra.Command, _ []string) error {
 }
 
 func affinityCreateCommandFunc(cmd *cobra.Command, _ []string) error {
-	groupID, err := getGroupID(cmd)
+	groupID, err := getGroupID(cmd, false)
 	if err != nil {
 		return err
 	}
@@ -266,7 +262,7 @@ type affinityKeyRange struct {
 }
 
 func affinityRangeShowCommandFunc(cmd *cobra.Command, _ []string) error {
-	groupID, err := getGroupID(cmd)
+	groupID, err := getGroupID(cmd, true)
 	if err != nil {
 		return err
 	}
@@ -319,7 +315,7 @@ func affinityRangeRemoveCommandFunc(cmd *cobra.Command, _ []string) error {
 }
 
 func changeAffinityGroupRanges(cmd *cobra.Command, add bool) error {
-	groupID, err := getGroupID(cmd)
+	groupID, err := getGroupID(cmd, !add)
 	if err != nil {
 		return err
 	}
@@ -354,7 +350,7 @@ func changeAffinityGroupRanges(cmd *cobra.Command, add bool) error {
 }
 
 func affinityDeleteCommandFunc(cmd *cobra.Command, _ []string) error {
-	groupID, err := getGroupID(cmd)
+	groupID, err := getGroupID(cmd, true)
 	if err != nil {
 		return err
 	}
@@ -378,7 +374,7 @@ func affinityDeleteCommandFunc(cmd *cobra.Command, _ []string) error {
 }
 
 func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) error {
-	groupID, err := getGroupID(cmd)
+	groupID, err := getGroupID(cmd, false)
 	if err != nil {
 		return err
 	}
@@ -405,7 +401,7 @@ func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func getGroupID(cmd *cobra.Command) (string, error) {
+func getGroupID(cmd *cobra.Command, existing bool) (string, error) {
 	if cmd.Flags().Changed("group-id") {
 		for _, name := range []string{"table-id", "partition-id", "keyspace-id"} {
 			if cmd.Flags().Changed(name) {
@@ -413,8 +409,13 @@ func getGroupID(cmd *cobra.Command) (string, error) {
 			}
 		}
 		groupID, _ := cmd.Flags().GetString("group-id")
-		if !groupIDRegexp.MatchString(groupID) {
+		if err := affinity.ValidateExistingGroupID(groupID); err != nil {
 			return "", errors.Errorf("invalid --group-id %q: it must be 1 to 64 letters, digits, hyphens or underscores", groupID)
+		}
+		if !existing {
+			if err := affinity.ValidateGroupID(groupID); err != nil {
+				return "", err
+			}
 		}
 		return groupID, nil
 	}
@@ -558,17 +559,18 @@ func checkCustomGroupKeyspace(groupID string, ranges []pd.AffinityGroupKeyRange)
 // like Region keys. PD compares keys with the same boundaries when it checks
 // the key ranges of a keyspace-aware TiDB group.
 func keyspaceOfKey(key []byte) (uint32, bool) {
-	// The boundary of MaxKeyspaceID+1 ends the last keyspace.
-	end := int(constants.MaxKeyspaceID) + 1
-	// next is the first keyspace whose boundary is after key.
-	next := sort.Search(end+1, func(id int) bool {
-		boundary := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, uint32(id))
-		return bytes.Compare(key, boundary[:]) < 0
-	})
-	if next == 0 || next > end {
+	if len(key) < codec.EncodedKeyspacePrefixLen || key[0] != codec.TxnKeyspaceModePrefix {
 		return 0, false
 	}
-	return uint32(next - 1), true
+	id := uint32(key[1])<<16 | uint32(key[2])<<8 | uint32(key[3])
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id)
+	if bytes.Compare(key, lower[:]) < 0 {
+		if id == 0 {
+			return 0, false
+		}
+		id--
+	}
+	return id, id <= constants.MaxKeyspaceID
 }
 
 // formatAffinityKeyRange formats a key range as --range takes it.

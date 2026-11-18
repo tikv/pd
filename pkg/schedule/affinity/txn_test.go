@@ -81,22 +81,26 @@ func TestNextGenTiDBGroupOperations(t *testing.T) {
 			re.ErrorContains(create([]GroupKeyRanges{{GroupID: "new_group"}, {GroupID: id}}), "pd-ctl --keyspace-id")
 			re.False(manager.IsGroupExist("new_group"))
 		}
-		for _, force := range []bool{false, true} {
-			re.ErrorContains(manager.DeleteAffinityGroups([]string{"custom_group", id}, force), "pd-ctl --keyspace-id")
-			re.ErrorContains(manager.DeleteAffinityGroups([]string{id + "_missing"}, force), "pd-ctl --keyspace-id")
-		}
 		_, err := manager.UpdateAffinityGroupPeers(id, 1, []uint64{1})
 		re.ErrorContains(err, "pd-ctl --keyspace-id")
 		_, err = manager.CheckAndGetAffinityGroupState(id)
-		re.ErrorContains(err, "pd-ctl --keyspace-id")
+		re.NoError(err)
 		_, err = CollectGroupStates(manager, []string{"custom_group", id})
 		re.ErrorContains(err, "pd-ctl --keyspace-id")
 		for _, ranges := range [][]keyutil.KeyRange{nil, {{StartKey: []byte("a"), EndKey: []byte("b")}}} {
 			op := []GroupKeyRanges{{GroupID: id, KeyRanges: ranges}}
 			re.ErrorContains(manager.UpdateAffinityGroupKeyRanges(op, nil), "pd-ctl --keyspace-id")
-			re.ErrorContains(manager.UpdateAffinityGroupKeyRanges(nil, op), "pd-ctl --keyspace-id")
+			if len(ranges) == 0 {
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, op))
+			} else {
+				re.Error(manager.UpdateAffinityGroupKeyRanges(nil, op))
+			}
 		}
 		re.Equal(before, snapshot(), "rejected requests must not change persistent groups or ranges")
+	}
+	re.NoError(manager.DeleteAffinityGroups(legacy, true))
+	for _, id := range legacy {
+		re.NoError(manager.DeleteAffinityGroups([]string{id + "_missing"}, true))
 	}
 	// Identical table IDs remain independent across keyspaces, including both bounds.
 	for _, keyspaceID := range []uint32{0, 42, 43, 16777215} {

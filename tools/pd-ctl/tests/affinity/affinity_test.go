@@ -409,12 +409,16 @@ func TestAffinityGroupAndRangeCommands(t *testing.T) {
 		return hex.EncodeToString(codec.EncodeBytes(key))
 	}
 	extraRange := tableKey(200) + "," + tableKey(201)
+	unscopedTableGroupError := "ADMIN REPAIR AFFINITY TABLE GROUP"
+	if kerneltype.IsNextGen() {
+		unscopedTableGroupError = "pd-ctl --keyspace-id"
+	}
 	for _, tc := range []struct {
 		args []string
 		err  string
 	}{
 		{[]string{"create", "--group-id", tidbPrefix + "103", "--range", "0a,0b"}, "derived from its ID"},
-		{[]string{"create", "--group-id", "_tidb_tg_1_i0"}, "ADMIN REPAIR AFFINITY TABLE GROUP"},
+		{[]string{"create", "--group-id", "_tidb_tg_1_i0"}, unscopedTableGroupError},
 		{[]string{"create", "--group-id", "_tidb_ks1_tg_1_i0"}, "ADMIN REPAIR AFFINITY TABLE GROUP"},
 		{[]string{"create", "--group-id", "_tidb_pg1"}, "reserved for TiDB"},
 		{[]string{"create", "--group-id", "_tidb_custom"}, "reserved for TiDB"},
@@ -577,4 +581,54 @@ func TestAffinityCustomGroupKeyspace(t *testing.T) {
 	groups = make(map[string]*pd.AffinityGroupState)
 	mustRun(&groups, "range", "add", "--group-id", "poc-legacy", "--range", table(4, 200))
 	re.Equal(1, groups["poc-legacy"].RangeCount)
+}
+
+func TestAffinityNextGenLegacyCleanup(t *testing.T) {
+	re := require.New(t)
+	cluster, err := pdTests.NewTestCluster(t.Context(), 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	cluster.WaitLeader()
+	server := cluster.GetLeaderServer()
+	re.NoError(server.BootstrapCluster())
+	manager, err := server.GetServer().GetAffinityManager()
+	re.NoError(err)
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+	defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
+	const groupID, orphanID = "_tidb_t_9001", "_tidb_tg_9002"
+	kr := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: groupID, KeyRanges: []keyutil.KeyRange{kr}}}))
+	regionLabeler := server.GetRaftCluster().GetRegionLabeler()
+	re.NoError(regionLabeler.SetLabelRule(affinity.MakeLabelRule(affinity.GroupKeyRanges{GroupID: orphanID, KeyRanges: []keyutil.KeyRange{kr}})))
+	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+	run := func(args ...string) ([]byte, error) {
+		return tests.ExecuteCommand(ctl.GetRootCmd(), append([]string{"-u", server.GetAddr(), "config", "affinity"}, args...)...)
+	}
+	out, err := run("show", "--group-id", groupID)
+	re.NoError(err)
+	re.Contains(string(out), groupID)
+	for _, id := range []string{groupID, orphanID} {
+		out, err := run("range", "show", "--group-id", id)
+		re.NoError(err)
+		re.Contains(string(out), `"start_key": "61"`)
+		if id == groupID {
+			for _, args := range [][]string{
+				{"create", "--group-id", id},
+				{"update", "--group-id", id, "--leader", "1", "--voters", "1"},
+				{"range", "add", "--group-id", id, "--range", "63,64", "--force"},
+			} {
+				_, err := run(args...)
+				re.ErrorContains(err, "pd-ctl --keyspace-id")
+			}
+			_, err := run("range", "remove", "--group-id", id, "--range", "61,62", "--force")
+			re.NoError(err)
+			re.Zero(manager.GetAffinityGroupState(id).RangeCount)
+		}
+		_, err = run("delete", "--group-id", id, "--force")
+		re.NoError(err)
+		re.False(manager.IsGroupExist(id))
+		re.Nil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID(id)))
+	}
 }

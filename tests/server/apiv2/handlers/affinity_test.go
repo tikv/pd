@@ -75,7 +75,6 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 		re.NoError(failpoint.Enable(modeFlag, "return(false)"))
 		legacy := []string{"_tidb_t_1001", "_tidb_pt_1001_p3", "_tidb_tg_100"}
 		defer func() {
-			re.NoError(failpoint.Enable(modeFlag, "return(false)"))
 			re.NoError(manager.DeleteAffinityGroups(legacy, true))
 			re.NoError(failpoint.Disable(modeFlag))
 		}()
@@ -88,14 +87,8 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 			for _, req := range []struct{ method, path, body string }{
 				{http.MethodPost, "", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
 				{http.MethodPost, "?skip_exist_check=true", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
-				{http.MethodDelete, "/" + id, ""},
-				{http.MethodDelete, "/" + id + "?force=true", ""},
-				{http.MethodDelete, "/" + id + "_missing?force=true", ""},
-				{http.MethodPost, "?delete", fmt.Sprintf(`{"ids":["%s"],"force":true}`, id)},
 				{http.MethodPatch, "", fmt.Sprintf(`{"add":[{"id":"%s","ranges":[]}]}`, id)},
-				{http.MethodPatch, "", fmt.Sprintf(`{"remove":[{"id":"%s","ranges":[]}]}`, id)},
 				{http.MethodPut, "/" + id, `{"leader_store_id":1,"voter_store_ids":[1]}`},
-				{http.MethodGet, "/" + id, ""},
 				{http.MethodGet, "?ids=" + id, ""},
 			} {
 				httpReq, err := http.NewRequest(req.method, url+req.path, strings.NewReader(req.body))
@@ -111,6 +104,19 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 				re.Len(manager.GetAllAffinityGroupStates(), len(legacy))
 				re.True(manager.IsGroupExist(id))
 			}
+		}
+		for i, id := range legacy {
+			re.Equal(id, mustGetAffinityGroup(re, leader.GetAddr(), id).ID)
+			switch i {
+			case 0:
+				mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
+			case 1:
+				mustBatchDeleteAffinityGroups(re, leader.GetAddr(), &handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{id}, Force: true})
+			default:
+				// Empty legacy groups also support ordinary deletion in NextGen.
+				mustDeleteAffinityGroup(re, leader.GetAddr(), id, false)
+			}
+			re.False(manager.IsGroupExist(id))
 		}
 		// The same table in two keyspaces can be created and managed independently.
 		status, message := doCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
@@ -1589,8 +1595,12 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDQueriesMCS() {
 					body, err := io.ReadAll(resp.Body)
 					re.NoError(err)
 					re.NoError(resp.Body.Close())
-					re.Equal(http.StatusBadRequest, resp.StatusCode, "%s%s: %s", url, path, body)
-					re.Contains(string(body), "pd-ctl --keyspace-id")
+					if strings.HasPrefix(path, "/") {
+						re.Equal(http.StatusNotFound, resp.StatusCode, "%s%s: %s", url, path, body)
+					} else {
+						re.Equal(http.StatusBadRequest, resp.StatusCode, "%s%s: %s", url, path, body)
+						re.Contains(string(body), "pd-ctl --keyspace-id")
+					}
 				}
 			}
 
@@ -1629,5 +1639,28 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 			return ok
 		})
 		re.Contains(result.AffinityGroups, "header-check")
+	})
+}
+
+func (suite *affinityHandlerTestSuite) TestNextGenLegacyOrphanCleanup() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
+		leader := cluster.GetLeaderServer()
+		regionLabeler := leader.GetRaftCluster().GetRegionLabeler()
+		for i, id := range []string{"_tidb_t_9001", "_tidb_pt_9002_p3", "_tidb_tg_9003"} {
+			rule := affinity.MakeLabelRule(affinity.GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}})
+			re.NoError(regionLabeler.SetLabelRule(rule))
+			status, _ := doGetAffinityGroup(re, leader.GetAddr(), id)
+			re.Equal(http.StatusNotFound, status)
+			if i == 0 {
+				mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
+			} else {
+				mustBatchDeleteAffinityGroups(re, leader.GetAddr(), &handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{id}, Force: true})
+			}
+			re.Nil(regionLabeler.GetLabelRule(rule.ID))
+		}
 	})
 }

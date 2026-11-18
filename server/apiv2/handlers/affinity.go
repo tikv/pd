@@ -245,7 +245,7 @@ func deleteAffinityGroups(c *gin.Context) {
 
 	// Validate all group IDs
 	for _, id := range req.IDs {
-		if err := affinity.ValidateGroupID(id); err != nil {
+		if err := affinity.ValidateExistingGroupID(id); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -404,7 +404,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
-	if err := affinity.ValidateGroupID(groupID); err != nil {
+	if err := affinity.ValidateExistingGroupID(groupID); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -540,9 +540,14 @@ func validateKeyRange(startKey, endKey []byte) error {
 // Multiple operations for the same group are automatically merged.
 func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool, remove bool) ([]affinity.GroupKeyRanges, error) {
 	grouped := make(map[string][]keyutil.KeyRange)
+	order := make([]string, 0, len(ops))
+	validateID := affinity.ValidateGroupID
+	if remove {
+		validateID = affinity.ValidateExistingGroupID
+	}
 
 	for _, op := range ops {
-		if err := affinity.ValidateGroupID(op.ID); err != nil {
+		if err := validateID(op.ID); err != nil {
 			return nil, err
 		}
 		if !manager.IsGroupExist(op.ID) {
@@ -553,6 +558,9 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("no key ranges provided")
 		}
 
+		if _, ok := grouped[op.ID]; !ok {
+			order = append(order, op.ID)
+		}
 		// Validate and merge ranges for this group
 		for _, kr := range op.Ranges {
 			// Removal must also match persisted half-unbounded ranges.
@@ -568,12 +576,12 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 		}
 	}
 
-	// Convert to slice (order is not significant as it will be converted to map later)
+	// Preserve the first occurrence of each group in the request.
 	result := make([]affinity.GroupKeyRanges, 0, len(grouped))
-	for groupID, keyRanges := range grouped {
+	for _, groupID := range order {
 		result = append(result, affinity.GroupKeyRanges{
 			GroupID:   groupID,
-			KeyRanges: keyRanges,
+			KeyRanges: grouped[groupID],
 		})
 	}
 

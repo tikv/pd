@@ -275,11 +275,16 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	groupInfo.RangeCount = rangeCount
 }
 
-func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
+func (m *Manager) updateGroupLabelRules(changes []GroupKeyRanges, committed map[string]GroupKeyRanges, labels map[string]*labeler.LabelRule, needClear bool) {
 	m.Lock()
 	defer m.Unlock()
-	for groupID, labelRule := range labels {
-		m.updateGroupLabelRuleLocked(groupID, labelRule, needClear)
+	for _, change := range changes {
+		if _, ok := committed[change.GroupID]; !ok {
+			continue
+		}
+		if rule, ok := labels[change.GroupID]; ok {
+			m.updateGroupLabelRuleLocked(change.GroupID, rule, needClear)
+		}
 	}
 }
 
@@ -425,7 +430,7 @@ func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 
 // CheckAndGetAffinityGroupState returns the group state after validating the ID and presence.
 func (m *Manager) CheckAndGetAffinityGroupState(groupID string) (*GroupState, error) {
-	if err := ValidateGroupID(groupID); err != nil {
+	if err := ValidateExistingGroupID(groupID); err != nil {
 		return nil, err
 	}
 	state := m.GetAffinityGroupState(groupID)

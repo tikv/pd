@@ -166,9 +166,9 @@ func TestCheckCustomGroupKeyspace(t *testing.T) {
 		// boundary after it.
 		{added: ranges(keyRange(key(1, 0), key(2, 0)))},
 		{added: ranges(keyRange(key(constants.MaxKeyspaceID, 0), afterLast[:]))},
-		// As PD does, the keys are compared with the keyspace boundaries, so a
-		// key between them is in the keyspace whatever its encoding.
-		{added: ranges(keyRange([]byte{'x', 0, 0, 1, 't'}, []byte{'x', 0, 0, 1, 'u'}))},
+		// A Region boundary must contain the complete encoded keyspace prefix.
+		{added: ranges(keyRange([]byte{'x', 0, 0, 1, 't'}, []byte{'x', 0, 0, 1, 'u'})),
+			problem: `key range "7800000174,7800000175" does not start in a transaction keyspace`},
 		{added: ranges(keyRange(nil, nil)), problem: `key range "," covers the whole key space`},
 		{
 			added:   ranges(keyRange(nil, key(1, 100))),
@@ -213,5 +213,12 @@ func TestCheckCustomGroupKeyspace(t *testing.T) {
 			continue
 		}
 		re.EqualError(err, "nextgen requires the key ranges of custom group poc to lie in one keyspace, but "+tc.problem)
+	}
+}
+
+func TestKeyspaceOfKeyRejectsNonTxnPrefixes(t *testing.T) {
+	for _, key := range [][]byte{codec.EncodeBytes([]byte("y")), codec.EncodeBytes([]byte("y\x00")), {'x', 0, 0, 1, 't'}} {
+		_, ok := keyspaceOfKey(key)
+		require.False(t, ok, "%x", key)
 	}
 }
