@@ -40,13 +40,13 @@ const managerUninitializedErr = "keyspace manager is not initialized"
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
 	redirect, bootstrap := middlewares.Redirector(), middlewares.BootstrapChecker()
-	router.POST("", middlewares.AuditWithBody("CreateKeyspace", audit.LocalLogLabel), redirect, bootstrap, CreateKeyspace)
-	router.POST("/id", middlewares.AuditWithBody("CreateKeyspaceByID", audit.LocalLogLabel), redirect, bootstrap, CreateKeyspaceByID)
-	router.GET("", redirect, bootstrap, LoadAllKeyspaces)
-	router.GET("/:name", redirect, bootstrap, LoadKeyspace)
-	router.PATCH("/:name/config", middlewares.AuditWithBody("UpdateKeyspaceConfig", audit.LocalLogLabel), redirect, bootstrap, UpdateKeyspaceConfig)
-	router.PUT("/:name/state", middlewares.AuditWithBody("UpdateKeyspaceState", audit.LocalLogLabel), redirect, bootstrap, UpdateKeyspaceState)
-	router.GET("/id/:id", redirect, bootstrap, LoadKeyspaceByID)
+	router.POST("", redirect, bootstrap, middlewares.Audit("CreateKeyspace", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspace)
+	router.POST("/id", redirect, bootstrap, middlewares.Audit("CreateKeyspaceByID", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspaceByID)
+	router.GET("", redirect, bootstrap, middlewares.Audit("LoadAllKeyspaces", audit.PrometheusHistogram), LoadAllKeyspaces)
+	router.GET("/:name", redirect, bootstrap, middlewares.Audit("LoadKeyspace", audit.PrometheusHistogram), LoadKeyspace)
+	router.PATCH("/:name/config", redirect, bootstrap, middlewares.Audit("UpdateKeyspaceConfig", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateKeyspaceConfig)
+	router.PUT("/:name/state", redirect, bootstrap, middlewares.Audit("UpdateKeyspaceState", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateKeyspaceState)
+	router.GET("/id/:id", redirect, bootstrap, middlewares.Audit("LoadKeyspaceByID", audit.PrometheusHistogram), LoadKeyspaceByID)
 }
 
 // CreateKeyspaceParams represents parameters needed when creating a new keyspace.

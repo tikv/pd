@@ -41,10 +41,10 @@ import (
 func RegisterMaintenance(r *gin.RouterGroup) {
 	router := r.Group("maintenance")
 	redirect := middlewares.Redirector()
-	router.PUT("/:task_type/:task_id", middlewares.AuditWithBody("StartMaintenanceTask", audit.LocalLogLabel), redirect, StartMaintenanceTask)
-	router.GET("", redirect, GetMaintenanceTasks)
-	router.GET("/:task_type", redirect, GetMaintenanceTaskByType)
-	router.DELETE("/:task_type/:task_id", middlewares.Audit("DeleteMaintenanceTask", audit.LocalLogLabel), redirect, DeleteMaintenanceTask)
+	router.PUT("/:task_type/:task_id", redirect, middlewares.Audit("StartMaintenanceTask", audit.LocalLogLabel, audit.PrometheusHistogram), StartMaintenanceTask)
+	router.GET("", redirect, middlewares.Audit("GetMaintenanceTasks", audit.PrometheusHistogram), GetMaintenanceTasks)
+	router.GET("/:task_type", redirect, middlewares.Audit("GetMaintenanceTaskByType", audit.PrometheusHistogram), GetMaintenanceTaskByType)
+	router.DELETE("/:task_type/:task_id", redirect, middlewares.Audit("DeleteMaintenanceTask", audit.LocalLogLabel, audit.PrometheusHistogram), DeleteMaintenanceTask)
 }
 
 // StartMaintenanceTask starts a maintenance task.

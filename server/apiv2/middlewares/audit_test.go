@@ -160,7 +160,7 @@ func TestAuditBackendSelection(t *testing.T) {
 			svr.options.SetAuditConfig(&config.AuditConfig{EnableAudit: tc.enabled})
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			router.POST("/pd/api/v2/keyspaces", AuditWithBody("CreateKeyspace", tc.labels...), func(c *gin.Context) {
+			router.POST("/pd/api/v2/keyspaces", Audit("CreateKeyspace", tc.labels...), func(c *gin.Context) {
 				re.Zero(body.reads)
 				re.False(body.closed)
 				_, ok := requestutil.RequestInfoFrom(c.Request.Context())
@@ -248,7 +248,7 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
 			var recordedInfo requestutil.RequestInfo
-			router.POST("/selected", AuditWithBody("CreateKeyspace", audit.LocalLogLabel), func(c *gin.Context) {
+			router.POST("/selected", Audit("CreateKeyspace", audit.LocalLogLabel), func(c *gin.Context) {
 				var ok bool
 				recordedInfo, ok = requestutil.RequestInfoFrom(c.Request.Context())
 				re.True(ok)
@@ -329,7 +329,7 @@ func TestAuditCompleteBody(t *testing.T) {
 			}})
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+			router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
 				re.Zero(body.bytesRead)
 				re.False(body.closed)
 				info, ok := requestutil.RequestInfoFrom(c.Request.Context())
@@ -377,7 +377,7 @@ func TestAuditBodyReadErrors(t *testing.T) {
 				router := gin.New()
 				router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
 				called := false
-				router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+				router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
 					called = true
 					re.False(body.closed)
 					info, ok := requestutil.RequestInfoFrom(c.Request.Context())
@@ -406,7 +406,7 @@ func TestAuditSkipsUnusedAndRedactedBodies(t *testing.T) {
 		mode    logutil.RedactInfoLogType
 		capture bool
 	}{
-		{name: "bodyless", mode: logutil.RedactInfoLogOFF},
+		{name: "metrics only", mode: logutil.RedactInfoLogOFF},
 		{name: "fully redacted", mode: logutil.RedactInfoLogON, capture: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -419,9 +419,9 @@ func TestAuditSkipsUnusedAndRedactedBodies(t *testing.T) {
 			svr := newTestAuditServer()
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			middleware := Audit("Selected", audit.LocalLogLabel)
+			middleware := Audit("Selected", audit.PrometheusHistogram)
 			if tc.capture {
-				middleware = AuditWithBody("Selected", audit.LocalLogLabel)
+				middleware = Audit("Selected", audit.LocalLogLabel)
 			}
 			router.POST("/selected", middleware, func(c *gin.Context) {
 				re.Zero(body.reads)
@@ -453,7 +453,7 @@ func TestAuditOnlyCapturesConsumedBody(t *testing.T) {
 			}})
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+			router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
 				re.Zero(body.reads)
 				data := make([]byte, consumed)
 				_, err := io.ReadFull(c.Request.Body, data)
@@ -492,7 +492,7 @@ func TestAuditBodyReadDoesNotDelayResponse(t *testing.T) {
 	}})
 	router := gin.New()
 	router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-	router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+	router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
 		requestBody := c.Request.Body
 		go func() {
 			_, err := requestBody.Read(make([]byte, 1))
@@ -521,7 +521,7 @@ func TestAuditBodyLogOnPanic(t *testing.T) {
 	router := gin.New()
 	router.Use(gin.CustomRecovery(func(c *gin.Context, _ any) { c.AbortWithStatus(http.StatusInternalServerError) }))
 	router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-	router.POST("/selected", AuditWithBody("Selected", audit.LocalLogLabel), func(c *gin.Context) {
+	router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
 		data, err := io.ReadAll(c.Request.Body)
 		re.NoError(err)
 		re.Equal("request-body", string(data))

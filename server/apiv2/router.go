@@ -54,7 +54,7 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	})
 	root := router.Group(apiV2Prefix)
 	handlers.RegisterReadyCheck(root)
-	// Routes place auditing before redirection so ingress identity is retained.
+	// Routes audit locally handled requests after redirection and bootstrap checks.
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
 	handlers.RegisterMetaServiceGroup(root)

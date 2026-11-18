@@ -15,14 +15,19 @@
 package audit
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 )
 
@@ -141,4 +146,101 @@ func (*LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
 		zap.String("remote-addr", r.RemoteAddr),
 		zap.String("tls-client-cn", clientCN))
 	return true
+}
+
+// ProcessHTTPRequest runs the selected HTTP audit backends around next.
+// Local logs capture only bytes consumed by next and run after processing when
+// a body is captured. Auditing never reads ahead, drains input, or replaces a
+// body-read error. Fully redacted and metrics-only requests skip body capture.
+func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendLabels, backends []Backend, next http.HandlerFunc) {
+	if labels == nil || len(labels.Labels) == 0 {
+		next(w, r)
+		return
+	}
+	info, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		info = requestutil.GetRequestInfoWithoutBody(r)
+	}
+	var body *capturedBody
+	if info.BodyParam == "" && slices.Contains(labels.Labels, LocalLogLabel) {
+		body = captureBody(r, &info)
+	}
+	ctx := requestutil.WithRequestInfo(r.Context(), info)
+	// Keep ingress identity even if downstream routing rewrites the request.
+	auditRequest := r.WithContext(ctx)
+	r = r.WithContext(ctx)
+	hasAfterBackend := false
+	for _, backend := range backends {
+		if !backend.Match(labels) {
+			continue
+		}
+		if backend.ProcessBeforeHandler() {
+			if body == nil {
+				backend.ProcessHTTPRequest(auditRequest)
+			}
+		} else {
+			hasAfterBackend = true
+		}
+	}
+
+	defer func() {
+		if body != nil {
+			info.BodyParam = body.String()
+			auditRequest = auditRequest.WithContext(requestutil.WithRequestInfo(auditRequest.Context(), info))
+			for _, backend := range backends {
+				if backend.ProcessBeforeHandler() && backend.Match(labels) {
+					backend.ProcessHTTPRequest(auditRequest)
+				}
+			}
+		}
+
+		if !hasAfterBackend {
+			return
+		}
+		end := time.Now().Unix()
+		auditRequest = auditRequest.WithContext(requestutil.WithEndTime(auditRequest.Context(), end))
+		for _, backend := range backends {
+			if !backend.ProcessBeforeHandler() && backend.Match(labels) {
+				backend.ProcessHTTPRequest(auditRequest)
+			}
+		}
+	}()
+	next(w, r)
+}
+
+type capturedBody struct {
+	io.ReadCloser
+	mu   sync.Mutex
+	data bytes.Buffer
+}
+
+func (body *capturedBody) Read(p []byte) (int, error) {
+	n, err := body.ReadCloser.Read(p)
+	if n > 0 {
+		body.mu.Lock()
+		body.data.Write(p[:n])
+		body.mu.Unlock()
+	}
+	return n, err
+}
+
+func (body *capturedBody) String() string {
+	// An HTTP transport may still be reading when an early response arrives.
+	// Never hold this lock across the underlying Read, which can block.
+	body.mu.Lock()
+	defer body.mu.Unlock()
+	return body.data.String()
+}
+
+func captureBody(r *http.Request, info *requestutil.RequestInfo) *capturedBody {
+	if r.Body == nil || r.Body == http.NoBody {
+		return nil
+	}
+	if logutil.IsInfoLogFullyRedacted() {
+		info.BodyParam = "?"
+		return nil
+	}
+	body := &capturedBody{ReadCloser: r.Body}
+	r.Body = body
+	return body
 }

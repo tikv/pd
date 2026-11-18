@@ -139,7 +139,7 @@ func TestMaintenanceAuditFollower(t *testing.T) {
 				re.NoError(response.Body.Close())
 				re.Equal(http.StatusNotFound, response.StatusCode)
 				expected := 0
-				if !enabled {
+				if !enabled && allowLocal {
 					expected++
 				}
 				if enabled && !allowLocal {
@@ -149,7 +149,7 @@ func TestMaintenanceAuditFollower(t *testing.T) {
 				re.NoError(err)
 				entries := string(data[len(before):])
 				re.Equal(expected, strings.Count(entries, "ServiceLabel:DeleteMaintenanceTask,"))
-				if !enabled {
+				if !enabled && allowLocal {
 					re.Contains(entries, peer, "the ingress connection must remain observable despite a forged forwarding header")
 				}
 				re.Equal(leaderName, cluster.GetLeader())

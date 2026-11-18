@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -136,7 +137,7 @@ func TestAuditFollowerWithoutConfigRead(t *testing.T) {
 			re.NotContains(entries, keypath.ServiceMiddlewarePath())
 			expected := 0
 			if enabled {
-				expected = 3 // One direct request and both receivers of the forwarded request.
+				expected = 2 // The leader audits the direct and forwarded requests.
 			}
 			re.Equal(expected, strings.Count(entries, "ServiceLabel:CreateKeyspace,"))
 			re.True(leader.GetServer().GetMember().IsServing())
@@ -195,9 +196,30 @@ func (suite *keyspaceTestSuite) TestHTTPAuditSwitch() {
 	re := suite.Require()
 	logFile := testutil.InitTempFileLogger(suite.T(), "info")
 	configURL := suite.server.GetAddr() + "/pd/api/v1/service-middleware/config"
+	snapshot := func() map[string]float64 {
+		families, err := prometheus.DefaultGatherer.Gather()
+		re.NoError(err)
+		counts := make(map[string]float64)
+		for _, family := range families {
+			if family.GetName() != "pd_service_audit_requests_total" && family.GetName() != "pd_service_audit_handling_seconds" {
+				continue
+			}
+			for _, metric := range family.GetMetric() {
+				var service string
+				for _, label := range metric.GetLabel() {
+					if label.GetName() == "service" {
+						service = label.GetValue()
+					}
+				}
+				counts[family.GetName()+":"+service] += metric.GetCounter().GetValue() + float64(metric.GetHistogram().GetSampleCount())
+			}
+		}
+		return counts
+	}
 	for i, enabled := range []bool{false, true, false} {
 		body := fmt.Appendf(nil, `{"audit.enable-audit":"%t"}`, enabled)
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, body, testutil.StatusOK(re)))
+		before := snapshot()
 		request := &handlers.CreateKeyspaceParams{Name: fmt.Sprintf("audit-keyspace-%d", i)}
 		MustCreateKeyspace(re, suite.server, request)
 		re.Equal(request.Name, mustLoadKeyspaces(re, suite.server, request.Name).Name)
@@ -209,6 +231,17 @@ func (suite *keyspaceTestSuite) TestHTTPAuditSwitch() {
 		}
 		re.Equal(expected, strings.Count(string(data), "ServiceLabel:CreateKeyspace,"))
 		re.NotContains(string(data), "ServiceLabel:LoadKeyspace,")
+		after := snapshot()
+		increment := float64(0)
+		if enabled {
+			increment = 1
+		}
+		for _, family := range []string{"pd_service_audit_requests_total", "pd_service_audit_handling_seconds"} {
+			for _, service := range []string{"CreateKeyspace", "LoadKeyspace"} {
+				key := family + ":" + service
+				re.Equal(increment, after[key]-before[key], key)
+			}
+		}
 	}
 }
 

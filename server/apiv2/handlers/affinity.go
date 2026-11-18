@@ -33,21 +33,21 @@ import (
 func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
 	redirect, bootstrap := middlewares.Redirector(), middlewares.BootstrapChecker()
-	createAudit := middlewares.AuditWithBody("CreateAffinityGroups", audit.LocalLogLabel)
-	deleteAudit := middlewares.AuditWithBody("DeleteAffinityGroups", audit.LocalLogLabel)
-	router.POST("", func(c *gin.Context) {
+	createAudit := middlewares.Audit("CreateAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram)
+	deleteAudit := middlewares.Audit("DeleteAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram)
+	router.POST("", redirect, bootstrap, func(c *gin.Context) {
 		if _, hasDelete := c.GetQuery("delete"); hasDelete {
 			deleteAudit(c)
 		} else {
 			createAudit(c)
 		}
-	}, redirect, bootstrap, PostAffinityGroups)
-	router.PATCH("", middlewares.AuditWithBody("BatchModifyAffinityGroups", audit.LocalLogLabel), redirect, bootstrap, BatchModifyAffinityGroups)
-	router.PUT("/:group_id", middlewares.AuditWithBody("UpdateAffinityGroupPeers", audit.LocalLogLabel), redirect, bootstrap, UpdateAffinityGroupPeers)
-	router.DELETE("/:group_id", middlewares.Audit("DeleteAffinityGroup", audit.LocalLogLabel), redirect, bootstrap, DeleteAffinityGroup)
+	}, PostAffinityGroups)
+	router.PATCH("", redirect, bootstrap, middlewares.Audit("BatchModifyAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram), BatchModifyAffinityGroups)
+	router.PUT("/:group_id", redirect, bootstrap, middlewares.Audit("UpdateAffinityGroupPeers", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateAffinityGroupPeers)
+	router.DELETE("/:group_id", redirect, bootstrap, middlewares.Audit("DeleteAffinityGroup", audit.LocalLogLabel, audit.PrometheusHistogram), DeleteAffinityGroup)
 	affinityRedirect := middlewares.AffinityMicroserviceRedirector()
-	router.GET("", redirect, affinityRedirect, bootstrap, GetAllAffinityGroups)
-	router.GET("/:group_id", redirect, affinityRedirect, bootstrap, GetAffinityGroup)
+	router.GET("", redirect, affinityRedirect, bootstrap, middlewares.Audit("GetAllAffinityGroups", audit.PrometheusHistogram), GetAllAffinityGroups)
+	router.GET("/:group_id", redirect, affinityRedirect, bootstrap, middlewares.Audit("GetAffinityGroup", audit.PrometheusHistogram), GetAffinityGroup)
 }
 
 // --- API Structures ---

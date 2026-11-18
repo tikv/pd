@@ -39,9 +39,9 @@ const tsoPrimaryEvictPath = "/tso/api/v1/primary/evict"
 func RegisterMicroservice(r *gin.RouterGroup) {
 	router := r.Group("ms")
 	redirect := middlewares.Redirector()
-	router.GET("members/:service", redirect, GetMembers)
-	router.GET("primary/:service", redirect, GetPrimary)
-	router.POST("tso/primary/evict", middlewares.AuditWithBody("EvictTSOPrimary", audit.LocalLogLabel), redirect, EvictTSOPrimary)
+	router.GET("members/:service", redirect, middlewares.Audit("GetMembers", audit.PrometheusHistogram), GetMembers)
+	router.GET("primary/:service", redirect, middlewares.Audit("GetPrimary", audit.PrometheusHistogram), GetPrimary)
+	router.POST("tso/primary/evict", redirect, middlewares.Audit("EvictTSOPrimary", audit.LocalLogLabel, audit.PrometheusHistogram), EvictTSOPrimary)
 }
 
 // GetMembers gets all members of the cluster for the specified service.
