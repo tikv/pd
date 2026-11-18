@@ -15,10 +15,11 @@
 package middlewares
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"slices"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,8 +44,8 @@ func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 	return newAudit(serviceLabel, false, backendLabels...)
 }
 
-// AuditWithBody also captures the request body for routes that consume it.
-// Fully redacted bodies are left unread, and handlers retain the complete stream.
+// AuditWithBody also records the bytes read by the handler or proxy. Body logs
+// are emitted after processing so auditing never reads ahead of the consumer.
 func AuditWithBody(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 	return newAudit(serviceLabel, true, backendLabels...)
 }
@@ -72,72 +73,89 @@ func newAudit(serviceLabel string, captureBody bool, backendLabels ...string) gi
 		backends := svr.GetAuditBackend()
 		info := requestutil.GetRequestInfoWithoutBody(c.Request)
 		info.ServiceLabel = serviceLabel
+		var body *auditRequestBody
 		if captureBody && slices.Contains(labels.Labels, audit.LocalLogLabel) {
-			captureAuditBody(c.Request, &info)
+			body = captureAuditBody(c.Request, &info)
 		}
-		c.Request = c.Request.WithContext(requestutil.WithRequestInfo(c.Request.Context(), info))
+		ctx := requestutil.WithRequestInfo(c.Request.Context(), info)
+		// Keep ingress identity even if downstream routing rewrites the request.
+		auditRequest := c.Request.WithContext(ctx)
+		c.Request = c.Request.WithContext(ctx)
 		hasAfterBackend := false
 		for _, backend := range backends {
 			if !backend.Match(labels) {
 				continue
 			}
 			if backend.ProcessBeforeHandler() {
-				backend.ProcessHTTPRequest(c.Request)
+				if body == nil {
+					backend.ProcessHTTPRequest(auditRequest)
+				}
 			} else {
 				hasAfterBackend = true
 			}
 		}
 
-		c.Next()
-
-		if !hasAfterBackend {
-			return
-		}
-		c.Request = c.Request.WithContext(requestutil.WithEndTime(c.Request.Context(), time.Now().Unix()))
-		for _, backend := range backends {
-			if !backend.ProcessBeforeHandler() && backend.Match(labels) {
-				backend.ProcessHTTPRequest(c.Request)
+		defer func() {
+			if body != nil {
+				info.BodyParam = body.String()
+				auditRequest = auditRequest.WithContext(requestutil.WithRequestInfo(auditRequest.Context(), info))
+				c.Request = c.Request.WithContext(requestutil.WithRequestInfo(c.Request.Context(), info))
+				for _, backend := range backends {
+					if backend.ProcessBeforeHandler() && backend.Match(labels) {
+						backend.ProcessHTTPRequest(auditRequest)
+					}
+				}
 			}
-		}
+
+			if !hasAfterBackend {
+				return
+			}
+			end := time.Now().Unix()
+			c.Request = c.Request.WithContext(requestutil.WithEndTime(c.Request.Context(), end))
+			auditRequest = auditRequest.WithContext(requestutil.WithEndTime(auditRequest.Context(), end))
+			for _, backend := range backends {
+				if !backend.ProcessBeforeHandler() && backend.Match(labels) {
+					backend.ProcessHTTPRequest(auditRequest)
+				}
+			}
+		}()
+		c.Next()
 	}
 }
 
 type auditRequestBody struct {
 	io.ReadCloser
-	captured *strings.Reader
-	readErr  error
+	mu   sync.Mutex
+	data bytes.Buffer
 }
 
 func (body *auditRequestBody) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
+	n, err := body.ReadCloser.Read(p)
+	if n > 0 {
+		body.mu.Lock()
+		body.data.Write(p[:n])
+		body.mu.Unlock()
 	}
-	if body.captured.Len() > 0 {
-		return body.captured.Read(p)
-	}
-	if body.readErr != nil {
-		err := body.readErr
-		body.readErr = nil
-		return 0, err
-	}
-	return body.ReadCloser.Read(p)
+	return n, err
 }
 
-func captureAuditBody(r *http.Request, info *requestutil.RequestInfo) {
+func (body *auditRequestBody) String() string {
+	// An HTTP transport may still be reading when an early response arrives.
+	// Never hold this lock across the underlying Read, which can block.
+	body.mu.Lock()
+	defer body.mu.Unlock()
+	return body.data.String()
+}
+
+func captureAuditBody(r *http.Request, info *requestutil.RequestInfo) *auditRequestBody {
 	if r.Body == nil || r.Body == http.NoBody {
-		return
+		return nil
 	}
 	if logutil.IsInfoLogFullyRedacted() {
 		info.BodyParam = "?"
-		return
+		return nil
 	}
-	data, err := io.ReadAll(r.Body)
-	info.BodyParam = string(data)
-	// Leave read errors to the handler so auditing preserves its response and
-	// prevents mutations based on an incomplete body.
-	r.Body = &auditRequestBody{
-		ReadCloser: r.Body,
-		captured:   strings.NewReader(info.BodyParam),
-		readErr:    err,
-	}
+	body := &auditRequestBody{ReadCloser: r.Body}
+	r.Body = body
+	return body
 }
