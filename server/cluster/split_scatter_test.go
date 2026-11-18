@@ -61,7 +61,6 @@ func TestHandleAskBatchSplitRejectsInvalidRequestBeforeAllocation(t *testing.T) 
 		{"count limit", core.MaxBatchSplitCount + 1, 0, false, "exceeds maximum"},
 		{"count overflow", math.MaxUint32, 0, false, "exceeds maximum"},
 		{"peer product", core.MaxBatchSplitCount, 32766, true, "split response exceeds maximum"},
-		{"same configuration mismatch", 1, 4, false, "peers do not match"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cluster, _ := newSplitScatterTestCluster(t)

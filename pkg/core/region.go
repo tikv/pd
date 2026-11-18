@@ -76,10 +76,8 @@ func ValidateBatchSplitCount(splitCount uint32) error {
 	return nil
 }
 
-// ValidateBatchSplitRequest bounds response construction even when the request
-// contains more peers than the cached region. A newer configuration may arrive
-// before its heartbeat, so compare peer sets only at the cached configuration.
-func ValidateBatchSplitRequest(splitCount uint32, region *metapb.Region, current *RegionInfo) error {
+// ValidateBatchSplitRequest bounds response construction using the requested peer count.
+func ValidateBatchSplitRequest(splitCount uint32, region *metapb.Region) error {
 	if err := ValidateBatchSplitCount(splitCount); err != nil {
 		return err
 	}
@@ -95,24 +93,7 @@ func ValidateBatchSplitRequest(splitCount uint32, region *metapb.Region, current
 	if peers > payloadBudget/10 || uint64(splitCount) > payloadBudget/(33+10*peers) {
 		return errors.Errorf("split response exceeds maximum %d bytes", MaxBatchSplitResponseSize)
 	}
-	if current == nil || current.GetID() != region.GetId() ||
-		current.GetRegionEpoch().GetConfVer() != region.GetRegionEpoch().GetConfVer() {
-		return nil
-	}
-	if len(current.GetPeers()) != len(region.GetPeers()) {
-		return errors.New("split region peers do not match current configuration")
-	}
-	remaining := make(map[uint64]*metapb.Peer, len(current.GetPeers()))
-	for _, peer := range current.GetPeers() {
-		remaining[peer.GetId()] = peer
-	}
-	for _, peer := range region.GetPeers() {
-		stored, ok := remaining[peer.GetId()]
-		if !ok || !proto.Equal(stored, peer) {
-			return errors.New("split region peers do not match current configuration")
-		}
-		delete(remaining, peer.GetId())
-	}
+
 	return nil
 }
 

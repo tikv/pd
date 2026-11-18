@@ -96,14 +96,7 @@ func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, 
 		}
 	}
 	tsoQueue := val.(*tsoRequestProxyQueue)
-	select {
-	case tsoQueue.requestCh <- req:
-	default:
-		select {
-		case tsoQueue.requestCh <- req:
-		case <-tsoQueue.ctx.Done():
-		}
-	}
+	tsoQueue.requestCh <- req
 	return tsoQueue.ctx
 }
 
@@ -141,11 +134,6 @@ func (s *TSODispatcher) dispatch(
 		return
 	}
 	defer cancel()
-	cancelBatch := func() {
-		// Returning the downstream handlers also unblocks a flow-controlled Send.
-		tsoQueue.cancel(context.Canceled)
-		cancel()
-	}
 
 	// make(chan Request, maxMergeRequests+1) + 1
 	requests := make([]Request, 0, maxMergeRequests+2)
@@ -167,7 +155,7 @@ func (s *TSODispatcher) dispatch(
 			}
 			for pending := requests; len(pending) > 0; {
 				done := make(chan struct{})
-				dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancelBatch)
+				dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
 				select {
 				case tsDeadlineCh <- dl:
 				case <-dispatcherCtx.Done():
@@ -198,37 +186,22 @@ func (s *TSODispatcher) dispatch(
 }
 
 // processRequests forwards one logical-capacity batch and returns the remaining requests.
-// Compact live requests in place so canceled streams need no upstream allocation.
 func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) ([]Request, error) {
 	if len(requests) == 0 {
 		return nil, ValidateTSOCount(0)
 	}
 	var count uint64
-	consumed, size := 0, 0
-	for consumed < len(requests) {
-		request := requests[consumed]
-		requestCount, active := request.getCountIfActive()
-		if !active {
-			consumed++
-			continue
-		}
-		if err := ValidateTSOCount(uint64(requestCount)); err != nil {
+	for i, request := range requests {
+		requestCount := uint64(request.getCount())
+		if err := ValidateTSOCount(requestCount); err != nil {
 			return nil, err
 		}
-		if count+uint64(requestCount) > logicalBits {
-			break
+		if count+requestCount > logicalBits {
+			return requests[i:], s.processBatch(forwardStream, requests[:i], uint32(count))
 		}
-		if size != consumed {
-			requests[size] = request
-		}
-		size++
-		consumed++
-		count += uint64(requestCount)
+		count += requestCount
 	}
-	if size == 0 {
-		return nil, nil
-	}
-	return requests[consumed:], s.processBatch(forwardStream, requests[:size], uint32(count))
+	return nil, s.processBatch(forwardStream, requests, uint32(count))
 }
 
 func (s *TSODispatcher) processBatch(forwardStream stream, requests []Request, count uint32) error {
@@ -254,25 +227,9 @@ func (s *TSODispatcher) processBatch(forwardStream stream, requests []Request, c
 
 func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) {
 	countSum := int64(0)
-	var remaining []Request
 	for i := range requests {
 		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
 		// The timestamps remain consumed even if this downstream stream closed.
-		countSum = newCountSum
-		if err != nil {
-			log.Warn("send tso response to client failed", errs.ZapError(err))
-			remaining = requests[i+1:]
-			break
-		}
-	}
-	// After a failed send, skip canceled streams without checking healthy batches twice.
-	for _, request := range remaining {
-		count, active := request.getCountIfActive()
-		if !active {
-			countSum += int64(count)
-			continue
-		}
-		newCountSum, err := request.postProcess(countSum, physical, firstLogical)
 		countSum = newCountSum
 		if err != nil {
 			log.Warn("send tso response to client failed", errs.ZapError(err))

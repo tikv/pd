@@ -408,7 +408,7 @@ func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBa
 			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "cannot split affinity region"),
 		}, nil
 	}
-	if err := core.ValidateBatchSplitRequest(splitCount, reqRegion, region); err != nil {
+	if err := core.ValidateBatchSplitRequest(splitCount, reqRegion); err != nil {
 		return &schedulingpb.AskBatchSplitResponse{
 			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil

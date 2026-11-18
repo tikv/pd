@@ -63,7 +63,6 @@ func TestAskBatchSplitRejectsInvalidRequestBeforeAllocation(t *testing.T) {
 		{"count overflow", math.MaxUint32, 0, false, "exceeds maximum"},
 		{"peer product", core.MaxBatchSplitCount, 32766, true, "split response exceeds maximum"},
 		{"ID count overflow", core.MaxBatchSplitCount, 32767, true, "split response exceeds maximum"},
-		{"same configuration mismatch", 1, 4, false, "peers do not match"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			svc, cluster, _ := newTestSchedulingServiceForSplit(t)

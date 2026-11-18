@@ -1732,33 +1732,8 @@ func BenchmarkQueryRegions(b *testing.B) {
 
 func TestValidateBatchSplitRequest(t *testing.T) {
 	region := &metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1}, Peers: []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}}}
-	current := NewRegionInfo(region, region.Peers[0])
-	require.NoError(t, ValidateBatchSplitRequest(MaxBatchSplitCount, region, current))
-	require.NoError(t, ValidateBatchSplitRequest(0, region, current))
-	changed := current.Clone(SetPeers([]*metapb.Peer{{Id: 1, StoreId: 1}})).GetMeta()
-	require.ErrorContains(t, ValidateBatchSplitRequest(1, changed, current), "peers do not match")
-	changed.RegionEpoch = &metapb.RegionEpoch{ConfVer: 2}
-	require.NoError(t, ValidateBatchSplitRequest(1, changed, current), "a newer configuration can precede the heartbeat")
-
-	for _, test := range []struct {
-		name  string
-		peers []*metapb.Peer
-		valid bool
-	}{
-		{"reordered", []*metapb.Peer{region.Peers[2], region.Peers[0], region.Peers[1]}, true},
-		{"duplicate", []*metapb.Peer{region.Peers[0], region.Peers[0], region.Peers[2]}, false},
-		{"different store", []*metapb.Peer{{Id: 1, StoreId: 9}, region.Peers[1], region.Peers[2]}, false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			request := current.Clone(SetPeers(test.peers)).GetMeta()
-			err := ValidateBatchSplitRequest(1, request, current)
-			if test.valid {
-				require.NoError(t, err)
-			} else {
-				require.ErrorContains(t, err, "peers do not match")
-			}
-		})
-	}
+	require.NoError(t, ValidateBatchSplitRequest(MaxBatchSplitCount, region))
+	require.NoError(t, ValidateBatchSplitRequest(0, region))
 	for _, test := range []struct {
 		peers int
 		count uint32
@@ -1785,7 +1760,7 @@ func TestValidateBatchSplitRequest(t *testing.T) {
 				ids[i] = math.MaxUint64
 			}
 			request := &metapb.Region{Peers: peers}
-			err := ValidateBatchSplitRequest(test.count, request, nil)
+			err := ValidateBatchSplitRequest(test.count, request)
 			if !test.valid {
 				require.Error(t, err)
 				return

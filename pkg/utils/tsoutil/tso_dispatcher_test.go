@@ -45,39 +45,23 @@ type mockStream struct {
 }
 
 type countRecordingStream struct {
-	counts    []uint32
-	onProcess func()
+	counts []uint32
 }
 
 func (s *countRecordingStream) process(_ uint64, count, _, _ uint32) (tsoResp, error) {
 	s.counts = append(s.counts, count)
-	if s.onProcess != nil {
-		s.onProcess()
-	}
 	return &pdpb.TsoResponse{Timestamp: &pdpb.Timestamp{Physical: int64(1233 + len(s.counts)), Logical: int64(count)}}, nil
 }
 
 type countResponseStream struct {
 	pdpb.PD_TsoServer
-	ctx      context.Context
 	response *pdpb.TsoResponse
 	err      error
 	done     chan struct{}
-	onSend   func()
-}
-
-func (s *countResponseStream) Context() context.Context {
-	if s.ctx != nil {
-		return s.ctx
-	}
-	return context.Background()
 }
 
 func (s *countResponseStream) Send(response *pdpb.TsoResponse) error {
 	s.response = response
-	if s.onSend != nil {
-		s.onSend()
-	}
 	if s.done != nil {
 		close(s.done)
 	}
@@ -236,8 +220,6 @@ func (m *mockRequest) getClientConn() *grpc.ClientConn {
 func (m *mockRequest) getCount() uint32 {
 	return m.count
 }
-
-func (m *mockRequest) getCountIfActive() (uint32, bool) { return m.count, true }
 
 func (m *mockRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
 	if m.err != nil {
@@ -441,83 +423,6 @@ func TestTSODispatcherPartitionDeadline(t *testing.T) {
 	stop()
 }
 
-func TestTSODispatcherUpstreamTimeout(t *testing.T) {
-	dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "upstream_timeout"}), nil)
-	ctx, cancel := context.WithCancelCause(t.Context())
-	queue := &tsoRequestProxyQueue{ctx: ctx, cancel: cancel, requestCh: make(chan Request, 1)}
-	queue.requestCh <- &mockRequest{count: 1, doneCh: make(chan struct{})}
-	startTestDispatcher(t, dispatcher, queue, &delayedProtoFactory{delay: 2 * DefaultTSOProxyTimeout})
-	select {
-	case <-ctx.Done():
-		require.ErrorIs(t, context.Cause(ctx), context.Canceled)
-	case <-time.After(3 * DefaultTSOProxyTimeout):
-		t.Fatal("a stalled upstream did not cancel the shared queue")
-	}
-}
-
-func TestTSODispatcherCanceledStreamBatches(t *testing.T) {
-	for _, test := range []struct {
-		name             string
-		cancelBefore     bool
-		counts           []uint32
-		expectedUpstream []uint32
-	}{
-		{"already canceled", true, []uint32{logicalBits, logicalBits, 1}, []uint32{1}},
-		{"canceled during first batch", false, []uint32{logicalBits, logicalBits, 1}, []uint32{logicalBits, 1}},
-		{"canceled range stays consumed", false, []uint32{2, 2, 1}, []uint32{5}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "canceled_stream_batches"}), nil)
-			ctx, cancel := context.WithCancelCause(t.Context())
-			queue := &tsoRequestProxyQueue{ctx: ctx, cancel: cancel, requestCh: make(chan Request, 3)}
-			downstreamCtx, closeDownstream := context.WithCancel(t.Context())
-			t.Cleanup(closeDownstream)
-			closed := &countResponseStream{ctx: downstreamCtx, err: errors.New("closed downstream")}
-			other := &countResponseStream{done: make(chan struct{})}
-			for i, count := range test.counts {
-				downstream := closed
-				if i == len(test.counts)-1 {
-					downstream = other
-				}
-				queue.requestCh <- NewPDProtoRequest("host", nil, &pdpb.TsoRequest{
-					Header: &pdpb.RequestHeader{ClusterId: 1}, Count: count,
-				}, downstream)
-			}
-			forward := &countRecordingStream{onProcess: closeDownstream}
-			if test.cancelBefore {
-				closeDownstream()
-			}
-			stop := startTestDispatcher(t, dispatcher, queue, &mockProtoFactory{stream: forward})
-			select {
-			case <-other.done:
-			case <-ctx.Done():
-				t.Fatalf("canceled stream affected another caller: %v", context.Cause(ctx))
-			case <-time.After(5 * time.Second):
-				t.Fatal("other stream did not receive a response")
-			}
-			stop()
-			require.Equal(t, test.expectedUpstream, forward.counts)
-			if test.cancelBefore {
-				require.Nil(t, closed.response, "canceled streams must not reach the allocator or sender")
-			}
-			require.Equal(t, uint32(1), other.response.GetCount())
-			require.Equal(t, int64(test.expectedUpstream[len(test.expectedUpstream)-1]), other.response.GetTimestamp().GetLogical())
-		})
-	}
-}
-
-func TestTSODispatcherAllRequestsCanceled(t *testing.T) {
-	dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "all_requests_canceled"}), nil)
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	request := NewPDProtoRequest("host", nil, &pdpb.TsoRequest{Count: 1}, &countResponseStream{ctx: ctx})
-	forward := &countRecordingStream{}
-	remaining, err := dispatcher.processRequests(forward, []Request{request})
-	require.NoError(t, err)
-	require.Empty(t, remaining)
-	require.Empty(t, forward.counts)
-}
-
 func TestWatchTSDeadlineIgnoresCompletedBatches(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -538,75 +443,4 @@ func TestWatchTSDeadlineIgnoresCompletedBatches(t *testing.T) {
 	cancel()
 	<-finished
 	require.Zero(t, canceled.Load())
-}
-
-func TestTSODispatcherCanceledStreamResponses(t *testing.T) {
-	dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "canceled_stream_responses"}), nil)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	sends := 0
-	closed := &countResponseStream{ctx: ctx, err: errors.New("closed downstream"), onSend: func() { sends++; cancel() }}
-	other := &countResponseStream{}
-	requests := make([]Request, 0, 101)
-	for range 100 {
-		requests = append(requests, NewPDProtoRequest("host", nil, &pdpb.TsoRequest{Count: 1}, closed))
-	}
-	requests = append(requests, NewPDProtoRequest("host", nil, &pdpb.TsoRequest{Count: 1}, other))
-	forward := &countRecordingStream{}
-	remaining, err := dispatcher.processRequests(forward, requests)
-	require.NoError(t, err)
-	require.Empty(t, remaining)
-	require.Equal(t, []uint32{101}, forward.counts)
-	require.Equal(t, int64(101), other.response.GetTimestamp().GetLogical())
-	require.Equal(t, 1, sends)
-}
-
-func TestTSODispatcherDownstreamTimeout(t *testing.T) {
-	dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "downstream_timeout"}), nil)
-	ctx, cancel := context.WithCancelCause(t.Context())
-	queue := &tsoRequestProxyQueue{ctx: ctx, cancel: cancel, requestCh: make(chan Request, 1)}
-	started := make(chan struct{})
-	downstream := &countResponseStream{ctx: ctx, err: context.Canceled, onSend: func() { close(started); <-ctx.Done() }}
-	queue.requestCh <- NewPDProtoRequest("host", nil, &pdpb.TsoRequest{Count: 1}, downstream)
-	startTestDispatcher(t, dispatcher, queue, &mockProtoFactory{stream: &countRecordingStream{}})
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("downstream Send did not start")
-	}
-	select {
-	case <-ctx.Done():
-		require.ErrorIs(t, context.Cause(ctx), context.Canceled)
-	case <-time.After(2 * DefaultTSOProxyTimeout):
-		t.Fatal("the proxy deadline did not unblock the downstream Send")
-	}
-}
-
-func TestTSODispatcherCanceledFullQueue(t *testing.T) {
-	dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "canceled_full_queue"}), nil)
-	ctx, cancel := context.WithCancelCause(t.Context())
-	queue := &tsoRequestProxyQueue{ctx: ctx, cancel: cancel, requestCh: make(chan Request, 1)}
-	queue.requestCh <- &mockRequest{count: 1}
-	dispatcher.dispatchChs.Store("host", queue)
-	result := make(chan context.Context, 1)
-	finished := make(chan struct{})
-	go func() {
-		defer close(finished)
-		result <- dispatcher.DispatchRequest(t.Context(), &mockRequest{forwardedHost: "host", count: 1}, nil)
-	}()
-	t.Cleanup(func() {
-		cancel(nil)
-		select {
-		case <-queue.requestCh:
-		default:
-		}
-		<-finished
-	})
-	cancel(nil)
-	select {
-	case returned := <-result:
-		require.ErrorIs(t, context.Cause(returned), context.Canceled)
-	case <-time.After(time.Second):
-		t.Fatal("enqueue remained blocked after queue cancellation")
-	}
 }
