@@ -206,40 +206,53 @@ func (b *freeIDBitmap) loadRangeLocked(ctx context.Context, start, end uint32) e
 	return nil
 }
 
-// findFreeCandidate searches cached nonempty buckets in order within [start, end).
-// A candidate at a bucket boundary requires a known non-free predecessor when
-// that predecessor is also in the requested range. Other earlier buckets do
-// not block selection. The search does no storage reads. Callers recheck Region
-// eligibility and selection under mu before claiming through updateLocked.
-func (b *freeIDBitmap) findFreeCandidate(start, end uint32) (uint32, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.findFreeCandidateLocked(start, end)
+// freeIDCandidates is a per-attempt cursor over cached free IDs. It keeps only
+// the next ID to visit, so changes to the bucket list cannot shift its position.
+// It is not a snapshot: newly loaded or reclaimed IDs behind the cursor are
+// left for the next attempt. Once exhausted, the cursor remains exhausted.
+type freeIDCandidates struct {
+	bitmap *freeIDBitmap
+	nextID uint32
 }
 
-func (b *freeIDBitmap) findFreeCandidateLocked(startID, endID uint32) (uint32, bool) {
-	if startID >= endID || endID > constant.MaxValidKeyspaceID+1 {
-		return 0, false
-	}
-	idsPerBucket := uint32(b.bucketBytes * 8)
-	firstBucket := startID / idsPerBucket
-	lastBucket := (endID - 1) / idsPerBucket
+// candidates creates a cursor without storage reads or changes to the free bits.
+// Callers may skip a candidate by calling Next again. Eligibility and the free
+// bit must be rechecked under the bitmap lock when actually claiming an ID.
+func (b *freeIDBitmap) candidates() *freeIDCandidates {
+	return &freeIDCandidates{bitmap: b}
+}
 
-	index, _ := slices.BinarySearch(b.freeBuckets, firstBucket)
+// Next returns the next cached candidate, releasing the lock before the caller
+// checks its Region. A candidate at a bucket's first bit requires a known
+// non-free predecessor; other earlier buckets do not block selection.
+func (c *freeIDCandidates) Next() (uint32, bool) {
+	b := c.bitmap
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	idsPerBucket := uint32(b.bucketBytes * 8)
+	resumeBucket := c.nextID / idsPerBucket
+	index, _ := slices.BinarySearch(b.freeBuckets, resumeBucket)
 	for _, bucket := range b.freeBuckets[index:] {
-		if bucket > lastBucket {
-			break
+		firstBit := uint32(0)
+		if bucket == resumeBucket {
+			firstBit = c.nextID % idsPerBucket
 		}
-		id, found := b.firstFreeInBucketLocked(bucket, startID, endID)
-		if !found {
-			continue
+		bitmap := b.buckets[bucket].Value
+		for bit := firstBit; bit < idsPerBucket; bit++ {
+			byteIndex := bit / 8
+			bitMask := byte(1 << (bit % 8))
+			if bitmap[byteIndex]&bitMask == 0 {
+				continue
+			}
+			if bit == 0 && bucket > 0 && !b.previousBucketAllowsSelectionLocked(bucket) {
+				break
+			}
+			id := bucket*idsPerBucket + bit
+			c.nextID = id + 1
+			return id, true
 		}
-		atBucketStart := id == bucket*idsPerBucket
-		if atBucketStart && id > startID && !b.previousBucketAllowsSelectionLocked(bucket) {
-			continue
-		}
-		return id, true
 	}
+	c.nextID = constant.MaxValidKeyspaceID + 1
 	return 0, false
 }
 
@@ -257,24 +270,6 @@ func (b *freeIDBitmap) previousBucketAllowsSelectionLocked(bucket uint32) bool {
 	}
 	// A known absent bucket is empty; otherwise test its highest bit.
 	return previous.Value == "" || previous.Value[len(previous.Value)-1]&0x80 == 0
-}
-
-// firstFreeInBucketLocked searches only the intersection of this bucket and
-// [startID, endID). Bit offsets are relative to the beginning of the bucket.
-func (b *freeIDBitmap) firstFreeInBucketLocked(bucket, startID, endID uint32) (uint32, bool) {
-	idsPerBucket := uint32(b.bucketBytes * 8)
-	bucketStartID := bucket * idsPerBucket
-	firstBit := max(startID, bucketStartID) - bucketStartID
-	endBit := min(endID, bucketStartID+idsPerBucket) - bucketStartID
-	bitmap := b.buckets[bucket].Value
-	for bit := firstBit; bit < endBit; bit++ {
-		byteIndex := bit / 8
-		bitMask := byte(1 << (bit % 8))
-		if bitmap[byteIndex]&bitMask != 0 {
-			return bucketStartID + bit, true
-		}
-	}
-	return 0, false
 }
 
 // update changes one bit and the caller's metadata in the same transaction.
