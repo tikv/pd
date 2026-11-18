@@ -11,8 +11,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - uses: ./.github/actions/setup-go
+        id: go
         with:
           cache-scope: check
+      - name: Restore linter cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('Makefile', 'tools.go', '**/go.mod', '**/go.sum', '**/.golangci.*') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('Makefile', 'tools.go', '**/go.mod', '**/go.sum', '**/.golangci.*') }}-
       - name: Make Check
         run: |
           python3 -m unittest discover -s scripts -p test_ci_shard.py

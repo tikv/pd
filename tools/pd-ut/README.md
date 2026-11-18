@@ -76,7 +76,12 @@ runner across the root, client, tools, and integration modules. All runners must
 use the same commit, layout, `JOB_COUNT`, and `NEXT_GEN` setting. Assignment uses
 the timing profile's fixed parallelism so different CPU quotas cannot produce
 different package ownership. `pd-ut` execution parallelism follows each runner's CPU
-quota and can be overridden with `--parallel`.
+quota and can be overridden with `--parallel` or `JOB_PARALLEL` for the CI entry.
+GitHub Actions uses eight test processes for runners 1–5 to overlap cluster waits;
+the other runners retain their existing execution parallelism.
+CI passes `--cpu-budget` separately to preserve compiler concurrency and each
+test's CPU allocation when increasing the number of test processes. Direct
+`pd-ut` commands retain their existing behavior when this option is omitted.
 The existing runner names and their allowed test scopes are recorded in
 `scripts/ci-test-groups.json`. Unit tests are balanced across runners 1–3,
 `tests/` packages across runners 4–5, and runners 6–10 retain their tools,
@@ -101,7 +106,12 @@ keyed by the runner image, Go version, module dependency files, and tool pins.
 Build caches are separate for each workflow and runner. A new commit restores
 the previous build snapshot for the same workload and dependencies, then saves
 its updated cache.
+When that snapshot is missing, another workload on the same runner image and Go
+version can supply common build entries. Go validates each entry, and the runner
+saves its own updated snapshot after a successful run.
 Native Go tests use `-count=1` so restored build caches do not skip test execution.
+Check PD also restores the native golangci-lint analysis cache, keyed by the Go
+version, tool pins, linter configuration, and module dependencies.
 
 ```shell
 # Inspect every runner's packages without compiling or running tests.

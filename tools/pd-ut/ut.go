@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +108,9 @@ pd-ut run --junitfile xxx
 // test with race flag
 pd-ut run --race
 
+// overlap waiting tests while retaining a four-CPU budget
+pd-ut run --parallel 8 --cpu-budget 4
+
 // test with coverprofile
 pd-ut run --coverprofile xxx
 go tool cover --func=xxx`
@@ -132,6 +136,7 @@ var (
 	coverProfile string
 	ignoreDirs   string
 	cache        bool
+	cpuBudget    int
 	packageList  string
 	durationFile string
 	// tags for tests
@@ -149,6 +154,8 @@ func run() (exitCode int) {
 
 	race = handleFlag("--race")
 	parallelStr := stripFlag("--parallel")
+	cpuBudgetSet := slices.Contains(os.Args, "--cpu-budget")
+	cpuBudgetStr := stripFlag("--cpu-budget")
 	junitFile = stripFlag("--junitfile")
 	coverProfile = stripFlag("--coverprofile")
 	ignoreDirs = stripFlag("--ignore")
@@ -184,6 +191,14 @@ func run() (exitCode int) {
 		if parallel > maxParallelAddrBound {
 			fmt.Printf("Clamping --parallel %d to %d to keep the port allocator's eviction bound reachable\n", parallel, maxParallelAddrBound)
 			parallel = maxParallelAddrBound
+		}
+	}
+	cpuBudget = 0
+	if cpuBudgetSet {
+		cpuBudget, err = strconv.Atoi(cpuBudgetStr)
+		if err != nil || cpuBudget < 1 {
+			fmt.Println("cpu budget must be a positive integer")
+			return 1
 		}
 	}
 	workDir, err = os.Getwd()
@@ -406,7 +421,7 @@ func cmdRun(args ...string) bool {
 		}
 	}
 
-	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", parallel*2, len(tasks), time.Since(start))
+	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", cpuParallelism()*2, len(tasks), time.Since(start))
 
 	if durationFile == "" {
 		shuffle(tasks)
@@ -782,7 +797,11 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
 	if strings.Contains(fn, "Suite") {
-		args = append(args, "-test.cpu", strconv.Itoa(parallel/2))
+		cpus := cpuParallelism() / 2
+		if cpuBudget > 0 {
+			cpus = max(1, cpus)
+		}
+		args = append(args, "-test.cpu", strconv.Itoa(cpus))
 	} else {
 		args = append(args, "-test.cpu", "1")
 	}
@@ -797,6 +816,15 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 	args = append(args, "-test.run", "^"+fn+"$")
 
 	return exec.Command(exe, args...)
+}
+
+// cpuParallelism keeps compilation and individual test CPU allocations stable
+// when extra test processes overlap cluster waits.
+func cpuParallelism() int {
+	if cpuBudget > 0 {
+		return min(parallel, cpuBudget)
+	}
+	return parallel
 }
 
 func skipDIR(pkg string) bool {
@@ -847,8 +875,8 @@ func buildTestBinaryMulti(pkgs []string) (_ []byte, err error) {
 		packages = append(packages, filepath.Join(modulePath, pkg))
 	}
 
-	// We use 2 * parallel for `go build` to make it faster.
-	p := strconv.Itoa(parallel * 2)
+	// Keep compiler concurrency within the selected CPU budget.
+	p := strconv.Itoa(cpuParallelism() * 2)
 	cmd := goCommand("test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags="+tags)
 	if coverProfile != "" {
 		root, err := filepath.Rel(workDir, repoRoot)

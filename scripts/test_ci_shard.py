@@ -16,9 +16,11 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import random
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -33,6 +35,36 @@ spec.loader.exec_module(ci)
 
 
 class ShardTests(unittest.TestCase):
+    def test_shell_entry_forwards_parallelism_and_failure(self):
+        root = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            arguments = directory / "arguments"
+            python = directory / "python3"
+            python.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$CI_SHARD_TEST_ARGS"\n'
+                'exit "$CI_SHARD_TEST_EXIT_CODE"\n'
+            )
+            python.chmod(0o755)
+            for parallel in ("", "8"):
+                for status in (0, 7):
+                    with self.subTest(parallel=parallel, status=status):
+                        environment = dict(os.environ, JOB_PARALLEL=parallel)
+                        environment.update({
+                            "PATH": str(directory) + os.pathsep + os.environ.get("PATH", os.defpath),
+                            "CI_SHARD_TEST_ARGS": str(arguments),
+                            "CI_SHARD_TEST_EXIT_CODE": str(status),
+                        })
+                        result = subprocess.run(
+                            ["bash", "scripts/ci-subtask.sh", "5", "10", "standard"],
+                            cwd=root, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        )
+                        expected = ["scripts/ci-shard.py", "run", "--index", "5", "--count", "10", "--layout", "standard"]
+                        if parallel:
+                            expected.extend(["--parallel", parallel])
+                        self.assertEqual(arguments.read_text().splitlines(), expected)
+                        self.assertEqual(result.returncode, status, result.stderr)
+
     def test_runner_names_and_scopes(self):
         root = Path(__file__).resolve().parent.parent
         config = json.loads((root / "scripts/ci-test-groups.json").read_text())
@@ -130,9 +162,12 @@ class ShardTests(unittest.TestCase):
                 report.write_text('<testsuites><testsuite name="failed"><testcase name="bad"><failure/></testcase></testsuite></testsuites>')
                 return mock.Mock(returncode=7)
 
-            with mock.patch.object(ci.subprocess, "run", side_effect=fail) as run:
-                self.assertEqual(ci.run_shard(root, packages, root / "durations.json", 4), 7)
+            with mock.patch.object(ci, "available_parallelism", return_value=4), mock.patch.object(ci.subprocess, "run", side_effect=fail) as run:
+                self.assertEqual(ci.run_shard(root, packages, root / "durations.json", 8), 7)
                 self.assertEqual(run.call_count, 1)
+                command = run.call_args.args[0]
+                self.assertEqual(command[command.index("--parallel") + 1], "8")
+                self.assertEqual(command[command.index("--cpu-budget") + 1], "4")
             self.assertEqual(len(list(ET.parse(root / "junitfile").iter("failure"))), 1)
 
     def test_preserves_native_client_and_tools_execution(self):

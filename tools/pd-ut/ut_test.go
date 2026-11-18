@@ -18,12 +18,42 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTestCommandCPUAllocation(t *testing.T) {
+	originalParallel, originalBudget := parallel, cpuBudget
+	t.Cleanup(func() {
+		parallel, cpuBudget = originalParallel, originalBudget
+	})
+	for _, tc := range []struct {
+		name      string
+		workers   int
+		budget    int
+		suiteCPUs string
+	}{
+		{"default", 4, 0, "2"},
+		{"legacy-override", 8, 0, "4"},
+		{"bounded-override", 8, 4, "2"},
+		{"fewer-workers", 4, 8, "2"},
+		{"single-cpu", 8, 1, "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parallel, cpuBudget = tc.workers, tc.budget
+			for name, cpus := range map[string]string{"TestSuite": tc.suiteCPUs, "TestPlain": "1"} {
+				command := (&numa{}).testCommand("pkg/test", name)
+				index := slices.Index(command.Args, "-test.cpu")
+				require.NotEqual(t, -1, index)
+				require.Equal(t, cpus, command.Args[index+1], name)
+			}
+		})
+	}
+}
 
 func TestBuildTestBinaryMultiCleansTempFileOnFailure(t *testing.T) {
 	tempDir := t.TempDir()

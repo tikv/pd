@@ -4,6 +4,10 @@ inputs:
   cache-scope:
     description: Workflow and runner that own this cache.
     required: true
+outputs:
+  go-version:
+    description: Resolved Go version.
+    value: ${{ steps.go.outputs.go-version }}
 runs:
   using: composite
   steps:
@@ -32,8 +36,9 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ steps.paths.outputs.build }}
-        # Refresh the snapshot after each commit without sharing partial caches
-        # between matrix runners. Go validates individual build entries itself.
+        # Refresh each workload's snapshot after every commit. Other workloads
+        # can seed missing caches; Go validates individual build entries.
         key: go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-${{ inputs.cache-scope }}-${{ hashFiles('**/go.mod', '**/go.sum') }}-${{ github.sha }}
         restore-keys: |
           go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-${{ inputs.cache-scope }}-${{ hashFiles('**/go.mod', '**/go.sum') }}-
+          go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-

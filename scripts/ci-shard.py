@@ -225,6 +225,7 @@ def run_shard(root, packages, durations, parallel):
                         str(root / "bin/pd-ut"), "run", "--module", module,
                         "--packages", ",".join(sorted(p.path for p in group)),
                         "--test-durations", str(durations.resolve()), "--parallel", str(parallel),
+                        "--cpu-budget", str(available_parallelism()),
                         "--race", "--coverprofile", str(results / f"{index}.cov"),
                         "--junitfile", str(results / f"{index}.xml"),
                     ]
