@@ -296,7 +296,7 @@ func TestSetCacheDoesNotPromoteStaleFitAfterStoreRemoval(t *testing.T) {
 	re.False(ok && cache.bestFit != nil)
 }
 
-func TestSetCacheRejectsRemovedRegion(t *testing.T) {
+func TestSetCacheDoesNotRecreateRemovedRegion(t *testing.T) {
 	for _, warmup := range []int{0, 1, minHitCountToCacheHit + 1} {
 		t.Run(fmt.Sprintf("warmup-%d", warmup), func(t *testing.T) {
 			re := require.New(t)
@@ -318,9 +318,13 @@ func TestSetCacheRejectsRemovedRegion(t *testing.T) {
 			// The root tree can lose the region before overlap cleanup runs.
 			cluster.RemoveRegion(region)
 			manager.SetCache(cluster, region, fit)
+			if warmup == 0 {
+				re.Empty(manager.regionCaches)
+				re.Empty(manager.storesOfRegion)
+			}
+			manager.Invalid(region.GetID())
 			re.Empty(manager.regionCaches)
 			re.Empty(manager.storesOfRegion)
-			manager.Invalid(region.GetID())
 			manager.SetCache(cluster, region, fit)
 			re.Empty(manager.regionCaches)
 			re.Empty(manager.storesOfRegion)
@@ -371,6 +375,8 @@ func TestSetCacheSerializesRegionRemoval(t *testing.T) {
 			for range warmup {
 				manager.SetCache(cluster, region, fit)
 			}
+			// Recreating an invalidated entry must serialize with overlap cleanup.
+			manager.Invalid(region.GetID())
 			paused := &pausedRegionSet{
 				BasicCluster: cluster,
 				read:         make(chan struct{}),

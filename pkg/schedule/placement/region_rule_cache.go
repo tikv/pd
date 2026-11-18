@@ -134,15 +134,6 @@ func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *co
 	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	// Patrol tasks can outlive their region. Check membership under the cache
-	// lock so overlap cleanup either precedes this check or removes this write.
-	// Store-only callers have no region lifecycle to validate.
-	if regions, ok := storeSet.(interface {
-		GetRegion(uint64) *core.RegionInfo
-	}); ok && regions.GetRegion(region.GetID()) == nil {
-		manager.removeRegionCacheLocked(region.GetID())
-		return
-	}
 	if cache, ok := manager.regionCaches[region.GetID()]; ok {
 		cache.hitCount++
 		if cache.hitCount >= minHitCountToCacheHit {
@@ -162,6 +153,14 @@ func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *co
 			}
 			cache.bestFit = fit
 		}
+		return
+	}
+	// Patrol tasks can outlive their region. Check membership before creating
+	// an entry under the cache lock so overlap cleanup either precedes this
+	// check or removes this write. Store-only callers have no region lifecycle.
+	if regions, ok := storeSet.(interface {
+		GetRegion(uint64) *core.RegionInfo
+	}); ok && regions.GetRegion(region.GetID()) == nil {
 		return
 	}
 	newCache, cacheable := manager.toRegionRuleFitCache(storeSet, region, fit)
