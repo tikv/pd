@@ -223,6 +223,18 @@ func TestSubtractKeyRanges(t *testing.T) {
 			base:   newKeyRangePointer("c", "g"),
 			expect: []*KeyRange{newKeyRangePointer("d", "e"), newKeyRangePointer("f", "g")},
 		},
+		{
+			name:   "unbounded end key",
+			ks:     []*KeyRange{newKeyRangePointer("b", "d"), newKeyRangePointer("e", "")},
+			base:   newKeyRangePointer("a", "z"),
+			expect: []*KeyRange{newKeyRangePointer("a", "b"), newKeyRangePointer("d", "e")},
+		},
+		{
+			name:   "unbounded end key and base",
+			ks:     []*KeyRange{newKeyRangePointer("b", "d"), newKeyRangePointer("e", "")},
+			base:   &KeyRange{},
+			expect: []*KeyRange{newKeyRangePointer("", "b"), newKeyRangePointer("d", "e")},
+		},
 	}
 	re := require.New(t)
 	for _, tc := range testCases {
@@ -272,6 +284,24 @@ func TestDeleteKeyRanges(t *testing.T) {
 			input:  []*KeyRange{newKeyRangePointer("", "a"), newKeyRangePointer("b", "d")},
 			base:   &KeyRange{StartKey: []byte("b"), EndKey: []byte("d")},
 			expect: []*KeyRange{newKeyRangePointer("", "a")},
+		},
+		{
+			name:   "unbounded base end key covers range",
+			input:  []*KeyRange{newKeyRangePointer("c", "z")},
+			base:   &KeyRange{StartKey: []byte("b")},
+			expect: []*KeyRange{},
+		},
+		{
+			name:   "unbounded base end key overlaps range",
+			input:  []*KeyRange{newKeyRangePointer("a", "z")},
+			base:   &KeyRange{StartKey: []byte("b")},
+			expect: []*KeyRange{newKeyRangePointer("a", "b")},
+		},
+		{
+			name:   "unbounded base end key and range end key",
+			input:  []*KeyRange{newKeyRangePointer("a", "")},
+			base:   &KeyRange{StartKey: []byte("b")},
+			expect: []*KeyRange{newKeyRangePointer("a", "b")},
 		},
 	}
 	re := require.New(t)
