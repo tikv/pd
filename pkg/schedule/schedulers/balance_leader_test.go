@@ -55,6 +55,62 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
+func TestBalanceLeaderReturnsFormerLeadersAfterRestart(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.AddLeaderStore(1, 100)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0) // Equal score, normally ranked first by store ID.
+	for id := uint64(100); id < 2100; id++ {
+		tc.AddLeaderRegion(id, 1, 2)
+	}
+	depart := func(id uint64, opts ...core.RegionCreateOption) *core.RegionInfo {
+		r := tc.AddLeaderRegion(id, 2, 1)
+		r = r.Clone(core.WithLeader(r.GetStorePeer(1)))
+		tc.PutRegion(r)
+		r = r.Clone(opts...)
+		tc.PutRegion(r)
+		return r
+	}
+	former := depart(11)
+	depart(12, core.WithIncVersion())
+	pending := depart(13)
+	pending = pending.Clone(core.WithPendingPeers([]*metapb.Peer{pending.GetStorePeer(2)}))
+	tc.PutRegion(pending)
+	depart(14, core.WithRemoveStorePeer(2), core.WithAddPeer(&metapb.Peer{Id: 99999, StoreId: 2}))
+	movedAgain := depart(15)
+
+	// Store start timestamps have second precision. Establish a distinct
+	// restart boundary between the original departures and a new transfer.
+	restart := time.Now().Truncate(time.Second).Add(time.Second)
+	time.Sleep(time.Until(restart))
+	tc.PutStore(tc.GetStore(2).Clone(core.SetStoreStartTime(restart.Unix())))
+	tc.PutRegion(movedAgain.Clone(core.WithLeader(movedAgain.GetStorePeer(2))))
+	tc.PutRegion(movedAgain)
+	candidates := tc.GetFormerLeaderRegions(2, restart.Add(-time.Minute).Unix(), restart.Unix(), []keyutil.KeyRange{{}})
+	re.ElementsMatch([]*core.RegionInfo{former, pending}, candidates)
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
+	re.NoError(err)
+	lb.(*balanceLeaderScheduler).conf.Batch = 1
+	ops, _ := lb.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(former.GetID(), ops[0].RegionID())
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
+
+	// Range ownership and load balancing still take precedence.
+	excluded := []keyutil.KeyRange{{StartKey: former.GetStartKey(), EndKey: former.GetEndKey()}}
+	tc.KeyRangeManager.Append(excluded)
+	ops, _ = lb.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.NotEqual(former.GetID(), ops[0].RegionID())
+	tc.KeyRangeManager.Delete(excluded)
+	tc.UpdateLeaderCount(1, 1)
+	tc.UpdateLeaderCount(2, 1)
+	ops, _ = lb.Schedule(tc, false)
+	re.Empty(ops)
+}
+
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re := require.New(t)
 	keyRanges1, err := getKeyRanges([]string{"a", "b", "c", "d"})

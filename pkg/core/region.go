@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -1071,6 +1072,7 @@ type RegionsInfo struct {
 	t            RWLockStats
 	tree         *regionTree
 	regions      map[uint64]*regionItem // regionID -> regionInfo
+	leaderMoves  leaderMoveHistory      // protected by t
 	st           RWLockStats
 	subRegions   map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
@@ -1080,6 +1082,73 @@ type RegionsInfo struct {
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 	// This tree is used to check the overlaps among all the subtrees.
 	overlapTree *regionTree
+}
+
+type leaderMove struct {
+	store, region, peer, version uint64
+	at                           int64
+}
+
+// Keep recent departures observed through heartbeats, including Raft elections.
+// Index by the old store so a restart can find sparse former leaders directly.
+type leaderMoveHistory struct {
+	recent  list.List
+	byStore map[uint64]map[uint64]*list.Element
+}
+
+func (h *leaderMoveHistory) add(m leaderMove) {
+	const capacity = 8192
+	if h.byStore == nil {
+		h.byStore = make(map[uint64]map[uint64]*list.Element)
+	}
+	index := h.byStore[m.store]
+	if index == nil {
+		index = make(map[uint64]*list.Element)
+		h.byStore[m.store] = index
+	}
+	if e := index[m.region]; e != nil {
+		e.Value = m
+		h.recent.MoveToFront(e)
+		return
+	}
+	index[m.region] = h.recent.PushFront(m)
+	if h.recent.Len() > capacity {
+		old := h.recent.Remove(h.recent.Back()).(leaderMove)
+		delete(h.byStore[old.store], old.region)
+		if len(h.byStore[old.store]) == 0 {
+			delete(h.byStore, old.store)
+		}
+	}
+}
+
+// GetFormerLeaderRegions samples current followers on the original peer and
+// range version whose latest departure from this store was in [from, until)
+// in Unix seconds.
+func (r *RegionsInfo) GetFormerLeaderRegions(storeID uint64, from, until int64, ranges []keyutil.KeyRange) []*RegionInfo {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	var candidates []*RegionInfo
+	for id, e := range r.leaderMoves.byStore[storeID] {
+		m := e.Value.(leaderMove)
+		if m.at < from || m.at >= until {
+			continue
+		}
+		region := r.getRegionLocked(id)
+		if region == nil || region.GetRegionEpoch().GetVersion() != m.version || region.GetLeader().GetStoreId() == storeID {
+			continue
+		}
+		voter := region.GetStoreVoter(storeID)
+		if voter.GetId() != m.peer || voter.GetIsWitness() {
+			continue
+		}
+		if slices.ContainsFunc(ranges, func(kr keyutil.KeyRange) bool { return region.isInvolved(kr.StartKey, kr.EndKey) }) {
+			candidates = append(candidates, region)
+			if len(candidates) == randomRegionMaxRetry {
+				break
+			}
+		}
+	}
+	return candidates
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -1378,6 +1447,11 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		// If this ID already exists, use the existing regionItem and pick out the origin.
 		origin = item.RegionInfo
 		rangeChanged = !origin.rangeEqualsTo(region)
+		old, current := origin.GetLeader(), region.GetLeader()
+		if old.GetId() != 0 && current.GetId() != 0 && old.GetStoreId() != current.GetStoreId() && !rangeChanged {
+			r.leaderMoves.add(leaderMove{store: old.GetStoreId(), region: region.GetID(), peer: old.GetId(),
+				version: origin.GetRegionEpoch().GetVersion(), at: time.Now().Unix()})
+		}
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
 			// Because the regionItem is reused, there is no need to delete it in the regionMap.
@@ -1485,6 +1559,7 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 // ResetRegionCache resets the regions info.
 func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
+	r.leaderMoves = leaderMoveHistory{}
 	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
 	r.t.Unlock()

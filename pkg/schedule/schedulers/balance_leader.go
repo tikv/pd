@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
@@ -351,6 +352,32 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
+	// Try a restart return before the normal source-first path fills the batch.
+	for _, target := range targetCandidate.stores {
+		if s.GetName() != types.BalanceLeaderScheduler.String() || !typeutil.Float64Equal(scoreFunc(target), scoreFunc(targetCandidate.getStore())) {
+			break
+		}
+		solver.Target = target
+		for _, region := range s.formerLeaders(solver) {
+			if s.OpController.GetOperator(region.GetID()) != nil {
+				continue
+			}
+			solver.Region = region
+			if op := s.transferLeaderInRegion(solver, nil); op != nil {
+				result = append(result, op)
+				if len(result) == batch {
+					return result, collector.GetPlans()
+				}
+				makeInfluence(op, solver, usedRegions, sourceCandidate, targetCandidate)
+				if targetCandidate.getStore().GetID() != solver.targetStoreID() {
+					break
+				}
+			}
+		}
+		if len(result) > 0 {
+			break // Applying influence may have reordered the target stores.
+		}
+	}
 	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
 		// first choose source
 		if sourceCandidate.hasStore() {
@@ -432,15 +459,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
 func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *plan.Collector) *operator.Operator {
-	rs := s.conf.getRanges()
-	if s.GetName() == types.BalanceLeaderScheduler.String() {
-		km := solver.GetKeyRangeManager()
-		if !km.IsEmpty() {
-			// todo: check all key ranges not only the first
-			rs = km.GetNonOverlappingKeyRanges(&rs[0])
-		}
-	}
-	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), rs),
+	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), s.balanceRanges(solver)),
 		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.sourceStoreID()))
@@ -480,10 +499,7 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 	return nil
 }
 
-// transferLeaderIn transfers leader to the target store.
-// It randomly selects a health region from the target store, then picks
-// the worst follower peer and transfers the leader.
-func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector) *operator.Operator {
+func (s *balanceLeaderScheduler) balanceRanges(solver *solver) []keyutil.KeyRange {
 	rs := s.conf.getRanges()
 	if s.GetName() == types.BalanceLeaderScheduler.String() {
 		km := solver.GetKeyRangeManager()
@@ -491,13 +507,34 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 			rs = km.GetNonOverlappingKeyRanges(&rs[0])
 		}
 	}
-	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), rs),
+	return rs
+}
+
+func (s *balanceLeaderScheduler) formerLeaders(solver *solver) []*core.RegionInfo {
+	// Take departures observed shortly before this process started. A new
+	// balancing move after restart must not cause its own immediate reversal.
+	const window = 10 * time.Minute
+	start := solver.Target.GetStartTime()
+	if age := time.Since(start); age < 0 || age >= window {
+		return nil
+	}
+	regions := solver.GetBasicCluster().GetFormerLeaderRegions(solver.targetStoreID(), start.Add(-window).Unix(), start.Unix(), s.balanceRanges(solver))
+	return filter.SelectRegions(regions, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
+}
+
+// transferLeaderIn samples a healthy follower on the target store.
+func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector) *operator.Operator {
+	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), s.balanceRanges(solver)),
 		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.targetStoreID()))
 		balanceLeaderNoFollowerRegionCounter.Inc()
 		return nil
 	}
+	return s.transferLeaderInRegion(solver, collector)
+}
+
+func (s *balanceLeaderScheduler) transferLeaderInRegion(solver *solver, collector *plan.Collector) *operator.Operator {
 	if solver.IsRegionHot(solver.Region) {
 		log.Debug("region is hot region, ignore it", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 		balanceLeaderRegionHotCounter.Inc()
