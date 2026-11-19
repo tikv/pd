@@ -83,6 +83,7 @@ func TestRegionReplicatedFilter(t *testing.T) {
 	re.Equal(filter.Select(region), statusRegionNotReplicated)
 }
 
+// TestRegionEmptyFilter checks key-aware empty detection and the cluster initialization exception.
 func TestRegionEmptyFilter(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -99,6 +100,7 @@ func TestRegionEmptyFilter(t *testing.T) {
 	re.Equal(filter.Select(region), statusOK)
 
 	region = region.Clone(core.SetApproximateSize(0))
+	re.Equal(statusOK, filter.Select(region))
 	for i := range uint64(100) {
 		testCluster.PutRegion(core.NewRegionInfo(&metapb.Region{
 			Id: i,
@@ -108,11 +110,24 @@ func TestRegionEmptyFilter(t *testing.T) {
 			EndKey:   fmt.Appendf(nil, "%3dz", i+1),
 		}, &metapb.Peer{StoreId: i + 1, Id: i + 1}))
 	}
-	re.Equal(filter.Select(region), statusRegionEmpty)
-
-	// balance-region only considers the size, so a small region with keys is still filtered.
-	region = region.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2))
-	re.Equal(filter.Select(region), statusRegionEmpty)
+	for _, test := range []struct {
+		name    string
+		size    int64
+		keys    int64
+		allowed bool
+	}{
+		{"empty", 0, 0, false},
+		{"empty with minimum size", 1, 0, false},
+		{"keys without size", 0, 1, true},
+		{"small with one key", 1, 1, true},
+		{"small with many keys", 1, 2000, true},
+		{"larger without keys", 2, 0, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			region := region.Clone(core.SetApproximateSize(test.size), core.SetApproximateKeys(test.keys))
+			require.Equal(t, test.allowed, filter.Select(region).IsOK())
+		})
+	}
 }
 
 func TestRegionWitnessFilter(t *testing.T) {
