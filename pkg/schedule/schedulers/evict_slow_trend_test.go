@@ -19,9 +19,11 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -262,4 +264,41 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPrepare() {
 	// prepare with evict store.
 	err = suite.es.PrepareConfig(suite.tc)
 	re.NoError(err)
+}
+
+func (suite *evictSlowTrendTestSuite) TestEvictedStoreMetricsCleanup() {
+	es := suite.es.(*evictSlowTrendScheduler)
+	gauge := storeSlowTrendEvictedStatusGauge
+	for _, state := range []string{"recovered", "tombstone", "deleted"} {
+		suite.Run(state, func() {
+			re := suite.Require()
+			const storeID = 5
+			gauge.Reset()
+			suite.T().Cleanup(gauge.Reset)
+			suite.tc.AddLeaderStore(storeID, 0)
+			re.NoError(es.prepareEvictLeader(suite.tc, storeID))
+			store := suite.tc.GetStore(storeID)
+			metric := gauge.WithLabelValues(store.GetAddress(), "5")
+			metric.Set(1)
+			switch state {
+			case "recovered":
+				es.cleanupEvictLeader(suite.tc)
+				re.Equal(1, promtestutil.CollectAndCount(gauge))
+				re.Zero(promtestutil.ToFloat64(metric))
+			case "tombstone":
+				suite.tc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+				gauge.DeleteLabelValues(store.GetAddress(), "5") // Simulate prior metric cleanup.
+			case "deleted":
+				suite.tc.DeleteStore(store)
+			}
+			if state != "recovered" {
+				re.NotPanics(func() {
+					ops, _ := es.Schedule(suite.tc, false)
+					re.Empty(ops)
+				})
+				re.Zero(promtestutil.CollectAndCount(gauge))
+			}
+			re.Zero(es.conf.evictedStore())
+		})
+	}
 }

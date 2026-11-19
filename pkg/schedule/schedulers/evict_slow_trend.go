@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
@@ -207,12 +208,12 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 	if oldID == 0 {
 		return
 	}
-	address := "?"
-	store := cluster.GetStore(oldID)
-	if store != nil {
-		address = store.GetAddress()
+	storeIDStr := strconv.FormatUint(oldID, 10)
+	if store := cluster.GetStore(oldID); store == nil || store.IsRemoved() {
+		storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeIDStr})
+	} else {
+		storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), storeIDStr).Set(0)
 	}
-	storeSlowTrendEvictedStatusGauge.WithLabelValues(address, strconv.FormatUint(oldID, 10)).Set(0)
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{}
@@ -379,12 +380,12 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 	var ops []*operator.Operator
 
-	if s.conf.evictedStore() != 0 {
-		store := cluster.GetStore(s.conf.evictedStore())
+	if evictedStoreID := s.conf.evictedStore(); evictedStoreID != 0 {
+		store := cluster.GetStore(evictedStoreID)
 		if store == nil || store.IsRemoved() {
 			// Previous slow store had been removed, remove the scheduler and check
 			// slow node next time.
-			log.Info("store evicted by slow trend has been removed", zap.Uint64("store-id", store.GetID()))
+			log.Info("store evicted by slow trend has been removed", zap.Uint64("store-id", evictedStoreID))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict", "stop_removed").Inc()
 		} else if checkStoreCanRecover(cluster, store) && s.conf.readyForRecovery() {
 			log.Info("store evicted by slow trend has been recovered", zap.Uint64("store-id", store.GetID()))
