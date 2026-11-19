@@ -537,10 +537,10 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 
 // GetStoreLimit returns the limit of a store.
 func (o *PersistOptions) GetStoreLimit(storeID uint64) sc.StoreLimitConfig {
-	return o.getStoreLimit(storeID, true)
+	return o.lookupStoreLimit(storeID, true)
 }
 
-func (o *PersistOptions) getStoreLimit(storeID uint64, writeBack bool) (returnSC sc.StoreLimitConfig) {
+func (o *PersistOptions) lookupStoreLimit(storeID uint64, writeBack bool) (returnSC sc.StoreLimitConfig) {
 	defer func() {
 		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
 		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
@@ -588,15 +588,15 @@ func (o *PersistOptions) getDefaultStoreLimit(cfg *sc.ScheduleConfig) (limit sc.
 
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
-	return o.getStoreLimitByType(storeID, typ, true)
+	return o.lookupStoreLimitByType(storeID, typ, true)
 }
 
 // PeekStoreLimitByType returns the effective limit without creating a per-store entry.
 func (o *PersistOptions) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
-	return o.getStoreLimitByType(storeID, typ, false)
+	return o.lookupStoreLimitByType(storeID, typ, false)
 }
 
-func (o *PersistOptions) getStoreLimitByType(storeID uint64, typ storelimit.Type, writeBack bool) (returned float64) {
+func (o *PersistOptions) lookupStoreLimitByType(storeID uint64, typ storelimit.Type, writeBack bool) (returned float64) {
 	defer func() {
 		if typ == storelimit.RemovePeer {
 			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
@@ -604,7 +604,7 @@ func (o *PersistOptions) getStoreLimitByType(storeID uint64, typ storelimit.Type
 			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
 		}
 	}()
-	limit := o.getStoreLimit(storeID, writeBack)
+	limit := o.lookupStoreLimit(storeID, writeBack)
 	switch typ {
 	case storelimit.AddPeer:
 		return limit.AddPeer
