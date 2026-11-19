@@ -16,7 +16,6 @@ package placement
 
 import (
 	"math"
-	"slices"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -48,7 +47,7 @@ func (f *RegionFit) NewReplacementChecker(srcStoreID uint64) func(*core.StoreInf
 	fit := f.getRuleFitByStoreID(srcStoreID)
 	var isolation *isolationReplacement
 	if fit != nil {
-		if labels := fit.Rule.isolationLabels(); labels != nil {
+		if labels, ok := fit.Rule.isolationPrefix(); ok {
 			stats := newIsolationReplacement(fit, labels, srcStoreID)
 			isolation = &stats
 		}
@@ -85,7 +84,7 @@ func (f *RegionFit) checkReplacement(srcStoreID uint64, dstStore *core.StoreInfo
 	}
 
 	if isolation == nil {
-		if labels := fit.Rule.isolationLabels(); labels != nil {
+		if labels, ok := fit.Rule.isolationPrefix(); ok {
 			stats := newIsolationReplacement(fit, labels, srcStoreID)
 			isolation = &stats
 		}
@@ -177,23 +176,9 @@ func (f *RuleFit) IsSatisfied() bool {
 	return len(f.Peers) == f.Rule.Count && len(f.PeersWithDifferentRole) == 0
 }
 
-// isolationLabels returns the location labels up to the configured isolation
-// level. Rule validation accepts a level that is absent from LocationLabels;
-// treat it as unset instead of rejecting every scheduling change for the rule.
-func (r *Rule) isolationLabels() []string {
-	if r.IsolationLevel == "" {
-		return nil
-	}
-	level := slices.Index(r.LocationLabels, r.IsolationLevel)
-	if level < 0 {
-		return nil
-	}
-	return r.LocationLabels[:level+1]
-}
-
 func hasIsolationLevel(rules []*Rule) bool {
 	for _, rule := range rules {
-		if rule.isolationLabels() != nil {
+		if _, ok := rule.isolationPrefix(); ok {
 			return true
 		}
 	}
@@ -209,8 +194,8 @@ func (f *RegionFit) HasIsolationLevel() bool {
 // above the rule's configured isolation level. It does not impose a default
 // level or compare the weighted isolation score.
 func (f *RuleFit) IsIsolationSatisfied() bool {
-	labels := f.Rule.isolationLabels()
-	if labels == nil {
+	labels, ok := f.Rule.isolationPrefix()
+	if !ok {
 		return true
 	}
 	for i, store := range f.Stores {
@@ -232,8 +217,8 @@ func (f *RuleFit) IsIsolationSatisfied() bool {
 // Missing labels use CompareLocation's conservative pairwise semantics; they
 // are not grouped under a synthetic host name. Different rules are independent.
 func (f *RuleFit) IsIsolationPreserved(target *RuleFit) bool {
-	labels := f.Rule.isolationLabels()
-	if labels == nil {
+	labels, ok := f.Rule.isolationPrefix()
+	if !ok {
 		return true
 	}
 	if target == nil || len(f.Stores) != len(target.Stores) {

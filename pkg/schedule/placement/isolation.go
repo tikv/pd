@@ -29,7 +29,7 @@ type isolationReplacement struct {
 	valid     bool
 }
 
-// newIsolationReplacement requires labels from Rule.isolationLabels.
+// newIsolationReplacement requires labels from Rule.isolationPrefix.
 func newIsolationReplacement(fit *RuleFit, labels []string, source uint64) isolationReplacement {
 	c := isolationReplacement{stores: fit.Stores, labels: labels, source: -1}
 	c.degrees = make([]int, len(c.stores))

@@ -68,8 +68,8 @@ type Builder struct {
 	// skip check flags
 	skipOriginJointStateCheck bool
 	skipPlacementRulesCheck   bool
-	// The transfer-leader factory checks every advertised target before Build.
-	leaderIsolationChecked bool
+	// The factory has checked the final targets or explicitly requested a repair.
+	skipFinalIsolationCheck bool
 
 	// build flags
 	useJointConsensus bool
@@ -458,7 +458,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	// peer into a temporary execution state, such as a witness learner.
 	var finalPeers peersMap
 	if b.originFit != nil && b.originRegion != nil && !b.forceTargetLeader && !b.skipPlacementRulesCheck &&
-		!b.leaderIsolationChecked && b.originFit.IsSatisfied() && b.originFit.HasIsolationLevel() {
+		!b.skipFinalIsolationCheck && b.originFit.IsSatisfied() && b.originFit.HasIsolationLevel() {
 		finalPeers = newPeersMap()
 		for _, peer := range b.targetPeers {
 			finalPeers.set(&metapb.Peer{Id: peer.GetId(), StoreId: peer.GetStoreId(), Role: peer.GetRole(), IsWitness: peer.GetIsWitness()})

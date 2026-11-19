@@ -826,9 +826,26 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
 	isolationAllowed := r.scatterIsolationChecker(region, plannedRegion, !internalScatter)
 	var targetLeader, leaderStorePickedCount uint64
+	var deferForCPU bool
+	needPeerIDs := plannedRegion != region
 	for len(leaderCandidateStores) > 0 {
 		targetLeader, leaderStorePickedCount = r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
-		if targetLeader == 0 || isolationAllowed(targetLeader) {
+		if targetLeader == 0 {
+			break
+		}
+		deferForCPU = internalScatter && shouldSkipInternalScatterByBalancedReadCPU(region, targetLeader, readCPUByStore, readPoolThreadCount)
+		if needPeerIDs {
+			// Preserve a CPU deferral on the provisional plan without reserving IDs.
+			// Only plans that may produce an operator need the allocated-ID fit.
+			if deferForCPU && isolationAllowed(targetLeader) {
+				break
+			}
+			if err := r.assignScatterPeerIDs(region, plannedRegion, targetPeers); err != nil {
+				return nil, r.scatterOperatorError(region, group, state, internalScatter, err)
+			}
+			needPeerIDs = false
+		}
+		if isolationAllowed(targetLeader) {
 			break
 		}
 		remaining := leaderCandidateStores[:0]
@@ -844,7 +861,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		observeNoLeaderTargetMetrics(internalScatter, leaderBlockedByReadPoolPressure)
 		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
 	}
-	if internalScatter && shouldSkipInternalScatterByBalancedReadCPU(region, targetLeader, readCPUByStore, readPoolThreadCount) {
+	if deferForCPU {
 		scatterSkipBalancedReadCPUCounter.Inc()
 		return nil, retryInternalScatterLater(InternalScatterRetryBalancedReadCPU, ErrInternalScatterBalancedReadCPU)
 	}
@@ -864,18 +881,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	}
 	op, err := createScatterOperator(desc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
-		scatterFailCounter.Inc()
-		currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
-		for _, peer := range region.GetPeers() {
-			currentPeers[peer.GetStoreId()] = peer
-		}
-		if state != nil {
-			r.applyScatterStateDelta(state, region, currentPeers, region.GetLeader().GetStoreId(), group, !internalScatter)
-		} else {
-			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
-		}
-		log.Debug("fail to create scatter region operator", errs.ZapError(err))
-		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("failed to create scatter region operator for region %v", region.GetID()))
+		return nil, r.scatterOperatorError(region, group, state, internalScatter, err)
 	}
 	if op != nil {
 		scatterSuccessCounter.Inc()
@@ -889,6 +895,45 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		op.SetPriorityLevel(operatorPriorityLevel)
 	}
 	return op, nil
+}
+
+// assignScatterPeerIDs fills in IDs only for planned moves to new stores.
+// Both planned and the new target peers are owned by this scatter request.
+func (r *RegionScatterer) assignScatterPeerIDs(source, planned *core.RegionInfo, targetPeers map[uint64]*metapb.Peer) error {
+	for _, peer := range planned.GetPeers() {
+		storeID := peer.GetStoreId()
+		if source.GetStorePeer(storeID) != nil {
+			continue
+		}
+		id, _, err := r.cluster.AllocID(1)
+		if err != nil {
+			return err
+		}
+		if id == 0 {
+			return errors.New("scatter allocator returned an empty peer ID")
+		}
+		peer.Id = id
+		targetPeers[storeID].Id = id
+		if leader := planned.GetLeader(); leader.GetStoreId() == storeID {
+			leader.Id = id
+		}
+	}
+	return nil
+}
+
+func (r *RegionScatterer) scatterOperatorError(region *core.RegionInfo, group string, state *scatterState, internalScatter bool, err error) error {
+	scatterFailCounter.Inc()
+	currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+	for _, peer := range region.GetPeers() {
+		currentPeers[peer.GetStoreId()] = peer
+	}
+	if state != nil {
+		r.applyScatterStateDelta(state, region, currentPeers, region.GetLeader().GetStoreId(), group, !internalScatter)
+	} else {
+		r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
+	}
+	log.Debug("fail to create scatter region operator", errs.ZapError(err))
+	return errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("failed to create scatter region operator for region %v", region.GetID()))
 }
 
 func (r *RegionScatterer) filterAllowedLeaderCandidateStores(

@@ -105,7 +105,7 @@ func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *co
 			targetStoreID = targets[0]
 		}
 		targetStoreIDs = targets
-		builder.leaderIsolationChecked = true
+		builder.skipFinalIsolationCheck = true
 	}
 	return builder.SetLeader(targetStoreID).SetLeaders(targetStoreIDs).Build(kind)
 }
@@ -377,4 +377,12 @@ func CreateNonWitnessPeerOperator(desc string, ci sche.SharedCluster, region *co
 	return NewBuilder(desc, ci, region).
 		BecomeNonWitness(peer.GetStoreId()).
 		Build(OpWitness)
+}
+
+// CreatePromoteWitnessForDownOperator restores a data replica while its down
+// peer is still present. The temporary witness deficit is part of the repair.
+func CreatePromoteWitnessForDownOperator(ci sche.SharedCluster, region *core.RegionInfo, witness *metapb.Peer) (*Operator, error) {
+	builder := NewBuilder("promote-witness-for-down", ci, region)
+	builder.skipFinalIsolationCheck = true
+	return builder.BecomeNonWitness(witness.GetStoreId()).Build(OpWitness)
 }

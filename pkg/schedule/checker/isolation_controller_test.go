@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/versioninfo"
 )
 
 func newIsolationTestController(t testing.TB) (*Controller, *mockcluster.Cluster) {
@@ -241,6 +242,90 @@ func TestControllerOrphanIsolationAcrossLevels(t *testing.T) {
 			if step, ok := op.Step(i).(operator.PromoteLearner); ok {
 				require.NotEqual(t, uint64(5), step.ToStore)
 			}
+		}
+	}
+}
+
+func TestPromoteWitnessForDownWithIsolation(t *testing.T) {
+	for _, isolated := range []bool{false, true} {
+		for _, joint := range []bool{false, true} {
+			t.Run(fmt.Sprintf("isolation=%t/joint=%t", isolated, joint), func(t *testing.T) {
+				controller, tc := newIsolationTestController(t)
+				tc.SetEnableUseJointConsensus(joint)
+				tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
+				tc.SetEnableWitness(true)
+				tc.SetMaxReplicas(5)
+				for i, path := range [][2]string{{"C", "l"}, {"B", "a"}, {"A", "d"}, {"A", "b"}, {"A", "c"}} {
+					labels := map[string]string{"zone": path[0], "host": path[1]}
+					if i == 0 {
+						labels["dedicated-leader"] = "yes"
+					}
+					tc.AddLabelsStore(uint64(i+1), 0, labels)
+				}
+				rm := tc.GetRuleManager()
+				leader := rm.GetRule("pd", "default").Clone()
+				leader.Role, leader.Count = placement.Leader, 1
+				leader.LocationLabels, leader.IsolationLevel = nil, ""
+				leader.LabelConstraints = []placement.LabelConstraint{{Key: "dedicated-leader", Op: placement.In, Values: []string{"yes"}}}
+				require.NoError(t, rm.SetRule(leader))
+				ordinary := leader.Clone()
+				ordinary.ID, ordinary.Role, ordinary.Count = "ordinary", placement.Voter, 2
+				ordinary.LabelConstraints = nil
+				ordinary.LocationLabels = []string{"zone", "host"}
+				if isolated {
+					ordinary.IsolationLevel = "host"
+				}
+				require.NoError(t, rm.SetRule(ordinary))
+				witness := ordinary.Clone()
+				witness.ID, witness.IsWitness = "witness", true
+				witness.LocationLabels = []string{"zone"}
+				if isolated {
+					witness.IsolationLevel = "zone"
+				}
+				require.NoError(t, rm.SetRule(witness))
+				peers := []*metapb.Peer{
+					{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2, IsWitness: true},
+					{Id: 13, StoreId: 3, IsWitness: true}, {Id: 14, StoreId: 4}, {Id: 15, StoreId: 5},
+				}
+				region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, peers[0],
+					core.WithDownPeers([]*pdpb.PeerStats{{Peer: peers[3], DownSeconds: 10}}))
+				tc.SetStoreDisconnect(4)
+				tc.PutRegion(region)
+				fit := rm.FitRegionWithoutCache(tc, region)
+				require.True(t, fit.IsSatisfied())
+				for _, rf := range fit.RuleFits {
+					require.True(t, rf.IsIsolationSatisfied())
+				}
+				// Only the checker repair may temporarily reduce the witness count.
+				_, err := operator.CreateNonWitnessPeerOperator("ordinary", tc, region, peers[1])
+				if isolated {
+					require.ErrorIs(t, err, operator.ErrTargetIsolation)
+				} else {
+					require.NoError(t, err)
+				}
+				op := controller.ruleChecker.Check(region)
+				require.NotNil(t, op)
+				require.Equal(t, "promote-witness-for-down", op.Desc())
+				var converted, promoted bool
+				for i := range op.Len() {
+					switch step := op.Step(i).(type) {
+					case operator.RemovePeer:
+						require.Equal(t, peers[1].GetStoreId(), step.FromStore)
+					case operator.BecomeNonWitness:
+						converted = step.PeerID == peers[1].GetId()
+					case operator.BatchSwitchWitness:
+						require.Len(t, step.ToNonWitnesses, 1)
+						converted = step.ToNonWitnesses[0].PeerID == peers[1].GetId()
+					case operator.PromoteLearner:
+						promoted = step.PeerID == peers[1].GetId()
+					case operator.ChangePeerV2Enter:
+						for _, voter := range step.PromoteLearners {
+							promoted = voter.PeerID == peers[1].GetId()
+						}
+					}
+				}
+				require.True(t, converted && promoted, "the selected witness must become a data voter")
+			})
 		}
 	}
 }

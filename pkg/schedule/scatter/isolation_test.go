@@ -16,6 +16,9 @@ package scatter
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -197,4 +201,113 @@ func TestScatterForceStillChecksAllPeers(t *testing.T) {
 	witness.GetStorePeer(2).IsWitness = true
 	require.False(t, sc.scatterIsolationChecker(source, witness, true)(1))
 	require.False(t, sc.scatterIsolationChecker(source, source, true)(99))
+}
+
+func TestScatterIsolationWithAllocatedPeerIDs(t *testing.T) {
+	for _, joint := range []bool{false, true} {
+		for _, degraded := range []bool{false, true} {
+			t.Run(fmt.Sprintf("joint=%t/degraded=%t", joint, degraded), func(t *testing.T) {
+				hosts := []string{"", "b", "b", "c", "", "c", "b"}
+				zones := []string{"b", "", "a", "a", "c", "a", "a"}
+				tc, sc := isolationTestScatter(t, hosts)
+				tc.SetEnablePlacementRules(true)
+				tc.SetEnableUseJointConsensus(joint)
+				tc.SetMaxReplicas(6)
+				for i, zone := range zones {
+					if !degraded {
+						zone = strconv.Itoa(i)
+					}
+					tc.PutStoreWithLabels(uint64(i+1), "zone", zone, "host", hosts[i])
+				}
+				rm := tc.GetRuleManager()
+				first := rm.GetRule("pd", "default").Clone()
+				first.Count, first.LocationLabels = 2, []string{"zone", "host"}
+				require.NoError(t, rm.SetRule(first))
+				second := first.Clone()
+				second.ID, second.Count, second.IsolationLevel = "second", 4, "host"
+				require.NoError(t, rm.SetRule(second))
+				region := tc.AddLeaderRegion(1, 1, 2, 3, 4, 5, 6)
+				const group = "allocated"
+				// Move only peer 3 to store 7 and keep the leader on store 1.
+				sc.ordinaryEngine.selectedPeer.Put(3, group)
+				for id := uint64(2); id <= 7; id++ {
+					sc.ordinaryEngine.selectedLeader.Put(id, group)
+				}
+				op, err := sc.Scatter(region, group, true)
+				if degraded {
+					// With old peer ID 3 the fit passes. With the new ID the
+					// maximum conflict degree in the second rule grows from 1 to 2.
+					require.ErrorIs(t, err, errs.ErrGetTargetStore)
+					require.Nil(t, op)
+				} else {
+					require.NoError(t, err)
+					require.NotNil(t, op)
+					peers, leader := scatterOperatorTargets(t, region, op)
+					require.NotContains(t, peers, uint64(3))
+					require.Equal(t, uint64(7), peers[7].GetId())
+					require.Equal(t, uint64(1), leader)
+					var actual []*metapb.Peer
+					for _, p := range peers {
+						actual = append(actual, p)
+					}
+					final := region.Clone(core.SetPeers(actual), core.WithLeader(peers[leader]))
+					require.True(t, sc.scatterIsolationChecker(region, final, true)(leader))
+				}
+				require.Equal(t, uint64(3), region.GetStorePeer(3).GetId())
+				require.Nil(t, region.GetStorePeer(7))
+			})
+		}
+	}
+}
+
+type scatterFailingAllocator struct {
+	*mockcluster.Cluster
+	calls int
+	err   error
+}
+
+func (c *scatterFailingAllocator) AllocID(uint32) (uint64, uint32, error) {
+	c.calls++
+	return 0, 0, c.err
+}
+
+func TestScatterPeerIDAllocationFailure(t *testing.T) {
+	for _, allocErr := range []error{errors.New("allocation failure"), nil} {
+		t.Run(fmt.Sprintf("error=%v", allocErr), func(t *testing.T) {
+			tc, sc := isolationTestScatter(t, []string{"a", "b", "c", "d"})
+			tc.SetEnablePlacementRules(true)
+			region := tc.AddLeaderRegion(1, 1, 2, 3)
+			allocator := &scatterFailingAllocator{Cluster: tc, err: allocErr}
+			sc.cluster = allocator
+			const group = "allocation"
+			// Favor a move of peer 1 to store 4. On failure record the unchanged layout.
+			sc.ordinaryEngine.selectedPeer.Put(1, group)
+			op, err := sc.Scatter(region, group, true)
+			require.ErrorIs(t, err, errs.ErrCreateOperator)
+			require.Nil(t, op)
+			require.Equal(t, 1, allocator.calls)
+			require.EqualValues(t, 1, sc.ordinaryEngine.selectedPeer.Get(2, group))
+			require.Zero(t, sc.ordinaryEngine.selectedPeer.Get(4, group))
+			require.EqualValues(t, 1, region.GetLeader().GetId())
+			require.Nil(t, region.GetStorePeer(4))
+		})
+	}
+}
+
+func TestDeferredInternalScatterDoesNotAllocatePeerIDs(t *testing.T) {
+	for _, rules := range []bool{false, true} {
+		t.Run(strconv.FormatBool(rules), func(t *testing.T) {
+			sc, tc, region := newInternalScatterReadCPUTestFixture(t)
+			tc.SetEnablePlacementRules(rules)
+			setUnifiedReadPoolThreadCount(tc)
+			setStoreReadCPU(tc, 1, 500)
+			setStoreReadCPU(tc, 4, 450)
+			allocator := &scatterFailingAllocator{Cluster: tc, err: errors.New("allocation failure")}
+			sc.cluster = allocator
+			op, err := sc.ScatterInternal(region, "deferred", []byte("a"), []byte("z"))
+			require.ErrorIs(t, err, ErrInternalScatterBalancedReadCPU)
+			require.Nil(t, op)
+			require.Zero(t, allocator.calls)
+		})
+	}
 }
