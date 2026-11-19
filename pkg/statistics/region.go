@@ -100,7 +100,7 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, op
 	approximateKvSize := r.GetApproximateKvSize()
 	approximateIAKvSize := min(r.GetApproximateIAKvSize(), approximateKvSize)
 	approximateColumnarKvSize := r.GetApproximateColumnarKvSize()
-	if approximateSize <= core.EmptyRegionApproximateSize {
+	if core.IsEmptyRegion(approximateSize, approximateKeys) {
 		s.EmptyCount++
 	}
 	s.StorageSize += approximateSize

@@ -77,6 +77,24 @@ func TestNeedMerge(t *testing.T) {
 	}
 }
 
+func TestIsEmptyRegion(t *testing.T) {
+	tests := []struct {
+		size  int64
+		keys  int64
+		empty bool
+	}{
+		{size: 1, keys: 0, empty: true},
+		{size: 1, keys: 1, empty: false},
+		{size: 1, keys: 2, empty: false},
+		{size: 2, keys: 1, empty: false},
+		{size: 2, keys: 0, empty: false},
+		{size: 0, keys: 0, empty: true},
+	}
+	for _, tt := range tests {
+		require.Equal(t, tt.empty, IsEmptyRegion(tt.size, tt.keys))
+	}
+}
+
 func TestRegionFromHeartbeatIAKVSize(t *testing.T) {
 	re := require.New(t)
 	heartbeat := &pdpb.RegionHeartbeatRequest{

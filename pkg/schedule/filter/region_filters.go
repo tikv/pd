@@ -152,6 +152,8 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
+// Balance-region balances by region size, so it intentionally only checks the approximate size here
+// instead of core.IsEmptyRegion: a region smaller than 1MiB contributes nothing to balancing even if it has keys.
 func isEmptyRegionAllowBalance(cluster sche.SharedCluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetTotalRegionCount() < core.InitClusterRegionThreshold
 }
