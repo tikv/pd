@@ -720,39 +720,9 @@ func TestEarlyTSOCampaignFailureStopsBootstrapCluster(t *testing.T) {
 	}
 	re.NoError(err)
 
-	// Keep the result hook enabled through a successful Start. Its error value
-	// is nil here, which must not panic inside failpoint's reflection call.
-	const startHook = "github.com/tikv/pd/server/afterRaftClusterStart"
-	startResult := make(chan string, 1)
-	re.NoError(failpoint.EnableCall(startHook, func(id uint64, errMsg string) {
-		if id == leader.GetServerID() {
-			startResult <- errMsg
-		}
-	}))
-	t.Cleanup(func() { re.NoError(failpoint.Disable(startHook)) })
 	resumes[1]()
-	select {
-	case errMsg := <-startResult:
-		re.Empty(errMsg)
-	case <-time.After(30 * time.Second):
-		t.Fatal("next campaign did not restart the cluster")
-	}
 	testutil.Eventually(re, svr.IsServing)
+	re.True(svr.DirectlyGetRaftCluster().IsRunning())
 	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 	re.Negative(tsoutil.CompareTimestamp(previous, next))
-}
-
-func TestEarlyTSOStartResultHook(t *testing.T) {
-	re := require.New(t)
-	const hook = "github.com/tikv/pd/server/afterRaftClusterStart"
-	results := make(chan string, 1)
-	re.NoError(failpoint.EnableCall(hook, func(_ uint64, errMsg string) { results <- errMsg }))
-	t.Cleanup(func() { re.NoError(failpoint.Disable(hook)) })
-	newEarlyTSOCluster(t, 1)
-	select {
-	case errMsg := <-results:
-		re.Empty(errMsg)
-	case <-time.After(30 * time.Second):
-		t.Fatal("successful Start did not reach the result hook")
-	}
 }

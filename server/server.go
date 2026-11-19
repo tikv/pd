@@ -888,13 +888,7 @@ func (s *Server) createRaftCluster() error {
 		return nil
 	}
 
-	err := s.cluster.Start(s, false)
-	errMsg := ""
-	if err != nil {
-		errMsg = err.Error()
-	}
-	failpoint.InjectCall("afterRaftClusterStart", s.member.ID(), errMsg)
-	return err
+	return s.cluster.Start(s, false)
 }
 
 func (s *Server) stopRaftCluster() {

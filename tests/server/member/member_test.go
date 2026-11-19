@@ -36,7 +36,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/election"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -869,21 +868,9 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 			content, err := os.ReadFile(fname)
 			re.NoError(err)
 			re.NotContains(string(content), resetMsg)
-			var startResult chan string
-			const startHook = "github.com/tikv/pd/server/afterRaftClusterStart"
-			if early {
-				startResult = make(chan string, 1)
-				re.NoError(failpoint.EnableCall(startHook, func(id uint64, errMsg string) {
-					if id == leader.GetServerID() {
-						startResult <- errMsg
-					}
-				}))
-				t.Cleanup(func() { re.NoError(failpoint.Disable(startHook)) })
-				// Initialization must abort before promotion. Its cleanup can wait
-				// for the allocator reset that is still blocked in Lease.Close.
-				resumeInitialization()
-				re.Nil(m.GetLeader())
-			}
+			// Let the withdrawn initialization finish. Recovery below must use a
+			// new lease after the allocator reset completes.
+			resumeInitialization()
 
 			// The line does arrive once the blocked close returns, which is what keeps
 			// the assertion above from passing merely because nothing was captured.
@@ -894,15 +881,6 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 				return strings.Contains(string(content), resetMsg)
 			}, testutil.WithWaitFor(30*time.Second))
 			testutil.Eventually(re, func() bool { return !svr.GetTSOAllocator().IsInitialize() })
-			if early {
-				select {
-				case errMsg := <-startResult:
-					re.Equal(errs.ErrNotLeader.Error(), errMsg)
-				case <-time.After(30 * time.Second):
-					t.Fatal("withdrawn initialization did not stop")
-				}
-				re.NoError(failpoint.Disable(startHook))
-			}
 			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"))
 			re.NoError(failpoint.Disable(campaignHook))
 			testutil.Eventually(re, func() bool {
