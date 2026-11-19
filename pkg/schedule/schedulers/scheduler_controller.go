@@ -142,6 +142,7 @@ func (c *Controller) CollectSchedulerMetrics() {
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
 func ResetSchedulerMetrics() {
+	ResetHotRegionMetrics()
 	schedulerStatusGauge.Reset()
 	ruleStatusGauge.Reset()
 	regionLabelStatusGauge.Reset()
@@ -244,6 +245,9 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 
 	s.(Scheduler).CleanConfig(c.cluster)
 	delete(c.schedulerHandlers, name)
+	if name == types.BalanceHotRegionScheduler.String() {
+		ResetHotRegionMetrics()
+	}
 	return nil
 }
 
@@ -320,6 +324,9 @@ func (c *Controller) RemoveScheduler(name string) error {
 	s.Stop()
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
+	if name == types.BalanceHotRegionScheduler.String() {
+		ResetHotRegionMetrics()
+	}
 	return nil
 }
 

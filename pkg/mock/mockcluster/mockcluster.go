@@ -150,6 +150,12 @@ func (mc *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return mc.HotStat.GetStoresLoads()
 }
 
+// GetStoresLoadsTo gets stores load statistics, writing into dst.
+func (mc *Cluster) GetStoresLoadsTo(dst map[uint64]statistics.StoreKindLoads) map[uint64]statistics.StoreKindLoads {
+	mc.FilterUnhealthyStore(mc)
+	return mc.HotStat.GetStoresLoadsTo(dst)
+}
+
 // GetStoreReadCPURecentMax returns the recent max read CPU usage of a store.
 func (mc *Cluster) GetStoreReadCPURecentMax(storeID uint64) float64 {
 	return mc.HotStat.GetStoreReadCPURecentMax(storeID)
