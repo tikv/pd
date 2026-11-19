@@ -285,6 +285,28 @@ func (m *Manager) ExpireAffinityGroup(groupID string) {
 	m.updateGroupAvailabilityLocked(groupID, groupExpired)
 }
 
+// ExpireAffinityGroupIf changes the Group availability to groupExpired only when
+// the group still matches the expected runtime instance, version, and target.
+func (m *Manager) ExpireAffinityGroupIf(expected *GroupState) (*GroupState, bool) {
+	if expected == nil {
+		return nil, false
+	}
+	m.Lock()
+	defer m.Unlock()
+	groupInfo, ok := m.groups[expected.ID]
+	if !ok ||
+		(expected.groupInfoPtr != nil && groupInfo != expected.groupInfoPtr) ||
+		groupInfo.CreateTimestamp != expected.CreateTimestamp ||
+		groupInfo.AffinityVer != expected.affinityVer ||
+		groupInfo.LeaderStoreID != expected.LeaderStoreID ||
+		!slices.Equal(groupInfo.VoterStoreIDs, expected.VoterStoreIDs) {
+		return nil, false
+	}
+	groupInfo.SetAvailability(groupExpired)
+	m.resetCountLocked(groupInfo)
+	return newGroupState(groupInfo), true
+}
+
 // DegradeAffinityGroup changes the Group availability to groupDegraded.
 func (m *Manager) DegradeAffinityGroup(groupID string) {
 	m.Lock()
