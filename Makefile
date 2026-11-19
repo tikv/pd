@@ -160,8 +160,8 @@ docker-image:
 #### Build utils ###
 
 swagger-spec: install-tools
-	swag init --tags swagger --parseDependency --parseInternal --parseDepth 1 --dir server --generalInfo api/router.go --output docs/swagger
-	swag fmt --dir server
+	swag init --tags swagger --parseDependency --parseInternal --parseDepth 1 --dir server,pkg/schedule/handler --generalInfo api/router.go --output docs/swagger
+	swag fmt --dir server,pkg/schedule/handler
 
 dashboard-ui:
 	./scripts/embed-dashboard-ui.sh

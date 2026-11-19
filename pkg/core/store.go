@@ -61,8 +61,8 @@ const (
 // StoreInfo contains information about a store.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreInfo struct {
-	meta    *metapb.Store
-	restart *storeRestart
+	meta          *metapb.Store
+	previousStart int64
 	*storeStats
 	pauseLeaderTransferIn  atomic.Int64 // not allow to be used as target of transfer leader
 	pauseLeaderTransferOut atomic.Int64 // not allow to be used as source of transfer leader
@@ -85,25 +85,9 @@ type StoreInfo struct {
 	networkSlowTriggers    uint64
 }
 
-// LeaderReturnWindow bounds how long PD retains restart-locality hints.
-const LeaderReturnWindow = 10 * time.Minute
-
-// storeRestart identifies the previous process on this store. observedAt is
-// local to this PD process and is used only to expire the return preference.
-type storeRestart struct {
-	previousStart int64
-	observedAt    time.Time
-}
-
-// RecentlyRestarted reports whether PD observed this store change to a new
-// process within the leader-return window. Initial discovery has no history.
-func (s *StoreInfo) RecentlyRestarted() bool {
-	return s.restart != nil && time.Since(s.restart.observedAt) < LeaderReturnWindow
-}
-
-// RestartedFrom reports whether the current recovery window follows the given process.
+// RestartedFrom reports whether the previous registered process had this start time.
 func (s *StoreInfo) RestartedFrom(start int64) bool {
-	return s.RecentlyRestarted() && s.restart.previousStart == start
+	return s != nil && start > 0 && s.previousStart == start
 }
 
 // ReadStats returns one usable Store heartbeat, including its matching read count and interval.
@@ -114,7 +98,7 @@ func (s *StoreInfo) ReadStats() *pdpb.StoreStats {
 	stats := s.GetStoreStats()
 	i := stats.GetInterval()
 	start, end := i.GetStartTimestamp(), i.GetEndTimestamp()
-	if end <= start || end-start > statsReportMaxInterval {
+	if s.meta.GetStartTimestamp() <= 0 || start < uint64(s.meta.GetStartTimestamp()) || end <= start || end-start > statsReportMaxInterval {
 		return nil
 	}
 	return stats
@@ -159,7 +143,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
 		meta:                typeutil.DeepClone(s.meta, StoreFactory),
 		storeStats:          s.storeStats,
-		restart:             s.restart,
+		previousStart:       s.previousStart,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		learnerCount:        s.learnerCount,
@@ -207,7 +191,7 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
 		meta:                s.meta,
 		storeStats:          s.storeStats,
-		restart:             s.restart,
+		previousStart:       s.previousStart,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		learnerCount:        s.learnerCount,
@@ -969,19 +953,18 @@ func (s *StoresInfo) putStoreLocked(store *StoreInfo, opts ...StoreCreateOption)
 	// Both PutStore registration and the scheduling service's metadata watcher
 	// install the effective store metadata here. Repeated updates preserve the
 	// same restart boundary, including ordinary heartbeat/statistics updates.
-	var restart *storeRestart
+	var previous int64
 	if current != nil {
 		old, next := current.meta.GetStartTimestamp(), store.meta.GetStartTimestamp()
-		switch {
-		case old == next:
-			restart = current.restart
-		case old > 0 && next > old:
-			restart = &storeRestart{previousStart: old, observedAt: time.Now()}
+		if old == next {
+			previous = current.previousStart
+		} else if old > 0 && next > old {
+			previous = old
 		}
 	}
-	if store.restart != restart {
+	if previous != store.previousStart {
 		store = store.ShallowClone()
-		store.restart = restart
+		store.previousStart = previous
 	}
 	s.stores[store.GetID()] = store
 }

@@ -472,31 +472,6 @@ func TestNeedSync(t *testing.T) {
 	}
 }
 
-func TestFormerLeaderAcrossStoreRestart(t *testing.T) {
-	re := require.New(t)
-	stores := NewStoresInfo()
-	register := func(start int64) *StoreInfo {
-		stores.PutStore(NewStoreInfo(&metapb.Store{Id: 1, StartTimestamp: start}))
-		return stores.GetStore(1)
-	}
-	re.False(register(1900).RecentlyRestarted())
-	store := register(2000)
-	re.Same(store.restart, register(2000).restart)
-	peers := []*metapb.Peer{{Id: 10, StoreId: 1}, {Id: 20, StoreId: 2}}
-	r := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
-		Region: &metapb.Region{Id: 1, Peers: peers}, Leader: peers[1], Term: 8,
-	}, 0)
-	last := FormerLeader{StoreID: 1, RegionID: 1, PeerID: 10, Term: 7, ReportEnd: 1999}
-	re.True(last.CanReturn(r, store))
-	re.False(last.CanReturn(r.Clone(WithIncVersion()), store))
-	re.False(last.CanReturn(r.Clone(WithRemoveStorePeer(1), WithAddPeer(&metapb.Peer{Id: 11, StoreId: 1})), store))
-	for _, end := range []uint64{0, 1899, 2000, 2001} {
-		last.ReportEnd = end
-		re.False(last.CanReturn(r, store))
-	}
-	re.False(register(1999).RecentlyRestarted())
-}
-
 func TestRegionGuideTermChanged(t *testing.T) {
 	regionGuide := GenerateRegionGuideFunc(false)
 	for _, tc := range []struct {

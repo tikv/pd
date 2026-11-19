@@ -354,7 +354,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
 		// first choose source
 		if sourceCandidate.hasStore() {
-			op := createTransferLeaderOperator(sourceCandidate, transferOut, s, solver, usedRegions, collector)
+			op := createTransferLeaderOperator(sourceCandidate, transferOut, s, solver, usedRegions, result, collector)
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
@@ -365,7 +365,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 		}
 		// next choose target
 		if targetCandidate.hasStore() {
-			op := createTransferLeaderOperator(targetCandidate, transferIn, s, solver, usedRegions, nil)
+			op := createTransferLeaderOperator(targetCandidate, transferIn, s, solver, usedRegions, result, nil)
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
@@ -380,7 +380,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 }
 
 func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLeaderScheduler,
-	ssolver *solver, usedRegions map[uint64]struct{}, collector *plan.Collector) *operator.Operator {
+	ssolver *solver, usedRegions map[uint64]struct{}, batch []*operator.Operator, collector *plan.Collector) *operator.Operator {
 	store := cs.getStore()
 	ssolver.Step++
 	defer func() { ssolver.Step-- }()
@@ -405,7 +405,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLea
 	}
 	if op != nil {
 		s.resetLimit(store)
-		op = s.preferFormerLeader(ssolver, op, usedRegions)
+		op = s.preferFormerLeader(ssolver, op, usedRegions, batch)
 	} else {
 		s.attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", s.GetName()), zap.Uint64(dir, store.GetID()))
@@ -485,36 +485,30 @@ func (s *balanceLeaderScheduler) balanceRanges(solver *solver) []keyutil.KeyRang
 }
 
 // Prefer a former leader only for the store pair already chosen by the balancer.
-func (s *balanceLeaderScheduler) preferFormerLeader(solver *solver, fallback *operator.Operator, usedRegions map[uint64]struct{}) *operator.Operator {
-	if s.GetName() != types.BalanceLeaderScheduler.String() || !solver.Target.RecentlyRestarted() {
-		return fallback
+func (s *balanceLeaderScheduler) preferFormerLeader(solver *solver, ordinary *operator.Operator, used map[uint64]struct{}, batch []*operator.Operator) *operator.Operator {
+	if s.GetName() != types.BalanceLeaderScheduler.String() {
+		return ordinary
 	}
 	source, original := solver.Source, solver.Region
-	ranges := s.balanceRanges(solver)
-	regions, planned := s.OpController.FormerLeaders(source, solver.Target, original)
-	if !planned {
-		regions = solver.GetBasicCluster().GetFormerLeaderRegions(solver.Target, ranges)
+	regions := s.OpController.ReturnCandidates(source, solver.Target)
+	if len(regions) == 0 {
+		return ordinary
 	}
-	for _, region := range filter.SelectRegions(regions, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster)) {
-		if _, used := usedRegions[region.GetID()]; used || region.GetLeader().GetStoreId() != source.GetID() || s.OpController.GetOperator(region.GetID()) != nil {
+	ranges := s.balanceRanges(solver)
+	for _, r := range filter.SelectRegions(regions, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster)) {
+		if _, exists := used[r.GetID()]; exists || !r.WithinRanges(ranges) || s.OpController.GetOperator(r.GetID()) != nil || r.GetLeader().GetStoreId() != source.GetID() {
 			continue
 		}
-		if planned && !region.WithinRanges(ranges) {
-			continue
-		}
-		if region.GetID() == fallback.RegionID() {
+		if r.GetID() == ordinary.RegionID() {
 			break
 		}
-		solver.Region = region
-		if op := s.transferLeaderInRegion(solver, nil, planned); op != nil {
-			if planned {
-				op.MarkLeaderReturn(solver.Target, fallback)
-			}
+		solver.Region = r
+		if op := s.transferLeaderInRegion(solver, nil, true); op != nil && s.OpController.PreferReturn(liveCluster(solver.SchedulerCluster), op, ordinary.RegionID(), batch) {
 			return op
 		}
 	}
 	solver.Source, solver.Region = source, original
-	return fallback
+	return ordinary
 }
 
 // transferLeaderIn samples a healthy follower on the target store.

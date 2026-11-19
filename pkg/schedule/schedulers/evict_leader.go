@@ -337,7 +337,9 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf, s.OpController), nil
+	ops := scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
+	s.OpController.PlanEvictions(liveCluster(cluster), ops)
+	return ops, nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -361,11 +363,11 @@ type evictLeaderStoresConf interface {
 	getBatch() int
 }
 
-func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, controller *operator.Controller) []*operator.Operator {
+func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for range batchSize {
-		once := scheduleEvictLeaderOnce(name, cluster, conf, controller)
+		once := scheduleEvictLeaderOnce(name, cluster, conf)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -379,7 +381,7 @@ func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf e
 	return ops
 }
 
-func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, controller *operator.Controller) []*operator.Operator {
+func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -431,9 +433,6 @@ func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf ev
 		}
 		op.SetPriorityLevel(constant.Urgent)
 		op.Counters = append(op.Counters, evictLeaderNewOperatorCounter)
-		if controller != nil && slices.ContainsFunc(targets, (*core.StoreInfo).RecentlyRestarted) {
-			op = controller.PreferEvictionTarget(cluster, region, target.GetID(), targetIDs, conf.getBatch(), op)
-		}
 		ops = append(ops, op)
 	}
 	return ops

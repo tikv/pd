@@ -193,6 +193,10 @@ func (s *Service) RegisterOperatorsRouter() {
 	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("operators")
 	router.Use(redirector)
+	router.GET("/recovery", func(c *gin.Context) { c.MustGet(handlerKey).(*handler.Handler).GetLeaderRecovery(c.Writer, c.Request) })
+	router.POST("/recovery", func(c *gin.Context) {
+		c.MustGet(handlerKey).(*handler.Handler).UpdateLeaderRecovery(c.Writer, c.Request)
+	})
 	router.GET("", getOperators)
 	router.POST("", createOperator)
 	router.DELETE("", deleteOperators)

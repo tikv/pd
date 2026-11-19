@@ -274,6 +274,11 @@ func (c *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return c.hotStat.IsRegionHot(region, c.persistConfig.GetHotRegionCacheHitsThreshold())
 }
 
+// AllowsLeaderReturn checks whether a voluntary recovery move may use this Region.
+func (c *Cluster) AllowsLeaderReturn(region *core.RegionInfo, degree int) bool {
+	return c.hotStat.AllowsLeaderReturn(region, degree)
+}
+
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.
 func (c *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *statistics.HotPeerStat {
 	return c.hotStat.GetHotPeerStat(rw, regionID, storeID)
@@ -284,12 +289,7 @@ func (c *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *sta
 // The result only includes peers that are hot enough.
 // GetHotPeerStats is a thread-safe method.
 func (c *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
-	threshold := c.persistConfig.GetHotRegionCacheHitsThreshold()
-	if rw == utils.Read {
-		// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
-		threshold = c.persistConfig.GetHotRegionCacheHitsThreshold() *
-			(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
-	}
+	threshold := rw.HotDegreeThreshold(c.persistConfig.GetHotRegionCacheHitsThreshold())
 	return c.hotStat.GetHotPeerStats(rw, threshold)
 }
 

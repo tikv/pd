@@ -142,6 +142,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/operators", operatorHandler.GetOperators, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators", operatorHandler.CreateOperator, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/operators", operatorHandler.DeleteOperators, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/operators/recovery", operatorHandler.GetLeaderRecovery, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/operators/recovery", operatorHandler.UpdateLeaderRecovery, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/operators/records", operatorHandler.GetOperatorRecords, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.GetOperatorsByRegion, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.DeleteOperatorByRegion, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))

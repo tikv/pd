@@ -213,6 +213,26 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	return false
 }
 
+// AllowsLeaderReturn checks both caches before voluntarily changing a planned
+// transfer. Read heat is sampled on Store heartbeats, as in GetHotPeerStats.
+func (w *HotCache) AllowsLeaderReturn(region *core.RegionInfo, degree int) bool {
+	read, write := make(chan bool, 1), make(chan bool, 1)
+	if !w.CheckReadAsync(func(c *HotPeerCache) {
+		for _, p := range region.GetPeers() {
+			h := c.getHotPeerStat(region.GetID(), p.GetStoreId())
+			if h != nil && (h.HotDegree >= utils.Read.HotDegreeThreshold(degree) ||
+				h.IsNeedCoolDownTransferLeader(degree, utils.Read)) {
+				read <- false
+				return
+			}
+		}
+		read <- true
+	}) || !w.CheckWriteAsync(func(c *HotPeerCache) { write <- !c.isRegionHotWithAnyPeers(region, degree) }) {
+		return false
+	}
+	return waitRet(w.ctx, read) && waitRet(w.ctx, write)
+}
+
 func waitRet(ctx context.Context, ret chan bool) bool {
 	select {
 	case <-ctx.Done():

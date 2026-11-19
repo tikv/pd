@@ -58,6 +58,26 @@ func TestIsHot(t *testing.T) {
 	}
 }
 
+func TestLeaderReturnDefersToHotScheduling(t *testing.T) {
+	cluster := core.NewBasicCluster()
+	cache := NewHotCache(t.Context(), cluster)
+	r, err := buildRegion(cluster, utils.Read, 3, 60)
+	require.NoError(t, err)
+	loads := make([]float64, utils.RegionStatCount)
+	loads[utils.RegionReadKeys] = 1e6
+	h := cache.CheckReadPeerSync(r, r.GetPeers(), loads, 60)[0]
+	h.HotDegree = 3
+	cache.Update(h, utils.Read)
+	require.True(t, cache.IsRegionHot(r, 3))
+	require.True(t, cache.AllowsLeaderReturn(r, 3))
+	// A write-hot follower protects the entire Region, even when Leader reads qualify.
+	loads[utils.RegionWriteKeys] = 1e6
+	w := cache.CheckWritePeerSync(r, r.GetPeers(), loads, 60)[1]
+	w.HotDegree = 3
+	cache.Update(w, utils.Write)
+	require.False(t, cache.AllowsLeaderReturn(r, 3))
+}
+
 func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {
 	for _, peerCount := range []int{0, 1, 2, 3, 5, 9} {
 		t.Run(fmt.Sprintf("%d-peers", peerCount), func(t *testing.T) {

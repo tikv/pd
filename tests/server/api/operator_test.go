@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -85,6 +86,25 @@ func (suite *operatorTestSuite) SetupTest() {
 func (suite *operatorTestSuite) TearDownTest() {
 	re := suite.Require()
 	suite.env.Reset(re)
+}
+
+func (suite *operatorTestSuite) TestRollingRestartNotifications() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		uri := cluster.GetLeaderServer().GetAddr() + "/pd/api/v1/operators/recovery"
+		var round operator.RecoveryRound
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, uri, nil, testutil.StatusOK(re), testutil.ExtractJSON(re, &round)))
+		re.NotEmpty(round.Epoch)
+		start := time.Now().Unix()
+		tests.MustPutStore(re, cluster, &metapb.Store{Id: 17, StartTimestamp: start, NodeState: metapb.NodeState_Serving})
+		body := []byte(fmt.Sprintf(`{"epoch":%q,"round":"%d","store":"17","process":"%d"}`, round.Epoch, round.ID+1, start))
+		post := func(data []byte, status int) {
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, uri, data, testutil.Status(re, status)))
+		}
+		post(body, http.StatusOK)
+		post([]byte(fmt.Sprintf(`{"epoch":%q,"round":"%d","finished":true}`, round.Epoch, round.ID+1)), http.StatusOK)
+		post(body, http.StatusConflict)
+	})
 }
 
 func (suite *operatorTestSuite) TestAddRemovePeer() {

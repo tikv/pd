@@ -690,6 +690,14 @@ func (c *cacheCluster) GetStores() []*core.StoreInfo {
 	return c.stores
 }
 
+// liveCluster drops the per-pass Store snapshot from decisions retained until dispatch.
+func liveCluster(c sche.SchedulerCluster) sche.SchedulerCluster {
+	if snapshot, ok := c.(*cacheCluster); ok {
+		return snapshot.SchedulerCluster
+	}
+	return c
+}
+
 // newCacheCluster constructor for cache
 func newCacheCluster(c sche.SchedulerCluster) *cacheCluster {
 	return &cacheCluster{

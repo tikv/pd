@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -45,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -70,6 +72,59 @@ func NewHandler(server Server) *Handler {
 	return &Handler{
 		Server: server,
 	}
+}
+
+// GetLeaderRecovery returns the latest round and the current scheduler incarnation.
+//
+//	@Tags		swagger,operator
+//	@Summary	Get the rolling-restart round
+//	@Produce	json
+//	@Success	200	{object}	operator.RecoveryRound
+//	@Failure	503	{string}	string
+//	@Router		/operators/recovery [get]
+func (h *Handler) GetLeaderRecovery(w http.ResponseWriter, _ *http.Request) {
+	rd := render.New()
+	oc, err := h.GetOperatorController()
+	if err != nil {
+		rd.JSON(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	rd.JSON(w, http.StatusOK, oc.CurrentRecoveryRound())
+}
+
+type recoveryNotification struct {
+	operator.RecoveryRound
+	Store   uint64 `json:"store,string,omitempty"`
+	Process int64  `json:"process,string,omitempty"`
+}
+
+// UpdateLeaderRecovery records an orchestrator's planned drain or finish.
+//
+//	@Tags			swagger,operator
+//	@Summary		Update the rolling-restart round
+//	@Description	Send store and process before its planned drain, or finished=true on completion or cancellation.
+//	@Accept			json
+//	@Produce		json
+//	@Param			notification	body		recoveryNotification	true	"Rolling-restart notification"
+//	@Success		200				{object}	operator.RecoveryRound
+//	@Failure		400,409,503		{string}	string
+//	@Router			/operators/recovery [post]
+func (h *Handler) UpdateLeaderRecovery(w http.ResponseWriter, r *http.Request) {
+	rd := render.New()
+	var request recoveryNotification
+	if err := apiutil.ReadJSONRespondError(rd, w, r.Body, &request); err != nil {
+		return
+	}
+	oc, err := h.GetOperatorController()
+	if err != nil {
+		rd.JSON(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if err := oc.UpdateRecoveryRound(request.RecoveryRound, request.Store, request.Process); err != nil {
+		rd.JSON(w, http.StatusConflict, err.Error())
+		return
+	}
+	rd.JSON(w, http.StatusOK, request.RecoveryRound)
 }
 
 // GetOperatorController returns OperatorController.

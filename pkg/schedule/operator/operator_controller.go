@@ -170,8 +170,8 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region) {
 				return
 			}
-			if !oc.canSendRecovery(op) {
-				oc.cancelRecovery(op)
+			if !oc.canSendRecovery(op, region) {
+				oc.RemoveOperator(op, StaleStatus)
 				return
 			}
 			oc.SendScheduleCommand(region, step, source)
@@ -546,7 +546,8 @@ func (oc *Controller) checkOperatorLightly(op *Operator) (*core.RegionInfo, Canc
 }
 
 func isHigherPriorityOperator(new, old *Operator) bool {
-	return new.GetPriorityLevel() > old.GetPriorityLevel()
+	// A voluntary change to an urgent eviction must yield to an existing hot move.
+	return new.GetPriorityLevel() > old.GetPriorityLevel() && (new.recovery == nil || old.Kind()&OpHotRegion == 0)
 }
 
 func (oc *Controller) addOperatorInner(op *Operator) bool {
@@ -588,9 +589,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 	failpoint.InjectCall("afterPublishOperator")
 
 	oc.counts.inc(op.SchedulerKind())
-	if !oc.admitRecovery(op) {
-		return oc.cancelRecovery(op)
-	}
+	oc.observeRecovery(op)
 	// Now start the operator after successfully adding it to the map
 	if !op.Start() {
 		_ = oc.removeOperatorWithoutBury(op)
@@ -633,8 +632,9 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 	var step OpStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
 		if step = op.Check(region); step != nil {
-			if !oc.canSendRecovery(op) {
-				return oc.cancelRecovery(op)
+			if !oc.canSendRecovery(op, region) {
+				oc.RemoveOperator(op, StaleStatus)
+				return false
 			}
 			oc.SendScheduleCommand(region, step, DispatchFromCreate)
 		}
@@ -646,15 +646,6 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		counter.Inc()
 	}
 	return true
-}
-
-// A stale preference gives up its reservation. The original operator goes
-// through normal admission again, including any concurrent hot operator.
-func (oc *Controller) cancelRecovery(op *Operator) bool {
-	if !oc.RemoveOperator(op, StaleStatus) || op.Status() != CANCELED || op.recovery == nil || op.recovery.fallback == nil {
-		return false
-	}
-	return oc.AddOperator(op.recovery.fallback)
 }
 
 func (oc *Controller) ack(op *Operator) {
