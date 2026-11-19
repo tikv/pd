@@ -91,6 +91,15 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	return c
 }
 
+// PutStore updates a store and initializes affinity availability when stores arrive.
+func (mc *Cluster) PutStore(store *core.StoreInfo) {
+	added := mc.GetStore(store.GetID()) == nil
+	mc.BasicCluster.PutStore(store)
+	if added && mc.AffinityManager != nil {
+		mc.AffinityManager.CheckGroupsAvailability()
+	}
+}
+
 // GetStoreConfig returns the store config.
 func (mc *Cluster) GetStoreConfig() sc.StoreConfigProvider {
 	return mc.PersistOptions.GetStoreConfig()

@@ -346,6 +346,7 @@ func TestAffinityCheckerFirstWinWithUnresponsivePD(t *testing.T) {
 			}
 		}
 		re.Zero(time.Since(start), "the checker must not wait for PD")
+		time.Sleep(50 * time.Millisecond)
 		synctest.Wait()
 
 		re.Equal(int32(1), writer.calls.Load())
@@ -396,6 +397,7 @@ func TestAffinityCheckerFirstWinUnsupportedTargetWriter(t *testing.T) {
 
 		// First check triggers background 404 and applies local target without blocking patrol.
 		re.Empty(affinityChecker.Check(region1))
+		time.Sleep(50 * time.Millisecond)
 		synctest.Wait()
 		re.Equal(int32(1), calls.Load())
 		group := affinityManager.GetAffinityGroupState("g")
@@ -413,6 +415,7 @@ func TestAffinityCheckerFirstWinUnsupportedTargetWriter(t *testing.T) {
 		supported.Store(true)
 		time.Sleep(time.Second)
 		re.Empty(affinityChecker.Check(region1))
+		time.Sleep(50 * time.Millisecond)
 		synctest.Wait()
 		re.Equal(int32(2), calls.Load())
 		re.Equal(affinity.GroupTarget{Expected: created, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}, lastSent)
@@ -423,6 +426,7 @@ func TestAffinityCheckerFirstWinUnsupportedTargetWriter(t *testing.T) {
 		affinityManager.SyncGroupFromEtcd(&persisted)
 		re.False(affinityManager.GetAffinityGroupState("g").HasUnpersistedTarget())
 		re.Empty(affinityChecker.Check(region1))
+		time.Sleep(50 * time.Millisecond)
 		synctest.Wait()
 		re.Equal(int32(2), calls.Load())
 	})
@@ -453,6 +457,7 @@ func TestAffinityCheckerFirstWinPatrolWithOldPD(t *testing.T) {
 		}))
 
 		re.Empty(checker.Check(regions[0]))
+		time.Sleep(50 * time.Millisecond)
 		synctest.Wait()
 		re.True(manager.GetAffinityGroupState("g1").HasUnpersistedTarget())
 		re.Zero(manager.GetAffinityGroupState("g2").LeaderStoreID)
@@ -463,8 +468,9 @@ func TestAffinityCheckerFirstWinPatrolWithOldPD(t *testing.T) {
 			time.Sleep(time.Second)
 			for _, region := range regions {
 				re.Empty(checker.Check(region))
-				synctest.Wait()
 			}
+			time.Sleep(50 * time.Millisecond)
+			synctest.Wait()
 			group := manager.GetAffinityGroupState("g2")
 			re.True(group.AffinitySchedulingAllowed, "g1's 404 must not block g2 from initializing")
 			re.True(group.HasUnpersistedTarget())
@@ -881,8 +887,8 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 	re.Equal(operator.OpAffinity, ops[1].SchedulerKind())
 }
 
-// TestAffinityCheckerMergePath ensures affinity merge path is triggered from Check when region is already in affinity.
-func TestAffinityCheckerMergePath(t *testing.T) {
+// TestMergeCheckerAffinity exercises the affinity merge path without initialization failpoints.
+func TestMergeCheckerAffinity(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
 

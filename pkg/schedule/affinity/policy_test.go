@@ -141,6 +141,7 @@ func TestObserveAvailableRegion(t *testing.T) {
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: group.ID}}))
 
 	// First observation makes group available with store 1.
+	manager.CheckGroupsAvailability()
 	region1 := core.NewRegionInfo(
 		&metapb.Region{
 			Id:       10,
@@ -205,6 +206,83 @@ func TestObserveAvailableRegion(t *testing.T) {
 	re.True(state.AffinitySchedulingAllowed)
 }
 
+func TestObserveAvailableRegionKeepsFixedTarget(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for _, id := range []uint64{1, 2} {
+		s := core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id), NodeState: metapb.NodeState_Serving})
+		storeInfos.PutStore(s.Clone(core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+
+	// Both Regions have voters on stores 1 and 2, with the leader on the given store.
+	newRegion := func(id, leaderStoreID uint64) *core.RegionInfo {
+		peers := []*metapb.Peer{
+			{Id: id + 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: id + 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+		}
+		return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[leaderStoreID-1])
+	}
+	leaderOn1, leaderOn2 := newRegion(10, 1), newRegion(20, 2)
+	observe := func(region *core.RegionInfo) *GroupState {
+		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
+		return manager.GetAffinityGroupState("g")
+	}
+	setPolicy := func(policy BalancePolicy) {
+		_, err := manager.UpdateAffinityGroupPolicy("g", policy)
+		re.NoError(err)
+	}
+
+	// A fixed group without a target takes the layout of the first Region.
+	manager.CheckGroupsAvailability()
+	setPolicy(BalancePolicyFixed)
+	state := observe(leaderOn1)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+
+	// A degraded fixed group keeps its leader, and a Region with the same layout
+	// confirms the target.
+	manager.DegradeAffinityGroup("g")
+	state = observe(leaderOn2)
+	re.False(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+	state = observe(leaderOn1)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+
+	// A degraded auto group takes the leader of the Region.
+	setPolicy(BalancePolicyAuto)
+	manager.DegradeAffinityGroup("g")
+	state = observe(leaderOn2)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(2), state.LeaderStoreID)
+
+	// An expired fixed group takes a new target.
+	setPolicy(BalancePolicyFixed)
+	manager.ExpireAffinityGroup("g")
+	state = observe(leaderOn1)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+
+	// An observation of an auto group does not move the leader once the policy
+	// is fixed. A policy update keeps the version that the observation carries.
+	setPolicy(BalancePolicyAuto)
+	manager.DegradeAffinityGroup("g")
+	stale := manager.GetAffinityGroupState("g")
+	setPolicy(BalancePolicyFixed)
+	manager.ObserveAvailableRegion(leaderOn2, stale)
+	state = manager.GetAffinityGroupState("g")
+	re.False(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+}
+
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -215,7 +293,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store1)
 	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2"})
-	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()), core.SetNodeState(metapb.NodeState_Removing))
+	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store2)
 
 	conf := mockconfig.NewTestOptions()
@@ -254,7 +332,7 @@ func TestStoreConditionsWithoutGroups(t *testing.T) {
 			change = core.PauseLeaderTransfer(constant.In)
 		}
 		stores.PutStore(stores.GetStore(3).Clone(change))
-		manager.checkGroupsAvailability()
+		manager.CheckGroupsAvailability()
 		re.Equal(evicted, manager.unavailableStores[3] == storeLeaderEvicted)
 		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
 		_, err := manager.UpdateAffinityGroupPeers("g", 3, []uint64{1, 2, 3})
@@ -284,8 +362,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store2)
 
-	// Set store3 to be disconnected
-	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
+	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store3)
 
 	conf := mockconfig.NewTestOptions()
@@ -326,8 +403,10 @@ func TestStoreHealthCheck(t *testing.T) {
 	groupInfo2 := manager.groups["group2"]
 	re.True(groupInfo2.IsAffinitySchedulingAllowed())
 
-	// Manually call checkStoreHealth to test
-	manager.checkGroupsAvailability()
+	// Disconnect store3 after creating the targets.
+	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
+	storeInfos.PutStore(store3)
+	manager.CheckGroupsAvailability()
 
 	// After health check, group1 should still be in effect (all stores healthy)
 	re.True(manager.groups["group1"].IsAffinitySchedulingAllowed())
@@ -340,7 +419,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	storeInfos.PutStore(store3Healthy)
 
 	// Check health again
-	manager.checkGroupsAvailability()
+	manager.CheckGroupsAvailability()
 
 	// Group2 should be restored to available status
 	re.True(manager.groups["group2"].IsAffinitySchedulingAllowed())
@@ -350,7 +429,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	storeInfos.PutStore(store3)
 
 	// Check health again
-	manager.checkGroupsAvailability()
+	manager.CheckGroupsAvailability()
 
 	// After health check, group2 should be invalidated (store3 is unhealthy)
 	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
@@ -360,7 +439,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	storeInfos.PutStore(store3Healthy)
 
 	// Check health again
-	manager.checkGroupsAvailability()
+	manager.CheckGroupsAvailability()
 
 	// Group2 should not be restored from expired status
 	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
@@ -393,14 +472,14 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "expire"}}))
 	_, err = manager.UpdateAffinityGroupPeers("expire", 1, []uint64{1, 2})
 	re.NoError(err)
-	manager.checkGroupsAvailability()
+	manager.CheckGroupsAvailability()
 	groupInfo := getGroupForTest(re, manager, "expire")
 	re.Equal(groupAvailable, groupInfo.GetAvailability())
 
 	// Make store2 unhealthy so the group becomes degraded.
 	store2Disconnected := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
 	storeInfos.PutStore(store2Disconnected)
-	manager.checkGroupsAvailability()
+	manager.CheckGroupsAvailability()
 	groupInfo = getGroupForTest(re, manager, "expire")
 	re.Equal(groupDegraded, groupInfo.GetAvailability())
 
@@ -410,7 +489,7 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 	manager.Unlock()
 
 	// Run availability check again without changing the unavailable store set.
-	manager.checkGroupsAvailability()
+	manager.CheckGroupsAvailability()
 	re.True(groupInfo.IsExpired())
 }
 

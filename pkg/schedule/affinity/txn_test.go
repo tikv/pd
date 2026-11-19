@@ -40,7 +40,7 @@ func TestNextGenTiDBGroupOperations(t *testing.T) {
 	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
-	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}, core.SetLastHeartbeatTS(time.Now())))
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)

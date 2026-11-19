@@ -137,6 +137,9 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 // startAvailabilityCheckLoop starts a goroutine to periodically check store availability and invalidate groups with unavailable stores.
 // TODO: If critical operations are added, a graceful shutdown is required.
 func (m *Manager) startAvailabilityCheckLoop() {
+	if m.storeSetInformer == nil {
+		return
+	}
 	interval := defaultAvailabilityCheckInterval
 	ticker := time.NewTicker(interval)
 	failpoint.Inject("changeAvailabilityCheckInterval", func() {
@@ -151,16 +154,16 @@ func (m *Manager) startAvailabilityCheckLoop() {
 				log.Info("affinity manager availability check loop stopped")
 				return
 			case <-ticker.C:
-				m.checkGroupsAvailability()
+				m.CheckGroupsAvailability()
 			}
 		}
 	}()
 	log.Info("affinity manager availability check loop started", zap.Duration("interval", interval))
 }
 
-// checkGroupsAvailability checks the condition of stores and invalidates groups with unavailable stores.
+// CheckGroupsAvailability checks the condition of stores and invalidates groups with unavailable stores.
 // It keeps the conditions current for groups created after an empty interval.
-func (m *Manager) checkGroupsAvailability() {
+func (m *Manager) CheckGroupsAvailability() {
 	m.applyStoreConditions(m.collectUnavailableStores())
 	m.collectMetrics()
 }

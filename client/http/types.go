@@ -759,6 +759,7 @@ type AffinityGroup struct {
 	CreateTimestamp uint64   `json:"create_timestamp"`
 	LeaderStoreID   uint64   `json:"leader_store_id,omitempty"`
 	VoterStoreIDs   []uint64 `json:"voter_store_ids,omitempty"`
+	BalancePolicy   string   `json:"balance_policy,omitempty"`
 }
 
 // AffinityGroupState defines the runtime state of an affinity group.
@@ -813,4 +814,9 @@ type BatchModifyAffinityGroupsRequest struct {
 type UpdateAffinityGroupPeersRequest struct {
 	LeaderStoreID uint64   `json:"leader_store_id"`
 	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+}
+
+// UpdateAffinityGroupPolicyRequest defines the body for updating an affinity group's balance policy.
+type UpdateAffinityGroupPolicyRequest struct {
+	BalancePolicy string `json:"balance_policy"`
 }

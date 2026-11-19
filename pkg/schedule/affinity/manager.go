@@ -71,9 +71,11 @@ type Manager struct {
 	// targetWriter writes the targets this Manager decides when it does not own the storage,
 	// as in the scheduling service. When it is nil, the Manager writes its own storage.
 	targetWriter TargetWriter
-	// targetWriteMutex protects admission and backoff for background first-win requests.
+	// targetWriteMutex protects queued, in-flight and cooling down first-win writes.
 	targetWriteMutex               syncutil.Mutex
-	targetWriteInFlight            bool
+	pendingTargets                 map[string]*observedTargetState
+	pendingTargetIDs               []string
+	targetSenderRunning            bool
 	targetWriteRetryAt             time.Time
 	targetEndpointUnsupportedUntil time.Time
 
@@ -124,6 +126,10 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 	if err := m.initialize(); err != nil {
 		return nil, err
 	}
+	if storeSetInformer != nil && len(storeSetInformer.GetStores()) > 0 {
+		m.CheckGroupsAvailability()
+	}
+	m.startAvailabilityCheckLoop()
 	return m, nil
 }
 
@@ -144,6 +150,10 @@ func (m *Manager) initialize() error {
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 			return
 		}
+		if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+			log.Warn("unknown affinity group balance policy from storage, the group keeps its target",
+				zap.String("key", k), zap.Error(err))
+		}
 		m.initGroupLocked(group)
 	})
 	if err != nil {
@@ -156,7 +166,6 @@ func (m *Manager) initialize() error {
 		return err
 	}
 
-	m.startAvailabilityCheckLoop()
 	log.Info("affinity manager initialized", zap.Int("group-count", len(m.groups)))
 	return nil
 }
@@ -177,7 +186,8 @@ func (m *Manager) initGroupLocked(group *Group) {
 		ID:                  group.ID,
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
-		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
+		VoterStoreIDs:       sortedStoreIDs(group.VoterStoreIDs),
+		BalancePolicy:       group.BalancePolicy,
 		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
@@ -241,24 +251,6 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	m.affinityRegionCount -= groupInfo.AffinityRegionCount
 	groupInfo.AffinityRegionCount = 0
 	groupInfo.AffinityVer++
-}
-
-func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	m.Lock()
-	defer m.Unlock()
-
-	groupInfo, ok := m.groups[groupID]
-	if !ok {
-		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
-	}
-
-	groupInfo.SetAvailability(groupAvailable)
-	groupInfo.LeaderStoreID = leaderStoreID
-	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
-	groupInfo.targetUnpersisted = false
-	m.resetCountLocked(groupInfo)
-
-	return newGroupState(groupInfo), nil
 }
 
 func (m *Manager) updateGroupAvailabilityLocked(groupID string, availability groupAvailability) {
@@ -510,15 +502,24 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
+	if err := validateBalancePolicy(group.BalancePolicy); err != nil {
+		log.Warn("unknown affinity group balance policy from etcd, the group keeps its target",
+			zap.String("group-id", group.ID), zap.Error(err))
+	}
+	// Voter order has no meaning, but affinity comparisons use canonical order.
+	clonedGroup := *group
+	clonedGroup.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
+	group = &clonedGroup
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
-	// Fast path: avoid taking write lock if nothing changes.
+	// Fast path: avoid taking write lock if nothing changes. The policy is also
+	// compared as written, so that memory keeps the stored value.
 	m.RLock()
 	existingGroup, exists := m.groups[group.ID]
 	if exists {
 		stored := existingGroup.storedGroup()
-		if sameStoredGroup(&stored, group) {
+		if sameStoredGroup(&stored, group) && stored.BalancePolicy == group.BalancePolicy {
 			m.RUnlock()
 			return
 		}
@@ -573,9 +574,11 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	}
 }
 
-// syncGroupTargetLocked syncs the stored target, replacing the runtime group if it was recreated.
-// A changed target takes the availability that the store conditions known now give, as when
+// syncGroupTargetLocked replaces the in-memory target and policy with those of
+// the stored group, and replaces the runtime group if it was recreated. A changed
+// target takes the availability that the store conditions known now give, as when
 // an admin sets it through PD, or a write whose result was unknown committed it.
+// A policy change keeps the counts, because it does not change Region affinity.
 // Both metaMutex and the write lock of RWMutex must be held.
 func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) bool {
 	if groupInfo.CreateTimestamp != group.CreateTimestamp {
@@ -586,25 +589,28 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		return true
 	}
 	if groupInfo.targetUnpersisted && group.LeaderStoreID == 0 && len(group.VoterStoreIDs) == 0 {
+		// A policy update can arrive before PD learns the local target.
+		groupInfo.BalancePolicy = group.BalancePolicy
 		return false
 	}
-
+	groupInfo.targetUnpersisted = false
 	// Publishing a normalized target also normalizes the voter order in memory.
-	if sameStoredGroup(&groupInfo.Group, group) && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
-		groupInfo.targetUnpersisted = false
+	if sameStoredGroup(&groupInfo.Group, group) && groupInfo.BalancePolicy == group.BalancePolicy && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
 		return false
 	}
+	targetChanged := groupInfo.LeaderStoreID != group.LeaderStoreID || !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs)
 	groupInfo.Group = *group
 	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
-	groupInfo.targetUnpersisted = false
-	// A changed target gets its own grace period, even if the old target expired.
-	groupInfo.availability = groupDegraded
-	groupInfo.degradedExpiredAt = newDegradedExpiredAtFromNow()
-	if m.storeConditionsKnown {
-		m.setTargetAvailabilityLocked(groupInfo)
+	if targetChanged {
+		// A changed target gets its own grace period, even if the old target expired.
+		groupInfo.availability = groupDegraded
+		groupInfo.degradedExpiredAt = newDegradedExpiredAtFromNow()
+		if m.storeConditionsKnown {
+			m.setTargetAvailabilityLocked(groupInfo)
+		}
+		m.resetCountLocked(groupInfo)
 	}
-	m.resetCountLocked(groupInfo)
-	return true
+	return targetChanged
 }
 
 // SyncGroupDeleteFromEtcd synchronizes a group deletion from etcd.

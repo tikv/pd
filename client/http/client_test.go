@@ -61,6 +61,27 @@ func TestConfigWithTrailingSlash(t *testing.T) {
 	}
 }
 
+func TestUpdateAffinityGroupPolicy(t *testing.T) {
+	re := require.New(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		re.Equal(http.MethodPatch, r.Method)
+		re.Equal("/pd/api/v2/affinity-groups/_tidb_t_1/policy", r.RequestURI)
+		body, err := io.ReadAll(r.Body)
+		re.NoError(err)
+		re.JSONEq(`{"balance_policy":"fixed"}`, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, err = io.WriteString(w, `{"id":"_tidb_t_1","balance_policy":"fixed"}`)
+		re.NoError(err)
+	}))
+	defer server.Close()
+
+	c := newClientWithMockServiceDiscovery("test-affinity-policy", []string{server.URL})
+	defer c.Close()
+	state, err := c.UpdateAffinityGroupPolicy(context.Background(), "_tidb_t_1", "fixed")
+	re.NoError(err)
+	re.Equal("fixed", state.BalancePolicy)
+}
+
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	re := require.New(t)
 	checked := 0

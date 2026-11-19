@@ -17,6 +17,7 @@ package affinity
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -341,49 +342,135 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 		if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
 		}
-		if group.AffinitySchedulingAllowed && leaderStoreID != group.LeaderStoreID {
+		m.RLock()
+		conditionsKnown := m.storeConditionsKnown
+		m.RUnlock()
+		if !conditionsKnown && !group.targetUnpersisted && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 &&
+			(m.targetWriter != nil || leaderStoreID != group.LeaderStoreID) {
 			return group, nil
 		}
-		if m.targetWriter != nil {
-			m.RLock()
-			conditionsKnown := m.storeConditionsKnown
-			m.RUnlock()
-			if !conditionsKnown && !group.targetUnpersisted && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
+		// Policy-only updates keep affinityVer, so check the current policy while
+		// holding metaMutex. A degraded fixed group can only confirm its target.
+		if group.BalancePolicy.IsFixed() && !group.RegularSchedulingAllowed && leaderStoreID != group.LeaderStoreID {
+			return group, nil
+		}
+		expected := group.Group
+		if group.targetUnpersisted {
+			expected = withoutTarget(expected)
+		}
+		target := GroupTarget{Expected: expected, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
+		if m.targetWriter == nil {
+			// PD has no affinity watcher. Even an unchanged observation must
+			// check storage after a write whose committed result was unknown.
+			if _, err := m.updateGroupTargetLocked(m.ctx, target); err != nil {
+				return nil, err
+			}
+		} else {
+			if group.AffinitySchedulingAllowed && leaderStoreID != group.LeaderStoreID {
 				return group, nil
 			}
-			expected := group.Group
-			if group.targetUnpersisted {
-				expected.LeaderStoreID = 0
-				expected.VoterStoreIDs = nil
-			}
-			target := GroupTarget{Expected: expected, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
 			persistOnly := group.AffinitySchedulingAllowed && group.targetUnpersisted
-			if !group.AffinitySchedulingAllowed && sameStoredGroup(&group.Group, target.result()) {
+			result := target.result()
+			if !group.AffinitySchedulingAllowed && sameStoredGroup(&group.Group, result) {
 				m.Lock()
-				if groupInfo, ok := m.groups[groupID]; ok && groupInfo.AffinityVer == observed.affinityVer && !groupInfo.IsAvailable() {
-					m.setTargetAvailabilityLocked(groupInfo)
-					m.resetCountLocked(groupInfo)
+				if info := m.groups[groupID]; info.AffinityVer == observed.affinityVer && !info.IsAvailable() {
+					m.setTargetAvailabilityLocked(info)
+					m.resetCountLocked(info)
 				}
 				m.Unlock()
 			}
-			if !sameStoredGroup(&target.Expected, target.result()) {
-				m.sendObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, persistOnly)
+			if !sameStoredGroup(&target.Expected, result) {
+				m.sendObservedTarget(observedTarget{
+					target:       target,
+					groupInfoPtr: observed.groupInfoPtr,
+					affinityVer:  observed.affinityVer,
+					persistOnly:  persistOnly,
+				})
 			}
-			return m.GetAffinityGroupState(groupID), nil
 		}
+		return m.GetAffinityGroupState(groupID), nil
 	}
 
 	// Step 2: Save the Group in storage.
-	group.LeaderStoreID = leaderStoreID
-	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		stored, err := m.loadAffinityGroupInTxn(txn, groupID)
+		if err != nil {
+			return err
+		}
+		group.Group = *stored
+		group.LeaderStoreID = leaderStoreID
+		group.VoterStoreIDs = slices.Clone(voterStoreIDs)
 		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
 	}); err != nil {
 		return nil, err
 	}
 
 	// Step 3: Save the information in memory.
-	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
+	m.Lock()
+	defer m.Unlock()
+	changed := m.syncGroupTargetLocked(m.groups[groupID], &group.Group)
+	groupInfo := m.groups[groupID]
+	if m.storeConditionsKnown {
+		m.setTargetAvailabilityLocked(groupInfo)
+	}
+	if !changed {
+		m.resetCountLocked(groupInfo)
+	}
+	return newGroupState(groupInfo), nil
+}
+
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+// The policy must be auto or fixed. It preserves the runtime state unless the
+// stored target differs from memory.
+func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy) (*GroupState, error) {
+	// An empty policy reads as auto in a stored group, but a request must name
+	// one, so that a body without the field does not reset the policy.
+	if policy != BalancePolicyAuto && policy != BalancePolicyFixed {
+		return nil, errs.ErrAffinityGroupContent.FastGenByArgs(
+			fmt.Sprintf("invalid balance policy %q, it must be %q or %q", policy, BalancePolicyAuto, BalancePolicyFixed))
+	}
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	if !m.IsGroupExist(groupID) {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	var updated *Group
+	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		var err error
+		updated, err = m.loadAffinityGroupInTxn(txn, groupID)
+		if err != nil {
+			return err
+		}
+		if updated.BalancePolicy == policy {
+			return nil
+		}
+		updated.BalancePolicy = policy
+		return m.storage.SaveAffinityGroup(txn, groupID, updated)
+	}); err != nil {
+		return nil, err
+	}
+
+	m.Lock()
+	defer m.Unlock()
+	m.syncGroupTargetLocked(m.groups[groupID], updated)
+	return newGroupState(m.groups[groupID]), nil
+}
+
+func (m *Manager) loadAffinityGroupInTxn(txn kv.Txn, groupID string) (*Group, error) {
+	value, err := m.storage.LoadAffinityGroupInTxn(txn, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if value == "" {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	var group Group
+	if err := json.Unmarshal([]byte(value), &group); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	group.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
+	return &group, nil
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.

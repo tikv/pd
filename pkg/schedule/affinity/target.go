@@ -17,12 +17,13 @@ package affinity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
-
-	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // ErrTargetWriterNotReady indicates that no request could be sent yet.
@@ -59,10 +60,13 @@ func (m *Manager) SetTargetWriter(w TargetWriter) {
 	m.targetWriter = w
 }
 
-// UpdateAffinityGroupTargets validates the whole request, then commits each
-// target in its own conditional transaction. Earlier commits survive an error.
-// Each target releases metaMutex before the next one starts.
+// UpdateAffinityGroupTargets validates the whole request, then conditionally
+// commits bounded batches. Earlier batches survive a later error.
 func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, error) {
+	return m.updateGroupTargets(m.ctx, targets)
+}
+
+func (m *Manager) updateGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
 	if len(targets) == 0 {
 		return nil, errs.ErrEmptyRequest.FastGenByArgs("no targets provided")
 	}
@@ -76,24 +80,32 @@ func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, e
 		if target.LeaderStoreID == 0 || len(target.VoterStoreIDs) == 0 {
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
 		}
-		if err := m.AdjustGroup(&Group{ID: target.Expected.ID, LeaderStoreID: target.LeaderStoreID, VoterStoreIDs: target.VoterStoreIDs}); err != nil {
+		if err := validateGroupFormat(&Group{ID: target.Expected.ID, LeaderStoreID: target.LeaderStoreID, VoterStoreIDs: target.VoterStoreIDs}); err != nil {
 			return nil, err
 		}
 		target.Expected.VoterStoreIDs = sortedStoreIDs(target.Expected.VoterStoreIDs)
 		target.VoterStoreIDs = sortedStoreIDs(target.VoterStoreIDs)
 		adjusted = append(adjusted, target)
 	}
-	written := make([]string, 0, len(adjusted))
-	for _, target := range adjusted {
-		if err := m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs); err != nil {
-			continue
+	adjusted = slices.DeleteFunc(adjusted, func(target GroupTarget) bool {
+		for _, id := range target.VoterStoreIDs {
+			if store := m.storeSetInformer.GetStore(id); store == nil || store.IsRemoved() {
+				return true
+			}
 		}
-		ok, err := m.updateGroupTarget(target)
-		if err != nil {
+		return m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs) != nil
+	})
+	written := make([]string, 0, len(adjusted))
+	for chunk := range slices.Chunk(adjusted, etcdutil.MaxEtcdTxnOps) {
+		if err := ctx.Err(); err != nil {
 			return written, err
 		}
-		if ok {
-			written = append(written, target.Expected.ID)
+		m.metaMutex.Lock()
+		ids, err := m.updateGroupTargetsLocked(ctx, chunk)
+		m.metaMutex.Unlock()
+		written = append(written, ids...)
+		if err != nil {
+			return written, err
 		}
 	}
 	return written, nil
@@ -102,44 +114,76 @@ func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, e
 func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
-	var stored *Group
-	written := false
-	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		value, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
-		if err != nil || value == "" {
+	return m.updateGroupTargetLocked(m.ctx, target)
+}
+
+// updateGroupTargetLocked requires metaMutex to serialize metadata changes.
+func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarget) (bool, error) {
+	written, err := m.updateGroupTargetsLocked(ctx, []GroupTarget{target})
+	return len(written) != 0, err
+}
+
+// updateGroupTargetsLocked requires metaMutex to serialize metadata changes.
+func (m *Manager) updateGroupTargetsLocked(ctx context.Context, targets []GroupTarget) ([]string, error) {
+	keys := make([]string, len(targets))
+	for i, target := range targets {
+		keys[i] = keypath.AffinityGroupPath(target.Expected.ID)
+	}
+	stored := make([]*Group, len(targets))
+	written := make([]string, 0, len(targets))
+	accepted := make([]bool, len(targets))
+	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		if err := kv.Prefetch(txn, keys); err != nil {
 			return err
 		}
-		group := &Group{}
-		if err := json.Unmarshal([]byte(value), group); err != nil {
-			return err
-		}
-		group.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
-		stored = group
-		result := target.result()
-		switch {
-		case sameStoredGroup(group, result):
-			written = true
-		case sameStoredGroup(group, &target.Expected):
-			if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
+		for i, target := range targets {
+			value, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
+			if err != nil {
 				return err
 			}
-			stored, written = result, true
+			if value == "" {
+				continue
+			}
+			group := &Group{}
+			if err := json.Unmarshal([]byte(value), group); err != nil {
+				return err
+			}
+			group.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
+			stored[i] = group
+			result := target.result()
+			switch {
+			case sameStoredGroup(group, result):
+				accepted[i] = true
+			case sameStoredGroup(group, &target.Expected):
+				if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
+					return err
+				}
+				stored[i], accepted[i] = result, true
+			}
+			if accepted[i] {
+				written = append(written, group.ID)
+			}
 		}
 		return nil
 	})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	if stored != nil {
-		m.Lock()
-		if group, ok := m.groups[stored.ID]; ok {
+	m.Lock()
+	defer m.Unlock()
+	for i, value := range stored {
+		if value == nil {
+			continue
+		}
+		if group, ok := m.groups[value.ID]; ok {
 			wasUnpersisted := group.targetUnpersisted
-			if changed := m.syncGroupTargetLocked(group, stored); written && !changed && (!wasUnpersisted || !group.IsAvailable()) {
-				m.setTargetAvailabilityLocked(group)
+			if changed := m.syncGroupTargetLocked(group, value); accepted[i] && !changed && (!wasUnpersisted || !group.IsAvailable()) {
+				if m.storeConditionsKnown {
+					m.setTargetAvailabilityLocked(group)
+				}
 				m.resetCountLocked(group)
 			}
 		}
-		m.Unlock()
 	}
 	return written, nil
 }
@@ -155,9 +199,22 @@ func (t *GroupTarget) result() *Group {
 // existing second-resolution creation timestamp cannot distinguish same-ID
 // recreations within one second.
 func sameStoredGroup(a, b *Group) bool {
-	return a.ID == b.ID && a.CreateTimestamp == b.CreateTimestamp &&
+	return a.ID == b.ID &&
+		a.CreateTimestamp == b.CreateTimestamp &&
+		sameBalancePolicy(a.BalancePolicy, b.BalancePolicy) &&
 		a.LeaderStoreID == b.LeaderStoreID &&
 		slices.Equal(sortedStoreIDs(a.VoterStoreIDs), sortedStoreIDs(b.VoterStoreIDs))
+}
+
+// sameBalancePolicy compares policies, where an empty policy means auto.
+func sameBalancePolicy(a, b BalancePolicy) bool {
+	if a == "" {
+		a = BalancePolicyAuto
+	}
+	if b == "" {
+		b = BalancePolicyAuto
+	}
+	return a == b
 }
 
 func sortedStoreIDs(ids []uint64) []uint64 {

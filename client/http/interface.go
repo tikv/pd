@@ -145,6 +145,8 @@ type Client interface {
 	GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error)
 	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
 	UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error)
+	// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+	UpdateAffinityGroupPolicy(ctx context.Context, groupID string, balancePolicy string) (*AffinityGroupState, error)
 	// DeleteAffinityGroup deletes an affinity group by group ID.
 	DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error
 	// BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
@@ -1358,6 +1360,26 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 		WithName("UpdateAffinityGroupPeers").
 		WithURI(fmt.Sprintf(AffinityGroupByID, groupID)).
 		WithMethod(http.MethodPut).
+		WithBody(reqJSON).
+		WithResp(&state))
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+func (c *client) UpdateAffinityGroupPolicy(ctx context.Context, groupID string, balancePolicy string) (*AffinityGroupState, error) {
+	req := UpdateAffinityGroupPolicyRequest{BalancePolicy: balancePolicy}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var state AffinityGroupState
+	err = c.request(ctx, newRequestInfo().
+		WithName("UpdateAffinityGroupPolicy").
+		WithURI(fmt.Sprintf(AffinityGroupPolicy, groupID)).
+		WithMethod(http.MethodPatch).
 		WithBody(reqJSON).
 		WithResp(&state))
 	if err != nil {
