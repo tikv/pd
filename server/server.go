@@ -496,6 +496,10 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
+	// This package's own heartbeat/bucket-report metrics can't be cleaned up from
+	// within RaftCluster's bury path without an import cycle, so RaftCluster invokes
+	// this callback instead.
+	s.cluster.SetOnStoreBuried(DeleteStoreMetrics)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,

@@ -686,7 +686,9 @@ func TestBucketHeartbeat(t *testing.T) {
 		Version:  1,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.Error(cluster.processReportBuckets(buckets))
+	processFlow, err := cluster.processReportBuckets(buckets)
+	re.Error(err)
+	re.False(processFlow)
 
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
@@ -699,18 +701,29 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0]))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[1]))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
-	re.NoError(cluster.processReportBuckets(buckets))
+	processFlow, err = cluster.processReportBuckets(buckets)
+	re.NoError(err)
+	re.True(processFlow)
 	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
-	// case3: the bucket version is same.
-	re.NoError(cluster.processReportBuckets(buckets))
+	// case3: a same-version report still carries flow statistics.
+	processFlow, err = cluster.processReportBuckets(buckets)
+	re.NoError(err)
+	re.True(processFlow)
 	// case4: the bucket version is changed.
 	newBuckets := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.NoError(cluster.processReportBuckets(newBuckets))
+	processFlow, err = cluster.processReportBuckets(newBuckets)
+	re.NoError(err)
+	re.True(processFlow)
+	re.Equal(newBuckets, cluster.GetRegion(uint64(1)).GetBuckets())
+	// As on master, an older version can also carry flow without replacing metadata.
+	processFlow, err = cluster.processReportBuckets(buckets)
+	re.NoError(err)
+	re.True(processFlow)
 	re.Equal(newBuckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case5: region update should inherit buckets.
@@ -725,6 +738,63 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newRegion2))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
 	re.Empty(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys())
+
+	// A report from a tombstoned leader must not update buckets or enqueue hot-bucket work.
+	leaderID := cluster.GetRegion(1).GetLeader().GetStoreId()
+	cluster.PutStore(cluster.GetStore(leaderID).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	processFlow, err = cluster.processReportBuckets(newBuckets)
+	re.NoError(err)
+	re.False(processFlow)
+	re.NoError(cluster.HandleReportBuckets(newBuckets))
+	re.Nil(cluster.GetRegion(1).GetBuckets())
+}
+
+func TestReportBucketsSameVersionUpdatesHotStats(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	store := newTestStores(1, "2.0.0")[0]
+	cluster.PutStore(store)
+	region := core.NewTestRegionInfo(1, store.GetID(), []byte("a"), []byte("b"))
+	cluster.PutRegion(region)
+
+	report := func(flow uint64) *metapb.Buckets {
+		loads := []uint64{flow}
+		return &metapb.Buckets{
+			RegionId:   region.GetID(),
+			Version:    1,
+			Keys:       [][]byte{{'a'}, {'b'}},
+			PeriodInMs: 1000,
+			Stats: &metapb.BucketStats{
+				ReadBytes: loads, ReadKeys: loads, ReadQps: loads,
+				WriteBytes: loads, WriteKeys: loads, WriteQps: loads,
+			},
+		}
+	}
+
+	first := report(1 << 30)
+	re.NoError(cluster.HandleReportBuckets(first))
+	metadata := region.GetBuckets()
+	re.NotNil(metadata)
+	stats := cluster.BucketsStats(0, region.GetID())[region.GetID()]
+	re.Len(stats, 1)
+	re.Equal(1, stats[0].HotDegree)
+
+	second := report(1 << 31)
+	re.NoError(cluster.HandleReportBuckets(second))
+	stats = cluster.BucketsStats(0, region.GetID())[region.GetID()]
+	re.Len(stats, 1)
+	re.Equal(2, stats[0].HotDegree)
+	re.Equal(second.Stats.ReadBytes[0], stats[0].Loads[0])
+	re.Equal(metadata, region.GetBuckets())
+
+	cluster.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	re.NoError(cluster.HandleReportBuckets(report(1 << 32)))
+	stats = cluster.BucketsStats(0, region.GetID())[region.GetID()]
+	re.Len(stats, 1)
+	re.Equal(2, stats[0].HotDegree)
+	re.Equal(second.Stats.ReadBytes[0], stats[0].Loads[0])
 }
 
 func TestRegionHeartbeat(t *testing.T) {
@@ -1069,14 +1139,17 @@ func TestConcurrentReportBucket(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
+	var reportErr error
 	go func() {
 		defer wg.Done()
-		cluster.processReportBuckets(bucket1)
+		_, reportErr = cluster.processReportBuckets(bucket1)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
-	re.NoError(cluster.processReportBuckets(bucket2))
+	_, err = cluster.processReportBuckets(bucket2)
+	re.NoError(err)
 	wg.Wait()
+	re.NoError(reportErr)
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }
 
