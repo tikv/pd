@@ -1434,7 +1434,7 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 	var loadedState keyspacepb.KeyspaceState
 	// If the keyspace state is not in the cache, try to get it from the storage.
 	meta, err := manager.LoadKeyspaceByID(id)
-	// Only check wether the keyspace meta is nil, ensure the returned state is as latest as possible.
+	// Only check whether the keyspace meta is nil, ensure the returned state is as latest as possible.
 	if meta == nil {
 		return keyspacepb.KeyspaceState_DISABLED, err
 	}
