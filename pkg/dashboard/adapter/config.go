@@ -23,6 +23,9 @@ import (
 // GenDashboardConfig generates a configuration for Dashboard Server.
 func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 	cfg := srv.GetConfig()
+	if err := cfg.Dashboard.Validate(); err != nil {
+		return nil, err
+	}
 
 	etcdCfg, err := cfg.GenEmbedEtcdConfig()
 	if err != nil {
@@ -43,8 +46,11 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 	if dashboardCfg.ClusterTLSInfo, err = cfg.Security.ToTLSInfo(); err != nil {
 		return nil, err
 	}
-	if dashboardCfg.TiDBTLSConfig, err = cfg.Dashboard.ToTiDBTLSConfig(); err != nil {
-		return nil, err
+	// The manager owns the rotating source for each active Dashboard run.
+	if cfg.Dashboard.TiDBSPIFFEWorkloadAPIAddr == "" {
+		if dashboardCfg.TiDBTLSConfig, err = cfg.Dashboard.ToTiDBTLSConfig(); err != nil {
+			return nil, err
+		}
 	}
 
 	dashboardCfg.NormalizePublicPathPrefix()

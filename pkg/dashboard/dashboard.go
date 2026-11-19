@@ -91,7 +91,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 				keyvisual.GenCustomDataProvider(srv),
 			)
 
-			m := adapter.NewManager(srv, s, redirector)
+			m := adapter.NewManager(srv, s, redirector, cfg)
 			srv.AddStartCallback(m.Start)
 			srv.AddCloseCallback(m.Stop)
 
