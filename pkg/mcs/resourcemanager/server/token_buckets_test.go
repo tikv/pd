@@ -607,9 +607,55 @@ func TestGroupTokenBucketRequestUnlimitedFillRateLoan(t *testing.T) {
 	re.InDelta(100, grant.Tokens, 1e-9)
 	re.Zero(trickle)
 	re.Greater(gtb.tokenSlots[2].curTokenCapacity, 0.0)
-	// A limited fill rate keeps smoothing such a loan over the target period.
-	gtb.overrideFillRate = 50000
-	grant, trickle = gtb.request(now.Add(3*time.Second), 100, 5000, 3)
-	re.InDelta(100, grant.Tokens, 1e-9)
+}
+
+func TestGroupTokenBucketRequestLimitedFillRateLoan(t *testing.T) {
+	re := require.New(t)
+	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+		Settings: &rmpb.TokenLimitSettings{FillRate: 10000, BurstLimit: 10000},
+	})
+	now := time.Now()
+	gtb.request(now, 1, 5000, 1)
+	// A zero-token request deletes the slot and the bucket refills to the burst limit.
+	gtb.request(now.Add(time.Second), 0, 5000, 99)
+	re.Equal(10000.0, gtb.Tokens)
+	// A new slot joining a full bucket gets no tokens from the refill, so its
+	// grant is a loan. The group bucket still covers it, so the grant must not
+	// be trickled over the whole target period.
+	grant, trickle := gtb.request(now.Add(2*time.Second), 20, 5000, 2)
+	re.InDelta(20, grant.Tokens, 1e-9)
+	re.Zero(trickle)
+	re.Less(gtb.tokenSlots[2].curTokenCapacity, 0.0)
+	// The same holds for a slot recreated after a zero-token request.
+	gtb.request(now.Add(3*time.Second), 0, 5000, 2)
+	re.NotContains(gtb.tokenSlots, uint64(2))
+	grant, trickle = gtb.request(now.Add(4*time.Second), 20, 5000, 2)
+	re.InDelta(20, grant.Tokens, 1e-9)
+	re.Zero(trickle)
+
+	// A slot that keeps borrowing is trickled again once it owes more than its
+	// fill rate repays in one target period, even if other slots still hold
+	// group tokens.
+	gtb = NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+		Settings: &rmpb.TokenLimitSettings{FillRate: 100, BurstLimit: 100000},
+	})
+	gtb.request(now, 1, 5000, 1)
+	for range 10 {
+		_, trickle = gtb.request(now, 100, 5000, 2)
+	}
 	re.Equal(int64(5000), trickle)
+	re.Positive(gtb.Tokens)
+	re.GreaterOrEqual(-gtb.tokenSlots[2].curTokenCapacity, gtb.tokenSlots[2].fillRate*5)
+
+	// An overdrawn group bucket keeps smoothing loans over the target period.
+	gtb = NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+		Settings: &rmpb.TokenLimitSettings{FillRate: 100, BurstLimit: 100},
+	})
+	gtb.request(now, 1, 5000, 99)
+	gtb.request(now.Add(time.Second), 0, 5000, 99)
+	gtb.request(now.Add(time.Second), 60, 5000, 1)
+	gtb.request(now.Add(time.Second), 60, 5000, 2)
+	_, trickle = gtb.request(now.Add(time.Second), 10, 5000, 2)
+	re.Equal(int64(5000), trickle)
+	re.Negative(gtb.Tokens)
 }

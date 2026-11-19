@@ -574,14 +574,6 @@ func (gtb *GroupTokenBucket) request(
 		)
 	}
 	res, trickleDuration := slot.assignSlotTokens(requiredToken, targetPeriodMs)
-	// When the effective group fill rate is unlimited, there is no group rate to
-	// smooth a loan against. Without this, a slot that holds no tokens (new or in
-	// debt) gets the whole target period as trickle, which holds the client to
-	// grant/period. The Service Limit, when set, still applies its own minimum
-	// trickle in RequestRU.
-	if res.Tokens > 0 && gtb.getFillRate() >= UnlimitedRate {
-		trickleDuration = 0
-	}
 	// Inspect the group token bucket and the assigned token result to catch any anomalies.
 	if isAnomaly := gtb.inspectAnomalies(res, slot, []zap.Field{
 		zap.Time("now", now),
@@ -597,6 +589,23 @@ func (gtb *GroupTokenBucket) request(
 	// Update bucket to record all tokens.
 	gtb.Tokens -= slot.lastTokenCapacity - slot.curTokenCapacity
 	slot.lastTokenCapacity = slot.curTokenCapacity
+	// A slot that holds no tokens, either new or in debt, gets its grant as a
+	// loan trickled over the whole target period, which holds the client to
+	// grant/period. Skip the trickle when there is nothing to smooth:
+	//   - The effective group fill rate is unlimited, so there is no group rate
+	//     to smooth the loan against.
+	//   - The group bucket still covers the grant, and the slot owes less than
+	//     its fill rate repays in one target period. Such a slot only lacks its
+	//     share of the group tokens, for example when it joins or is recreated
+	//     while the group bucket is full.
+	// The Service Limit, when set, still applies its own minimum trickle in RequestRU.
+	if res.Tokens > 0 {
+		owed := -slot.curTokenCapacity
+		coveredByGroup := gtb.Tokens >= 0 && owed < slot.fillRate*float64(targetPeriodMs)/1000
+		if gtb.getFillRate() >= UnlimitedRate || coveredByGroup {
+			trickleDuration = 0
+		}
+	}
 	return res, trickleDuration
 }
 
