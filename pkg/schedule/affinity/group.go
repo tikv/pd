@@ -131,9 +131,17 @@ type GroupState struct {
 
 	// affinityVer is used to mark the version of the cache.
 	affinityVer uint64
+	// targetUnpersisted indicates that the active target only exists in memory
+	// and still needs to be persisted to PD.
+	targetUnpersisted bool
 	// groupInfoPtr is a pointer to the original information.
 	// It is used only for pointer comparison and should not access any internal data.
 	groupInfoPtr *runtimeGroupInfo
+}
+
+// HasUnpersistedTarget reports whether the group holds a local target that has not been persisted yet.
+func (g *GroupState) HasUnpersistedTarget() bool {
+	return g != nil && g.targetUnpersisted
 }
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
@@ -163,6 +171,10 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
+	// targetUnpersisted indicates that LeaderStoreID and VoterStoreIDs were applied
+	// locally while PD did not implement the target endpoint, and etcd still stores
+	// an empty target for CreateTimestamp.
+	targetUnpersisted bool
 	// availability must be used together with degradedExpiredAt. Therefore, GetAvailability and SetAvailability must
 	// always be used to read or modify them, and availability must not be accessed directly.
 	availability groupAvailability
@@ -207,8 +219,16 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		RegionCount:               len(g.Regions),
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
+		targetUnpersisted:         g.targetUnpersisted,
 		groupInfoPtr:              g,
 	}
+}
+
+func (g *runtimeGroupInfo) storedGroup() Group {
+	if g.targetUnpersisted {
+		return Group{ID: g.ID, CreateTimestamp: g.CreateTimestamp}
+	}
+	return g.Group
 }
 
 // IsAvailable indicates that the Group is currently in the groupAvailable status,

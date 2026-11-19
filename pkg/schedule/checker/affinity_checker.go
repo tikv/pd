@@ -133,6 +133,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 				group = c.affinityManager.GetAffinityGroupState(group.ID)
 				needRefetch = true
 			}
+		} else if group.HasUnpersistedTarget() {
+			c.affinityManager.ObserveAvailableRegion(region, group)
 		}
 	} else {
 		// If the Group is not affinity scheduling allowed, provide the available Region information and fetch group state again.

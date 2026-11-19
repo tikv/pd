@@ -27,11 +27,19 @@ import (
 )
 
 // sendObservedTarget permits one outstanding first-win write per Manager. Busy
-// observations are discarded; patrol observes the groups again. A failed write
-// delays all new attempts, including observations from other groups.
-func (m *Manager) sendObservedTarget(target GroupTarget) {
+// observations are discarded. A 404 pauses HTTP attempts but lets groups
+// without an active target use a fresh observation locally. Caller holds metaMutex.
+func (m *Manager) sendObservedTarget(target GroupTarget, affinityVer uint64, persistOnly bool) {
 	m.targetWriteMutex.Lock()
-	if m.ctx.Err() != nil || m.targetWriteInFlight || time.Now().Before(m.targetWriteRetryAt) {
+	now := time.Now()
+	if now.Before(m.targetEndpointUnsupportedUntil) {
+		m.targetWriteMutex.Unlock()
+		if !persistOnly && m.ctx.Err() == nil {
+			m.applyLocalObservedTarget(target, affinityVer)
+		}
+		return
+	}
+	if m.ctx.Err() != nil || m.targetWriteInFlight || now.Before(m.targetWriteRetryAt) {
 		m.targetWriteMutex.Unlock()
 		return
 	}
@@ -43,15 +51,74 @@ func (m *Manager) sendObservedTarget(target GroupTarget) {
 		if err == nil && !slices.Contains(written, target.Expected.ID) {
 			err = errors.New("affinity group target was not written")
 		}
+		unsupported := errors.Is(err, ErrTargetWriterUnsupported)
+		if unsupported && !persistOnly {
+			m.metaMutex.Lock()
+			if m.ctx.Err() == nil {
+				m.applyLocalObservedTarget(target, affinityVer)
+			}
+			m.metaMutex.Unlock()
+		}
 		m.targetWriteMutex.Lock()
 		m.targetWriteInFlight = false
 		if err != nil {
 			m.targetWriteRetryAt = time.Now().Add(time.Second)
 		}
+		if unsupported {
+			m.targetEndpointUnsupportedUntil = m.targetWriteRetryAt
+		} else {
+			m.targetEndpointUnsupportedUntil = time.Time{}
+		}
 		m.targetWriteMutex.Unlock()
-		if err != nil && !errors.Is(err, ErrTargetWriterNotReady) && m.ctx.Err() == nil {
+		if err != nil && !unsupported && !errors.Is(err, ErrTargetWriterNotReady) && m.ctx.Err() == nil {
 			targetWriteFailureCounter.Inc()
 			log.Warn("failed to write affinity group target", zap.String("group-id", target.Expected.ID), zap.Error(err))
 		}
 	}()
+}
+
+// applyLocalObservedTarget initializes or updates a group's target in memory
+// when PD does not yet implement the conditional target endpoint. Once PD
+// upgrades, later patrol observations persist the target against the empty
+// stored group in Expected. Caller holds metaMutex.
+func (m *Manager) applyLocalObservedTarget(target GroupTarget, affinityVer uint64) {
+	if target.Expected.LeaderStoreID != 0 || len(target.Expected.VoterStoreIDs) != 0 {
+		return
+	}
+	voterStoreIDs := sortedStoreIDs(target.VoterStoreIDs)
+	if target.LeaderStoreID == 0 || len(voterStoreIDs) == 0 {
+		return
+	}
+
+	m.Lock()
+	defer m.Unlock()
+
+	groupInfo, ok := m.groups[target.Expected.ID]
+	if !ok || groupInfo.AffinityVer != affinityVer {
+		return
+	}
+	stored := groupInfo.storedGroup()
+	if !sameStoredGroup(&stored, &target.Expected) {
+		return
+	}
+	if groupInfo.IsAffinitySchedulingAllowed() {
+		return
+	}
+	if !groupInfo.IsRegularSchedulingAllowed() && !slices.Equal(voterStoreIDs, groupInfo.VoterStoreIDs) {
+		return
+	}
+	if groupInfo.LeaderStoreID == target.LeaderStoreID && slices.Equal(groupInfo.VoterStoreIDs, voterStoreIDs) {
+		if !groupInfo.IsAvailable() {
+			m.setTargetAvailabilityLocked(groupInfo)
+			m.resetCountLocked(groupInfo)
+		}
+		return
+	}
+	groupInfo.LeaderStoreID = target.LeaderStoreID
+	groupInfo.VoterStoreIDs = voterStoreIDs
+	groupInfo.targetUnpersisted = true
+	groupInfo.availability = groupDegraded
+	groupInfo.degradedExpiredAt = newDegradedExpiredAtFromNow()
+	m.setTargetAvailabilityLocked(groupInfo)
+	m.resetCountLocked(groupInfo)
 }
