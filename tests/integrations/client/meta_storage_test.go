@@ -27,6 +27,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -159,10 +160,94 @@ func TestMetaStorageProtectTSOTimestamps(t *testing.T) {
 	require.Equal(t, value, event.Events[0].GetKv().GetValue())
 }
 
+func TestMetaStorageProtectMicroserviceMetadata(t *testing.T) {
+	cli, etcd := newMetaStorageTestClient(t)
+	for _, tc := range []struct {
+		name string
+		key  string
+	}{
+		{name: "default tso primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.TSOServiceName})},
+		{name: "keyspace group primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.TSOServiceName, GroupID: 1})},
+		{name: "scheduling primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.SchedulingServiceName})},
+		{name: "resource manager primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.ResourceManagerServiceName})},
+		{name: "expected primary", key: keypath.ExpectedPrimaryPath(&keypath.MsParam{ServiceName: constant.TSOServiceName})},
+		{name: "service registry", key: keypath.RegistryPath(constant.RouterServiceName, "meta-storage-test")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			lease, err := etcd.Grant(ctx, 60)
+			re.NoError(err)
+			seed, err := etcd.Put(ctx, tc.key, "original", clientv3.WithLease(lease.ID))
+			re.NoError(err)
+
+			for _, operation := range []string{"Put", "PutWithLease", "Delete", "DeleteWithRangeEnd"} {
+				t.Run(operation, func(t *testing.T) {
+					var err error
+					switch operation {
+					case "Put":
+						_, err = cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(tc.key), Value: []byte("overwritten")})
+					case "PutWithLease":
+						_, err = cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(tc.key), Value: []byte("overwritten"), Lease: int64(lease.ID)})
+					case "Delete":
+						_, err = cli.Delete(ctx, &meta_storagepb.DeleteRequest{Key: []byte(tc.key)})
+					case "DeleteWithRangeEnd":
+						_, err = cli.Delete(ctx, &meta_storagepb.DeleteRequest{Key: []byte(tc.key), RangeEnd: []byte("/ms0")})
+					}
+					require.Equal(t, codes.PermissionDenied, status.Code(err))
+					stored, err := etcd.Get(ctx, tc.key)
+					require.NoError(t, err)
+					require.Len(t, stored.Kvs, 1)
+					require.Equal(t, "original", string(stored.Kvs[0].Value))
+					require.Equal(t, int64(lease.ID), stored.Kvs[0].Lease)
+					require.Equal(t, seed.Header.Revision, stored.Kvs[0].ModRevision)
+				})
+			}
+
+			read, err := cli.Get(ctx, &meta_storagepb.GetRequest{Key: []byte(tc.key)})
+			re.NoError(err)
+			re.Nil(read.GetHeader().GetError())
+			re.Len(read.Kvs, 1)
+			re.Equal("original", string(read.Kvs[0].Value))
+			all, err := cli.Get(ctx, &meta_storagepb.GetRequest{Key: []byte("/ms/"), RangeEnd: []byte("/ms0")})
+			re.NoError(err)
+			re.Nil(all.GetHeader().GetError())
+			re.NotEmpty(all.Kvs)
+			for _, kv := range all.Kvs {
+				re.True(strings.HasPrefix(string(kv.Key), "/ms/"))
+			}
+
+			watch, err := cli.Watch(ctx, &meta_storagepb.WatchRequest{
+				Key: []byte("/ms/"), RangeEnd: []byte("/ms0"), StartRevision: seed.Header.Revision, PrevKv: true,
+			})
+			re.NoError(err)
+			event, err := watch.Recv()
+			re.NoError(err)
+			re.Nil(event.GetHeader().GetError())
+			re.Len(event.Events, 1)
+			re.Equal(tc.key, string(event.Events[0].GetKv().GetKey()))
+			re.Equal("original", string(event.Events[0].GetKv().GetValue()))
+
+			// The metadata owner can still update etcd directly, and discovery
+			// clients continue receiving its changes through MetaStorage.
+			_, err = etcd.Put(ctx, tc.key, "updated", clientv3.WithLease(lease.ID))
+			re.NoError(err)
+			event, err = watch.Recv()
+			re.NoError(err)
+			re.Nil(event.GetHeader().GetError())
+			re.Len(event.Events, 1)
+			re.Equal(tc.key, string(event.Events[0].GetKv().GetKey()))
+			re.Equal("updated", string(event.Events[0].GetKv().GetValue()))
+			re.Equal("original", string(event.Events[0].GetPrevKv().GetValue()))
+		})
+	}
+}
+
 func TestMetaStorageNamespaceCompatibility(t *testing.T) {
 	cli, etcd := newMetaStorageTestClient(t)
 	for _, prefix := range []string{
-		"/ms/", "resource_group/", "/tidb/br-stream",
+		"resource_group/", "/tidb/br-stream",
 		strings.TrimSuffix(keypath.RegionLabelPathPrefix(), "/"),
 	} {
 		t.Run(prefix, func(t *testing.T) {
