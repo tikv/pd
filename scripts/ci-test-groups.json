@@ -22,9 +22,9 @@
       {"id": 10, "name": "Microservice Integration(TSO)", "pools": ["microservice-tso"]}
     ],
     "nextgen": [
-      {"id": 1, "name": "pull-unit-test-next-gen-1", "pools": ["unit"]},
-      {"id": 2, "name": "pull-unit-test-next-gen-2", "pools": ["tests", "tools"]},
-      {"id": 3, "name": "pull-unit-test-next-gen-3", "pools": ["client", "tso", "microservice", "microservice-tso"]}
+      {"id": 1, "name": "pull-unit-test-next-gen-1", "pools": ["unit", "tests", "tools", "client", "tso", "microservice", "microservice-tso"]},
+      {"id": 2, "name": "pull-unit-test-next-gen-2", "pools": ["unit", "tests", "tools", "client", "tso", "microservice", "microservice-tso"]},
+      {"id": 3, "name": "pull-unit-test-next-gen-3", "pools": ["unit", "tests", "tools", "client", "tso", "microservice", "microservice-tso"]}
     ]
   }
 }

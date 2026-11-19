@@ -95,30 +95,45 @@ def discover_packages(root, profile):
     return packages
 
 
-def estimate(packages, parallel):
+def estimate(packages, parallel, module_penalty=MODULE_PENALTY_SECONDS):
     modules = collections.defaultdict(list)
     for package in packages:
         modules[package.module].append(package)
     return sum(
         max(sum(p.seconds for p in group) / parallel, max(p.longest for p in group))
-        + MODULE_PENALTY_SECONDS
+        + module_penalty
         for group in modules.values()
     )
 
 
-def plan_shards(packages, count, parallel, eligible=None):
+def plan_shards(packages, count, parallel, eligible=None, module_penalty=MODULE_PENALTY_SECONDS):
     if count < 1 or parallel < 1:
         raise ValueError("shard count and parallelism must be positive")
     identities = [(p.module, p.path) for p in packages]
     if len(set(identities)) != len(identities):
         raise ValueError("duplicate test package")
+    # Native go test runs the entire client/tools module on its selected runner.
+    native = collections.defaultdict(list)
+    units = []
+    for package in packages:
+        if package.module in ("client", "tools"):
+            native[package.module].append(package)
+        else:
+            units.append([package])
+    units.extend(native.values())
     shards = [[] for _ in range(count)]
-    for package in sorted(packages, key=lambda p: (-max(p.seconds / parallel, p.longest), -p.seconds, p.module, p.path)):
-        candidates = range(count) if eligible is None else eligible[(package.module, package.path)]
+    for group in sorted(units, key=lambda group: (
+        -max(sum(p.seconds for p in group) / parallel, max(p.longest for p in group)),
+        -sum(p.seconds for p in group), group[0].module, group[0].path,
+    )):
+        candidates = set(range(count))
+        if eligible is not None:
+            for package in group:
+                candidates.intersection_update(eligible[(package.module, package.path)])
         if not candidates:
-            raise ValueError(f"no eligible runner for {package.module}: {package.path}")
-        index = min(candidates, key=lambda i: (estimate(shards[i] + [package], parallel), len(shards[i]), i))
-        shards[index].append(package)
+            raise ValueError(f"no common eligible runner for {group[0].module}: {group[0].path}")
+        index = min(candidates, key=lambda i: (estimate(shards[i] + group, parallel, module_penalty), len(shards[i]), i))
+        shards[index].extend(group)
     return shards
 
 
@@ -126,7 +141,7 @@ def under(path, prefix):
     return not prefix or path == prefix or path.startswith(prefix + "/")
 
 
-def plan_layout(packages, config, layout_name, parallel):
+def plan_layout(packages, config, layout_name, parallel, module_penalty=MODULE_PENALTY_SECONDS):
     layout = config["layouts"][layout_name]
     if [runner["id"] for runner in layout] != list(range(1, len(layout) + 1)):
         raise ValueError("runner IDs must be consecutive and one-based")
@@ -140,7 +155,7 @@ def plan_layout(packages, config, layout_name, parallel):
         if len(pools) != 1:
             raise ValueError(f"package must match exactly one test scope: {package.module}: {package.path} ({pools})")
         eligible[(package.module, package.path)] = [i for i, runner in enumerate(layout) if pools[0] in runner["pools"]]
-    shards = plan_shards(packages, len(layout), parallel, eligible)
+    shards = plan_shards(packages, len(layout), parallel, eligible, module_penalty)
     for module in ("client", "tools"):
         owners = [i for i, shard in enumerate(shards) if any(p.module == module for p in shard)]
         if len(owners) > 1:
@@ -347,9 +362,12 @@ def main():
     planning_parallel = profile.get("parallel", PLANNING_PARALLELISM)
     if not isinstance(planning_parallel, int) or planning_parallel < 1:
         parser.error("profile parallelism must be a positive integer")
-    shards = plan_layout(discover_packages(ROOT, profile), config, args.layout, planning_parallel)
+    # Default package weights express task counts, so a penalty in seconds would
+    # overwhelm them and pack a whole module onto one runner.
+    module_penalty = MODULE_PENALTY_SECONDS if profile["packages"] else 0
+    shards = plan_layout(discover_packages(ROOT, profile), config, args.layout, planning_parallel, module_penalty)
     for index, shard in enumerate(shards, 1):
-        print(f"Shard {index}/{count} ({layout[index - 1]['name']}): {len(shard)} packages, estimated cost {estimate(shard, planning_parallel):.1f}s", flush=True)
+        print(f"Shard {index}/{count} ({layout[index - 1]['name']}): {len(shard)} packages, estimated cost {estimate(shard, planning_parallel, module_penalty):.1f}s", flush=True)
         if args.action == "plan":
             for package in sorted(shard, key=lambda p: (p.module, p.path)):
                 print(f"  {package.module}: {package.path}")
