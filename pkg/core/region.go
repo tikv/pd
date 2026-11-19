@@ -55,7 +55,48 @@ const (
 	batchSearchSize = 128
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
+	// MaxBatchSplitCount caps the number of new regions in one request.
+	// ValidateBatchSplitRequest also applies a peer-dependent response budget:
+	// three-peer regions can reach this cap, while six-peer regions are limited
+	// to 90,189 splits and seven-peer regions to 81,432.
+	MaxBatchSplitCount = 1 << 17
+	// MaxBatchSplitResponseSize bounds the encoded response and the region/peer
+	// ID work needed to construct it. Forwarding RPCs must accept this size.
+	// Clients must also configure a receive limit of at least this size. The Go
+	// gRPC default and older PD forwarders may still limit responses to 4 MiB;
+	// upgrade forwarding PD nodes before issuing larger batches through them.
+	MaxBatchSplitResponseSize = 8 << 20
 )
+
+// ValidateBatchSplitCount checks the supported batch size before allocating IDs
+// or response slices. Zero retains the existing empty-batch behavior.
+func ValidateBatchSplitCount(splitCount uint32) error {
+	if splitCount > MaxBatchSplitCount {
+		return errors.Errorf("split count %d exceeds maximum %d", splitCount, MaxBatchSplitCount)
+	}
+	return nil
+}
+
+// ValidateBatchSplitRequest bounds response construction using the requested peer count.
+func ValidateBatchSplitRequest(splitCount uint32, region *metapb.Region) error {
+	if err := ValidateBatchSplitCount(splitCount); err != nil {
+		return err
+	}
+	if splitCount == 0 {
+		return nil
+	}
+	// Charge ten bytes per uint64 varint, and eleven bytes for each field tag
+	// and length prefix: region ID, packed peer IDs, and enclosing SplitID.
+	// Reserve room for the response header as well. This also bounds the peer
+	// arrays; the count limit bounds the per-region objects and bookkeeping.
+	const payloadBudget = MaxBatchSplitResponseSize - 1024
+	peers := uint64(len(region.GetPeers()))
+	if peers > payloadBudget/10 || uint64(splitCount) > payloadBudget/(33+10*peers) {
+		return errors.Errorf("split response exceeds maximum %d bytes", MaxBatchSplitResponseSize)
+	}
+
+	return nil
+}
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {

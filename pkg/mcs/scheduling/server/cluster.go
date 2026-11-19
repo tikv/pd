@@ -411,11 +411,18 @@ func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConf
 
 // AllocID allocates new IDs.
 func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
+	return c.allocIDWithContext(c.ctx, count)
+}
+
+func (c *Cluster) allocIDWithContext(ctx context.Context, count uint32) (uint64, uint32, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
+	}
 	client, err := c.getPDLeaderClient()
 	if err != nil {
 		return 0, 0, err
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	req := &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count}
 
@@ -426,6 +433,12 @@ func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
 	if err != nil {
 		c.triggerMembershipCheck()
 		return 0, 0, err
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
+	}
+	if err := resp.GetHeader().GetError(); err != nil {
+		return 0, 0, errors.New(err.String())
 	}
 	return resp.GetId(), resp.GetCount(), nil
 }

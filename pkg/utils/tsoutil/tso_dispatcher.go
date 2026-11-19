@@ -36,6 +36,9 @@ import (
 
 const (
 	maxMergeRequests = 10000
+	// Leave logical space for concurrent requests to the same oracle. A single
+	// larger request is still forwarded on its own.
+	maxMergedTSOCount = (logicalBits + 1) / 2
 	// DefaultTSOProxyTimeout defines the default timeout value of TSP Proxying
 	DefaultTSOProxyTimeout = 3 * time.Second
 	// tsoProxyStreamIdleTimeout defines how long Proxy stream will live if no request is received
@@ -72,6 +75,12 @@ func NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize prometheus.Histo
 
 // DispatchRequest is the entry point for dispatching/forwarding a tso request to the destination host
 func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, tsoProtoFactory ProtoFactory, tsoPrimaryWatchers ...*etcdutil.LoopWatcher) context.Context {
+	if err := ValidateTSOCount(uint64(req.getCount())); err != nil {
+		// Reject only this request before it can affect a shared forwarding queue.
+		ctx, cancel := context.WithCancelCause(serverCtx)
+		cancel(err)
+		return ctx
+	}
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
 	if !loaded {
@@ -146,24 +155,27 @@ func (s *TSODispatcher) dispatch(
 			for i := 1; i < pendingTSOReqCount; i++ {
 				requests = append(requests, <-tsoQueue.requestCh)
 			}
-			done := make(chan struct{})
-			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
-			select {
-			case tsDeadlineCh <- dl:
-			case <-dispatcherCtx.Done():
-				return
-			}
-			err = s.processRequests(forwardStream, requests)
-			close(done)
-			if err != nil {
-				log.Error("proxy forward tso error",
-					zap.String("forwarded-host", forwardedHost),
-					errs.ZapError(errs.ErrGRPCSend, err))
-				if needUpdateServicePrimaryAddr && errs.IsLeaderChanged(err) {
-					tsoPrimaryWatchers[0].ForceLoad()
+			for pending := requests; len(pending) > 0; {
+				done := make(chan struct{})
+				dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
+				select {
+				case tsDeadlineCh <- dl:
+				case <-dispatcherCtx.Done():
+					timerutil.GlobalTimerPool.Put(dl.timer)
+					return
 				}
-				tsoQueue.cancel(err)
-				return
+				pending, err = s.processRequests(forwardStream, pending)
+				close(done)
+				if err != nil {
+					log.Error("proxy forward tso error",
+						zap.String("forwarded-host", forwardedHost),
+						errs.ZapError(errs.ErrGRPCSend, err))
+					if needUpdateServicePrimaryAddr && errs.IsLeaderChanged(err) {
+						tsoPrimaryWatchers[0].ForceLoad()
+					}
+					tsoQueue.cancel(err)
+					return
+				}
 			}
 		case <-noProxyRequestsTimer.C:
 			log.Info("close tso proxy as it is idle for a while")
@@ -175,18 +187,31 @@ func (s *TSODispatcher) dispatch(
 	}
 }
 
-func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) error {
-	// Merge the requests
-	count := uint32(0)
-	for _, request := range requests {
-		count += request.getCount()
+// processRequests forwards one bounded batch and returns the remaining requests.
+func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) ([]Request, error) {
+	if len(requests) == 0 {
+		return nil, ValidateTSOCount(0)
+	}
+	var count uint64
+	batchSize := len(requests)
+	for i, request := range requests {
+		requestCount := uint64(request.getCount())
+		if err := ValidateTSOCount(requestCount); err != nil {
+			return nil, err
+		}
+		if i > 0 && count+requestCount > maxMergedTSOCount {
+			batchSize = i
+			break
+		}
+		count += requestCount
+	}
+	batch, remaining := requests[:batchSize], requests[batchSize:]
+	start := time.Now()
+	resp, err := batch[0].process(forwardStream, uint32(count))
+	if err != nil {
+		return nil, err
 	}
 
-	start := time.Now()
-	resp, err := requests[0].process(forwardStream, count)
-	if err != nil {
-		return err
-	}
 	s.tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
 	if s.tsoProxyBatchSize != nil {
 		s.tsoProxyBatchSize.Observe(float64(count))
@@ -198,19 +223,43 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
 	// count is 5, then the splitting results should be 5 and 10.
 	firstLogical := logical - int64(count)
-	return s.finishRequest(requests, physical, firstLogical)
+	if s.finishRequest(batch, physical, firstLogical) {
+		active := remaining[:0]
+		for _, request := range remaining {
+			if _, ok := request.getCountIfActive(); ok {
+				active = append(active, request)
+			}
+		}
+		remaining = active
+	}
+	return remaining, nil
 }
 
-func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) error {
+// finishRequest sends the allocated timestamps and reports whether any downstream send failed.
+func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) bool {
 	countSum := int64(0)
 	for i := range requests {
 		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
-		if err != nil {
-			return err
-		}
+		// The timestamps remain consumed even if this downstream stream closed.
 		countSum = newCountSum
+		if err != nil {
+			log.Warn("send tso response to client failed", errs.ZapError(err))
+			for _, request := range requests[i+1:] {
+				count, active := request.getCountIfActive()
+				if !active {
+					countSum += int64(count)
+					continue
+				}
+				newCountSum, err := request.postProcess(countSum, physical, firstLogical)
+				countSum = newCountSum
+				if err != nil {
+					log.Warn("send tso response to client failed", errs.ZapError(err))
+				}
+			}
+			return true
+		}
 	}
-	return nil
+	return false
 }
 
 // clearPendingRequests clears all pending requests in the queue to prevent goroutine leakage.
@@ -276,9 +325,15 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 		case d := <-tsDeadlineCh:
 			select {
 			case <-d.timer.C:
-				log.Warn("tso proxy request processing is canceled due to timeout",
-					errs.ZapError(errs.ErrProxyTSOTimeout))
-				d.cancel()
+				// A completed batch may be observed after its timer has fired.
+				// Its stale deadline must not cancel a subsequent batch.
+				select {
+				case <-d.done:
+				default:
+					log.Warn("tso proxy request processing is canceled due to timeout",
+						errs.ZapError(errs.ErrProxyTSOTimeout))
+					d.cancel()
+				}
 				timerutil.GlobalTimerPool.Put(d.timer)
 			case <-d.done:
 				timerutil.GlobalTimerPool.Put(d.timer)

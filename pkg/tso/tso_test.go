@@ -16,6 +16,8 @@ package tso
 
 import (
 	"context"
+	"math"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -48,6 +50,46 @@ func TestLogicalOverflow(t *testing.T) {
 	re := require.New(t)
 	re.True(overflowedLogical(maxLogical))
 	re.False(overflowedLogical(maxLogical - 1))
+}
+
+func TestGetTSRejectsInvalidCountWithoutChangingClock(t *testing.T) {
+	for _, count := range []uint32{0, uint32(maxLogical), uint32(maxLogical + 1), math.MaxUint32} {
+		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
+			current := time.Now()
+			ts := &timestampOracle{
+				tsoMux:        &tsoObject{physical: current, logical: 42},
+				saveInterval:  time.Hour,
+				maxResetTSGap: func() time.Duration { return time.Hour },
+				metrics:       newTSOMetrics("test"),
+				member:        &mockElection{},
+			}
+			saved := current.Add(time.Hour)
+			ts.lastSavedTime.Store(saved)
+			_, err := ts.getTS(t.Context(), count)
+			require.Error(t, err)
+			physical, logical := ts.getTSO()
+			require.Equal(t, current, physical)
+			require.Equal(t, int64(42), logical)
+			require.Equal(t, saved, ts.lastSavedTime.Load())
+			valid, err := ts.getTS(t.Context(), 1)
+			require.NoError(t, err)
+			require.Equal(t, current.UnixMilli(), valid.GetPhysical())
+			require.Equal(t, int64(43), valid.GetLogical())
+		})
+	}
+}
+
+func TestGetTSLargestValidCount(t *testing.T) {
+	current := time.Now()
+	ts := &timestampOracle{
+		tsoMux:  &tsoObject{physical: current},
+		metrics: newTSOMetrics("test"),
+		member:  &mockElection{},
+	}
+	result, err := ts.getTS(t.Context(), uint32(maxLogical-1))
+	require.NoError(t, err)
+	require.Equal(t, current.UnixMilli(), result.GetPhysical())
+	require.Equal(t, maxLogical-1, result.GetLogical())
 }
 
 func TestSetTSO(t *testing.T) {
