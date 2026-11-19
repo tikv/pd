@@ -158,7 +158,7 @@ func (s *Service) QueryRegion(stream routerpb.Router_QueryRegionServer) error {
 			PrevKeyIdMap: prevKeyIDMap,
 			RegionsById:  regionsByID,
 		}
-		grpcutil.RequestCounter("QueryRegion", request.Header, response.Header.Error, regionRequestCounter)
+		grpcutil.RecordQueryRegionRequestMetrics(request, response.GetHeader().GetError(), regionRequestCounter)
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}

@@ -15,6 +15,7 @@
 package caller
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -84,4 +85,18 @@ func GetComponent(upperLayer int) Component {
 
 	// Extract the package name
 	return Component(fullFuncName[:lastSlash])
+}
+
+// componentKey identifies the caller component carried by a request context.
+type componentKey struct{}
+
+// WithComponent attaches a caller component to a request context.
+func WithComponent(ctx context.Context, component Component) context.Context {
+	return context.WithValue(ctx, componentKey{}, component)
+}
+
+// ComponentFromContext returns the caller component, or an empty component if unset.
+func ComponentFromContext(ctx context.Context) Component {
+	component, _ := ctx.Value(componentKey{}).(Component)
+	return component
 }
