@@ -490,16 +490,26 @@ func (s *balanceLeaderScheduler) preferFormerLeader(solver *solver, fallback *op
 		return fallback
 	}
 	source, original := solver.Source, solver.Region
-	regions := solver.GetBasicCluster().GetFormerLeaderRegions(solver.Target, s.balanceRanges(solver))
+	ranges := s.balanceRanges(solver)
+	regions, planned := s.OpController.FormerLeaders(source, solver.Target, original)
+	if !planned {
+		regions = solver.GetBasicCluster().GetFormerLeaderRegions(solver.Target, ranges)
+	}
 	for _, region := range filter.SelectRegions(regions, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster)) {
 		if _, used := usedRegions[region.GetID()]; used || region.GetLeader().GetStoreId() != source.GetID() || s.OpController.GetOperator(region.GetID()) != nil {
+			continue
+		}
+		if planned && !region.WithinRanges(ranges) {
 			continue
 		}
 		if region.GetID() == fallback.RegionID() {
 			break
 		}
 		solver.Region = region
-		if op := s.transferLeaderInRegion(solver, nil); op != nil {
+		if op := s.transferLeaderInRegion(solver, nil, planned); op != nil {
+			if planned {
+				op.MarkLeaderReturn(solver.Target.GetID(), fallback)
+			}
 			return op
 		}
 	}
@@ -516,11 +526,11 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		balanceLeaderNoFollowerRegionCounter.Inc()
 		return nil
 	}
-	return s.transferLeaderInRegion(solver, collector)
+	return s.transferLeaderInRegion(solver, collector, false)
 }
 
-func (s *balanceLeaderScheduler) transferLeaderInRegion(solver *solver, collector *plan.Collector) *operator.Operator {
-	if solver.IsRegionHot(solver.Region) {
+func (s *balanceLeaderScheduler) transferLeaderInRegion(solver *solver, collector *plan.Collector, plannedReturn bool) *operator.Operator {
+	if !plannedReturn && solver.IsRegionHot(solver.Region) {
 		log.Debug("region is hot region, ignore it", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 		balanceLeaderRegionHotCounter.Inc()
 		return nil

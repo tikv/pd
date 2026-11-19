@@ -98,6 +98,11 @@ func (s *StoreInfo) RecentlyRestarted() bool {
 	return s.restart != nil && time.Since(s.restart.observedAt) < leaderReturnWindow
 }
 
+// RestartedFrom reports whether the current recovery window follows the given process.
+func (s *StoreInfo) RestartedFrom(start int64) bool {
+	return s.RecentlyRestarted() && s.restart.previousStart == start
+}
+
 // NewStoreInfo creates StoreInfo with meta data.
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{

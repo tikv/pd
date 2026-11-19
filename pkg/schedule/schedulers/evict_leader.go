@@ -337,7 +337,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf), nil
+	return scheduleEvictLeaderWithRecovery(s.GetName(), cluster, s.conf, s.OpController), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -362,10 +362,14 @@ type evictLeaderStoresConf interface {
 }
 
 func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+	return scheduleEvictLeaderWithRecovery(name, cluster, conf, nil)
+}
+
+func scheduleEvictLeaderWithRecovery(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, controller *operator.Controller) []*operator.Operator {
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for range batchSize {
-		once := scheduleEvictLeaderOnce(name, cluster, conf)
+		once := pickEvictions(name, cluster, conf, controller)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -380,6 +384,10 @@ func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf e
 }
 
 func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+	return pickEvictions(name, cluster, conf, nil)
+}
+
+func pickEvictions(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, controller *operator.Controller) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -431,9 +439,42 @@ func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf ev
 		}
 		op.SetPriorityLevel(constant.Urgent)
 		op.Counters = append(op.Counters, evictLeaderNewOperatorCounter)
+		if controller != nil && slices.ContainsFunc(targets, (*core.StoreInfo).RecentlyRestarted) {
+			op = preferEvictionTarget(controller, cluster, region, target.GetID(), targetIDs, conf.getBatch(), op)
+		}
 		ops = append(ops, op)
 	}
 	return ops
+}
+
+// The normal urgent operator remains a fallback. Only valid primary targets
+// contribute capacity; a multi-target alternative can be a witness or be
+// excluded by the placement rules for Leaders.
+func preferEvictionTarget(controller *operator.Controller, cluster sche.SchedulerCluster, region *core.RegionInfo, original uint64, targets []uint64, batch int, fallback *operator.Operator) *operator.Operator {
+	if len(region.GetPendingPeers()) != 0 || len(region.GetDownPeers()) != 0 {
+		return fallback
+	}
+	eligible := make([]uint64, 0, len(targets))
+	for _, id := range targets {
+		if peer := region.GetStoreVoter(id); peer != nil && operator.IsAllowedLeaderTarget(cluster, region, peer) {
+			eligible = append(eligible, id)
+		}
+	}
+	if !slices.Contains(eligible, original) {
+		return fallback
+	}
+	id := controller.EvictionTarget(region, original, eligible, batch)
+	if id == original {
+		return fallback
+	}
+	op, err := operator.CreateTransferLeaderOperator(fallback.Desc(), cluster, region, id, eligible, operator.OpLeader)
+	if err != nil {
+		return fallback
+	}
+	op.SetPriorityLevel(constant.Urgent)
+	op.Counters = append(op.Counters, evictLeaderNewOperatorCounter)
+	op.MarkEvictionChoice(original, eligible, batch, fallback)
+	return op
 }
 
 type evictLeaderHandler struct {

@@ -121,6 +121,49 @@ func TestBalanceLeaderReturnsFormerLeadersAfterRestart(t *testing.T) {
 	re.Empty(ops)
 }
 
+func TestBalanceLeaderReturnsPlannedHotRegionThroughOperatorController(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest(false)
+	defer cancel()
+	tc.AddLeaderStore(1, 100)
+	tc.AddLeaderStore(2, 1)
+	start := time.Now().Unix()
+	setStore := func(id uint64, epoch int64, keys uint64) {
+		tc.PutStore(tc.GetStore(id), core.SetStoreStartTime(epoch), core.SetLastHeartbeatTS(time.Now()),
+			core.SetStoreStats(&pdpb.StoreStats{KeysRead: keys, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(start) - 10, EndTimestamp: uint64(start)}}))
+	}
+	setStore(1, start-100, 1000000)
+	setStore(2, start-100, 0)
+	for id := uint64(100); id < 300; id++ {
+		tc.AddLeaderRegion(id, 1, 2)
+	}
+	tc.AddRegionWithReadInfo(11, 1, 1<<26, 20000, 20000, 10, []uint64{2}, 10)
+	r := tc.GetRegion(11)
+	report := func(peer, term uint64, end int64) *core.RegionInfo {
+		reg := core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{Region: r.GetMeta(), Leader: r.GetStorePeer(peer), Term: term,
+			KeysRead: 20000, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(end) - 10, EndTimestamp: uint64(end)}, ApproximateSize: 10 << 20}, 0)
+		tc.PutRegion(reg)
+		return reg
+	}
+	// Only the completed planned eviction authorizes bypassing the hot filter.
+	r = report(2, 7, start-20)
+	evict, err := operator.CreateTransferLeaderOperator(types.EvictLeaderScheduler.String(), tc, r, 1, []uint64{1}, operator.OpLeader)
+	require.NoError(t, err)
+	require.True(t, oc.AddOperator(evict))
+	r = report(1, 8, start-10)
+	oc.Dispatch(r, operator.DispatchFromHeartBeat, func(uint64) {})
+	require.Equal(t, operator.SUCCESS, evict.Status())
+	require.True(t, tc.IsRegionHot(r))
+	setStore(2, start-5, 0)
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
+	require.NoError(t, err)
+	lb.(*balanceLeaderScheduler).conf.Batch = 1
+	ops, _ := lb.Schedule(tc, false)
+	require.Len(t, ops, 1)
+	require.Equal(t, r.GetID(), ops[0].RegionID())
+	require.True(t, oc.AddOperator(ops[0]))
+	operatorutil.CheckTransferLeader(require.New(t), ops[0], operator.OpLeader, 1, 2)
+}
+
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re := require.New(t)
 	keyRanges1, err := getKeyRanges([]string{"a", "b", "c", "d"})

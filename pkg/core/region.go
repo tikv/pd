@@ -808,6 +808,22 @@ func (r *RegionInfo) GetKeysRead() uint64 {
 	return r.readKeys
 }
 
+// ReadKeysPerSecond returns the last valid heartbeat's read rate. A valid
+// idle interval is distinct from a missing measurement.
+func (r *RegionInfo) ReadKeysPerSecond() (float64, bool) {
+	i := r.GetInterval()
+	span := i.GetEndTimestamp() - i.GetStartTimestamp()
+	if span < statsReportMinInterval || span > statsReportMaxInterval {
+		return 0, false
+	}
+	return float64(r.GetKeysRead()) / float64(span), true
+}
+
+// WithinRanges reports whether a scheduling range contains the entire Region.
+func (r *RegionInfo) WithinRanges(ranges []keyutil.KeyRange) bool {
+	return slices.ContainsFunc(ranges, func(kr keyutil.KeyRange) bool { return r.isInvolved(kr.StartKey, kr.EndKey) })
+}
+
 // GetWriteRate returns the write rate of the region.
 func (r *RegionInfo) GetWriteRate() (bytesRate, keysRate float64) {
 	reportInterval := r.GetInterval()
@@ -1161,7 +1177,7 @@ func (r *RegionsInfo) GetFormerLeaderRegions(store *StoreInfo, ranges []keyutil.
 		if voter.GetId() != m.peer || voter.GetIsWitness() {
 			continue
 		}
-		if slices.ContainsFunc(ranges, func(kr keyutil.KeyRange) bool { return region.isInvolved(kr.StartKey, kr.EndKey) }) {
+		if region.WithinRanges(ranges) {
 			candidates = append(candidates, region)
 		}
 	}

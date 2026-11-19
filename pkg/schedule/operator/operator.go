@@ -95,6 +95,7 @@ type Operator struct {
 	// not set at creation time; callers opt in after the operator is built
 	// (see SetStoreHealthCheck), similar to additionalInfos.
 	needStoreHealthCheck atomic.Bool
+	recovery             *recoveryChoice
 }
 
 // SetStoreHealthCheck marks whether the operator's in-progress steps should
