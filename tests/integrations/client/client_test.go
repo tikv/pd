@@ -1170,7 +1170,11 @@ func (suite *clientTestSuite) TestGetStore() {
 	// offline -> tombstone, and stores[0..2] are the ones other tests in
 	// this suite heartbeat regions through (peers[0..2]) and expect to
 	// stay live for the rest of the suite.
-	store := stores[3]
+	store := typeutil.DeepClone(stores[3], core.StoreFactory)
+	// SetupSuite registers this store with a heartbeat timestamp.
+	registeredStore := cluster.GetStore(store.GetId())
+	re.NotNil(registeredStore)
+	store.LastHeartbeat = registeredStore.GetMeta().GetLastHeartbeat()
 
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
