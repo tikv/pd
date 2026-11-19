@@ -81,7 +81,7 @@ def discover_packages(root, profile):
         tags = "deadlock,nextgen" if os.getenv("NEXT_GEN") == "1" and module not in ("client", "tools") else "deadlock"
         prefix = MODULE_PREFIX if module == "." else f"{MODULE_PREFIX}/{module}"
         output = subprocess.check_output(
-            ["go", "list", "-tags", tags, "-f", "{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}", "./..."],
+            ["go", "list", "-race", "-tags", tags, "-f", "{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}", "./..."],
             cwd=root / module, universal_newlines=True,
         )
         for full_path in sorted(set(output.split())):

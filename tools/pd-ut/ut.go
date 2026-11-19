@@ -615,7 +615,11 @@ func filterTestCases(tasks []task, arg1 string) ([]task, error) {
 
 func listPackages() ([]string, error) {
 	listPath := strings.Join([]string{".", "..."}, string(filepath.Separator))
-	cmd := goCommand("list", "-tags", tags, listPath)
+	cmd := goCommand("list", "-tags", tags)
+	if race {
+		cmd.Args = append(cmd.Args, "-race")
+	}
+	cmd.Args = append(cmd.Args, listPath)
 	cmd.Dir = workDir
 	ss, err := cmdToLines(cmd)
 	if err != nil {
