@@ -454,6 +454,12 @@ type serviceDiscovery struct {
 	option *opt.Option
 
 	flight singleflight.Group
+
+	memberProbeMu     sync.Mutex
+	memberProbeCtx    context.Context
+	memberProbeCancel context.CancelFunc
+	memberProbeWg     sync.WaitGroup
+	memberProbeClosed bool
 }
 
 // NewDefaultServiceDiscovery returns a new default service discovery-based client.
@@ -652,6 +658,13 @@ func (c *serviceDiscovery) Close() {
 	}
 	c.closeOnce.Do(func() {
 		log.Info("[pd] close service discovery client")
+		c.memberProbeMu.Lock()
+		c.memberProbeClosed = true
+		if c.memberProbeCancel != nil {
+			c.memberProbeCancel()
+		}
+		c.memberProbeMu.Unlock()
+		c.memberProbeWg.Wait()
 		c.clientConns.Range(func(key, cc any) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
 				log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
@@ -890,8 +903,10 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 }
 
 func (c *serviceDiscovery) updateMember() error {
+	// A slow healthy endpoint must not fan out membership RPCs during client bursts.
+	// Advance only after a response fails validation, an RPC fails, or its timeout expires.
 	for _, url := range c.GetServiceURLs() {
-		members, err := c.getMembers(c.ctx, url, UpdateMemberTimeout)
+		members, err := c.probeMember(url)
 		// Check the cluster ID.
 		updatedClusterID := members.GetHeader().GetClusterId()
 		if err == nil && updatedClusterID != c.clusterID {
@@ -920,6 +935,25 @@ func (c *serviceDiscovery) updateMember() error {
 		return c.updateServiceClient(members.GetMembers(), members.GetLeader())
 	}
 	return errs.ErrClientGetMember.FastGenByArgs()
+}
+
+func (c *serviceDiscovery) probeMember(url string) (*pdpb.GetMembersResponse, error) {
+	c.memberProbeMu.Lock()
+	if c.memberProbeClosed || c.ctx.Err() != nil {
+		c.memberProbeMu.Unlock()
+		return nil, context.Canceled
+	}
+	if c.memberProbeCtx == nil {
+		c.memberProbeCtx, c.memberProbeCancel = context.WithCancel(c.ctx)
+	}
+	ctx := c.memberProbeCtx
+	c.memberProbeWg.Add(1)
+	c.memberProbeMu.Unlock()
+	defer c.memberProbeWg.Done()
+
+	// Close cancels this discovery's calls without canceling its owner's context.
+	// Each call keeps its own timeout when sharing a GetMembers RPC with another waiter.
+	return c.getMembers(ctx, url, UpdateMemberTimeout)
 }
 
 func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {
@@ -961,7 +995,7 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cc, err := c.GetOrCreateGRPCConn(url)
+	cc, err := grpcutil.GetOrCreateGRPCConn(ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 	if err != nil {
 		return nil, err
 	}

@@ -27,14 +27,20 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/retry"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
@@ -223,6 +229,12 @@ func TestTSODispatcherTestSuite(t *testing.T) {
 type countingServiceDiscovery struct {
 	removeCount   atomic.Int32
 	scheduleCount atomic.Int32
+	checkCount    atomic.Int32
+	conn          *grpc.ClientConn
+	conns         map[string]*grpc.ClientConn
+	backupURLs    []string
+	onSchedule    func()
+	servingURL    string
 }
 
 func (*countingServiceDiscovery) Init() error                                        { return nil }
@@ -234,19 +246,25 @@ func (*countingServiceDiscovery) GetKeyspaceGroupID() uint32                    
 func (*countingServiceDiscovery) GetServiceURLs() []string                           { return nil }
 func (*countingServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn     { return nil }
 func (*countingServiceDiscovery) GetClientConns() *sync.Map                          { return &sync.Map{} }
-func (*countingServiceDiscovery) GetServingURL() string                              { return "" }
-func (*countingServiceDiscovery) GetBackupURLs() []string                            { return nil }
+func (s *countingServiceDiscovery) GetServingURL() string                            { return s.servingURL }
+func (s *countingServiceDiscovery) GetBackupURLs() []string                          { return s.backupURLs }
 func (*countingServiceDiscovery) GetServiceClient() sd.ServiceClient                 { return nil }
 func (*countingServiceDiscovery) GetServiceClientByKind(sd.APIKind) sd.ServiceClient { return nil }
 func (*countingServiceDiscovery) GetAllServiceClients() []sd.ServiceClient           { return nil }
-func (*countingServiceDiscovery) GetOrCreateGRPCConn(string) (*grpc.ClientConn, error) {
-	return nil, nil
+func (s *countingServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	if s.conns != nil {
+		return s.conns[url], nil
+	}
+	return s.conn, nil
 }
 func (s *countingServiceDiscovery) RemoveClientConn(string) { s.removeCount.Add(1) }
 func (s *countingServiceDiscovery) ScheduleCheckMemberChanged() {
 	s.scheduleCount.Add(1)
+	if s.onSchedule != nil {
+		s.onSchedule()
+	}
 }
-func (*countingServiceDiscovery) CheckMemberChanged() error                                      { return nil }
+func (s *countingServiceDiscovery) CheckMemberChanged() error                                    { s.checkCount.Add(1); return nil }
 func (*countingServiceDiscovery) ExecAndAddLeaderSwitchedCallback(sd.LeaderSwitchedCallbackFunc) {}
 func (*countingServiceDiscovery) AddLeaderSwitchedCallback(sd.LeaderSwitchedCallbackFunc)        {}
 func (*countingServiceDiscovery) AddMembersChangedCallback(func())                               {}
@@ -284,7 +302,267 @@ func (s *testTSODispatcherSuite) TestHandleProcessRequestErrorRemoveConnOnCallee
 
 	s.re.True(ok)
 	s.re.Equal(int32(1), svcDiscovery.removeCount.Load())
-	s.re.Zero(svcDiscovery.scheduleCount.Load())
+	s.re.Equal(int32(1), svcDiscovery.scheduleCount.Load())
+}
+
+type reconnectTestBuilder func(context.Context, context.CancelFunc, time.Duration) (*tsoStream, error)
+
+func (b reconnectTestBuilder) makeBuilder(*grpc.ClientConn) tsoStreamBuilder { return b }
+func (b reconnectTestBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (*tsoStream, error) {
+	return b(ctx, cancel, timeout)
+}
+
+func TestTSOReconnectSkipsRedundantDiscovery(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		name := "new-stream"
+		if existing {
+			name = "existing-stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc := &countingServiceDiscovery{conn: new(grpc.ClientConn)}
+			var builds int
+			builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+				builds++
+				return newTSOStream(ctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+			})
+			client := NewClient(t.Context(), opt.NewOption(), svc, builder)
+			client.leaderURL.Store(mockStreamURL)
+			t.Cleanup(func() {
+				client.cancel()
+				client.conCtxMgr.GC(func(string) bool { return true })
+			})
+			if existing {
+				ctx, cancel := context.WithCancel(client.ctx)
+				stream, err := builder(ctx, cancel, time.Second)
+				require.NoError(t, err)
+				require.True(t, client.conCtxMgr.Store(ctx, cancel, mockStreamURL, stream))
+				builds = 0
+			}
+			require.NoError(t, client.tryConnectToTSO(client.ctx))
+			require.Zero(t, svc.scheduleCount.Load(), "successful reconnect must not queue another membership RPC")
+			require.Equal(t, 1, client.conCtxMgr.Size())
+			if existing {
+				require.Zero(t, builds)
+			} else {
+				require.Equal(t, 1, builds)
+			}
+		})
+	}
+}
+
+func TestTSOReconnectFailureRefreshesBeforeBackoff(t *testing.T) {
+	svc := &countingServiceDiscovery{conn: new(grpc.ClientConn)}
+	errConnect := context.DeadlineExceeded
+	var builds int
+	builder := reconnectTestBuilder(func(context.Context, context.CancelFunc, time.Duration) (*tsoStream, error) {
+		builds++
+		return nil, errConnect
+	})
+	client := NewClient(t.Context(), opt.NewOption(), svc, builder)
+	defer client.cancel()
+	client.leaderURL.Store(mockStreamURL)
+	svc.onSchedule = client.cancel
+	require.ErrorIs(t, client.tryConnectToTSO(client.ctx), errConnect)
+	require.Equal(t, int32(1), svc.scheduleCount.Load())
+	require.Equal(t, 1, builds)
+}
+
+func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
+	const leaderURL, backupURL = "leader", "backup"
+	newHealthConn := func(url string, servingStatus healthpb.HealthCheckResponse_ServingStatus) *grpc.ClientConn {
+		conn, err := grpc.NewClient(url,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithUnaryInterceptor(func(_ context.Context, _ string, _, reply any,
+				_ *grpc.ClientConn, _ grpc.UnaryInvoker, _ ...grpc.CallOption,
+			) error {
+				reply.(*healthpb.HealthCheckResponse).Status = servingStatus
+				return nil
+			}))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, conn.Close()) })
+		return conn
+	}
+	svc := &countingServiceDiscovery{
+		servingURL: leaderURL,
+		backupURLs: []string{backupURL},
+		conns: map[string]*grpc.ClientConn{
+			leaderURL: newHealthConn(leaderURL, healthpb.HealthCheckResponse_NOT_SERVING),
+			backupURL: newHealthConn(backupURL, healthpb.HealthCheckResponse_SERVING),
+		},
+	}
+	var directBuilds int
+	builder := reconnectTestBuilder(func(ctx context.Context, cancel context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+		if forwardedHost := grpcutil.GetForwardedHost(ctx, metadata.FromOutgoingContext); forwardedHost != "" {
+			require.Equal(t, leaderURL, forwardedHost)
+			return newTSOStream(ctx, backupURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+		}
+		directBuilds++
+		// Trigger the production build timeout immediately, then return the same
+		// gRPC cancellation error as a connection that remains unavailable.
+		done := make(chan struct{})
+		go checkStreamTimeout(ctx, cancel, done, 0)
+		<-ctx.Done()
+		done <- struct{}{}
+		return nil, status.FromContextError(ctx.Err()).Err()
+	})
+	option := opt.NewOption()
+	option.EnableForwarding = true
+	client := NewClient(t.Context(), option, svc, builder)
+	client.leaderURL.Store(leaderURL)
+	t.Cleanup(func() {
+		client.cancel()
+		client.wg.Wait()
+		client.conCtxMgr.ReleaseAll()
+	})
+
+	require.NoError(t, client.tryConnectToTSO(client.ctx))
+	require.Equal(t, constants.MaxRetryTimes, directBuilds)
+	require.False(t, client.conCtxMgr.Exist(leaderURL))
+	require.True(t, client.conCtxMgr.Exist(backupURL))
+	_, req := startRecoveryDispatcher(t, client)
+	physical, _, err := req.waitTimeout(time.Second)
+	require.NoError(t, err)
+	require.Positive(t, physical)
+}
+
+func TestTSORecoveryRefreshesOnRequestErrors(t *testing.T) {
+	for _, leaderChange := range []bool{false, true} {
+		name, message := "transport-error", "connection unavailable"
+		if leaderChange {
+			name, message = "not-leader", errs.NotLeaderErr
+		}
+		t.Run(name, func(t *testing.T) {
+			svc := &countingServiceDiscovery{}
+			provider := &mockTSOServiceProvider{option: opt.NewOption(), conCtxMgr: cctx.NewManager[*tsoStream](), svcDiscovery: svc}
+			dispatcher := newTSODispatcher(t.Context(), provider)
+			defer dispatcher.close()
+			bo := retry.InitialBackoffer(time.Millisecond, time.Millisecond, time.Second)
+			require.True(t, dispatcher.handleProcessRequestError(t.Context(), bo, provider.conCtxMgr, mockStreamURL, fmt.Errorf("%s", message)))
+			if leaderChange {
+				require.Equal(t, int32(1), svc.checkCount.Load())
+				require.Zero(t, svc.scheduleCount.Load())
+			} else {
+				require.Equal(t, int32(1), svc.scheduleCount.Load())
+				require.Zero(t, svc.checkCount.Load())
+			}
+		})
+	}
+}
+
+func TestTSORecoveryUsesKnownNewLeader(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		leaderURL  string
+		forwarding bool
+		proxy      bool
+		checks     int32
+		schedules  int32
+	}{
+		{name: "new-direct-leader", leaderURL: "new-leader", checks: 0, schedules: 1},
+		{name: "unchanged-leader", leaderURL: mockStreamURL, checks: 1},
+		{name: "unknown-leader", checks: 1},
+		{name: "forwarded-stream", leaderURL: "new-leader", forwarding: true, checks: 1},
+		{name: "proxy-stream", leaderURL: "new-leader", proxy: true, checks: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &countingServiceDiscovery{servingURL: tc.leaderURL}
+			option := opt.NewOption()
+			option.EnableForwarding = tc.forwarding
+			option.SetEnableTSOFollowerProxy(tc.proxy)
+			provider := &mockTSOServiceProvider{option: option, conCtxMgr: cctx.NewManager[*tsoStream](), svcDiscovery: svc}
+			dispatcher := newTSODispatcher(t.Context(), provider)
+			defer dispatcher.close()
+			bo := retry.InitialBackoffer(time.Millisecond, time.Millisecond, time.Second)
+			require.True(t, dispatcher.handleProcessRequestError(t.Context(), bo, provider.conCtxMgr, mockStreamURL, fmt.Errorf("%s", errs.NotLeaderErr)))
+			require.Equal(t, tc.checks, svc.checkCount.Load(), "a known new direct leader must not wait for another membership RPC")
+			require.Equal(t, tc.schedules, svc.scheduleCount.Load())
+		})
+	}
+}
+
+func TestDispatcherCanceledStreamRefreshesBeforeReconnect(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		streamURL  string
+		leaderURL  string
+		forwarding bool
+		schedules  int32
+	}{
+		{name: "forwarded-stream", streamURL: "backup", leaderURL: "leader", forwarding: true, schedules: 1},
+		{name: "current-direct-leader", streamURL: "leader", leaderURL: "leader", schedules: 1},
+		{name: "obsolete-direct-leader", streamURL: "old-leader", leaderURL: "new-leader"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &countingServiceDiscovery{conn: new(grpc.ClientConn), servingURL: tc.leaderURL}
+			var builds, scheduledBeforeBuild atomic.Int32
+			builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+				// A real connection attempt may block. Observe discovery at entry so
+				// scheduling it after the attempt cannot satisfy the regression check.
+				builds.Add(1)
+				scheduledBeforeBuild.Store(svc.scheduleCount.Load())
+				return newTSOStream(ctx, tc.leaderURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+			})
+			option := opt.NewOption()
+			option.EnableForwarding = tc.forwarding
+			client := NewClient(t.Context(), option, svc, builder)
+			client.leaderURL.Store(tc.leaderURL)
+			t.Cleanup(client.cancel)
+
+			ctx, cancel := context.WithCancel(client.ctx)
+			stream := newTSOStream(ctx, tc.streamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
+			require.True(t, client.conCtxMgr.Store(ctx, cancel, tc.streamURL, stream))
+			// The deadline watcher cancels this outer context when a request times out.
+			cancel()
+			stream.WaitForClosed()
+
+			_, req := startRecoveryDispatcher(t, client)
+			physical, _, err := req.waitTimeout(time.Second)
+			require.NoError(t, err)
+			require.Positive(t, physical)
+			require.Equal(t, int32(1), builds.Load())
+			require.Equal(t, tc.schedules, scheduledBeforeBuild.Load(), "refresh must be scheduled before reconnecting")
+			require.Equal(t, tc.schedules, svc.scheduleCount.Load(), "successful reconnect must not add another refresh")
+		})
+	}
+}
+
+func TestTSOLeaderChangeCancelsObsoleteBuild(t *testing.T) {
+	svc := &countingServiceDiscovery{conn: new(grpc.ClientConn)}
+	started := make(chan context.Context, 1)
+	var client *Cli
+	builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+		if client.getLeaderURL() == "old-leader" {
+			started <- ctx
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return newTSOStream(ctx, "new-leader", newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+	})
+	client = NewClient(t.Context(), opt.NewOption(), svc, builder)
+	client.leaderURL.Store("old-leader")
+	t.Cleanup(func() {
+		client.cancel()
+		client.conCtxMgr.GC(func(string) bool { return true })
+	})
+	finished := make(chan error, 1)
+	go func() { finished <- client.tryConnectToTSO(client.ctx) }()
+	var obsolete context.Context
+	select {
+	case obsolete = <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the old stream build did not start")
+	}
+	client.leaderURL.Store("new-leader")
+	client.notifyLeaderSwitched()
+	require.ErrorIs(t, obsolete.Err(), context.Canceled, "a leader change must cancel the obsolete stream build")
+	select {
+	case err := <-finished:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reconnect did not use the new leader")
+	}
+	require.True(t, client.conCtxMgr.Exist("new-leader"))
+	require.Equal(t, int32(1), svc.scheduleCount.Load())
 }
 
 func (s *testTSODispatcherSuite) checkIdleTokenCount(expectedTotal int) {
@@ -464,4 +742,177 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 	}
 	// Don't count the time cost in `defer`
 	b.StopTimer()
+}
+
+type recoveringTSOServiceProvider struct {
+	*mockTSOServiceProvider
+	update func(context.Context) bool
+}
+
+func (p *recoveringTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool {
+	return p.update(ctx)
+}
+
+func startRecoveryDispatcher(t *testing.T, provider tsoServiceProvider) (*tsoDispatcher, *Request) {
+	t.Helper()
+	td := newTSODispatcher(t.Context(), provider)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go td.handleDispatcher(&wg)
+	t.Cleanup(func() {
+		td.close()
+		wg.Wait()
+	})
+	req := &Request{
+		requestCtx: td.ctx,
+		clientCtx:  td.ctx,
+		done:       make(chan error, 1),
+		start:      time.Now(),
+		pool:       &sync.Pool{},
+	}
+	td.push(req)
+	return td, req
+}
+
+func TestDispatcherUsesBackgroundStream(t *testing.T) {
+	for _, duringRefresh := range []bool{true, false} {
+		name := "after-refresh"
+		if duringRefresh {
+			name = "during-refresh"
+		}
+		t.Run(name, func(t *testing.T) {
+			refreshStarted := make(chan struct{})
+			refreshFinished := make(chan struct{})
+			releaseRefresh := make(chan struct{})
+			var once sync.Once
+			provider := &recoveringTSOServiceProvider{
+				mockTSOServiceProvider: newMockTSOServiceProvider(opt.NewOption(), nil),
+				update: func(ctx context.Context) bool {
+					once.Do(func() { close(refreshStarted) })
+					select {
+					case <-ctx.Done():
+					case <-releaseRefresh:
+					}
+					select {
+					case <-refreshFinished:
+					default:
+						close(refreshFinished)
+					}
+					return false
+				},
+			}
+			td, req := startRecoveryDispatcher(t, provider)
+			select {
+			case <-refreshStarted:
+			case <-time.After(time.Second):
+				t.Fatal("dispatcher did not attempt stream recovery")
+			}
+			if !duringRefresh {
+				close(releaseRefresh)
+				select {
+				case <-refreshFinished:
+				case <-time.After(time.Second):
+					t.Fatal("stream recovery did not return")
+				}
+			}
+
+			// A concurrent background updater has established the new leader's stream.
+			// The foreground attempt still reports failure, as it used the old leader.
+			ctx, cancel := context.WithCancel(td.ctx)
+			inner := newMockTSOStreamImpl(ctx, resultModeGenerated)
+			stream := newTSOStream(ctx, mockStreamURL, inner)
+			require.True(t, provider.conCtxMgr.CleanAllAndStore(ctx, cancel, mockStreamURL, stream))
+			if duringRefresh {
+				close(releaseRefresh)
+			}
+
+			// Readiness must resume this request before the 500ms polling fallback.
+			physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
+			require.NoError(t, err)
+			require.Positive(t, physical)
+		})
+	}
+}
+
+func TestDispatcherFindsStreamPublishedBeforeSubscription(t *testing.T) {
+	provider := &recoveringTSOServiceProvider{
+		mockTSOServiceProvider: newMockTSOServiceProvider(opt.NewOption(), nil),
+		update:                 func(context.Context) bool { return false },
+	}
+	published := make(chan bool, 1)
+	var once sync.Once
+	const injection = "github.com/tikv/pd/client/clients/tso/beforeSubscribeTSOStreamUpdates"
+	require.NoError(t, failpoint.EnableCall(injection, func() {
+		once.Do(func() {
+			// Publish after the first empty lookup but before the subscription. There
+			// is no waiter yet, so only rechecking availability can observe this store.
+			ctx, cancel := context.WithCancel(t.Context())
+			stream := newTSOStream(ctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
+			stored := provider.conCtxMgr.CleanAllAndStore(ctx, cancel, mockStreamURL, stream)
+			if !stored {
+				cancel()
+			}
+			published <- stored
+		})
+	}))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(injection)) })
+	_, req := startRecoveryDispatcher(t, provider)
+	physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
+	require.NoError(t, err)
+	require.True(t, <-published)
+	require.Positive(t, physical)
+}
+
+func TestDispatcherStreamRecoveryPollingFallback(t *testing.T) {
+	var attempts atomic.Int32
+	mock := newMockTSOServiceProvider(opt.NewOption(), nil)
+	provider := &recoveringTSOServiceProvider{
+		mockTSOServiceProvider: mock,
+		update: func(ctx context.Context) bool {
+			if attempts.Add(1) == 1 {
+				return false
+			}
+			return mock.updateConnectionCtxs(ctx)
+		},
+	}
+	_, req := startRecoveryDispatcher(t, provider)
+	physical, _, err := req.waitTimeout(2 * time.Second)
+	require.NoError(t, err)
+	require.Positive(t, physical)
+	require.Equal(t, int32(2), attempts.Load())
+}
+
+func TestDispatcherStreamRecoveryShutdown(t *testing.T) {
+	started := make(chan struct{})
+	var once sync.Once
+	provider := &recoveringTSOServiceProvider{
+		mockTSOServiceProvider: newMockTSOServiceProvider(opt.NewOption(), nil),
+		update: func(context.Context) bool {
+			once.Do(func() { close(started) })
+			return false
+		},
+	}
+	td, req := startRecoveryDispatcher(t, provider)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("dispatcher did not attempt stream recovery")
+	}
+	td.close()
+	_, _, err := req.waitTimeout(time.Second)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestDispatcherStreamRecoveryTimeout(t *testing.T) {
+	option := opt.NewOption()
+	option.Timeout = 50 * time.Millisecond
+	provider := &recoveringTSOServiceProvider{
+		mockTSOServiceProvider: newMockTSOServiceProvider(option, nil),
+		update:                 func(context.Context) bool { return false },
+	}
+	td, req := startRecoveryDispatcher(t, provider)
+	_, _, err := req.waitTimeout(time.Second)
+	require.Error(t, err)
+	require.True(t, errs.ErrClientCreateTSOStream.Equal(err), "%v", err)
+	require.NoError(t, td.ctx.Err())
 }
