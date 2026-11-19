@@ -249,10 +249,10 @@ type ScheduleConfig struct {
 	//   ^                    ^                             ^                         ^
 	//   0       HighSpaceRatio * capacity       LowSpaceRatio * capacity          capacity
 	//
-	// LowSpaceRatio is the lowest usage ratio of store which regraded as low space.
+	// LowSpaceRatio is the lowest usage ratio of store which regarded as low space.
 	// When in low space, store region score increases to very large and varies inversely with available size.
 	LowSpaceRatio float64 `toml:"low-space-ratio" json:"low-space-ratio"`
-	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
+	// HighSpaceRatio is the highest usage ratio of store which regarded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio" json:"high-space-ratio"`
 	// RegionScoreFormulaVersion is used to control the formula used to calculate region score.
