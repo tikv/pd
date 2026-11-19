@@ -351,7 +351,7 @@ type ScheduleConfig struct {
 
 // Clone returns a cloned scheduling configuration.
 func (c *ScheduleConfig) Clone() *ScheduleConfig {
-	schedulers := slices.Clone(c.Schedulers)
+	schedulers := c.Schedulers.Clone()
 	var storeLimit map[uint64]StoreLimitConfig
 	if c.StoreLimit != nil {
 		storeLimit = make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
@@ -778,6 +778,15 @@ func (c *ScheduleConfig) GetDefaultStoreLimit() StoreLimitConfig {
 
 // SchedulerConfigs is a slice of customized scheduler configuration.
 type SchedulerConfigs []SchedulerConfig
+
+// Clone returns scheduler configurations with independent argument slices.
+func (c SchedulerConfigs) Clone() SchedulerConfigs {
+	cloned := slices.Clone(c)
+	for i := range cloned {
+		cloned[i].Args = slices.Clone(cloned[i].Args)
+	}
+	return cloned
+}
 
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
