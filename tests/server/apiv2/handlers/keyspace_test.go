@@ -15,16 +15,23 @@
 package handlers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -34,13 +41,111 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
+}
+
+func TestAuditJSONReadErrorCompatibility(t *testing.T) {
+	for _, redaction := range []logutil.RedactInfoLogType{logutil.RedactInfoLogOFF, logutil.RedactInfoLogMarker} {
+		t.Run(fmt.Sprintf("redaction=%d", redaction), func(t *testing.T) {
+			re := require.New(t)
+			cluster, err := tests.NewTestCluster(t.Context(), 1, func(cfg *config.Config, _ string) {
+				cfg.Security.RedactInfoLog = redaction
+			})
+			re.NoError(err)
+			defer cluster.Destroy()
+			re.NoError(cluster.RunInitialServers())
+			re.NotEmpty(cluster.WaitLeader())
+			leader := cluster.GetLeaderServer()
+			re.NoError(leader.BootstrapCluster())
+			address, err := url.Parse(leader.GetAddr())
+			re.NoError(err)
+			for _, enabled := range []bool{false, true} {
+				re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+				for _, padding := range []int{0, 16 << 10} {
+					t.Run(fmt.Sprintf("audit=%t/padding=%d", enabled, padding), func(t *testing.T) {
+						re := require.New(t)
+						payload := `{"name":"` + strings.Repeat("x", padding)
+						conn, err := net.Dial("tcp", address.Host)
+						re.NoError(err)
+						defer conn.Close()
+						re.NoError(conn.SetDeadline(time.Now().Add(10 * time.Second)))
+						_, err = fmt.Fprintf(conn,
+							"POST /pd/api/v2/keyspaces HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+							address.Host, len(payload)+20, payload)
+						re.NoError(err)
+						re.NoError(conn.(*net.TCPConn).CloseWrite())
+						response, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodPost})
+						re.NoError(err)
+						data, err := io.ReadAll(response.Body)
+						re.NoError(err)
+						re.NoError(response.Body.Close())
+						re.Equal(http.StatusBadRequest, response.StatusCode)
+						re.Contains(string(data), "[PD:gin:ErrBindJSON]unexpected EOF")
+					})
+				}
+			}
+		})
+	}
+}
+
+func TestAuditFollowerWithoutConfigRead(t *testing.T) {
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(follower)
+	logFile := testutil.InitTempFileLogger(t, "info")
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("audit=%t", enabled), func(t *testing.T) {
+			re := require.New(t)
+			re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+			follower.GetServer().GetServiceMiddlewarePersistOptions().SetAuditConfig(&config.AuditConfig{EnableAudit: enabled})
+			before, err := os.ReadFile(logFile)
+			re.NoError(err)
+			// A storage lookup would exceed its deadline. Auditing must use the
+			// local switch so forwarding does not depend on that lookup.
+			const slowGet = "github.com/tikv/pd/pkg/utils/etcdutil/SlowEtcdKVGet"
+			delaySeconds := int(etcdutil.DefaultRequestTimeout/time.Second) + 1
+			re.NoError(failpoint.Enable(slowGet, fmt.Sprintf("return(%d)", delaySeconds)))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(slowGet)) })
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, leader.GetAddr()+"/pd/api/v2/keyspaces", []byte("{"),
+				testutil.Status(re, http.StatusBadRequest), testutil.StringContain(re, "[PD:gin:ErrBindJSON]")))
+			response, err := tests.TestDialClient.Post(follower.GetAddr()+"/pd/api/v2/keyspaces", "application/json", strings.NewReader("{"))
+			re.NoError(err)
+			data, err := io.ReadAll(response.Body)
+			re.NoError(err)
+			re.NoError(response.Body.Close())
+			after, err := os.ReadFile(logFile)
+			re.NoError(err)
+			entries := string(after[len(before):])
+			re.NotContains(entries, keypath.ServiceMiddlewarePath())
+			expected := 0
+			if enabled {
+				expected = 2 // The leader audits the direct and forwarded requests.
+			}
+			re.Equal(expected, strings.Count(entries, "ServiceLabel:CreateKeyspace,"))
+			re.True(leader.GetServer().GetMember().IsServing())
+			re.Equal(leaderName, cluster.GetLeader())
+			re.Equal(http.StatusBadRequest, response.StatusCode)
+			re.Contains(string(data), "[PD:gin:ErrBindJSON]")
+		})
+	}
 }
 
 type keyspaceTestSuite struct {
@@ -85,6 +190,59 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 	bootstrapKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.GetBootstrapKeyspaceName())
 	re.Equal(keyspace.GetBootstrapKeyspaceName(), bootstrapKeyspace.Name)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
+}
+
+func (suite *keyspaceTestSuite) TestHTTPAuditSwitch() {
+	re := suite.Require()
+	logFile := testutil.InitTempFileLogger(suite.T(), "info")
+	configURL := suite.server.GetAddr() + "/pd/api/v1/service-middleware/config"
+	snapshot := func() map[string]float64 {
+		families, err := prometheus.DefaultGatherer.Gather()
+		re.NoError(err)
+		counts := make(map[string]float64)
+		for _, family := range families {
+			if family.GetName() != "pd_service_audit_requests_total" && family.GetName() != "pd_service_audit_handling_seconds" {
+				continue
+			}
+			for _, metric := range family.GetMetric() {
+				var service string
+				for _, label := range metric.GetLabel() {
+					if label.GetName() == "service" {
+						service = label.GetValue()
+					}
+				}
+				counts[family.GetName()+":"+service] += metric.GetCounter().GetValue() + float64(metric.GetHistogram().GetSampleCount())
+			}
+		}
+		return counts
+	}
+	for i, enabled := range []bool{false, true, false} {
+		body := fmt.Appendf(nil, `{"audit.enable-audit":"%t"}`, enabled)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, body, testutil.StatusOK(re)))
+		before := snapshot()
+		request := &handlers.CreateKeyspaceParams{Name: fmt.Sprintf("audit-keyspace-%d", i)}
+		MustCreateKeyspace(re, suite.server, request)
+		re.Equal(request.Name, mustLoadKeyspaces(re, suite.server, request.Name).Name)
+		data, err := os.ReadFile(logFile)
+		re.NoError(err)
+		expected := 0
+		if i > 0 {
+			expected = 1
+		}
+		re.Equal(expected, strings.Count(string(data), "ServiceLabel:CreateKeyspace,"))
+		re.NotContains(string(data), "ServiceLabel:LoadKeyspace,")
+		after := snapshot()
+		increment := float64(0)
+		if enabled {
+			increment = 1
+		}
+		for _, family := range []string{"pd_service_audit_requests_total", "pd_service_audit_handling_seconds"} {
+			for _, service := range []string{"CreateKeyspace", "LoadKeyspace"} {
+				key := family + ":" + service
+				re.Equal(increment, after[key]-before[key], key)
+			}
+		}
+	}
 }
 
 func (suite *keyspaceTestSuite) TestCreateLoadKeyspaceByID() {

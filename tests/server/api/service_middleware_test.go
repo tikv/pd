@@ -15,20 +15,68 @@
 package api
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
+
+func TestAuditV1TruncatedRequest(t *testing.T) {
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 1, func(cfg *config.Config, _ string) {
+		cfg.Security.RedactInfoLog = logutil.RedactInfoLogOFF
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	u, err := url.Parse(leader.GetAddr())
+	re.NoError(err)
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("audit=%t", enabled), func(t *testing.T) {
+			re := require.New(t)
+			re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+			payload := fmt.Sprintf(`{"enable-audit":"%t"}`, !enabled)
+			conn, err := net.Dial("tcp", u.Host)
+			re.NoError(err)
+			defer conn.Close()
+			re.NoError(conn.SetDeadline(time.Now().Add(10 * time.Second)))
+			_, err = fmt.Fprintf(conn, "POST /pd/api/v1/service-middleware/config HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", u.Host, len(payload)+5, payload)
+			re.NoError(err)
+			re.NoError(conn.(*net.TCPConn).CloseWrite())
+			response, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodPost})
+			re.NoError(err)
+			data, err := io.ReadAll(response.Body)
+			re.NoError(err)
+			re.NoError(response.Body.Close())
+			re.Equal(http.StatusInternalServerError, response.StatusCode, string(data))
+			re.Contains(string(data), "unexpected EOF")
+			re.Equal(enabled, leader.GetServer().GetAuditConfig().EnableAudit)
+			persisted := config.NewServiceMiddlewareConfig()
+			found, err := leader.GetServer().GetStorage().LoadServiceMiddlewareConfig(persisted)
+			re.NoError(err)
+			re.True(found)
+			re.Equal(enabled, persisted.EnableAudit)
+		})
+	}
+}
 
 type auditMiddlewareTestSuite struct {
 	suite.Suite

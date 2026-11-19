@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -31,13 +32,22 @@ import (
 // RegisterAffinity registers affinity group related handlers to router paths.
 func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
-	router.Use(middlewares.BootstrapChecker())
-	router.POST("", PostAffinityGroups)
-	router.PATCH("", BatchModifyAffinityGroups)
-	router.PUT("/:group_id", UpdateAffinityGroupPeers)
-	router.DELETE("/:group_id", DeleteAffinityGroup)
-	router.GET("", GetAllAffinityGroups)
-	router.GET("/:group_id", GetAffinityGroup)
+	redirect, bootstrap := middlewares.Redirector(), middlewares.BootstrapChecker()
+	createAudit := middlewares.Audit("CreateAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram)
+	deleteAudit := middlewares.Audit("DeleteAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram)
+	router.POST("", redirect, bootstrap, func(c *gin.Context) {
+		if _, hasDelete := c.GetQuery("delete"); hasDelete {
+			deleteAudit(c)
+		} else {
+			createAudit(c)
+		}
+	}, PostAffinityGroups)
+	router.PATCH("", redirect, bootstrap, middlewares.Audit("BatchModifyAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram), BatchModifyAffinityGroups)
+	router.PUT("/:group_id", redirect, bootstrap, middlewares.Audit("UpdateAffinityGroupPeers", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateAffinityGroupPeers)
+	router.DELETE("/:group_id", redirect, bootstrap, middlewares.Audit("DeleteAffinityGroup", audit.LocalLogLabel, audit.PrometheusHistogram), DeleteAffinityGroup)
+	affinityRedirect := middlewares.AffinityMicroserviceRedirector()
+	router.GET("", redirect, affinityRedirect, bootstrap, middlewares.Audit("GetAllAffinityGroups", audit.PrometheusHistogram), GetAllAffinityGroups)
+	router.GET("/:group_id", redirect, affinityRedirect, bootstrap, middlewares.Audit("GetAffinityGroup", audit.PrometheusHistogram), GetAffinityGroup)
 }
 
 // --- API Structures ---
