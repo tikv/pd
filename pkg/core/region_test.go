@@ -472,6 +472,54 @@ func TestNeedSync(t *testing.T) {
 	}
 }
 
+func TestFormerLeaderAcrossStoreRestart(t *testing.T) {
+	const restart = 2000 // Store clock, independent of PD and the successor.
+	for _, registrationFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("registrationFirst=%v", registrationFirst), func(t *testing.T) {
+			re := require.New(t)
+			stores, regions := NewStoresInfo(), NewRegionsInfo()
+			putStore := func(start int64) {
+				stores.PutStore(NewStoreInfo(&metapb.Store{Id: 1, StartTimestamp: start}))
+			}
+			putStore(restart - 100)
+			re.False(stores.GetStore(1).RecentlyRestarted())
+			if registrationFirst {
+				putStore(restart)
+			}
+			peers := []*metapb.Peer{{Id: 10, StoreId: 1}, {Id: 20, StoreId: 2}}
+			report := func(id byte, peer int, term, timestamp uint64) {
+				region := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+					Region: &metapb.Region{Id: uint64(id), StartKey: []byte{id}, EndKey: []byte{id + 1}, Peers: peers},
+					Leader: peers[peer], Term: term, Interval: &pdpb.TimeInterval{EndTimestamp: timestamp},
+				}, 0)
+				regions.CheckAndPutRegion(region)
+			}
+			// Only the first departure has an unbroken handover from the previous process.
+			for i, c := range []struct{ timestamp, successorTerm uint64 }{
+				{restart - 1, 8}, {restart, 8}, {restart + 1, 8}, {restart - 101, 8},
+				{0, 8}, {restart - 1, 10},
+			} {
+				report(byte(i+1), 0, 7, c.timestamp)
+				report(byte(i+1), 1, c.successorTerm, restart+86400)
+			}
+			if !registrationFirst {
+				putStore(restart)
+			}
+			store := stores.GetStore(1)
+			putStore(restart)
+			re.Same(store.restart, stores.GetStore(1).restart)
+			ranges := []keyutil.KeyRange{{}}
+			re.Equal([]*RegionInfo{regions.GetRegion(1)}, regions.GetFormerLeaderRegions(stores.GetStore(1), ranges))
+
+			// A later election can hide a return to the restarted store.
+			report(1, 1, 10, restart+86430)
+			re.Empty(regions.GetFormerLeaderRegions(store, ranges))
+			putStore(restart - 1)
+			re.False(stores.GetStore(1).RecentlyRestarted())
+		})
+	}
+}
+
 func TestRegionGuideTermChanged(t *testing.T) {
 	regionGuide := GenerateRegionGuideFunc(false)
 	for _, tc := range []struct {

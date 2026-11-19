@@ -33,6 +33,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -62,13 +63,23 @@ func TestBalanceLeaderReturnsFormerLeadersAfterRestart(t *testing.T) {
 	tc.AddLeaderStore(1, 100)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0) // Equal score, normally ranked first by store ID.
+	const restart = 2000
+	tc.PutStore(tc.GetStore(2), core.SetStoreStartTime(1000))
 	for id := uint64(100); id < 2100; id++ {
 		tc.AddLeaderRegion(id, 1, 2)
 	}
+	report := func(r *core.RegionInfo, store, term, timestamp uint64) *core.RegionInfo {
+		r = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+			Region: r.GetMeta(), Leader: r.GetStorePeer(store), Term: term,
+			Interval: &pdpb.TimeInterval{EndTimestamp: timestamp}, ApproximateSize: 10 << 20,
+		}, 0)
+		tc.PutRegion(r)
+		return r
+	}
 	depart := func(id uint64, opts ...core.RegionCreateOption) *core.RegionInfo {
 		r := tc.AddLeaderRegion(id, 2, 1)
-		r = r.Clone(core.WithLeader(r.GetStorePeer(1)))
-		tc.PutRegion(r)
+		report(r, 2, 5, restart-1)
+		r = report(r, 1, 6, restart)
 		r = r.Clone(opts...)
 		tc.PutRegion(r)
 		return r
@@ -81,14 +92,10 @@ func TestBalanceLeaderReturnsFormerLeadersAfterRestart(t *testing.T) {
 	depart(14, core.WithRemoveStorePeer(2), core.WithAddPeer(&metapb.Peer{Id: 99999, StoreId: 2}))
 	movedAgain := depart(15)
 
-	// Store start timestamps have second precision. Establish a distinct
-	// restart boundary between the original departures and a new transfer.
-	restart := time.Now().Truncate(time.Second).Add(time.Second)
-	time.Sleep(time.Until(restart))
-	tc.PutStore(tc.GetStore(2).Clone(core.SetStoreStartTime(restart.Unix())))
-	tc.PutRegion(movedAgain.Clone(core.WithLeader(movedAgain.GetStorePeer(2))))
-	tc.PutRegion(movedAgain)
-	candidates := tc.GetFormerLeaderRegions(2, restart.Add(-time.Minute).Unix(), restart.Unix(), []keyutil.KeyRange{{}})
+	tc.PutStore(tc.GetStore(2), core.SetStoreStartTime(restart))
+	report(movedAgain, 2, 7, restart+1)
+	report(movedAgain, 1, 8, restart+2)
+	candidates := tc.GetFormerLeaderRegions(tc.GetStore(2), []keyutil.KeyRange{{}})
 	re.ElementsMatch([]*core.RegionInfo{former, pending}, candidates)
 	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
 	re.NoError(err)

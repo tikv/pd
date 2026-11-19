@@ -22,7 +22,6 @@ import (
 	"slices"
 	"sort"
 	"strconv"
-	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
@@ -511,14 +510,10 @@ func (s *balanceLeaderScheduler) balanceRanges(solver *solver) []keyutil.KeyRang
 }
 
 func (s *balanceLeaderScheduler) formerLeaders(solver *solver) []*core.RegionInfo {
-	// Take departures observed shortly before this process started. A new
-	// balancing move after restart must not cause its own immediate reversal.
-	const window = 10 * time.Minute
-	start := solver.Target.GetStartTime()
-	if age := time.Since(start); age < 0 || age >= window {
+	if !solver.Target.RecentlyRestarted() {
 		return nil
 	}
-	regions := solver.GetBasicCluster().GetFormerLeaderRegions(solver.targetStoreID(), start.Add(-window).Unix(), start.Unix(), s.balanceRanges(solver))
+	regions := solver.GetBasicCluster().GetFormerLeaderRegions(solver.Target, s.balanceRanges(solver))
 	return filter.SelectRegions(regions, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 }
 
