@@ -217,6 +217,7 @@ type etcdTxn struct {
 	ctx        context.Context
 	conditions []clientv3.Cmp
 	operations []clientv3.Op
+	revision   int64
 }
 
 // RunInTxn runs user provided function f in a transaction.
@@ -316,6 +317,9 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 	return keys, values, err
 }
 
+// CommitRevision returns the revision after a successful commit.
+func (txn *etcdTxn) CommitRevision() int64 { return txn.revision }
+
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
 	failpoint.Inject("slowTxn", func() {
@@ -332,6 +336,7 @@ func (txn *etcdTxn) commit() error {
 	if !resp.Succeeded {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
+	txn.revision = resp.Header.Revision
 	return nil
 }
 
