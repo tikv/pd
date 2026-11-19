@@ -127,17 +127,14 @@ func validateMetaStorageAccess(key, rangeEnd []byte) error {
 	return status.Error(codes.PermissionDenied, "meta storage access is outside the allowed key prefixes")
 }
 
-// validateMetaStorageWriteAccess keeps persisted TSO windows under the control of
-// TSO storage while preserving the existing discovery reads and watches.
+// validateMetaStorageWriteAccess reserves microservice metadata mutations for
+// their etcd owners while preserving discovery reads and watches.
 func validateMetaStorageWriteAccess(key, rangeEnd []byte) error {
 	if err := validateMetaStorageAccess(key, rangeEnd); err != nil {
 		return err
 	}
-	if start := string(key); strings.HasPrefix(start, "/ms/") {
-		parts := strings.SplitN(start, "/", 8)
-		if len(parts) == 7 && parts[3] == "tso" && parts[5] == "gta" && parts[6] == "timestamp" {
-			return status.Error(codes.PermissionDenied, "meta storage cannot modify persisted TSO timestamps")
-		}
+	if strings.HasPrefix(string(key), "/ms/") {
+		return status.Error(codes.PermissionDenied, "meta storage cannot modify microservice metadata")
 	}
 	return nil
 }
