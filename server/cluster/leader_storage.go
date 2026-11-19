@@ -38,7 +38,13 @@ type leaderKV struct {
 	term   election.LeadershipTerm
 }
 
-func newLeaderStorage(base storage.Storage, member *member.Member, lease *election.Lease, term election.LeadershipTerm) (storage.Storage, error) {
+type leaderMetadataStorage interface {
+	endpoint.RuleStorage
+	endpoint.AffinityStorage
+	endpoint.ReplicationStatusStorage
+}
+
+func newLeaderStorage(base storage.Storage, member *member.Member, lease *election.Lease, term election.LeadershipTerm) (leaderMetadataStorage, error) {
 	runner, ok := base.(kv.ConditionalTxnRunner)
 	if !ok {
 		return nil, errors.New("cluster metadata storage does not support conditional transactions")

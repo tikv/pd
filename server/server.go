@@ -869,6 +869,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
+	failpoint.InjectCall("beforeBootstrapClusterStart", s.member.ID())
 	if err := s.cluster.Start(s, true); err != nil {
 		return nil, err
 	}
@@ -888,7 +889,11 @@ func (s *Server) createRaftCluster() error {
 	}
 
 	err := s.cluster.Start(s, false)
-	failpoint.InjectCall("afterRaftClusterStart", s.member.ID(), err)
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+	failpoint.InjectCall("afterRaftClusterStart", s.member.ID(), errMsg)
 	return err
 }
 
@@ -2047,6 +2052,10 @@ func (s *Server) campaignLeader() {
 		}
 		return
 	}
+	// Stop any cluster started by an overlapping bootstrap even if this
+	// campaign exits before createRaftCluster. The reset deferred below runs
+	// first, withdrawing serving before Stop waits for background jobs.
+	defer s.stopRaftCluster()
 	// Start timing from when leader is successfully elected
 	leaderReadyStart := time.Now()
 	log.Info("leader election succeeded, start leader ready process")
@@ -2088,6 +2097,7 @@ func (s *Server) campaignLeader() {
 	keepLeaderDuration := time.Since(keepLeaderStart)
 	log.Info("keep leader lease completed", zap.Duration("cost", keepLeaderDuration), zap.String("campaign-leader-name", s.Name()))
 
+	failpoint.InjectCall("beforeLeaderReloadConfig", s.member.ID())
 	reloadConfigStart := time.Now()
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Warn("failed to reload configuration", errs.ZapError(err), zap.Duration("cost", time.Since(reloadConfigStart)))
@@ -2132,10 +2142,6 @@ func (s *Server) campaignLeader() {
 	}
 	createRaftClusterDuration := time.Since(createRaftClusterStart)
 	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
-	defer s.stopRaftCluster()
-	// Withdraw serving before Stop waits for background jobs, including when
-	// initialization below fails before the full PD service is promoted.
-	defer resetLeaderOnce.Do(resetLeader)
 	failpoint.Inject("rebaseErr", func(val failpoint.Value) {
 		if memberFailpointEnabled(val, s.member.ID()) {
 			failpoint.Return()

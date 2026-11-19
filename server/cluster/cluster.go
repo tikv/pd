@@ -356,7 +356,7 @@ func (c *RaftCluster) initClusterWithStorage(
 	opt sc.ConfProvider,
 	hbstreams *hbstream.HeartbeatStreams,
 	keyspaceGroupManager *keyspace.GroupManager,
-	metadataStorage storage.Storage,
+	metadataStorage leaderMetadataStorage,
 ) error {
 	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
@@ -450,7 +450,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		failpoint.Return(err)
 	})
 	loadClusterInfoStart := time.Now()
-	cluster, err := c.LoadClusterInfo()
+	cluster, err := c.loadClusterInfoWithConditions(term.Comparisons())
 	if err != nil {
 		resignOnFailure()
 		log.Warn("failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
@@ -940,6 +940,10 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddres
 
 // LoadClusterInfo loads cluster related info.
 func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
+	return c.loadClusterInfoWithConditions(nil)
+}
+
+func (c *RaftCluster) loadClusterInfoWithConditions(conditions []clientv3.Cmp) (*RaftCluster, error) {
 	c.meta = &metapb.Cluster{}
 	ok, err := c.storage.LoadMeta(c.meta)
 	if err != nil {
@@ -962,7 +966,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.CheckAndPutRegion); err != nil {
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.CheckAndPutRegion, conditions...); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",

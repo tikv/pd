@@ -28,6 +28,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -592,5 +593,166 @@ func TestEarlyTSOInitializationWritesAfterLeadershipLoss(t *testing.T) {
 			next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 			re.Negative(tsoutil.CompareTimestamp(previous, next))
 		})
+	}
+}
+
+func TestEarlyTSORegionCleanupAfterLeadershipLoss(t *testing.T) {
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 1, func(conf *config.Config, _ string) {
+		conf.PDServerCfg.UseRegionStorage = false
+		conf.TSOSaveInterval = typeutil.Duration{Duration: time.Second}
+	})
+	re.NoError(err)
+	t.Cleanup(cluster.Destroy)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	svr := leader.GetServer()
+	client := earlyTSOClient(t, leader)
+	previous := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+	waitInit, resumeInit := pauseAfterTSOInitialization(t, leader.GetServerID())
+	leader.ResetPDLeader()
+	waitInit()
+	parent := &metapb.Region{Id: 100, StartKey: []byte("a"), EndKey: []byte("z"), RegionEpoch: &metapb.RegionEpoch{Version: 2}}
+	child := &metapb.Region{Id: 101, StartKey: []byte("a"), EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 3}}
+	re.NoError(svr.GetStorage().SaveRegion(parent))
+	re.NoError(svr.GetStorage().SaveRegion(child))
+	waitDelete, resumeDelete := pauseMemberHook(t, parent.GetId(), "github.com/tikv/pd/pkg/storage/endpoint/beforeRegionOverlapDelete")
+	waitNext, resumeNext := pauseAtTSOCheckpoint(t, leader.GetServerID(), "beforeTSOInitialized")
+	resumeInit()
+	waitDelete()
+
+	const updateHook = "github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"
+	re.NoError(failpoint.Enable(updateHook, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(updateHook)) })
+	testutil.Eventually(re, func() bool {
+		resp, err := svr.GetClient().Get(t.Context(), svr.GetMember().GetElectionPath())
+		re.NoError(err)
+		return len(resp.Kvs) == 0 && !svr.GetTSOAllocator().IsInitialize()
+	})
+	// A successor's heartbeat can replace the old parent while its deletion is
+	// paused. The withdrawn loader must leave this newer persisted record intact.
+	parent.StartKey = []byte("m")
+	parent.RegionEpoch.Version = 4
+	re.NoError(svr.GetStorage().SaveRegion(parent))
+	resumeDelete()
+	waitNext()
+	loaded := &metapb.Region{}
+	ok, err := svr.GetStorage().LoadRegion(parent.GetId(), loaded)
+	re.NoError(err)
+	re.True(ok, "withdrawn loader deleted the replacement region")
+	re.Equal(parent, loaded)
+	re.NoError(failpoint.Disable(updateHook))
+	resumeNext()
+	testutil.Eventually(re, svr.IsServing)
+	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+	re.Negative(tsoutil.CompareTimestamp(previous, next))
+}
+
+func TestEarlyTSOCampaignFailureStopsBootstrapCluster(t *testing.T) {
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 1)
+	re.NoError(err)
+	t.Cleanup(cluster.Destroy)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	svr := leader.GetServer()
+	client := earlyTSOClient(t, leader)
+	previous := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+	waitBootstrap, resumeBootstrap := pauseMemberHook(t, leader.GetServerID(), "github.com/tikv/pd/server/beforeBootstrapClusterStart")
+	bootstrapResult := make(chan error, 1)
+	go func() { bootstrapResult <- leader.BootstrapCluster() }()
+	waitBootstrap()
+
+	const reloadHook = "github.com/tikv/pd/server/beforeLeaderReloadConfig"
+	reached := make(chan int, 2)
+	release := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+	resumes := [2]func(){sync.OnceFunc(func() { close(release[0]) }), sync.OnceFunc(func() { close(release[1]) })}
+	var attempts int
+	re.NoError(failpoint.EnableCall(reloadHook, func(id uint64) {
+		if id == leader.GetServerID() && attempts < len(release) {
+			i := attempts
+			attempts++
+			reached <- i
+			<-release[i]
+		}
+	}))
+	t.Cleanup(func() {
+		resumes[0]()
+		resumes[1]()
+		re.NoError(failpoint.Disable(reloadHook))
+	})
+	waitReload := func(want int) {
+		t.Helper()
+		select {
+		case got := <-reached:
+			re.Equal(want, got)
+		case <-time.After(30 * time.Second):
+			t.Fatal("campaign did not reach config reload")
+		}
+	}
+	leader.ResetPDLeader()
+	waitReload(0)
+	failedLease := svr.GetMember().GetLeadership().GetLease()
+	resumeBootstrap()
+	select {
+	case err := <-bootstrapResult:
+		re.NoError(err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("bootstrap did not finish in the new campaign")
+	}
+	re.True(svr.DirectlyGetRaftCluster().IsRunning())
+	configKey := keypath.ConfigPath()
+	saved, err := svr.GetClient().Get(t.Context(), configKey)
+	re.NoError(err)
+	_, err = svr.GetClient().Put(t.Context(), configKey, "invalid config")
+	re.NoError(err)
+	resumes[0]()
+	waitReload(1)
+	re.NotSame(failedLease, svr.GetMember().GetLeadership().GetLease())
+	re.False(svr.DirectlyGetRaftCluster().IsRunning(), "failed campaign left the bootstrap cluster running")
+	if len(saved.Kvs) == 0 {
+		_, err = svr.GetClient().Delete(t.Context(), configKey)
+	} else {
+		_, err = svr.GetClient().Put(t.Context(), configKey, string(saved.Kvs[0].Value))
+	}
+	re.NoError(err)
+
+	// Keep the result hook enabled through a successful Start. Its error value
+	// is nil here, which must not panic inside failpoint's reflection call.
+	const startHook = "github.com/tikv/pd/server/afterRaftClusterStart"
+	startResult := make(chan string, 1)
+	re.NoError(failpoint.EnableCall(startHook, func(id uint64, errMsg string) {
+		if id == leader.GetServerID() {
+			startResult <- errMsg
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(startHook)) })
+	resumes[1]()
+	select {
+	case errMsg := <-startResult:
+		re.Empty(errMsg)
+	case <-time.After(30 * time.Second):
+		t.Fatal("next campaign did not restart the cluster")
+	}
+	testutil.Eventually(re, svr.IsServing)
+	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+	re.Negative(tsoutil.CompareTimestamp(previous, next))
+}
+
+func TestEarlyTSOStartResultHook(t *testing.T) {
+	re := require.New(t)
+	const hook = "github.com/tikv/pd/server/afterRaftClusterStart"
+	results := make(chan string, 1)
+	re.NoError(failpoint.EnableCall(hook, func(_ uint64, errMsg string) { results <- errMsg }))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(hook)) })
+	newEarlyTSOCluster(t, 1)
+	select {
+	case errMsg := <-results:
+		re.Empty(errMsg)
+	case <-time.After(30 * time.Second):
+		t.Fatal("successful Start did not reach the result hook")
 	}
 }

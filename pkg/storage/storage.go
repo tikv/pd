@@ -156,17 +156,19 @@ func TrySwitchRegionStorage(s Storage, useLocalRegionStorage bool) endpoint.Regi
 
 // TryLoadRegionsOnce loads all regions from storage to RegionsInfo.
 // If the underlying storage is the local region storage, it will only load once.
-func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+// Conditions fence overlap deletion only in the shared default storage; local
+// region cleanup does not affect another member and needs no leadership fence.
+func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error {
 	ps, ok := s.(*coreStorage)
 	if !ok {
-		return s.LoadRegions(ctx, f)
+		return s.LoadRegions(ctx, f, conditions...)
 	}
 
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
 	if !ps.useRegionStorage.Load() {
-		err := ps.Storage.LoadRegions(ctx, f)
+		err := ps.Storage.LoadRegions(ctx, f, conditions...)
 		if err == nil {
 			ps.regionLoaded = fromEtcd
 		}
@@ -191,11 +193,11 @@ func (ps *coreStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bo
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error {
 	if ps.useRegionStorage.Load() {
 		return ps.regionStorage.LoadRegions(ctx, f)
 	}
-	return ps.Storage.LoadRegions(ctx, f)
+	return ps.Storage.LoadRegions(ctx, f, conditions...)
 }
 
 // SaveRegion saves one region to storage.

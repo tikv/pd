@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -431,5 +433,46 @@ func BenchmarkLoadRegionsByRandomMerge(b *testing.B) {
 		b.Run(fmt.Sprintf("merge ratio %d", r.ratio), func(b *testing.B) {
 			benchmarkLoadRegions(b, 1000000, r.ratio)
 		})
+	}
+}
+
+func TestLoadRegionsTermFence(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	for _, local := range []bool{false, true} {
+		for _, valid := range []bool{false, true} {
+			t.Run(fmt.Sprintf("local=%t/valid=%t", local, valid), func(t *testing.T) {
+				re := require.New(t)
+				shared := NewStorageWithEtcdBackend(client)
+				localStorage := NewStorageWithMemoryBackend()
+				s := NewCoreStorage(shared, localStorage)
+				TrySwitchRegionStorage(s, local)
+				parent := &metapb.Region{Id: 100, StartKey: []byte("a"), EndKey: []byte("z"), RegionEpoch: &metapb.RegionEpoch{Version: 1}}
+				child := &metapb.Region{Id: 101, StartKey: []byte("a"), EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 2}}
+				// Seed both backends to detect accidental redirection of local cleanup.
+				for _, backend := range []Storage{shared, localStorage} {
+					re.NoError(backend.SaveRegion(parent))
+					re.NoError(backend.SaveRegion(child))
+				}
+				expectedRevision := int64(1)
+				if valid {
+					expectedRevision = 0
+				}
+				cache := core.NewBasicCluster()
+				err := TryLoadRegionsOnce(t.Context(), s, cache.CheckAndPutRegion, clientv3.Compare(clientv3.CreateRevision("/test-region-leader"), "=", expectedRevision))
+				if !local && !valid {
+					re.Error(err)
+				} else {
+					re.NoError(err)
+				}
+				region := &metapb.Region{}
+				exists, err := shared.LoadRegion(parent.GetId(), region)
+				re.NoError(err)
+				re.Equal(local || !valid, exists)
+				exists, err = localStorage.LoadRegion(parent.GetId(), region)
+				re.NoError(err)
+				re.Equal(!local, exists)
+			})
+		}
 	}
 }

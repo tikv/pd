@@ -869,13 +869,13 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 			content, err := os.ReadFile(fname)
 			re.NoError(err)
 			re.NotContains(string(content), resetMsg)
-			var startResult chan error
+			var startResult chan string
 			const startHook = "github.com/tikv/pd/server/afterRaftClusterStart"
 			if early {
-				startResult = make(chan error, 1)
-				re.NoError(failpoint.EnableCall(startHook, func(id uint64, err error) {
+				startResult = make(chan string, 1)
+				re.NoError(failpoint.EnableCall(startHook, func(id uint64, errMsg string) {
 					if id == leader.GetServerID() {
-						startResult <- err
+						startResult <- errMsg
 					}
 				}))
 				t.Cleanup(func() { re.NoError(failpoint.Disable(startHook)) })
@@ -896,8 +896,8 @@ func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 			testutil.Eventually(re, func() bool { return !svr.GetTSOAllocator().IsInitialize() })
 			if early {
 				select {
-				case err := <-startResult:
-					re.ErrorIs(err, errs.ErrNotLeader)
+				case errMsg := <-startResult:
+					re.Equal(errs.ErrNotLeader.Error(), errMsg)
 				case <-time.After(30 * time.Second):
 					t.Fatal("withdrawn initialization did not stop")
 				}
