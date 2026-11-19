@@ -622,7 +622,7 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 	)
 }
 
-func TestMergeCheckerAffinity(t *testing.T) {
+func TestMergeCheckerSkipsActiveAffinityGroup(t *testing.T) {
 	for _, tc := range []struct {
 		name                  string
 		targetStores          []uint64
