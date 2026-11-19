@@ -51,6 +51,8 @@ const (
 	randomRegionMaxRetry = 10
 	// Bound work under the tree read locks while checking preparation.
 	regionPreparationScanBatchSize = 16
+	// Bound snapshot traversal scratch space independently of the Region count.
+	regionPreparationSnapshotBatchSize = 1024
 	// Bound the temporary topology journal during a preparation query.
 	regionPreparationMaxChanges = 1 << 16
 	// Bound retries when changes arrive during the incremental recheck.
@@ -2059,16 +2061,9 @@ func (r *RegionsInfo) IsRegionLeaderPrepared() bool {
 		r.st.RUnlock()
 		r.t.RUnlock()
 	}()
-	// Snapshot item order outside the cache locks. A pointer slice avoids a
-	// coroutine switch for every Region and is released when this query returns.
-	items := make([]*regionItem, 0, rootSnapshot.Len())
-	rootSnapshot.Ascend(func(item *regionItem) bool {
-		items = append(items, item)
-		return !r.preparationRootInvalid.Load() && !r.preparationSubInvalid.Load()
-	})
-	if len(items) != rootSnapshot.Len() || r.preparationRootInvalid.Load() || r.preparationSubInvalid.Load() {
-		return false
-	}
+	// Traverse the cloned structure by rank in bounded batches. Looking up a
+	// key would read mutable regionItem values outside their owning tree lock.
+	var items [regionPreparationSnapshotBatchSize]*regionItem
 	var changed map[uint64]struct{}
 	mark := func(id uint64) bool {
 		if _, ok := changed[id]; ok {
@@ -2085,11 +2080,23 @@ func (r *RegionsInfo) IsRegionLeaderPrepared() bool {
 	}
 	valid, count := true, 0
 	subSnapshot.Ascend(func(subItem *regionItem) bool {
-		if count == len(items) {
+		if count == rootSnapshot.Len() {
 			valid = false
 			return false
 		}
-		root, subtree := items[count].loadRegionInfo(), subItem.loadRegionInfo()
+		if count%len(items) == 0 {
+			filled := 0
+			rootSnapshot.AscendFromIndex(count, func(item *regionItem) bool {
+				items[filled] = item
+				filled++
+				return filled < len(items) && !r.preparationRootInvalid.Load() && !r.preparationSubInvalid.Load()
+			})
+			if filled != min(len(items), rootSnapshot.Len()-count) {
+				valid = false
+				return false
+			}
+		}
+		root, subtree := items[count%len(items)].loadRegionInfo(), subItem.loadRegionInfo()
 		if root == nil || subtree == nil {
 			valid = false
 			return false
@@ -2107,11 +2114,11 @@ func (r *RegionsInfo) IsRegionLeaderPrepared() bool {
 		valid = !r.preparationRootInvalid.Load() && !r.preparationSubInvalid.Load()
 		return valid
 	})
-	if !valid || count != len(items) {
+	if !valid || count != rootSnapshot.Len() {
 		return false
 	}
 	if count%regionPreparationScanBatchSize != 0 {
-		failpoint.InjectCall("regionPreparationScanBatch", items[count-1].loadRegionInfo().GetID())
+		failpoint.InjectCall("regionPreparationScanBatch", items[(count-1)%len(items)].loadRegionInfo().GetID())
 	}
 	// Recheck captured IDs in small batches outside the tree locks.
 	var batch [regionPreparationScanBatchSize]struct {

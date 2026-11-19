@@ -60,25 +60,36 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	if notLoadedFromRegionsCnt < totalRegionCount {
 		return false
 	}
-	// Synced regions may still lack leaders even when all metadata is collected.
+	if !areStoreRegionsCollected(c) {
+		return false
+	}
+	// Scan for missing leaders and stale subtrees only after the cheaper count
+	// checks pass. Synced metadata can be complete without all leaders known.
 	if !c.IsRegionLeaderPrepared() {
 		return false
 	}
+	// Store heartbeats can reveal more Regions while the snapshot is scanned.
+	if !areStoreRegionsCollected(c) {
+		return false
+	}
+	// Schedulers score StoreInfo snapshots rather than the Region subtrees.
+	c.UpdateAllStoreStatus()
+	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionCount))
+	checker.prepared = true
+	return true
+}
+
+func areStoreRegionsCollected(c *core.BasicCluster) bool {
 	for _, store := range c.GetStores() {
 		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		storeID := store.GetID()
 		collected := c.GetNotFromStorageRegionsCntByStore(storeID)
-		// It is used to avoid sudden scheduling when scheduling service is just started.
 		if collected < int(store.GetStoreStats().GetRegionCount()) || collected < c.GetStoreRegionCount(storeID) {
 			return false
 		}
 	}
-	// Schedulers score StoreInfo snapshots rather than the Region subtrees.
-	c.UpdateAllStoreStatus()
-	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionCount))
-	checker.prepared = true
 	return true
 }
 

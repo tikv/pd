@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -75,10 +76,45 @@ func TestPrepareCheckerRequiresAllRegions(t *testing.T) {
 				}, peer, core.SetSource(source)))
 			}
 			checker := newPrepareChecker(func() (int, error) { return tc.total, nil })
+			// A failed count check must not clone and scan the Region trees.
+			scanned := false
+			point := "github.com/tikv/pd/pkg/core/regionPreparationScanBatch"
+			re.NoError(failpoint.EnableCall(point, func(uint64) { scanned = true }))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(point)) })
 			re.Equal(tc.prepared, checker.check(cluster))
 			re.Equal(tc.prepared, checker.IsPrepared())
+			re.Equal(tc.prepared, scanned)
 		})
 	}
+}
+
+func TestPrepareCheckerRechecksStoreCountsAfterScan(t *testing.T) {
+	re := require.New(t)
+	cluster := core.NewBasicCluster()
+	store := core.NewStoreInfo(
+		&metapb.Store{Id: 1, NodeState: metapb.NodeState_Serving},
+		core.SetStoreStats(&pdpb.StoreStats{RegionCount: 1}),
+	)
+	cluster.PutStore(store)
+	peer := &metapb.Peer{Id: 1, StoreId: 1}
+	cluster.PutRegion(core.NewRegionInfo(&metapb.Region{Id: 1, EndKey: []byte("b"), Peers: []*metapb.Peer{peer}}, peer, core.SetSource(core.Heartbeat)))
+	checker := newPrepareChecker(func() (int, error) { return 1, nil })
+	updated := false
+	point := "github.com/tikv/pd/pkg/core/regionPreparationScanBatch"
+	re.NoError(failpoint.EnableCall(point, func(uint64) {
+		if !updated {
+			// A store heartbeat reveals an uncollected Region during the scan.
+			cluster.PutStore(store.Clone(core.SetStoreStats(&pdpb.StoreStats{RegionCount: 2})))
+			updated = true
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(point)) })
+	re.False(checker.check(cluster))
+	re.True(updated)
+	re.False(checker.IsPrepared())
+	peer = &metapb.Peer{Id: 2, StoreId: 1}
+	cluster.PutRegion(core.NewRegionInfo(&metapb.Region{Id: 2, StartKey: []byte("b"), Peers: []*metapb.Peer{peer}}, peer, core.SetSource(core.Heartbeat)))
+	re.True(checker.check(cluster))
 }
 
 func TestPrepareCheckerRequiresRegionLeaders(t *testing.T) {

@@ -1480,7 +1480,8 @@ func TestRegionPreparationDuringScan(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
 			regions := NewRegionsInfo()
-			for i := range regionPreparationScanBatchSize*2 + 1 {
+			const regionCount = regionPreparationSnapshotBatchSize*2 + 1
+			for i := range regionCount {
 				id := uint64(i + 1)
 				peers := []*metapb.Peer{{Id: id*10 + 1, StoreId: 1}, {Id: id*10 + 2, StoreId: 2}}
 				region := NewRegionInfo(&metapb.Region{
@@ -1554,7 +1555,7 @@ func TestRegionPreparationDuringScan(t *testing.T) {
 				t.Fatal("scan did not finish after the concurrent update")
 			}
 			if tc.name == "statistics" || tc.name == "statistics both" {
-				re.Equal(int64((regionPreparationScanBatchSize*2+1)*10+10), regions.GetRegionSizeByRange(nil, nil))
+				re.Equal(int64(regionCount*10+10), regions.GetRegionSizeByRange(nil, nil))
 				if tc.name == "statistics both" {
 					re.Equal(regions.GetRegionSizeByRange(nil, nil), regions.GetStoreLeaderRegionSize(1))
 				}

@@ -322,6 +322,44 @@ func TestAscendRangeG(t *testing.T) {
 	}
 }
 
+func TestAscendFromIndexG(t *testing.T) {
+	for _, degree := range []int{2, 64} {
+		for _, size := range []int{0, 1, 127, 1025} {
+			t.Run(fmt.Sprintf("degree=%d/size=%d", degree, size), func(t *testing.T) {
+				tr := NewG[Int](degree)
+				for _, v := range perm(size) {
+					tr.ReplaceOrInsert(v)
+				}
+				snapshot := tr.Clone()
+				for i := 0; i < size; i += 2 {
+					tr.Delete(Int(i))
+				}
+				for _, tree := range []*BTreeG[Int]{snapshot, tr} {
+					want := all(tree)
+					for start := -1; start <= len(want); start++ {
+						for _, limit := range []int{1, 17, size + 1} {
+							var got []Int
+							tree.AscendFromIndex(start, func(item Int) bool {
+								got = append(got, item)
+								return len(got) < limit
+							})
+							var expected []Int
+							if start >= 0 && start < len(want) {
+								end := start + limit
+								if end > len(want) {
+									end = len(want)
+								}
+								expected = want[start:end]
+							}
+							assertEq(t, fmt.Sprintf("start=%d/limit=%d", start, limit), got, expected)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestDescendRangeG(t *testing.T) {
 	tr := NewG[Int](2)
 	for _, v := range perm(100) {
