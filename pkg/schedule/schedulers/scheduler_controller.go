@@ -289,7 +289,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 }
 
 // RemoveScheduler removes a scheduler by name.
-func (c *Controller) RemoveScheduler(name string) error {
+func (c *Controller) RemoveScheduler(name string) (err error) {
 	c.Lock()
 	defer c.Unlock()
 	if c.cluster == nil {
@@ -299,6 +299,19 @@ func (c *Controller) RemoveScheduler(name string) error {
 	if !ok {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
+	if removal := s.removal; removal != nil {
+		c.Unlock()
+		<-removal.done
+		c.Lock()
+		return removal.err
+	}
+	removal := &schedulerRemoval{done: make(chan struct{})}
+	s.removal = removal
+	defer func() {
+		removal.err = err
+		s.removal = nil
+		close(removal.done)
+	}()
 
 	conf := c.cluster.GetSchedulerConfig()
 	conf.RemoveSchedulerCfg(s.GetType())
@@ -306,6 +319,16 @@ func (c *Controller) RemoveScheduler(name string) error {
 		log.Error("the option can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
+
+	// Keep the instance registered until its loop and CleanConfig have finished.
+	// Both may persist config, so deleting it before they finish can resurrect
+	// the deleted config or overwrite the config of a replacement instance.
+	s.Stop()
+	// The registered instance reserves its name, and concurrent removals join
+	// this attempt. Do not block unrelated scheduler APIs while it shuts down.
+	c.Unlock()
+	<-s.done
+	c.Lock()
 
 	// nolint:errcheck
 	// SetDisable will not work now, because the config is removed. We can't
@@ -317,7 +340,6 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return err
 	}
 
-	s.Stop()
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
 	return nil
@@ -434,6 +456,7 @@ func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
 func (c *Controller) runScheduler(s *ScheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
+	defer close(s.done)
 	defer s.CleanConfig(c.cluster)
 
 	ticker := time.NewTicker(s.GetInterval())
@@ -441,6 +464,10 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 	for {
 		select {
 		case <-ticker.C:
+			// A tick and cancellation may be ready at the same time.
+			if s.Ctx().Err() != nil {
+				return
+			}
 			diagnosable := s.IsDiagnosticAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue
@@ -514,6 +541,13 @@ func (c *Controller) GetAllSchedulerConfigs() (sches, configs []string, err erro
 	return c.storage.LoadAllSchedulerConfigs()
 }
 
+// schedulerRemoval records the result of one removal attempt. Closing done
+// publishes err to concurrent callers, even if a later attempt starts.
+type schedulerRemoval struct {
+	done chan struct{}
+	err  error
+}
+
 // ScheduleController is used to manage a scheduler.
 type ScheduleController struct {
 	Scheduler
@@ -522,6 +556,8 @@ type ScheduleController struct {
 	nextInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc
+	done               chan struct{}     // Closed by runScheduler after CleanConfig returns.
+	removal            *schedulerRemoval // Guarded by the owning Controller's lock.
 	delayAt            atomic.Int64
 	delayUntil         atomic.Int64
 	diagnosticRecorder *DiagnosticRecorder
@@ -537,6 +573,7 @@ func NewScheduleController(ctx context.Context, cluster sche.SchedulerCluster, o
 		nextInterval:       s.GetMinInterval(),
 		ctx:                ctx,
 		cancel:             cancel,
+		done:               make(chan struct{}),
 		diagnosticRecorder: NewDiagnosticRecorder(s.GetType(), cluster.GetSchedulerConfig()),
 	}
 }
@@ -546,7 +583,7 @@ func (s *ScheduleController) Ctx() context.Context {
 	return s.ctx
 }
 
-// Stop stops the ScheduleController
+// Stop cancels the ScheduleController without waiting for its loop to exit.
 func (s *ScheduleController) Stop() {
 	s.cancel()
 }
