@@ -43,6 +43,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -434,10 +435,10 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 	}
 }
 
-// TestGetTSAfterTSOPrimaryChanged checks that a client discovering TSO servers directly
-// resumes soon after the primary changes. The old primary rejects requests or closes its
-// streams before the new one is elected, so the client must not wait a full retry interval
-// after its first attempt misses the new primary.
+// TestGetTSAfterTSOPrimaryChanged checks that a client resumes promptly after a
+// primary transfer or shutdown. Server election and timestamp initialization finish
+// before the recovery budget starts. Both discovery loops first miss the new primary,
+// so a full fixed retry interval still violates the client recovery budget.
 func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -452,35 +453,78 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 
-	client := utils.SetupClientWithKeyspaceID(ctx, re, constant.DefaultKeyspaceID, []string{pdLeader.GetAddr()})
+	const (
+		beforeUpdateFailpoint = "github.com/tikv/pd/client/servicediscovery/beforeTSOMemberUpdate"
+		missPrimaryFailpoint  = "github.com/tikv/pd/client/servicediscovery/tsoPrimaryNotReady"
+	)
+	type discoveryGate struct {
+		entered atomic.Int32
+		release chan struct{}
+	}
+	var activeGate atomic.Pointer[discoveryGate]
+	clientCtx := failpoint.WithHook(ctx, func(ctx context.Context, name string) bool {
+		gate := activeGate.Load()
+		if gate == nil {
+			return false
+		}
+		if name == missPrimaryFailpoint {
+			return true
+		}
+		if name != beforeUpdateFailpoint {
+			return false
+		}
+		gate.entered.Add(1)
+		select {
+		case <-gate.release:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	})
+	re.NoError(failpoint.Enable(beforeUpdateFailpoint, "return(true)"))
+	defer func() { re.NoError(failpoint.Disable(beforeUpdateFailpoint)) }()
+	re.NoError(failpoint.Enable(missPrimaryFailpoint, "return(true)"))
+	defer func() { re.NoError(failpoint.Disable(missPrimaryFailpoint)) }()
+
+	client := utils.SetupClientWithKeyspaceID(clientCtx, re, constant.DefaultKeyspaceID, []string{pdLeader.GetAddr()})
 	defer client.Close()
 	utils.WaitForTSOServiceAvailable(ctx, re, client)
+	inner, ok := client.(interface{ GetTSOServiceDiscovery() sd.ServiceDiscovery })
+	re.True(ok)
+	discovery := inner.GetTSOServiceDiscovery()
 
-	// Measure the longest gap between two successful GetTS calls across the primary change.
-	checkMaxGap := func(changePrimary func()) {
+	checkRecovery := func(changePrimary func()) {
 		var (
-			maxGap      time.Duration
-			lastSuccess time.Time
-			stoppedAt   time.Time
-			// Stop between calls instead of canceling an in-flight GetTS, whose request
-			// may be put back to the pool while the dispatcher still holds it.
+			maxGap          time.Duration
+			lastSuccess     time.Time
+			stoppedAt       time.Time
+			recoveryStarted atomic.Pointer[time.Time]
+			// Stop between calls to avoid canceling a request still held by the dispatcher.
 			stopped atomic.Bool
 		)
 		started := make(chan struct{})
+		recovered := make(chan time.Duration, 1)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
+			firstSuccess := true
 			for !stopped.Load() {
 				if _, _, err := client.GetTS(ctx); err != nil {
 					continue
 				}
-				now := time.Now()
-				if lastSuccess.IsZero() {
+				if firstSuccess {
 					close(started)
-				} else {
-					maxGap = max(maxGap, now.Sub(lastSuccess))
+					firstSuccess = false
 				}
-				lastSuccess = now
+				if start := recoveryStarted.Load(); start != nil {
+					now := time.Now()
+					if lastSuccess.IsZero() {
+						lastSuccess = *start
+						recovered <- now.Sub(*start)
+					}
+					maxGap = max(maxGap, now.Sub(lastSuccess))
+					lastSuccess = now
+				}
 			}
 			stoppedAt = time.Now()
 		}()
@@ -488,29 +532,54 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 			stopped.Store(true)
 			<-done
 		}()
+		gate := &discoveryGate{release: make(chan struct{})}
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(gate.release) }) }
+		defer func() {
+			activeGate.Store(nil)
+			release()
+		}()
 		select {
 		case <-started:
 		case <-time.After(10 * time.Second):
 			re.FailNow("GetTS does not succeed before the primary change")
 		}
+		activeGate.Store(gate)
+		discovery.ScheduleCheckMemberChanged()
+		// Drain any earlier background update before changing the primary.
+		testutil.Eventually(re, func() bool { return gate.entered.Load() >= 1 })
 		changedAt := time.Now()
 		changePrimary()
-		tc.WaitForDefaultPrimaryServing(re)
+		primary := tc.WaitForDefaultPrimaryServing(re)
+		serverWait := time.Since(changedAt)
+		// One blocked update is from the background loop and one from the foreground
+		// leader-change check. Both retry timers start only after release.
+		testutil.Eventually(re, func() bool { return gate.entered.Load() >= 2 })
+		start := time.Now()
+		recoveryStarted.Store(&start)
+		release()
+		select {
+		case elapsed := <-recovered:
+			t.Logf("server primary wait: %s; client recovery: %s", serverWait, elapsed)
+			re.Less(elapsed, 400*time.Millisecond)
+		case <-time.After(5 * time.Second):
+			re.FailNow("GetTS does not recover after the new primary is serving")
+		}
+		// Keep the original observation window and check gaps after recovery too.
 		time.Sleep(time.Second)
 		stopped.Store(true)
 		<-done
-		// End the open gap in the worker so observer scheduling after it exits is excluded.
-		re.True(lastSuccess.After(changedAt))
 		re.Less(max(maxGap, stoppedAt.Sub(lastSuccess)), 400*time.Millisecond)
+		re.Equal(primary.GetAddr(), discovery.GetServingURL())
 	}
 	for range 3 {
-		checkMaxGap(func() {
+		checkRecovery(func() {
 			re.NoError(tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID))
 		})
 	}
 	// Shut down the primary as a rolling upgrade does, leaving the last server as the primary.
 	for range 2 {
-		checkMaxGap(func() {
+		checkRecovery(func() {
 			tc.DestroyServer(tc.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID).GetAddr())
 		})
 	}
