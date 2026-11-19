@@ -157,6 +157,7 @@ func (s *tsoServer) recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 type heartbeatServer struct {
 	stream pdpb.PD_RegionHeartbeatServer
 	closed atomic.Int32
+	sendMu sync.Mutex
 }
 
 // Send wraps Send() of PD_RegionHeartbeatServer.
@@ -167,7 +168,18 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	done := make(chan error, 1)
 	go func() {
 		defer logutil.LogPanic()
-		done <- s.stream.Send(m.(*pdpb.RegionHeartbeatResponse))
+		// A timed-out caller must not release an in-flight Send.
+		s.sendMu.Lock()
+		defer s.sendMu.Unlock()
+		if s.closed.Load() == 1 {
+			done <- io.EOF
+			return
+		}
+		err := s.stream.Send(m.(*pdpb.RegionHeartbeatResponse))
+		if err != nil {
+			s.closed.Store(1)
+		}
+		done <- err
 	}()
 	timer := time.NewTimer(heartbeatSendTimeout)
 	defer timer.Stop()
