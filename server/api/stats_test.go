@@ -108,7 +108,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 			&metapb.Peer{Id: 107, StoreId: 5},
 			core.SetApproximateSize(1),
 			core.SetApproximateKvSize(1),
-			core.SetApproximateKeys(1),
+			core.SetApproximateKeys(0),
 		),
 		core.NewRegionInfo(
 			&metapb.Region{
@@ -136,7 +136,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 	// region range       size  rows store1 store2 store3 store4 store5
 	// 1      ["", "a")   100   50 	  L      F      F
 	// 2      ["a", "t")  200   150	  F                    L      F
-	// 3      ["t", "x")  1     1	  F                           L
+	// 3      ["t", "x")  1     0	  F                           L
 	// 4      ["x", "")   50    20                   	   L
 
 	statsAll := &statistics.RegionStats{
@@ -144,13 +144,13 @@ func (suite *statsTestSuite) TestRegionStats() {
 		EmptyCount:       1,
 		StorageSize:      351,
 		UserStorageSize:  291,
-		StorageKeys:      221,
+		StorageKeys:      220,
 		StoreLeaderCount: map[uint64]int{1: 1, 4: 2, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 3, 2: 1, 3: 1, 4: 2, 5: 2},
 		StoreLeaderSize:  map[uint64]int64{1: 100, 4: 250, 5: 1},
-		StoreLeaderKeys:  map[uint64]int64{1: 50, 4: 170, 5: 1},
+		StoreLeaderKeys:  map[uint64]int64{1: 50, 4: 170, 5: 0},
 		StorePeerSize:    map[uint64]int64{1: 301, 2: 100, 3: 100, 4: 250, 5: 201},
-		StorePeerKeys:    map[uint64]int64{1: 201, 2: 50, 3: 50, 4: 170, 5: 151},
+		StorePeerKeys:    map[uint64]int64{1: 200, 2: 50, 3: 50, 4: 170, 5: 150},
 	}
 
 	stats23 := &statistics.RegionStats{
@@ -158,13 +158,13 @@ func (suite *statsTestSuite) TestRegionStats() {
 		EmptyCount:       1,
 		StorageSize:      201,
 		UserStorageSize:  181,
-		StorageKeys:      151,
+		StorageKeys:      150,
 		StoreLeaderCount: map[uint64]int{4: 1, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 2, 4: 1, 5: 2},
 		StoreLeaderSize:  map[uint64]int64{4: 200, 5: 1},
-		StoreLeaderKeys:  map[uint64]int64{4: 150, 5: 1},
+		StoreLeaderKeys:  map[uint64]int64{4: 150, 5: 0},
 		StorePeerSize:    map[uint64]int64{1: 201, 4: 200, 5: 201},
-		StorePeerKeys:    map[uint64]int64{1: 151, 4: 150, 5: 151},
+		StorePeerKeys:    map[uint64]int64{1: 150, 4: 150, 5: 150},
 	}
 
 	testdata := []struct {
@@ -203,4 +203,60 @@ func (suite *statsTestSuite) TestRegionStats() {
 			}
 		}
 	}
+<<<<<<< HEAD:server/api/stats_test.go
+=======
+
+	hotStats := &statistics.RegionStats{
+		Count:                4,
+		EmptyCount:           1,
+		StorageSize:          351,
+		UserStorageSize:      291,
+		StorageKeys:          220,
+		StoreLeaderCount:     map[uint64]int{1: 1},
+		StorePeerCount:       map[uint64]int{1: 3},
+		StoreLeaderSize:      map[uint64]int64{1: 100},
+		StoreLeaderKeys:      map[uint64]int64{1: 50},
+		StorePeerSize:        map[uint64]int64{1: 301},
+		StorePeerKeys:        map[uint64]int64{1: 200},
+		StoreWriteBytes:      map[uint64]uint64{1: regions[0].GetBytesWritten() / intervalSec},
+		StoreWriteKeys:       map[uint64]uint64{1: regions[0].GetKeysWritten() / intervalSec},
+		StoreWriteQuery:      map[uint64]uint64{1: regions[0].GetWriteQueryNum() / intervalSec},
+		StoreLeaderReadBytes: map[uint64]uint64{1: 10000},
+		StoreLeaderReadKeys:  map[uint64]uint64{1: 1000},
+		StoreLeaderReadQuery: map[uint64]uint64{1: 100},
+		StorePeerReadBytes:   map[uint64]uint64{1: 10000},
+		StorePeerReadKeys:    map[uint64]uint64{1: 1000},
+		StorePeerReadQuery:   map[uint64]uint64{1: 100},
+		StoreEngine:          map[uint64]string{1: core.EngineTiKV},
+	}
+
+	storeReq := pdpb.StoreHeartbeatRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Stats: &pdpb.StoreStats{
+			StoreId:  1,
+			Interval: &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10},
+			PeerStats: []*pdpb.PeerStat{
+				{
+					RegionId:  1,
+					ReadBytes: 10000 * 10,
+					ReadKeys:  1000 * 10,
+					QueryStats: &pdpb.QueryStats{
+						Get: 100 * 10,
+					},
+				},
+			},
+		},
+	}
+
+	tests.MustHandleStoreHeartbeat(re, cluster, &storeReq)
+
+	args := fmt.Sprintf("?use_hot&start_key=%s&end_key=%s&engine=tikv", "", "")
+	stats := &statistics.RegionStats{}
+	res, err := tests.TestDialClient.Get(statsURL + args)
+	re.NoError(err)
+	err = apiutil.ReadJSON(res.Body, stats)
+	re.NoError(res.Body.Close())
+	re.NoError(err)
+	re.Equal(hotStats, stats)
+>>>>>>> bcd573daf7 (core, statistics, operator: account for keys in empty regions (#11295)):tests/server/api/stats_test.go
 }
