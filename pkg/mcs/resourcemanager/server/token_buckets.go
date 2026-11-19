@@ -133,8 +133,7 @@ func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
 	gtb.Tokens = state.Tokens
 	gtb.LastUpdate = state.LastUpdate
 	gtb.Initialized = state.Initialized
-	gtb.moderatedDebt = state.moderatedDebt
-	gtb.moderatedAt = state.moderatedAt
+	gtb.guardDebt = state.guardDebt
 }
 
 // tokenSlot is used to split a token bucket into multiple slots to
@@ -167,6 +166,22 @@ func (ts *tokenSlot) logFields() []zap.Field {
 	}
 }
 
+type grantDebt struct {
+	amount    float64
+	settledAt time.Time
+}
+
+func (d *grantDebt) settle(now time.Time, repaymentRate float64) {
+	if d.settledAt.IsZero() {
+		d.settledAt = now
+		return
+	}
+	if now.After(d.settledAt) {
+		d.amount = max(0, d.amount-repaymentRate*now.Sub(d.settledAt).Seconds())
+		d.settledAt = now
+	}
+}
+
 // GroupTokenBucketState is the running state of TokenBucket.
 type GroupTokenBucketState struct {
 	Tokens      float64    `json:"tokens,omitempty"`
@@ -187,8 +202,7 @@ type GroupTokenBucketState struct {
 	// token calculation during the next update.
 	reservedServiceTokens float64
 	// Outstanding MODERATED grants, repaid independently of the raw token balance.
-	moderatedDebt float64
-	moderatedAt   time.Time
+	guardDebt grantDebt
 	// overrideFillRate is used to override the fill rate of the token bucket.
 	// It's used to control the fill rate of the token bucket within the service
 	// limit to ensure the priority of the resource group. Only non-negative value
@@ -220,8 +234,7 @@ func (gts *GroupTokenBucketState) clone() *GroupTokenBucketState {
 		Tokens:             gts.Tokens,
 		LastUpdate:         lastUpdate,
 		Initialized:        gts.Initialized,
-		moderatedDebt:      gts.moderatedDebt,
-		moderatedAt:        gts.moderatedAt,
+		guardDebt:          gts.guardDebt,
 		resourceGroupName:  gts.resourceGroupName,
 		tokenSlots:         tokenSlots,
 		overrideFillRate:   gts.overrideFillRate,
@@ -420,9 +433,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		if tokensForBalance != 0 {
 			// maps.Clone makes allocationMap escape even when this branch is skipped.
 			refillAllocation = make(map[uint64]float64, len(allocationMap))
-			for id, allocation := range allocationMap {
-				refillAllocation[id] = allocation
-			}
+			maps.Copy(refillAllocation, allocationMap)
 		}
 		floorRequestingSlot(allocationMap, clientUniqueID, basicFillRate)
 	}
@@ -487,7 +498,7 @@ func floorRequestingSlot(allocationMap map[uint64]float64, requesterID uint64, b
 
 func (gtb *GroupTokenBucket) debtWithin(allowance float64) bool {
 	if getBurstableMode(gtb.Settings) == moderated {
-		return gtb.moderatedDebt <= allowance
+		return gtb.guardDebt.amount <= allowance
 	}
 	return gtb.Tokens >= -allowance
 }
@@ -497,14 +508,13 @@ func (gtb *GroupTokenBucket) settleModeratedDebt(now time.Time) {
 	if getBurstableMode(gtb.Settings) != moderated {
 		return
 	}
-	if gtb.moderatedAt.IsZero() {
-		gtb.moderatedAt = now
-		return
-	}
-	if now.After(gtb.moderatedAt) {
-		rate, _ := gtb.getFillRateAndBurstLimit()
-		gtb.moderatedDebt = max(0, gtb.moderatedDebt-rate*now.Sub(gtb.moderatedAt).Seconds())
-		gtb.moderatedAt = now
+	rate, _ := gtb.getFillRateAndBurstLimit()
+	gtb.guardDebt.settle(now, rate)
+}
+
+func (gtb *GroupTokenBucket) refundModeratedGrant(tokens float64) {
+	if getBurstableMode(gtb.Settings) == moderated {
+		gtb.guardDebt.amount -= tokens
 	}
 }
 
@@ -565,7 +575,7 @@ func (gtb *GroupTokenBucket) applySettings(tb *rmpb.TokenBucket) {
 	if settings := tb.GetSettings(); settings != nil {
 		gtb.settleModeratedDebt(time.Now())
 		if getBurstableMode(gtb.Settings) != getBurstableMode(settings) {
-			gtb.moderatedDebt, gtb.moderatedAt = 0, time.Time{}
+			gtb.guardDebt = grantDebt{}
 		}
 		setting := proto.Clone(settings).(*rmpb.TokenLimitSettings)
 		gtb.Settings = setting
@@ -700,7 +710,7 @@ func (gtb *GroupTokenBucket) request(
 		return nil, 0
 	}
 	if getBurstableMode(gtb.Settings) == moderated {
-		gtb.moderatedDebt += res.Tokens
+		gtb.guardDebt.amount += res.Tokens
 	}
 	// Update bucket to record all tokens.
 	gtb.Tokens -= slot.lastTokenCapacity - slot.curTokenCapacity

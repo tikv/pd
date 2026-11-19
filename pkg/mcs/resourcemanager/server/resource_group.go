@@ -298,10 +298,7 @@ func (rg *ResourceGroup) RequestRU(
 	limitedTokens, minTrickleTimeMs := sl.applyServiceLimit(now, grantedTokens)
 	if limitedTokens < grantedTokens {
 		tb.Tokens = limitedTokens
-		if getBurstableMode(rg.RUSettings.RU.Settings) == moderated {
-			// Only issued tokens count as debt.
-			rg.RUSettings.RU.moderatedDebt -= grantedTokens - limitedTokens
-		}
+		rg.RUSettings.RU.refundModeratedGrant(grantedTokens - limitedTokens)
 		// Retain the unused tokens for the later requests if it has a burst limit.
 		if rg.getBurstLimitLocked() > 0 {
 			rg.RUSettings.RU.reservedServiceTokens += grantedTokens - limitedTokens

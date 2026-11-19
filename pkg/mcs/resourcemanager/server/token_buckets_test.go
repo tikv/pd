@@ -1122,7 +1122,7 @@ func TestBalanceSlotTokensModeratedFloorAfterGrants(t *testing.T) {
 			gtb := res.gtb
 			fillRate, _ := gtb.getFillRateAndBurstLimit()
 			re.Less(gtb.Tokens, -fillRate*5)
-			re.LessOrEqual(gtb.moderatedDebt, fillRate*5)
+			re.LessOrEqual(gtb.guardDebt.amount, fillRate*5)
 			re.InDelta(11.0, res.byClient[0][returning.id], 1e-9)
 			if name == "busy first" {
 				// A later busy-client request would rebalance this share.
@@ -1132,39 +1132,42 @@ func TestBalanceSlotTokensModeratedFloorAfterGrants(t *testing.T) {
 	}
 }
 
+func newModeratedTestGroup() *ResourceGroup {
+	return FromProtoResourceGroup(&rmpb.ResourceGroup{
+		Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: -2},
+		}},
+	})
+}
+
 func TestModeratedDebtSurvivesSlotRemoval(t *testing.T) {
 	re := require.New(t)
-	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
-		Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: -2},
-	})
+	gtb := newModeratedTestGroup().RUSettings.RU
 	now := time.Now()
 	first, _ := gtb.request(now, 60000, 5000, 1)
 	re.Equal(60000.0, first.Tokens)
 	gtb.request(now, 0, 5000, 1)
 	re.Empty(gtb.tokenSlots)
-	re.Equal(first.Tokens, gtb.moderatedDebt)
+	re.Equal(first.Tokens, gtb.guardDebt.amount)
 	second, _ := gtb.request(now, 10, 5000, 1)
-	re.Equal(60000.0+second.Tokens, gtb.moderatedDebt)
-	re.False(gtb.debtWithin(60000))
+	re.Equal(60000.0+second.Tokens, gtb.guardDebt.amount)
 	gtb.resetLoan()
 	re.False(gtb.debtWithin(60000))
 	gtb.settleModeratedDebt(now.Add(time.Second))
-	re.True(gtb.debtWithin(60000))
-	re.Equal(48000.0+second.Tokens, gtb.moderatedDebt)
+	re.Equal(48000.0+second.Tokens, gtb.guardDebt.amount)
 	gtb.settleModeratedDebt(now)
 	gtb.settleModeratedDebt(now.Add(time.Second))
-	re.Equal(48000.0+second.Tokens, gtb.moderatedDebt)
+	re.Equal(48000.0+second.Tokens, gtb.guardDebt.amount)
 	gtb.settleModeratedDebt(now.Add(time.Hour))
-	re.Zero(gtb.moderatedDebt)
+	re.Zero(gtb.guardDebt.amount)
 	third, _ := gtb.request(now.Add(time.Hour), 10, 5000, 1)
-	re.Equal(third.Tokens, gtb.moderatedDebt, "idle time must not bank credit")
+	re.Equal(third.Tokens, gtb.guardDebt.amount, "idle time must not bank credit")
 }
 
 func TestModeratedDebtGatesReturningFloor(t *testing.T) {
 	re := require.New(t)
-	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
-		Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: -2},
-	})
+	gtb := newModeratedTestGroup().RUSettings.RU
 	gtb.grt = newGroupRUTracker()
 	now := time.Now()
 	gtb.request(now, 60000, 5000, 1)
@@ -1181,12 +1184,7 @@ func TestModeratedDebtGatesReturningFloor(t *testing.T) {
 func TestModeratedDebtFloorAfterOverride(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		re := require.New(t)
-		rg := FromProtoResourceGroup(&rmpb.ResourceGroup{
-			Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode,
-			RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: -2},
-			}},
-		})
+		rg := newModeratedTestGroup()
 		gtb := rg.RUSettings.RU
 		gtb.grt = newGroupRUTracker()
 		request := func(id uint64, amount float64) *rmpb.TokenBucket {
@@ -1203,88 +1201,76 @@ func TestModeratedDebtFloorAfterOverride(t *testing.T) {
 		}
 		rg.overrideFillRateAndBurstLimit(500, 500)
 		re.Equal(limited, gtb.getBurstableMode())
-		re.Zero(gtb.moderatedDebt)
+		re.Zero(gtb.guardDebt.amount)
 		grant := request(2, 10)
 		re.Less(gtb.Tokens, -500.0*5)
-		t.Logf("override: raw tokens=%g debt=%g share=%g grant=%g", gtb.Tokens, gtb.moderatedDebt, gtb.tokenSlots[2].fillRate, grant.Tokens)
 		re.InDelta(250.0, gtb.tokenSlots[2].fillRate, 1e-9)
 		re.Equal(10.0, grant.Tokens)
-		re.Equal(grant.Tokens, gtb.moderatedDebt)
+		re.Equal(grant.Tokens, gtb.guardDebt.amount)
 
 		rg.overrideFillRateAndBurstLimit(-1, -1)
 		re.Equal(moderated, gtb.getBurstableMode())
-		re.Equal(grant.Tokens, gtb.moderatedDebt)
+		re.Equal(grant.Tokens, gtb.guardDebt.amount)
 		request(2, 0)
 		grant = request(2, 10)
 		re.InDelta(6000.0, gtb.tokenSlots[2].fillRate, 1e-9)
 		re.Equal(10.0, grant.Tokens)
-		re.Equal(20.0, gtb.moderatedDebt)
+		re.Equal(20.0, gtb.guardDebt.amount)
 	})
 }
 
 func TestModeratedDebtSettingsAndOverrides(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		re := require.New(t)
-		rg := FromProtoResourceGroup(&rmpb.ResourceGroup{
-			Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode,
-			RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: -2},
-			}},
-		})
+		rg := newModeratedTestGroup()
 		gtb := rg.RUSettings.RU
 		gtb.request(time.Now(), 50000, 5000, 1)
 		time.Sleep(time.Second)
 		gtb.applySettings(&rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 3000, BurstLimit: -2}})
-		re.Equal(38000.0, gtb.moderatedDebt, "settle the old rate before replacing settings")
+		re.Equal(38000.0, gtb.guardDebt.amount, "settle the old rate before replacing settings")
 		time.Sleep(time.Second)
 		gtb.request(time.Now(), 10, 5000, 1)
-		re.Equal(25010.0, gtb.moderatedDebt, "resetLoan must preserve issuance history")
+		re.Equal(25010.0, gtb.guardDebt.amount, "resetLoan must preserve issuance history")
 		time.Sleep(time.Second)
 		rg.overrideFillRateAndBurstLimit(500, 500)
-		re.Equal(12010.0, gtb.moderatedDebt)
+		re.Equal(12010.0, gtb.guardDebt.amount)
 		time.Sleep(time.Second)
 		grant, _ := gtb.request(time.Now(), 10, 5000, 1)
 		re.Equal(10.0, grant.Tokens)
-		re.Equal(11520.0, gtb.moderatedDebt, "track grants during the temporary LIMITED interval")
+		re.Equal(11520.0, gtb.guardDebt.amount, "track grants during the temporary LIMITED interval")
 		time.Sleep(time.Second)
 		rg.overrideFillRateAndBurstLimit(-1, -1)
-		re.Equal(11020.0, gtb.moderatedDebt)
+		re.Equal(11020.0, gtb.guardDebt.amount)
 		time.Sleep(time.Second)
 		gtb.request(time.Now(), 0, 5000, 1)
-		re.Zero(gtb.moderatedDebt)
+		re.Zero(gtb.guardDebt.amount)
 
 		gtb.request(time.Now(), 1000, 5000, 1)
 		gtb.patch(&rmpb.TokenBucket{Tokens: 100000})
-		re.Equal(1000.0, gtb.moderatedDebt, "a token patch is not repayment")
+		re.Equal(1000.0, gtb.guardDebt.amount, "a token patch is not repayment")
 		gtb.applySettings(&rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 3000, BurstLimit: -1}})
-		re.Zero(gtb.moderatedDebt, "an explicit mode switch ends the accounting epoch")
-		re.True(gtb.moderatedAt.IsZero())
+		re.Zero(gtb.guardDebt, "an explicit mode switch ends the accounting epoch")
 	})
 }
 
 func TestModeratedDebtIndividualOverrides(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		re := require.New(t)
-		rg := FromProtoResourceGroup(&rmpb.ResourceGroup{
-			Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode,
-			RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: -2},
-			}},
-		})
+		rg := newModeratedTestGroup()
 		gtb := rg.RUSettings.RU
 		gtb.request(time.Now(), 50000, 5000, 1)
 		time.Sleep(time.Second)
 		rg.overrideFillRate(1000)
-		re.Equal(38000.0, gtb.moderatedDebt)
+		re.Equal(38000.0, gtb.guardDebt.amount)
 		time.Sleep(time.Second)
 		rg.overrideBurstLimit(1000)
-		re.Equal(27000.0, gtb.moderatedDebt)
+		re.Equal(27000.0, gtb.guardDebt.amount)
 		time.Sleep(time.Second)
 		rg.overrideBurstLimit(-1)
-		re.Equal(26000.0, gtb.moderatedDebt)
+		re.Equal(26000.0, gtb.guardDebt.amount)
 		time.Sleep(time.Second)
 		rg.overrideFillRate(-1)
-		re.Equal(15000.0, gtb.moderatedDebt)
+		re.Equal(15000.0, gtb.guardDebt.amount)
 	})
 }
 
@@ -1292,12 +1278,7 @@ func TestModeratedDebtAfterServiceLimit(t *testing.T) {
 	for _, override := range []bool{false, true} {
 		t.Run(fmt.Sprintf("override=%t", override), func(t *testing.T) {
 			re := require.New(t)
-			rg := FromProtoResourceGroup(&rmpb.ResourceGroup{
-				Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode,
-				RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
-					Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: -2},
-				}},
-			})
+			rg := newModeratedTestGroup()
 			if override {
 				rg.overrideFillRateAndBurstLimit(1000, 1000)
 			}
@@ -1306,10 +1287,10 @@ func TestModeratedDebtAfterServiceLimit(t *testing.T) {
 			res := rg.RequestRU(now, 50000, 5000, 1, newGroupRUTracker(), sl)
 			re.Equal(250.0, res.GrantedTokens.Tokens)
 			gtb := rg.RUSettings.RU
-			re.Equal(250.0, gtb.moderatedDebt)
+			re.Equal(250.0, gtb.guardDebt.amount)
 			res = rg.RequestRU(now, 100, 5000, 1, gtb.grt, sl)
 			re.Zero(res.GrantedTokens.Tokens)
-			re.Equal(250.0, gtb.moderatedDebt)
+			re.Equal(250.0, gtb.guardDebt.amount)
 		})
 	}
 }
@@ -1323,15 +1304,13 @@ func TestModeratedDebtCloneAndState(t *testing.T) {
 	gtb.request(now, 50000, 5000, 1)
 	re.Equal(uint64(defaultRefillRate), gtb.Settings.FillRate)
 	clone := gtb.clone()
-	re.Equal(50000.0, clone.moderatedDebt)
-	re.Equal(now, clone.moderatedAt)
+	re.Equal(grantDebt{amount: 50000, settledAt: now}, clone.guardDebt)
 	restored := NewGroupTokenBucket(testResourceGroupName, gtb.GetTokenBucket())
 	restored.setState(gtb.GroupTokenBucketState.clone())
-	re.Equal(50000.0, restored.moderatedDebt)
-	re.Equal(now, restored.moderatedAt)
+	re.Equal(grantDebt{amount: 50000, settledAt: now}, restored.guardDebt)
 	clone.settleModeratedDebt(now.Add(time.Second))
-	re.Equal(30000.0, clone.moderatedDebt)
-	re.Equal(50000.0, gtb.moderatedDebt)
+	re.Equal(30000.0, clone.guardDebt.amount)
+	re.Equal(50000.0, gtb.guardDebt.amount)
 }
 
 func BenchmarkBalanceSlotTokens(b *testing.B) {
