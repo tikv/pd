@@ -247,8 +247,11 @@ func (s *evictStoppingStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerC
 		return
 	}
 	cluster.StoppingStoreRecovered(evictStoppingStore)
-	// Reset the stopping store evicted status metric.
 	storeIDStr := strconv.FormatUint(evictStoppingStore, 10)
+	if store := cluster.GetStore(evictStoppingStore); store == nil || store.IsRemoved() {
+		evictedStoppingStoreStatusGauge.DeleteLabelValues(storeIDStr)
+		return
+	}
 	evictedStoppingStoreStatusGauge.WithLabelValues(storeIDStr).Set(0)
 }
 
