@@ -23,7 +23,7 @@ import (
 type RegionStatInformer interface {
 	GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *HotPeerStat
 	IsRegionHot(region *core.RegionInfo) bool
-	AllowsLeaderReturn(region *core.RegionInfo, degree int) bool
+	LeaderReturnEligibility(regions []*core.RegionInfo, degree int) []bool
 	// GetHotPeerStats return the read or write statistics for hot regions.
 	// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 	// The result only includes peers that are hot enough.

@@ -274,9 +274,9 @@ func (c *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return c.hotStat.IsRegionHot(region, c.persistConfig.GetHotRegionCacheHitsThreshold())
 }
 
-// AllowsLeaderReturn checks whether a voluntary recovery move may use this Region.
-func (c *Cluster) AllowsLeaderReturn(region *core.RegionInfo, degree int) bool {
-	return c.hotStat.AllowsLeaderReturn(region, degree)
+// LeaderReturnEligibility checks which Regions a voluntary recovery move may use.
+func (c *Cluster) LeaderReturnEligibility(regions []*core.RegionInfo, degree int) []bool {
+	return c.hotStat.LeaderReturnEligibility(regions, degree)
 }
 
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.

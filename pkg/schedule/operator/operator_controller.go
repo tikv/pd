@@ -485,7 +485,7 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 			operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
 			return false, EpochNotMatch
 		}
-		if oldi, ok := oc.operators.Load(op.RegionID()); ok && oldi.(*Operator) != nil && !isHigherPriorityOperator(op, oldi.(*Operator)) {
+		if oldi, ok := oc.operators.Load(op.RegionID()); ok && oldi.(*Operator) != nil && op.GetPriorityLevel() <= oldi.(*Operator).GetPriorityLevel() {
 			old := oldi.(*Operator)
 			log.Debug("already have operator, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()),
@@ -545,11 +545,6 @@ func (oc *Controller) checkOperatorLightly(op *Operator) (*core.RegionInfo, Canc
 	return region, ""
 }
 
-func isHigherPriorityOperator(new, old *Operator) bool {
-	// A voluntary change to an urgent eviction must yield to an existing hot move.
-	return new.GetPriorityLevel() > old.GetPriorityLevel() && (new.recovery == nil || old.Kind()&OpHotRegion == 0)
-}
-
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
 
@@ -557,7 +552,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 	if loaded {
 		// If there is an old operator and it has lower priority, replace it
 		oldOp := old.(*Operator)
-		if !isHigherPriorityOperator(op, oldOp) {
+		if op.GetPriorityLevel() <= oldOp.GetPriorityLevel() {
 			log.Debug("operator already exists with higher or equal priority",
 				zap.Uint64("region-id", regionID),
 				zap.Reflect("old", oldOp),

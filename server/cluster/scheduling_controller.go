@@ -324,9 +324,9 @@ func (sc *schedulingController) IsRegionHot(region *core.RegionInfo) bool {
 	return sc.hotStat.IsRegionHot(region, sc.opt.GetHotRegionCacheHitsThreshold())
 }
 
-// AllowsLeaderReturn checks whether a voluntary recovery move may use this Region.
-func (sc *schedulingController) AllowsLeaderReturn(region *core.RegionInfo, degree int) bool {
-	return sc.hotStat.AllowsLeaderReturn(region, degree)
+// LeaderReturnEligibility checks which Regions a voluntary recovery move may use.
+func (sc *schedulingController) LeaderReturnEligibility(regions []*core.RegionInfo, degree int) []bool {
+	return sc.hotStat.LeaderReturnEligibility(regions, degree)
 }
 
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.

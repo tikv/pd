@@ -95,7 +95,8 @@ type RegionInfo struct {
 	// todo: keep it compatible with previous design, we can remove it later.
 	reportBuckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
-	source RegionSource
+	source          RegionSource
+	invalidReadFlow bool // TiKV supplied an impossible counter that was normalized to zero.
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
 	ref atomic.Int32
 	// bucketMeta is used to store the bucket meta reported by tikv.
@@ -279,6 +280,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		region.writtenBytes = 0
 	}
 	if region.readKeys >= ImpossibleFlowSize || region.readBytes >= ImpossibleFlowSize {
+		region.invalidReadFlow = true
 		region.readKeys = 0
 		region.readBytes = 0
 	}
@@ -343,6 +345,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		writtenKeys:               r.writtenKeys,
 		readBytes:                 r.readBytes,
 		readKeys:                  r.readKeys,
+		invalidReadFlow:           r.invalidReadFlow,
 		approximateSize:           r.approximateSize,
 		approximateKvSize:         r.approximateKvSize,
 		approximateIAKvSize:       r.approximateIAKvSize,
@@ -811,11 +814,23 @@ func (r *RegionInfo) GetKeysRead() uint64 {
 // idle interval is distinct from a missing measurement.
 func (r *RegionInfo) ReadKeysPerSecond() (float64, bool) {
 	i := r.GetInterval()
-	span := i.GetEndTimestamp() - i.GetStartTimestamp()
+	start, end := i.GetStartTimestamp(), i.GetEndTimestamp()
+	if r.invalidReadFlow || start == 0 || end <= start {
+		return 0, false
+	}
+	span := end - start
 	if span < statsReportMinInterval || span > statsReportMaxInterval {
 		return 0, false
 	}
 	return float64(r.GetKeysRead()) / float64(span), true
+}
+
+// ReportedIdleOverLongInterval recognizes an actual zero counter on a Leader's
+// first heartbeat after an extended period as follower.
+func (r *RegionInfo) ReportedIdleOverLongInterval() bool {
+	i := r.GetInterval()
+	start, end := i.GetStartTimestamp(), i.GetEndTimestamp()
+	return !r.invalidReadFlow && r.readKeys == 0 && start > 0 && end > start && end-start > statsReportMaxInterval
 }
 
 // WithinRanges reports whether a scheduling range contains the entire Region.

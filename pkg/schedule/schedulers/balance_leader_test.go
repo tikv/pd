@@ -79,13 +79,24 @@ func TestBalanceLeaderReturnsPlannedEvacuation(t *testing.T) {
 	round := oc.CurrentRecoveryRound()
 	round.ID = 1
 	re.NoError(oc.UpdateRecoveryRound(round, 2, now-120))
-	r := report(tc.AddLeaderRegion(11, 2, 1), 2, 7, 2000, now-40)
-	ev, err := operator.CreateTransferLeaderOperator(types.EvictLeaderScheduler.String(), tc, r, 1, nil, operator.OpLeader)
-	re.NoError(err)
-	oc.PlanEvictions(tc, []*operator.Operator{ev})
-	re.True(oc.AddOperator(ev))
-	r = report(r, 1, 8, 2000, now-30)
-	oc.Dispatch(r, operator.DispatchFromHeartBeat, func(uint64) {})
+	// More than one page departs. The two busiest Regions fit together even
+	// when the second slot accounts for the first transfer still in flight.
+	for id := uint64(11); id < 27; id++ {
+		rate := uint64(4)
+		switch id {
+		case 11:
+			rate = 2000
+		case 12:
+			rate = 1900
+		}
+		r := report(tc.AddLeaderRegion(id, 2, 1), 2, 7, rate, now-40)
+		ev, err := operator.CreateTransferLeaderOperator(types.EvictLeaderScheduler.String(), tc, r, 1, nil, operator.OpLeader)
+		re.NoError(err)
+		oc.PlanEvictions(tc, []*operator.Operator{ev})
+		re.True(oc.AddOperator(ev))
+		r = report(r, 1, 8, rate, now-30)
+		oc.Dispatch(r, operator.DispatchFromHeartBeat, func(uint64) {})
+	}
 	store(2, now-20, 1000)
 	// Both stores have a full interval after the last confirmed transfer.
 	now += 20
@@ -94,8 +105,9 @@ func TestBalanceLeaderReturnsPlannedEvacuation(t *testing.T) {
 	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
 	re.NoError(err)
 	ops, _ := lb.Schedule(tc, false)
-	re.NotEmpty(ops)
-	re.Equal(r.GetID(), ops[0].RegionID())
+	re.GreaterOrEqual(len(ops), 2)
+	re.Equal(uint64(11), ops[0].RegionID())
+	re.Equal(uint64(12), ops[1].RegionID())
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 	re.True(oc.AddOperator(ops[0]))
 	oc.RemoveOperator(ops[0])

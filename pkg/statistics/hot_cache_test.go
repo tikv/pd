@@ -69,13 +69,14 @@ func TestLeaderReturnDefersToHotScheduling(t *testing.T) {
 	h.HotDegree = 3
 	cache.Update(h, utils.Read)
 	require.True(t, cache.IsRegionHot(r, 3))
-	require.True(t, cache.AllowsLeaderReturn(r, 3))
+	require.Equal(t, []bool{true}, cache.LeaderReturnEligibility([]*core.RegionInfo{r}, 3))
 	// A write-hot follower protects the entire Region, even when Leader reads qualify.
 	loads[utils.RegionWriteKeys] = 1e6
 	w := cache.CheckWritePeerSync(r, r.GetPeers(), loads, 60)[1]
 	w.HotDegree = 3
 	cache.Update(w, utils.Write)
-	require.False(t, cache.AllowsLeaderReturn(r, 3))
+	cold := r.Clone(core.WithNewRegionID(r.GetID() + 1))
+	require.Equal(t, []bool{true, false, true}, cache.LeaderReturnEligibility([]*core.RegionInfo{cold, r, cold}, 3))
 }
 
 func TestRegionFlowTasksMatchOriginalForAnyPeerCount(t *testing.T) {

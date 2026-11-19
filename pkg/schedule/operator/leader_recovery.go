@@ -57,10 +57,7 @@ func (d departure) stillLeads(r *core.RegionInfo) bool {
 	return r != nil && r.GetLeader().GetId() == d.peer && r.GetLeader().GetStoreId() == d.home && r.GetTerm() == d.term && r.GetRegionEpoch().GetVersion() == d.version
 }
 
-type storePair struct{ from, to uint64 }
-
-// Order each Store pair by its departing read rate; the cursor makes zero-read
-// candidates eligible on subsequent passes without building a per-restart queue.
+// Departing read rate bounds the reusable read rate from above.
 func byDirection(a, b departure) bool {
 	return cmp.Or(cmp.Compare(a.home, b.home), cmp.Compare(a.successor, b.successor), cmp.Compare(b.rate, a.rate), cmp.Compare(a.id, b.id)) < 0
 }
@@ -72,14 +69,18 @@ type leaderRecovery struct {
 	roundRecords
 }
 
+type transferSample struct {
+	rate float64
+	term uint64
+}
+
 type roundRecords struct {
-	pending  map[*Operator]float64
+	pending  map[*Operator]transferSample
 	draining map[uint64]int64
 	yielded  map[uint64]bool
 	history  map[uint64]departure
 	coldest  *btree.BTreeG[departure]
 	index    *btree.BTreeG[departure]
-	cursor   map[storePair]departure
 	recent   map[uint64]map[uint64]readBounds // Store -> last reported end -> change still possibly absent
 }
 
@@ -127,10 +128,10 @@ func (oc *Controller) UpdateRecoveryRound(round RecoveryRound, store uint64, pro
 		}
 		s.roundRecords = roundRecords{
 			draining: make(map[uint64]int64), yielded: make(map[uint64]bool),
-			history: make(map[uint64]departure), cursor: make(map[storePair]departure),
+			history: make(map[uint64]departure),
 			index:   btree.NewG(16, byDirection),
 			coldest: btree.NewG(16, func(a, b departure) bool { return cmp.Or(cmp.Compare(a.rate, b.rate), cmp.Compare(a.id, b.id)) < 0 }),
-			recent:  make(map[uint64]map[uint64]readBounds), pending: make(map[*Operator]float64),
+			recent:  make(map[uint64]map[uint64]readBounds), pending: make(map[*Operator]transferSample),
 		}
 		oc.operators.Range(func(_, v any) bool { oc.trackTransfer(v.(*Operator)); return true })
 	}
@@ -143,7 +144,6 @@ func (s *leaderRecovery) forget(id uint64) {
 		delete(s.history, id)
 		s.coldest.Delete(d)
 		s.index.Delete(d)
-		delete(s.cursor, storePair{d.successor, d.home})
 	}
 }
 
@@ -166,54 +166,67 @@ func (s *leaderRecovery) remember(d departure) {
 	s.index.ReplaceOrInsert(d)
 }
 
-// ReturnCandidates revisits a bounded slice of the recorded handovers for this
-// direction. Missing and idle samples stay in the rotation for later passes.
-func (oc *Controller) ReturnCandidates(source, target *core.StoreInfo) []*core.RegionInfo {
+// BestReturn finds the largest reusable read rate for one ordinary balance slot.
+// The default wins ties. The callback checks the scheduler's live placement and
+// admission rules and retains the operator only when it accepts a better Region.
+func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.StoreInfo, ordinary *core.RegionInfo, batch []*Operator, accept func(*core.RegionInfo) bool) *core.RegionInfo {
 	s := &oc.recovery
 	if !s.active.Load() {
-		return nil
+		return ordinary
 	}
 	s.Lock()
-	defer s.Unlock()
-	if !target.RestartedFrom(s.draining[target.GetID()]) {
-		return nil
+	if !s.active.Load() || s.index.Len() == 0 || !target.RestartedFrom(s.draining[target.GetID()]) {
+		s.Unlock()
+		return ordinary
 	}
-	pair := storePair{source.GetID(), target.GetID()}
-	cursor, continuing := s.cursor[pair]
-	if !continuing {
-		cursor = departure{home: pair.to, successor: pair.from, rate: math.Inf(1)}
+	cost := readCost(ordinary)
+	loads, ok := oc.compareReads(target, source, &recoveryChoice{extra: batch})
+	if !ok || math.IsInf(cost, 0) {
+		s.Unlock()
+		return ordinary
 	}
-	var candidates []*core.RegionInfo
-	visits := 0
-	s.index.AscendGreaterOrEqual(cursor, func(d departure) bool {
-		if d.home != pair.to || d.successor != pair.from {
+	best := 0.0
+	if d, found := s.history[ordinary.GetID()]; found && d.home == target.GetID() && d.successor == source.GetID() && d.matches(ordinary, target) {
+		best = min(d.rate, cost)
+	}
+	index := s.index.Clone()
+	s.Unlock()
+
+	type candidate struct {
+		region *core.RegionInfo
+		score  float64
+	}
+	var candidates []candidate
+	first := departure{home: target.GetID(), successor: source.GetID(), rate: math.Inf(1)}
+	index.AscendGreaterOrEqual(first, func(d departure) bool {
+		if d.home != first.home || d.successor != first.successor || d.rate <= best {
 			return false
-		}
-		if continuing && d == cursor {
-			return true
 		}
 		r := oc.cluster.GetRegion(d.id)
-		if d.rate > 0 && d.matches(r, target) {
-			if rate, ok := r.ReadKeysPerSecond(); ok && rate > 0 {
-				candidates = append(candidates, r)
-			}
+		if !d.matches(r, target) {
+			return true
 		}
-		visits++
-		if visits == 10 {
-			s.cursor[pair] = d
-			return false
+		rate, valid := r.ReadKeysPerSecond()
+		score := min(d.rate, rate)
+		if valid && score > best && loads.allows(cost, rate, nil) {
+			candidates = append(candidates, candidate{r, score})
 		}
 		return true
 	})
-	if visits < 10 {
-		delete(s.cursor, pair)
+	if len(candidates) == 0 {
+		return ordinary
 	}
-	slices.SortStableFunc(candidates, func(a, b *core.RegionInfo) int {
-		ar, _ := a.ReadKeysPerSecond()
-		br, _ := b.ReadKeysPerSecond()
-		return cmp.Compare(min(s.history[b.GetID()].rate, br), min(s.history[a.GetID()].rate, ar))
-	})
-	return candidates
+	slices.SortStableFunc(candidates, func(a, b candidate) int { return cmp.Compare(b.score, a.score) })
+	regions := make([]*core.RegionInfo, len(candidates))
+	for i, candidate := range candidates {
+		regions[i] = candidate.region
+	}
+	for i, allowed := range c.LeaderReturnEligibility(regions, c.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()) {
+		if allowed && accept(regions[i]) {
+			return regions[i]
+		}
+	}
+	return ordinary
 }
 
 type readBounds struct{ low, high float64 }
@@ -272,7 +285,8 @@ type recoveryChoice struct {
 // the signed ranges from transfers a Store's measurement may not yet include.
 func (oc *Controller) loadBounds(st *core.StoreInfo, p *recoveryChoice) (readBounds, bool) {
 	stats := st.ReadStats()
-	if stats == nil || st.GetLeaderWeight() <= 0 {
+	w := st.GetLeaderWeight()
+	if stats == nil || !(w > 0 && w <= math.MaxFloat64) {
 		return readBounds{}, false
 	}
 	i := stats.GetInterval()
@@ -296,19 +310,22 @@ func (oc *Controller) loadBounds(st *core.StoreInfo, p *recoveryChoice) (readBou
 			}
 		})
 	}
-	for op, rate := range oc.recovery.pending {
-		add(op, rate)
+	for op, sample := range oc.recovery.pending {
+		add(op, sample.rate)
 	}
 	for _, op := range p.extra {
 		if _, tracked := oc.recovery.pending[op]; !tracked && op.Status() == CREATED {
 			add(op, 0)
 		}
 	}
-	w := st.GetLeaderWeight()
-	return readBounds{max(0, b.low) / w, b.high / w}, !math.IsInf(b.low, 0) && !math.IsInf(b.high, 0)
+	if math.IsInf(b.low, 0) || math.IsInf(b.high, 0) {
+		return readBounds{}, false
+	}
+	b = readBounds{max(0, b.low) / w, b.high / w}
+	return b, b.low <= math.MaxFloat64 && b.high <= math.MaxFloat64
 }
 
-func eligibleReturn(c sche.SchedulerCluster, r *core.RegionInfo, to uint64) bool {
+func eligibleReturnTarget(c sche.SchedulerCluster, r *core.RegionInfo, to uint64) bool {
 	if r == nil || len(r.GetDownPeers()) != 0 || len(r.GetPendingPeers()) != 0 {
 		return false
 	}
@@ -316,8 +333,15 @@ func eligibleReturn(c sche.SchedulerCluster, r *core.RegionInfo, to uint64) bool
 		return false
 	}
 	peer := r.GetStoreVoter(to)
-	return peer != nil && !peer.GetIsWitness() && IsAllowedLeaderTarget(c, r, peer) &&
-		c.AllowsLeaderReturn(r, c.GetSchedulerConfig().GetHotRegionCacheHitsThreshold())
+	return peer != nil && !peer.GetIsWitness() && IsAllowedLeaderTarget(c, r, peer)
+}
+
+func eligibleReturn(c sche.SchedulerCluster, r *core.RegionInfo, to uint64) bool {
+	if !eligibleReturnTarget(c, r, to) {
+		return false
+	}
+	mask := c.LeaderReturnEligibility([]*core.RegionInfo{r}, c.GetSchedulerConfig().GetHotRegionCacheHitsThreshold())
+	return len(mask) == 1 && mask[0]
 }
 
 // fits compares the same source/target pair under the default and proposed
@@ -348,7 +372,7 @@ func (oc *Controller) fits(p *recoveryChoice) bool {
 	}
 	if p.partner != nil {
 		for _, id := range []uint64{p.home.id, p.ordinary} {
-			if op := oc.GetOperator(id); op != nil && op.Kind()&OpHotRegion != 0 {
+			if op := oc.GetOperator(id); op != nil && op.recovery != p {
 				return false
 			}
 		}
@@ -360,36 +384,64 @@ func (oc *Controller) fits(p *recoveryChoice) bool {
 	if p.partner != nil && !p.sent[1] && !p.partner.stillLeads(a) {
 		return false
 	}
+	loads, ok := oc.compareReads(home, other, p)
+	return ok && loads.allows(aRate, bRate, p)
+}
+
+// The same two Store bounds apply to every candidate for one balance slot.
+// They are taken again against live operators before first dispatch.
+type readComparison struct {
+	lo, hi, homeWeight, otherWeight float64
+	homeYielded, otherYielded       bool
+}
+
+func (oc *Controller) compareReads(home, other *core.StoreInfo, p *recoveryChoice) (readComparison, bool) {
 	h, ok := oc.loadBounds(home, p)
 	if !ok {
-		return false
+		return readComparison{}, false
 	}
 	o, ok := oc.loadBounds(other, p)
 	if !ok {
-		return false
+		return readComparison{}, false
 	}
-	delta := bRate - aRate
-	if s.yielded[home.GetID()] && delta > 0 || s.yielded[other.GetID()] && delta < 0 {
-		return false
-	}
-	scale := 1/home.GetLeaderWeight() + 1/other.GetLeaderWeight()
-	ordinary, candidate := aRate*scale, bRate*scale
-	lo, hi := o.low-h.high, o.high-h.low
-	if p.partner != nil {
-		// Either half may already appear in the Store samples when its sibling
-		// reaches first dispatch. Bound the original load in both cases.
+	return readComparison{
+		lo: o.low - h.high, hi: o.high - h.low,
+		homeWeight: home.GetLeaderWeight(), otherWeight: other.GetLeaderWeight(),
+		homeYielded: oc.recovery.yielded[home.GetID()], otherYielded: oc.recovery.yielded[other.GetID()],
+	}, true
+}
+
+func (c readComparison) allows(aRate, bRate float64, p *recoveryChoice) bool {
+	lo, hi := c.lo, c.hi
+	// Two independently issued Raft commands may finish in either order, and
+	// one may fail. Compare the same completed legs under both allocations.
+	if p != nil && p.partner != nil {
+		if c.homeYielded && bRate > 0 || c.otherYielded && aRate > 0 {
+			return false
+		}
+		bHome, bOther := bRate/c.homeWeight, bRate/c.otherWeight
+		aHome, aOther := aRate/c.homeWeight, aRate/c.otherWeight
 		if p.sent[0] {
-			hi += bRate / home.GetLeaderWeight()
+			hi += bHome
 		}
 		if p.sent[1] {
-			lo -= aRate / other.GetLeaderWeight()
+			lo -= aOther
 		}
-		ordinary = aRate/home.GetLeaderWeight() - bRate/other.GetLeaderWeight()
-		candidate = bRate/home.GetLeaderWeight() - aRate/other.GetLeaderWeight()
+		return noWiderGap(lo, hi, -bOther, bHome) && noWiderGap(lo, hi, aHome, -aOther) &&
+			noWiderGap(lo, hi, aHome-bOther, bHome-aOther)
 	}
-	for _, gap := range []float64{lo, hi} {
-		after := math.Abs(gap - candidate)
-		if after > math.Abs(gap-ordinary) || p.partner == nil && after > math.Abs(gap) {
+	delta := bRate - aRate
+	if c.homeYielded && delta > 0 || c.otherYielded && delta < 0 {
+		return false
+	}
+	scale := 1/c.homeWeight + 1/c.otherWeight
+	return noWiderGap(lo, hi, aRate*scale, bRate*scale) && noWiderGap(lo, hi, 0, bRate*scale)
+}
+
+func noWiderGap(lo, hi, ordinary, candidate float64) bool {
+	for _, gap := range [...]float64{lo, hi} {
+		limit := math.Abs(gap - ordinary)
+		if !(limit <= math.MaxFloat64 && math.Abs(gap-candidate) <= limit) {
 			return false
 		}
 	}
@@ -457,8 +509,8 @@ func (oc *Controller) PlanEvictions(c sche.SchedulerCluster, ops []*Operator) {
 		}
 	}
 	s.Unlock()
-	// Start with the largest reusable working set. Bound expensive load and
-	// placement checks by the actual batch length, including multi-store drains.
+	// Try the highest reusable read rate first. Both members must be movable
+	// under the same hot-cache observation.
 	var homes []int
 	for i, op := range ops {
 		if d, ok := former[op.RegionID()]; ok && min(d.rate, op.drain.rate) > 0 {
@@ -467,12 +519,41 @@ func (oc *Controller) PlanEvictions(c sche.SchedulerCluster, ops []*Operator) {
 	}
 	volume := func(i int) float64 { return min(ops[i].drain.rate, former[ops[i].RegionID()].rate) }
 	slices.SortStableFunc(homes, func(i, j int) int { return cmp.Compare(volume(j), volume(i)) })
-	checks := len(ops)
+	if len(homes) == 0 {
+		return
+	}
+	regions := make([]*core.RegionInfo, len(ops))
+	for i, op := range ops {
+		if op.drain != nil {
+			regions[i] = oc.cluster.GetRegion(op.RegionID())
+		}
+	}
+	allowed := c.LeaderReturnEligibility(regions, c.GetSchedulerConfig().GetHotRegionCacheHitsThreshold())
+	if len(allowed) != len(ops) {
+		return
+	}
+	loads := make(map[[2]uint64]readComparison)
 	for _, i := range homes {
 		op := ops[i]
 		t, _ := primary(op)
 		d := former[op.RegionID()]
-		if t.ToStore == d.home || !slices.Contains(t.ToStores, d.home) || !eligibleReturn(c, oc.cluster.GetRegion(d.id), d.home) {
+		if !allowed[i] || t.ToStore == d.home || !slices.Contains(t.ToStores, d.home) || !eligibleReturnTarget(c, regions[i], d.home) {
+			continue
+		}
+		// All other commands in this batch might fail. If that outcome alone
+		// rules out an exchange, building its full pending plan is unnecessary.
+		pair := [2]uint64{d.home, t.ToStore}
+		base, known := loads[pair]
+		if !known {
+			s.Lock()
+			home, other := oc.cluster.GetStore(d.home), oc.cluster.GetStore(t.ToStore)
+			if home != nil && other != nil && s.active.Load() && s.ID == round {
+				base, _ = oc.compareReads(home, other, &recoveryChoice{})
+			}
+			s.Unlock()
+			loads[pair] = base
+		}
+		if base.homeWeight == 0 || base.otherWeight == 0 {
 			continue
 		}
 		for j, other := range ops {
@@ -483,14 +564,10 @@ func (oc *Controller) PlanEvictions(c sche.SchedulerCluster, ops []*Operator) {
 			if _, exists := former[other.RegionID()]; exists {
 				continue
 			}
-			if checks == 0 {
-				return
-			}
-			checks--
-			if !eligibleReturn(c, oc.cluster.GetRegion(other.RegionID()), t.ToStore) {
+			p := &recoveryChoice{round: round, cluster: c, home: d, ordinary: other.RegionID(), other: t.ToStore, partner: other.drain}
+			if !allowed[j] || !base.allows(other.drain.rate, op.drain.rate, p) || !eligibleReturnTarget(c, regions[j], t.ToStore) {
 				continue
 			}
-			p := &recoveryChoice{round: round, cluster: c, home: d, ordinary: other.RegionID(), other: t.ToStore, partner: other.drain}
 			for k, rest := range ops {
 				if k != i && k != j {
 					p.extra = append(p.extra, rest)
@@ -521,7 +598,8 @@ func (p *recoveryChoice) redirectEviction(old *Operator, to uint64) *Operator {
 	if err != nil {
 		return nil
 	}
-	op.SetPriorityLevel(old.GetPriorityLevel())
+	// A cache-directed exchange has normal Leader priority. A hot operator
+	// can therefore win regardless of which is published first.
 	op.Counters = old.Counters
 	op.recovery, op.drain = p, old.drain
 	op.SetAdditionalInfo("cache-return", "evict")
@@ -549,7 +627,12 @@ func (oc *Controller) trackTransfer(op *Operator) {
 		switch t := step.(type) {
 		case TransferLeader:
 			if _, ok := s.pending[op]; !ok {
-				s.pending[op] = readCost(oc.cluster.GetRegion(op.RegionID()))
+				r := oc.cluster.GetRegion(op.RegionID())
+				sample := transferSample{rate: readCost(r)}
+				if r != nil && r.GetLeader().GetStoreId() == t.FromStore {
+					sample.term = r.GetTerm()
+				}
+				s.pending[op] = sample
 			}
 			if op.Kind()&OpHotRegion != 0 {
 				s.yielded[t.FromStore] = true
@@ -636,7 +719,16 @@ func (oc *Controller) finishRecovery(op *Operator, r *core.RegionInfo) {
 	if r != nil && op.Status() == SUCCESS && op.steps[len(op.steps)-1].IsFinish(r) {
 		actual = r.GetLeader().GetStoreId()
 	}
-	op.leaderReadChanges(max(admitted, readCost(r)), actual, func(id uint64, delta float64) {
+	received := readCost(r)
+	if actual != 0 && len(op.steps) == 1 && r.GetTerm() > 1 && r.GetTerm()-1 == admitted.term &&
+		r.ReportedIdleOverLongInterval() && op.RegionEpoch() != nil &&
+		r.GetRegionEpoch() != nil && r.GetRegionEpoch().GetVersion() == op.RegionEpoch().GetVersion() &&
+		r.GetRegionEpoch().GetConfVer() == op.RegionEpoch().GetConfVer() {
+		// This confirmation includes time as a follower. Keep the admitted
+		// cost and settle on the actual receiver without inventing extra reads.
+		received = 0
+	}
+	op.leaderReadChanges(max(admitted.rate, received), actual, func(id uint64, delta float64) {
 		st := oc.cluster.GetStore(id)
 		if st == nil {
 			return

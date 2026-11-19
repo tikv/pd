@@ -490,25 +490,30 @@ func (s *balanceLeaderScheduler) preferFormerLeader(solver *solver, ordinary *op
 		return ordinary
 	}
 	source, original := solver.Source, solver.Region
-	regions := s.OpController.ReturnCandidates(source, solver.Target)
-	if len(regions) == 0 {
-		return ordinary
-	}
-	ranges := s.balanceRanges(solver)
-	for _, r := range filter.SelectRegions(regions, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster)) {
-		if _, exists := used[r.GetID()]; exists || !r.WithinRanges(ranges) || s.OpController.GetOperator(r.GetID()) != nil || r.GetLeader().GetStoreId() != source.GetID() {
-			continue
+	best := ordinary
+	var ranges []keyutil.KeyRange
+	var affinity filter.RegionFilter
+	solver.Region = s.OpController.BestReturn(liveCluster(solver.SchedulerCluster), source, solver.Target, original, batch, func(r *core.RegionInfo) bool {
+		if _, exists := used[r.GetID()]; exists || s.OpController.GetOperator(r.GetID()) != nil {
+			return false
 		}
-		if r.GetID() == ordinary.RegionID() {
-			break
+		if affinity == nil {
+			ranges = s.balanceRanges(solver)
+			affinity = filter.NewAffinityFilter(solver.SchedulerCluster)
+		}
+		if !r.WithinRanges(ranges) || !affinity.Select(r).IsOK() {
+			return false
 		}
 		solver.Region = r
-		if op := s.transferLeaderInRegion(solver, nil, true); op != nil && s.OpController.PreferReturn(liveCluster(solver.SchedulerCluster), op, ordinary.RegionID(), batch) {
-			return op
+		op := s.transferLeaderInRegion(solver, nil, true)
+		if op == nil || !s.OpController.PreferReturn(liveCluster(solver.SchedulerCluster), op, ordinary.RegionID(), batch) {
+			return false
 		}
-	}
-	solver.Source, solver.Region = source, original
-	return ordinary
+		best = op
+		return true
+	})
+	solver.Source = source
+	return best
 }
 
 // transferLeaderIn samples a healthy follower on the target store.

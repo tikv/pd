@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"context"
+	"slices"
 
 	"github.com/smallnest/chanx"
 
@@ -213,24 +214,43 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	return false
 }
 
-// AllowsLeaderReturn checks both caches before voluntarily changing a planned
-// transfer. Read heat is sampled on Store heartbeats, as in GetHotPeerStats.
-func (w *HotCache) AllowsLeaderReturn(region *core.RegionInfo, degree int) bool {
-	read, write := make(chan bool, 1), make(chan bool, 1)
+// LeaderReturnEligibility checks read and write heat for a scheduling decision
+// in one task per cache. A missing result means a cache could not be queried.
+func (w *HotCache) LeaderReturnEligibility(regions []*core.RegionInfo, degree int) []bool {
+	if len(regions) == 0 {
+		return nil
+	}
+	// A queued task can outlive a failed submission to the other cache.
+	regions = slices.Clone(regions)
+	read, write := make([]bool, len(regions)), make([]bool, len(regions))
+	readDone, writeDone := make(chan bool, 1), make(chan bool, 1)
 	if !w.CheckReadAsync(func(c *HotPeerCache) {
-		for _, p := range region.GetPeers() {
-			h := c.getHotPeerStat(region.GetID(), p.GetStoreId())
-			if h != nil && (h.HotDegree >= utils.Read.HotDegreeThreshold(degree) ||
-				h.IsNeedCoolDownTransferLeader(degree, utils.Read)) {
-				read <- false
-				return
+		for i, r := range regions {
+			if r == nil {
+				continue
+			}
+			read[i] = true
+			for _, p := range r.GetPeers() {
+				h := c.getHotPeerStat(r.GetID(), p.GetStoreId())
+				if h != nil && (h.HotDegree >= utils.Read.HotDegreeThreshold(degree) || h.IsNeedCoolDownTransferLeader(degree, utils.Read)) {
+					read[i] = false
+					break
+				}
 			}
 		}
-		read <- true
-	}) || !w.CheckWriteAsync(func(c *HotPeerCache) { write <- !c.isRegionHotWithAnyPeers(region, degree) }) {
-		return false
+		readDone <- true
+	}) || !w.CheckWriteAsync(func(c *HotPeerCache) {
+		for i, r := range regions {
+			write[i] = r != nil && !c.isRegionHotWithAnyPeers(r, degree)
+		}
+		writeDone <- true
+	}) || !waitRet(w.ctx, readDone) || !waitRet(w.ctx, writeDone) {
+		return nil
 	}
-	return waitRet(w.ctx, read) && waitRet(w.ctx, write)
+	for i := range read {
+		read[i] = read[i] && write[i]
+	}
+	return read
 }
 
 func waitRet(ctx context.Context, ret chan bool) bool {

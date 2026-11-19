@@ -15,6 +15,8 @@
 package operator
 
 import (
+	"math"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -94,10 +96,10 @@ type gatedHeat struct {
 	checking, resume chan struct{}
 }
 
-func (g *gatedHeat) AllowsLeaderReturn(r *core.RegionInfo, degree int) bool {
+func (g *gatedHeat) LeaderReturnEligibility(r []*core.RegionInfo, degree int) []bool {
 	close(g.checking)
 	<-g.resume
-	return g.SchedulerCluster.AllowsLeaderReturn(r, degree)
+	return g.SchedulerCluster.LeaderReturnEligibility(r, degree)
 }
 
 func TestRecoveryRoundFencesRetriesAndDispatch(t *testing.T) {
@@ -144,9 +146,9 @@ func TestReturnRechecksSamplesAndIncomingHotOperator(t *testing.T) {
 	x.store(1, x.now-17, 40)
 	x.store(8, x.now-135, 100)
 	x.report(1, 8, 8, 0, x.now)
-	require.Empty(t, x.ReturnCandidates(x.cluster.GetStore(8), x.cluster.GetStore(1)))
+	require.Same(t, ordinary, x.BestReturn(x.tc, x.cluster.GetStore(8), x.cluster.GetStore(1), ordinary, nil, func(*core.RegionInfo) bool { return true }))
 	r = x.report(1, 8, 8, 40, x.now)
-	require.Equal(t, []*core.RegionInfo{r}, x.ReturnCandidates(x.cluster.GetStore(8), x.cluster.GetStore(1)))
+	require.Same(t, r, x.BestReturn(x.tc, x.cluster.GetStore(8), x.cluster.GetStore(1), ordinary, nil, func(*core.RegionInfo) bool { return true }))
 	require.True(t, x.PreferReturn(x.tc, op, ordinary.GetID(), nil))
 	l := x.tc.GetRegionLabeler()
 	require.NoError(t, l.SetLabelRule(&labeler.LabelRule{ID: "deny-return", RuleType: labeler.KeyRange,
@@ -162,7 +164,7 @@ func TestReturnRechecksSamplesAndIncomingHotOperator(t *testing.T) {
 	require.False(t, x.canSendRecovery(op, x.cluster.GetRegion(op.RegionID())), "multi-step incoming Leader consumes receiver headroom")
 	x.finishRecovery(in, nil)
 	require.True(t, x.canSendRecovery(op, x.cluster.GetRegion(op.RegionID())))
-	require.Empty(t, x.ReturnCandidates(x.cluster.GetStore(8), x.cluster.GetStore(1)))
+	require.Same(t, ordinary, x.BestReturn(x.tc, x.cluster.GetStore(8), x.cluster.GetStore(1), ordinary, nil, func(*core.RegionInfo) bool { return true }))
 }
 
 func TestEvictionSwapsWithinBatchAndFollowsActualReceiver(t *testing.T) {
@@ -190,14 +192,24 @@ func TestEvictionSwapsWithinBatchAndFollowsActualReceiver(t *testing.T) {
 		return ops
 	}
 	hot := transfer(r, "hot", 8, OpHotRegion)
+	hot.SetPriorityLevel(constant.High)
 	x.operators.Store(r.GetID(), hot)
 	ops := batch()
 	require.Nil(t, ops[0].recovery, "keep ordinary urgent eviction while hot scheduling owns the Region")
-	require.True(t, isHigherPriorityOperator(ops[0], hot), "the mandatory drain keeps its original priority")
+	admit, _ := x.checkAddOperator(false, ops[0])
+	require.True(t, admit, "the mandatory drain keeps its original priority")
 	x.operators.Delete(r.GetID())
+	require.Nil(t, batch()[0].recovery, "if only the companion succeeds it adds reads to the Store shedding heat")
+	other = x.report(2, 12, 3, 0, x.now)
 	ops = batch()
 	require.NotNil(t, ops[0].recovery)
-	require.False(t, isHigherPriorityOperator(ops[0], hot), "a hot move arriving after selection keeps its operator")
+	x.operators.Store(r.GetID(), hot)
+	admit, _ = x.checkAddOperator(false, ops[0])
+	require.False(t, admit, "a recovery exchange yields to an already published hot move")
+	x.operators.Store(r.GetID(), ops[0])
+	admit, _ = x.checkAddOperator(false, hot)
+	require.True(t, admit, "a later hot move can replace the voluntary exchange")
+	x.operators.Delete(r.GetID())
 	a, _ := primary(ops[0])
 	b, _ := primary(ops[1])
 	require.Equal(t, uint64(1), a.ToStore)
@@ -213,5 +225,124 @@ func TestEvictionSwapsWithinBatchAndFollowsActualReceiver(t *testing.T) {
 	require.True(t, x.canSendRecovery(ops[0], r))
 	x.finish(ops[0], x.report(1, 1, 9, 40, x.now))
 	x.store(12, x.now-20, 0)
-	require.Empty(t, x.ReturnCandidates(x.cluster.GetStore(1), x.cluster.GetStore(12)), "temporary host must not pull the same Region back")
+	require.Same(t, other, x.BestReturn(x.tc, x.cluster.GetStore(1), x.cluster.GetStore(12), other, nil, func(*core.RegionInfo) bool { return true }), "temporary host must not pull the same Region back")
+}
+
+func TestEmptyHandoffReportPreservesAdmissionCost(t *testing.T) {
+	for _, tt := range []struct {
+		name                                            string
+		admitted, received                              uint64
+		senderInterval, receiverInterval, version, term uint64
+		allow                                           bool
+	}{
+		{"cold transfer after a long time as follower", 0, 0, 10, 493, 1, 8, true},
+		{"retain known cost", 1, 0, 10, 301, 1, 8, true},
+		{"retain high cost", 40, 0, 10, 301, 1, 8, false},
+		{"unknown admission", 0, 0, 0, 301, 1, 8, false},
+		{"split during handoff", 1, 0, 10, 301, 2, 8, false},
+		{"another election intervened", 1, 0, 10, 301, 1, 9, false},
+		{"unmeasured nonzero reads", 1, 1, 10, 301, 1, 8, false},
+		{"missing reporting interval", 1, 0, 10, 0, 1, 8, false},
+		{"heartbeat too short", 1, 0, 10, 1, 1, 8, false},
+		{"invalid counter on new leader", 1, core.ImpossibleFlowSize, 10, 493, 1, 8, false},
+		{"new leader reports a burst", 1, 400, 10, 10, 1, 8, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			x := newRecoveryTest(t)
+			x.drain(1)
+			home := x.evacuate(1, 8, 40)
+			x.store(1, x.now-20, 40)
+			x.store(8, x.now-120, 100)
+			ordinary := x.report(2, 8, 7, 10, x.now)
+			canReturn := func() bool {
+				return x.PreferReturn(x.tc, transfer(home, "balance", 1, OpLeader), ordinary.GetID(), nil)
+			}
+			require.True(t, canReturn())
+			end := uint64(x.now)
+			sender := x.report(731, 8, 7, tt.admitted, x.now).Clone(core.SetReportInterval(end-tt.senderInterval, end))
+			x.cluster.CheckAndPutRegion(sender)
+			op := transfer(sender, "balance", 12, OpLeader)
+			x.observeRecovery(op)
+			require.True(t, op.Start())
+			metadata := sender.Clone(core.SetRegionVersion(tt.version))
+			receiver := core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+				Region: metadata.GetMeta(), Leader: metadata.GetStorePeer(12), Term: tt.term,
+				KeysRead: tt.received, Interval: &pdpb.TimeInterval{StartTimestamp: end - tt.receiverInterval, EndTimestamp: end},
+			}, 0)
+			require.Nil(t, op.Check(receiver))
+			x.finishRecovery(op, receiver)
+			require.Equal(t, tt.allow, canReturn())
+		})
+	}
+}
+
+// Compare the indexed search with scoring every candidate independently. Both the
+// hottest original and the hottest current Region may be inadmissible.
+func TestBestReturnMatchesExhaustiveSelection(t *testing.T) {
+	x := newRecoveryTest(t)
+	x.drain(1)
+	rng := rand.New(rand.NewPCG(731, 2975))
+	const count = 32
+	origin := make([]uint64, count)
+	for i := range origin {
+		origin[i] = rng.Uint64N(100) + 1
+		x.evacuate(uint64(i+1), 8, origin[i])
+	}
+	restart, sourceStart := x.now-20, x.now-120
+	x.now += 20
+	weights := []float64{0.25, 0.5, 1, 2, 4}
+	for trial := range 512 {
+		sourceRate, homeRate := rng.Uint64N(400), rng.Uint64N(400)
+		x.store(8, sourceStart, sourceRate)
+		x.store(1, restart, homeRate)
+		sw, hw := weights[rng.IntN(len(weights))], weights[rng.IntN(len(weights))]
+		source := x.cluster.GetStore(8).Clone(core.SetLeaderWeight(sw))
+		home := x.cluster.GetStore(1).Clone(core.SetLeaderWeight(hw))
+		x.cluster.PutStore(source)
+		x.cluster.PutStore(home)
+		var current [count]uint64
+		var veto [count]bool
+		for i := range current {
+			current[i] = rng.Uint64N(150)
+			veto[i] = rng.IntN(3) == 0
+			x.report(uint64(i+1), 8, 8, current[i], x.now)
+		}
+		ordinary := x.report(100, 8, 5, rng.Uint64N(100), x.now)
+		var best uint64
+		if trial%2 == 0 {
+			i := rng.IntN(count)
+			ordinary = x.cluster.GetRegion(uint64(i + 1))
+			best = min(origin[i], current[i])
+		}
+		pending := rng.Uint64N(80)
+		incoming := transfer(x.report(101, 12, 5, pending, x.now), "balance", 1, OpLeader)
+		defaultRate, _ := ordinary.ReadKeysPerSecond()
+		homeYield, sourceYield := trial%5 == 0, trial%7 == 0
+		x.recovery.yielded[1], x.recovery.yielded[8] = homeYield, sourceYield
+		for i, n := range current {
+			if veto[i] || n == 0 || homeYield && float64(n) > defaultRate || sourceYield && float64(n) < defaultRate {
+				continue
+			}
+			allowed := true
+			for _, extra := range []uint64{0, pending} {
+				h, s := float64(homeRate+extra), float64(sourceRate)
+				gap := func(moved float64) float64 { return math.Abs((s-moved)/sw - (h+moved)/hw) }
+				if gap(float64(n)) > min(gap(0), gap(defaultRate)) {
+					allowed = false
+				}
+			}
+			if allowed {
+				best = max(best, min(origin[i], n))
+			}
+		}
+		got := x.BestReturn(x.tc, source, home, ordinary, []*Operator{incoming}, func(r *core.RegionInfo) bool { return !veto[r.GetID()-1] })
+		var score uint64
+		if id := got.GetID(); id <= count {
+			score = min(origin[id-1], current[id-1])
+		}
+		require.Equal(t, best, score, "trial %d", trial)
+		if id := ordinary.GetID(); id <= count && min(origin[id-1], current[id-1]) == best {
+			require.Same(t, ordinary, got, "keep an equally good default")
+		}
+	}
 }
