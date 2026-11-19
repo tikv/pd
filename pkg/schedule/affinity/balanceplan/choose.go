@@ -80,7 +80,7 @@ func (p *planner) leaderCapable(g *groupState, r *Rule, s int) bool {
 	return r.Role != RoleFollower && p.canLead(g, s)
 }
 
-// solution is a complete target of one group.
+// solution is a complete target of one group. rules[i] labels voters[i].
 type solution struct {
 	ok            bool
 	c             cost
@@ -103,7 +103,7 @@ type ruleSearch struct {
 }
 
 func (rs *ruleSearch) done() bool {
-	if rs.nodes >= maxSearchNodes || rs.steps >= maxAssignSteps || rs.nodes > 0 && rs.p.stopped() {
+	if rs.nodes >= maxSearchNodes || rs.steps >= maxAssignSteps || rs.p.stopped() {
 		rs.limited = true
 		return true
 	}
@@ -171,7 +171,8 @@ func (p *planner) choose(g *groupState) (voters, rules []int, leader int, ok boo
 
 // assignForced calls f with the assignments of the forced stores to rules
 // that accept them, within each rule's count, until the search is cut off.
-// Every store tries its current rule first.
+// Every store tries its current rule first. The callback borrows must until
+// it returns, when backtracking can reuse the per-rule slices.
 func (p *planner) assignForced(g *groupState, forced []int, must [][]int, rs *ruleSearch, f func([][]int) bool) bool {
 	rs.steps++
 	if len(forced) == 0 {
@@ -187,12 +188,14 @@ func (p *planner) assignForced(g *groupState, forced []int, must [][]int, rs *ru
 		if rs.done() {
 			return false
 		}
+		p.work++
 		if len(must[ri]) >= g.Rules[ri].Count || !p.accepts(g, ri, s) {
 			continue
 		}
-		next := slices.Clone(must)
-		next[ri] = append(slices.Clone(must[ri]), s)
-		if p.assignForced(g, forced[1:], next, rs, f) {
+		must[ri] = append(must[ri], s)
+		ok := p.assignForced(g, forced[1:], must, rs, f)
+		must[ri] = must[ri][:len(must[ri])-1]
+		if ok {
 			return true
 		}
 	}
@@ -406,6 +409,33 @@ func (p *planner) assignTarget(g *groupState, voters []int, rs *ruleSearch) solu
 	// Charge one repair attempt to the caller; its internal assignments cannot
 	// exhaust the step budget needed to reach subsequent repair candidates.
 	rs.steps++
+	if len(g.Rules) > 1 {
+		// Try the least flexible voters first. A voter with no matching rule
+		// rules out the whole target before any assignments are enumerated.
+		type voterRules struct{ store, count int }
+		order := make([]voterRules, len(voters))
+		for i, s := range voters {
+			order[i].store = s
+			for ri := range g.Rules {
+				if p.stopped() {
+					p.placementLimited = true
+					return solution{}
+				}
+				p.work++
+				if p.accepts(g, ri, s) {
+					order[i].count++
+				}
+			}
+			if order[i].count == 0 {
+				return solution{}
+			}
+		}
+		slices.SortStableFunc(order, func(a, b voterRules) int { return cmp.Compare(a.count, b.count) })
+		voters = make([]int, len(order))
+		for i, v := range order {
+			voters[i] = v.store
+		}
+	}
 	local := &ruleSearch{p: p}
 	var best solution
 	assignments := 0

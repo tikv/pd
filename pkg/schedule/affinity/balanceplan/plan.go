@@ -53,9 +53,9 @@ type Rule struct {
 	// labels. Values are interned per level and every path has equal length.
 	// A rule without location labels uses empty paths.
 	Location [][]int32
-	// IsolationDepth is the 1-based depth in Location requiring strict
-	// isolation (at most one peer per domain at Location[s][IsolationDepth-1]),
-	// or 0 when the rule has no hard isolation level.
+	// IsolationDepth is the 1-based prefix length in Location requiring strict
+	// isolation (at most one peer per Location[s][:IsolationDepth] prefix), or
+	// 0 when the rule has no hard isolation level.
 	IsolationDepth int
 
 	// Derived by the planner on its private copy.
@@ -65,7 +65,8 @@ type Rule struct {
 }
 
 // Group is one group whose target may change. Voters/Leader is its current
-// target; RuleOf[i] is the rule index that Voters[i] fits.
+// target. RuleOf[i] is the rule index that Voters[i] fits. An empty RuleOf
+// assigns every voter to rule 0.
 type Group struct {
 	Rules  []*Rule
 	Voters []int
@@ -132,9 +133,9 @@ type Input struct {
 // Options bounds the search. Zero values select the defaults.
 type Options struct {
 	Sweeps int
-	// WorkBudget limits candidate, reversion and leader transfer load entries
-	// processed by the whole plan, including entries restored after a
-	// rejected reversion.
+	// WorkBudget limits candidate scans, voter-to-rule assignment attempts,
+	// and load entries processed by reversions and leader transfers, including
+	// entries restored after a rejected reversion.
 	WorkBudget int64
 	Seed       uint64
 	// Cancel is checked before every group visit, reversion trial and round
@@ -268,12 +269,12 @@ func (p *planner) expand(voters [][]int, leaders []int) ([][]int, []int) {
 	return outV, outL
 }
 
-// validRule reports whether the planner can model r exactly.
+// validRule checks the rule itself. supported checks how its voters fit.
 func validRule(r *Rule, stores int) bool {
 	if r == nil || r.Count <= 0 || r.Count > maxCount || r.depth() > maxDepth {
 		return false
 	}
-	if r.Role > RoleFollower || r.Role == RoleLeader && r.Count != 1 {
+	if r.Role > RoleFollower {
 		return false
 	}
 	if r.IsolationDepth < 0 || r.IsolationDepth > r.depth() {
@@ -313,22 +314,21 @@ func supported(g *Group, stores int, valid func(*Rule) bool) bool {
 		seen[s] = true
 		counts[ri]++
 	}
-	leaders := 0
 	for ri, r := range g.Rules {
 		if !valid(r) || counts[ri] != r.Count {
 			return false
 		}
-		if r.Role == RoleLeader {
-			leaders++
-			if leaders > 1 {
-				return false
-			}
-		}
 		for k, s := range g.Voters {
-			if ruleIndex(g, k) == ri && (s == g.Leader && r.Role == RoleFollower || s != g.Leader && r.Role == RoleLeader) {
+			if ruleIndex(g, k) != ri {
+				continue
+			}
+			// Every rule has a positive count of distinct voters. If only the
+			// group's leader may fill a leader rule, at most one such rule
+			// can be filled and its count must be one.
+			if s == g.Leader && r.Role == RoleFollower || s != g.Leader && r.Role == RoleLeader {
 				return false
 			}
-			if r.IsolationDepth == 0 || ruleIndex(g, k) != ri {
+			if r.IsolationDepth == 0 {
 				continue
 			}
 			for j, t := range g.Voters[:k] {
@@ -392,10 +392,9 @@ func newPlanner(in *Input, opt Options) *planner {
 	for i := range p.gs {
 		s := &p.gs[i]
 		g := s.Group
-		s.cur, s.curRule, s.lead = slices.Clone(g.Voters), slices.Clone(g.RuleOf), g.Leader
-		if s.curRule == nil {
-			s.curRule = make([]int, len(s.cur))
-		}
+		s.cur, s.lead = slices.Clone(g.Voters), g.Leader
+		s.curRule = make([]int, len(s.cur))
+		copy(s.curRule, g.RuleOf)
 		for _, v := range s.cur {
 			p.v[v]++
 		}
@@ -459,7 +458,7 @@ func (p *planner) prepareRules() {
 }
 
 func ruleIndex(g *Group, k int) int {
-	if g.RuleOf == nil {
+	if len(g.RuleOf) == 0 {
 		return 0
 	}
 	return g.RuleOf[k]
