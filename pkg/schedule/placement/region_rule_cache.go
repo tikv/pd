@@ -155,6 +155,14 @@ func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *co
 		}
 		return
 	}
+	// Patrol tasks can outlive their region. Check membership before creating
+	// an entry under the cache lock so overlap cleanup either precedes this
+	// check or removes this write. Store-only callers have no region lifecycle.
+	if regions, ok := storeSet.(interface {
+		GetRegion(uint64) *core.RegionInfo
+	}); ok && regions.GetRegion(region.GetID()) == nil {
+		return
+	}
 	newCache, cacheable := manager.toRegionRuleFitCache(storeSet, region, fit)
 	if !cacheable {
 		return
