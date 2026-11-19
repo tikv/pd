@@ -444,6 +444,131 @@ func TestHotWriteRegionScheduleWithRevertRegionsInSamePlacementScope(t *testing.
 	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 }
 
+func TestHotWriteRegionScheduleSkipsRevertIntoCPUOverloadedStore(t *testing.T) {
+	re := require.New(t)
+	for _, maxDstCPUUsage := range []float64{0, 1000} {
+		cancel, _, tc, oc := prepareSchedulersTest()
+		sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+		re.NoError(err)
+		hb := sche.(*hotScheduler)
+		hb.types = []resourceType{writePeer}
+		hb.conf.setDstToleranceRatio(0.0)
+		hb.conf.setSrcToleranceRatio(0.0)
+		hb.conf.setRankFormulaVersion("v2")
+		hb.conf.setHistorySampleDuration(0)
+		hb.conf.MaxDstStoreCPUUsage = maxDstCPUUsage
+		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+		for storeID := uint64(1); storeID <= 5; storeID++ {
+			tc.AddRegionStore(storeID, 20)
+		}
+		hb.conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
+
+		tc.UpdateStorageWrittenStats(1, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenStats(2, 20*units.MiB*utils.StoreHeartBeatReportInterval, 14*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenStats(3, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenStats(4, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
+		// Store 2 is the source of the main operator and the destination of
+		// the revert one.
+		for _, storeID := range []uint64{1, 3, 4, 5} {
+			tc.UpdateStorageCPUUsage(storeID, 500)
+		}
+		tc.UpdateStorageCPUUsage(2, 1400)
+		addRegionInfo(tc, utils.Write, []testRegionInfo{
+			{6, []uint64{3, 2, 4}, 3 * units.MiB, 1.8 * units.MiB, 0},
+			{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
+		})
+		// searchRevertRegions becomes true after the first `Schedule`.
+		ops, _ := hb.Schedule(tc, false)
+		re.Len(ops, 1)
+		re.True(hb.searchRevertRegions[writePeer])
+		clearPendingInfluence(hb)
+
+		ops, _ = hb.Schedule(tc, false)
+		re.Len(ops, 2)
+		if maxDstCPUUsage == 0 {
+			operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+			operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
+		} else {
+			// Reverting into store 2 is rejected, so the solver pairs store 3
+			// with store 5 instead.
+			operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 3, 5)
+			operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 3)
+		}
+		cancel()
+	}
+}
+
+func TestHotWriteRegionScheduleSkipsCPUOverloadedStoreInPlacementScope(t *testing.T) {
+	re := require.New(t)
+	for _, maxDstCPUUsage := range []float64{0, 1000} {
+		cancel, _, tc, oc := prepareSchedulersTest()
+		tc.SetEnablePlacementRules(true)
+		sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+		re.NoError(err)
+		hb := sche.(*hotScheduler)
+		hb.types = []resourceType{writePeer}
+		hb.conf.setRankFormulaVersion("v2")
+		hb.conf.setHistorySampleDuration(0)
+		hb.conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
+		hb.conf.MaxDstStoreCPUUsage = maxDstCPUUsage
+		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+
+		for id := uint64(1); id <= 6; id++ {
+			pool := "target"
+			if id == 6 {
+				pool = "other"
+			}
+			tc.AddLabelsStore(id, 20, map[string]string{"pool": pool})
+			tc.UpdateStorageCPUUsage(id, 500)
+		}
+		// Store 5 is the only legal destination for the main Region.
+		tc.UpdateStorageCPUUsage(5, 1400)
+		tc.SetStoreBusy(1, true)
+		tc.SetStoreBusy(6, true)
+		re.NoError(tc.SetRule(&placement.Rule{
+			GroupID: placement.DefaultGroupID,
+			ID:      placement.DefaultRuleID,
+			Role:    placement.Voter,
+			Count:   3,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "pool", Op: placement.In, Values: []string{"target"}},
+			},
+		}))
+		// The destinations are picked with placement-scoped load statistics.
+		re.True(getPlacementLoadState(tc, "v2").enabled)
+
+		storeLoads := map[uint64]statistics.Loads{
+			1: {utils.ByteDim: 15 * units.MiB},
+			2: {utils.ByteDim: 20 * units.MiB, utils.KeyDim: 14 * units.MiB},
+			3: {utils.ByteDim: 15 * units.MiB},
+			4: {utils.ByteDim: 15 * units.MiB},
+			5: {utils.ByteDim: 10 * units.MiB, utils.KeyDim: 16 * units.MiB},
+			6: {utils.ByteDim: 15 * units.MiB, utils.KeyDim: 6 * units.MiB},
+		}
+		for id, loads := range storeLoads {
+			tc.UpdateStorageWrittenStats(
+				id,
+				uint64(loads[utils.ByteDim]*utils.StoreHeartBeatReportInterval),
+				uint64(loads[utils.KeyDim]*utils.StoreHeartBeatReportInterval),
+			)
+		}
+		addRegionInfo(tc, utils.Write, []testRegionInfo{
+			{6, []uint64{3, 2, 4}, 3 * units.MiB, 1.8 * units.MiB, 0},
+			{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
+		})
+
+		ops, _ := hb.Schedule(tc, false)
+		if maxDstCPUUsage == 0 {
+			re.Len(ops, 1)
+			operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+		} else {
+			re.Empty(ops)
+		}
+		cancel()
+	}
+}
+
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank 2.
 	re := require.New(t)
