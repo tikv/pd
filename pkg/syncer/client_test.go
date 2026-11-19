@@ -90,6 +90,7 @@ func TestErrorCode(t *testing.T) {
 
 func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
 	re := require.New(t)
+<<<<<<< HEAD
 	tempDir := t.TempDir()
 	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
@@ -101,10 +102,13 @@ func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
 		core.NewBasicCluster(),
 	)
 	syncer := NewRegionSyncer(server)
+=======
+	syncer, _ := newTestRegionSyncer(t)
+>>>>>>> 8179ce7c2d (server: resync follower region cache reset (#10689))
 	syncer.history.resetWithIndex(10)
 	syncer.streamingRunning.Store(true)
 
-	handled := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+	handled, fullSyncing := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
 		Header: &pdpb.ResponseHeader{
 			ClusterId: keypath.ClusterID(),
 			Error: &pdpb.Error{
@@ -112,9 +116,10 @@ func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
 				Message: "server stopped, close the region syncer client",
 			},
 		},
-	}, nil, nil)
+	}, nil, nil, false)
 
 	re.False(handled)
+	re.False(fullSyncing)
 	re.Equal(uint64(10), syncer.history.getNextIndex())
 	re.False(syncer.IsRunning())
 }
