@@ -1032,20 +1032,28 @@ func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGl
 		return &pdpb.SetGlobalGCBarrierResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	now := time.Now()
 	barrierID := request.GetBarrierId()
 	barrierTS := request.GetBarrierTs()
 	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
-	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, now)
+	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, time.Time{})
 	if err != nil {
 		return &pdpb.SetGlobalGCBarrierResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
+	// Set returns the applied TTL. Reads and deletes report the remaining TTL.
+	ttlSeconds := request.GetTtlSeconds()
+	if newBarrier.ExpirationTime.Time == nil {
+		ttlSeconds = math.MaxInt64
+	}
 	return &pdpb.SetGlobalGCBarrierResponse{
-		Header:         grpcutil.WrapHeader(),
-		NewBarrierInfo: globalGCBarrierToProto(newBarrier, now),
+		Header: grpcutil.WrapHeader(),
+		NewBarrierInfo: &pdpb.GlobalGCBarrierInfo{
+			BarrierId:  newBarrier.BarrierID,
+			BarrierTs:  newBarrier.BarrierTS,
+			TtlSeconds: ttlSeconds,
+		},
 	}, nil
 }
 

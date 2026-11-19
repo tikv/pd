@@ -496,6 +496,11 @@ error = '''
 trying to set a global GC barrier on ts %d which is already behind the txn safe point %d of keyspace %s
 '''
 
+["PD:gc:ErrGlobalGCBarrierTSBelowFloor"]
+error = '''
+global GC barrier timestamp %d is below the minimum allowed timestamp %d
+'''
+
 ["PD:gc:ErrReservedGCBarrierID"]
 error = '''
 trying to set a GC barrier with a barrier ID that is reserved: %v

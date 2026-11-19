@@ -16,6 +16,10 @@ package endpoint
 
 import (
 	"context"
+	"math"
+	"path"
+	"regexp"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -25,8 +29,10 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -113,9 +119,111 @@ func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts
 	})
 }
 
-// DeleteTimestamp deletes the timestamp from the storage.
+// DeleteTimestamp retires the group window atomically so that a global GC barrier
+// still covers timestamps issued by a group after its allocator has been removed.
 func (se *StorageEndpoint) DeleteTimestamp(ctx context.Context, groupID uint32) error {
+	groupKey, retiredKey := keypath.TimestampPath(groupID), keypath.RetiredTSOWindowPath()
 	return se.RunInTxn(ctx, func(txn kv.Txn) error {
-		return txn.Remove(keypath.TimestampPath(groupID))
+		window, err := loadTSOWindowInTxn(txn, groupKey)
+		if err != nil || window == 0 {
+			return err
+		}
+		retired, err := loadTSOWindowInTxn(txn, retiredKey)
+		if err != nil {
+			return err
+		}
+		if window > retired {
+			if err := txn.Save(retiredKey, string(typeutil.Uint64ToBytes(window))); err != nil {
+				return err
+			}
+		}
+		return txn.Remove(groupKey)
 	})
+}
+
+func loadTSOWindowInTxn(txn kv.Txn, key string) (uint64, error) {
+	// Load pins the value (or its absence) until commit. Its string result alone
+	// cannot distinguish a missing record from a malformed, present empty record.
+	value, err := txn.Load(key)
+	if err != nil {
+		return 0, err
+	}
+	if value == "" {
+		keys, _, err := txn.LoadRange(key, key+"\x00", 1)
+		if err != nil || len(keys) == 0 {
+			return 0, err
+		}
+	}
+	return decodeTSOWindow(key, value)
+}
+
+// Window records store positive Unix nanoseconds as eight big-endian bytes.
+func decodeTSOWindow(key, value string) (uint64, error) {
+	nanos, err := typeutil.BytesToUint64([]byte(value))
+	if err != nil {
+		return 0, errors.Annotatef(err, "invalid TSO window at %q", key)
+	}
+	if nanos == 0 || nanos > math.MaxInt64 {
+		return 0, errors.Errorf("invalid TSO window at %q: expected positive Unix nanoseconds", key)
+	}
+	return nanos, nil
+}
+
+// Legacy allocators built their window keys with path.Join. A DC location can
+// therefore occupy multiple directory components beneath lta/.
+const localTSOWindowSuffix = `([^/]+/)+timestamp`
+
+var (
+	localTSOWindow = regexp.MustCompile(`^` + localTSOWindowSuffix + `$`)
+	groupTSOWindow = regexp.MustCompile(`^[0-9]{5}/(gta/timestamp|lta/` + localTSOWindowSuffix + `)$`)
+)
+
+// LoadGlobalGCBarrierTSFloor returns a TSO upper bound for timestamps issued
+// across the cluster, including retired groups and legacy per-DC allocators.
+func (p GCStateProvider) LoadGlobalGCBarrierTSFloor(ctx context.Context) (uint64, error) {
+	defaultKey, retiredKey := keypath.TimestampPath(constant.DefaultKeyspaceGroupID), keypath.RetiredTSOWindowPath()
+	localPrefix, groupPrefix := keypath.LegacyLocalTSOPrefix(), keypath.TSOMicroservicePrefix()
+	// Read all four disjoint ranges at the same etcd revision. Group IDs are
+	// formatted as five decimal digits; this range skips registries, elections
+	// and the default group, whose windows live under /pd.
+	ops := []kv.RawTxnOp{
+		{OpType: kv.RawTxnOpGet, Key: defaultKey},
+		{OpType: kv.RawTxnOpGet, Key: retiredKey},
+		{OpType: kv.RawTxnOpGetRange, Key: localPrefix, EndKey: "\x00"},
+		{OpType: kv.RawTxnOpGetRange, Key: groupPrefix + "00001/", EndKey: groupPrefix + ":"},
+	}
+	txn, err := p.storage.createRawTxnWithContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+	result, err := txn.Then(ops...).Commit()
+	if err != nil {
+		return 0, err
+	}
+	if !result.Succeeded || len(result.Responses) != len(ops) {
+		return 0, errors.New("invalid TSO window snapshot response")
+	}
+	var largest uint64
+	for _, item := range result.Responses {
+		for _, pair := range item.KeyValuePairs {
+			isWindow := pair.Key == defaultKey || pair.Key == retiredKey ||
+				localTSOWindow.MatchString(strings.TrimPrefix(pair.Key, localPrefix)) ||
+				groupTSOWindow.MatchString(strings.TrimPrefix(pair.Key, groupPrefix))
+			if !isWindow || path.Clean(pair.Key) != pair.Key {
+				continue
+			}
+			nanos, err := decodeTSOWindow(pair.Key, pair.Value)
+			if err != nil {
+				return 0, err
+			}
+			largest = max(largest, nanos)
+		}
+	}
+	if largest == 0 {
+		return 0, errors.New("no persisted TSO window available for a global GC barrier")
+	}
+	// Round the maximal physical window up to a millisecond boundary before
+	// composing logical zero. Avoid overflowing when rounding a large UnixNano.
+	millis := (largest-1)/uint64(time.Millisecond) + 1
+	return tsoutil.ComposeTS(int64(millis), 0), nil
 }

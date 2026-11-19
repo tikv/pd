@@ -618,12 +618,13 @@ func TestGCOperations(t *testing.T) {
 		}
 	}
 
+	var globalTS uint64
 	{
 		// Successfully sets a global GC barrier
 		req := &pdpb.SetGlobalGCBarrierRequest{
 			Header:     header,
 			BarrierId:  "b1",
-			BarrierTs:  20,
+			BarrierTs:  0,
 			TtlSeconds: 3600,
 		}
 		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
@@ -631,7 +632,8 @@ func TestGCOperations(t *testing.T) {
 		re.NotNil(resp.Header)
 		re.Nil(resp.Header.Error)
 		re.Equal("b1", resp.GetNewBarrierInfo().GetBarrierId())
-		re.Equal(uint64(20), resp.GetNewBarrierInfo().GetBarrierTs())
+		globalTS = resp.GetNewBarrierInfo().GetBarrierTs()
+		re.NotZero(globalTS)
 		re.Greater(resp.GetNewBarrierInfo().GetTtlSeconds(), int64(3599))
 		re.Less(resp.GetNewBarrierInfo().GetTtlSeconds(), int64(3601))
 	}
@@ -641,7 +643,7 @@ func TestGCOperations(t *testing.T) {
 		req := &pdpb.SetGlobalGCBarrierRequest{
 			Header:     header,
 			BarrierId:  "b2",
-			BarrierTs:  24,
+			BarrierTs:  globalTS + 4,
 			TtlSeconds: math.MaxInt64,
 		}
 		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
@@ -649,7 +651,7 @@ func TestGCOperations(t *testing.T) {
 		re.NotNil(resp.Header)
 		re.Nil(resp.Header.Error)
 		re.Equal("b2", resp.GetNewBarrierInfo().GetBarrierId())
-		re.Equal(uint64(24), resp.GetNewBarrierInfo().GetBarrierTs())
+		re.Equal(globalTS+4, resp.GetNewBarrierInfo().GetBarrierTs())
 		re.Equal(math.MaxInt64, int(resp.GetNewBarrierInfo().GetTtlSeconds()))
 	}
 
@@ -675,11 +677,11 @@ func TestGCOperations(t *testing.T) {
 			return 0
 		})
 		re.Equal("b1", barriers[0].GetBarrierId())
-		re.Equal(uint64(20), barriers[0].GetBarrierTs())
+		re.Equal(globalTS, barriers[0].GetBarrierTs())
 		re.GreaterOrEqual(barriers[0].GetTtlSeconds(), int64(3595))
 		re.LessOrEqual(barriers[0].GetTtlSeconds(), int64(3600))
 		re.Equal("b2", barriers[1].GetBarrierId())
-		re.Equal(uint64(24), barriers[1].GetBarrierTs())
+		re.Equal(globalTS+4, barriers[1].GetBarrierTs())
 		re.Equal(int64(math.MaxInt64), barriers[1].GetTtlSeconds())
 	}
 
@@ -687,7 +689,7 @@ func TestGCOperations(t *testing.T) {
 		Header:        header,
 		KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID),
 		BarrierId:     "local-observer",
-		BarrierTs:     26,
+		BarrierTs:     globalTS + 6,
 		TtlSeconds:    math.MaxInt64,
 	})
 	re.NoError(err)
@@ -705,7 +707,7 @@ func TestGCOperations(t *testing.T) {
 	_, err = leaderServer.GetServer().GetGCStateManager().SetGlobalGCBarrier(
 		ctx,
 		"expired",
-		25,
+		globalTS+5,
 		time.Second,
 		time.Now().Add(-2*time.Second),
 	)
@@ -731,7 +733,7 @@ func TestGCOperations(t *testing.T) {
 	re.Equal("b1", barriersWithExpired[0].GetBarrierId())
 	re.Equal("b2", barriersWithExpired[1].GetBarrierId())
 	re.Equal("expired", barriersWithExpired[2].GetBarrierId())
-	re.Equal(uint64(25), barriersWithExpired[2].GetBarrierTs())
+	re.Equal(globalTS+5, barriersWithExpired[2].GetBarrierTs())
 	re.Zero(barriersWithExpired[2].GetTtlSeconds())
 
 	{
@@ -747,7 +749,7 @@ func TestGCOperations(t *testing.T) {
 	}
 
 	{
-		// Failed to set a global GC barrier (below txn safe point)
+		// Failed to set a global GC barrier (below the smallest active global barrier)
 		req := &pdpb.SetGlobalGCBarrierRequest{
 			Header:     header,
 			BarrierId:  "b3",
@@ -758,7 +760,7 @@ func TestGCOperations(t *testing.T) {
 		re.NoError(err)
 		re.NotNil(resp.Header)
 		re.NotNil(resp.Header.Error)
-		re.Contains(resp.Header.Error.Message, "ErrGlobalGCBarrierTSBehindTxnSafePoint")
+		re.Contains(resp.Header.Error.Message, "ErrGlobalGCBarrierTSBelowFloor")
 	}
 
 	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {
@@ -766,13 +768,13 @@ func TestGCOperations(t *testing.T) {
 		req := &pdpb.AdvanceTxnSafePointRequest{
 			Header:        header,
 			KeyspaceScope: makeKeyspaceScope(keyspaceID),
-			Target:        30,
+			Target:        globalTS + 10,
 		}
 		resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
 		re.NoError(err)
 		re.NotNil(resp.Header)
 		re.Nil(resp.Header.Error)
-		re.Equal(uint64(20), resp.GetNewTxnSafePoint())
+		re.Equal(globalTS, resp.GetNewTxnSafePoint())
 		re.Equal(uint64(15), resp.GetOldTxnSafePoint())
 		re.Contains(resp.GetBlockerDescription(), "b1")
 	}
@@ -788,7 +790,7 @@ func TestGCOperations(t *testing.T) {
 		re.NotNil(resp.Header)
 		re.Nil(resp.Header.Error)
 		re.Equal("b1", resp.GetDeletedBarrierInfo().GetBarrierId())
-		re.Equal(uint64(20), resp.GetDeletedBarrierInfo().GetBarrierTs())
+		re.Equal(globalTS, resp.GetDeletedBarrierInfo().GetBarrierTs())
 		// The TTL value decreases over time
 		re.Greater(resp.GetDeletedBarrierInfo().GetTtlSeconds(), int64(3595))
 		re.LessOrEqual(resp.GetDeletedBarrierInfo().GetTtlSeconds(), int64(3600))
@@ -799,14 +801,14 @@ func TestGCOperations(t *testing.T) {
 		req := &pdpb.AdvanceTxnSafePointRequest{
 			Header:        header,
 			KeyspaceScope: makeKeyspaceScope(keyspaceID),
-			Target:        30,
+			Target:        globalTS + 10,
 		}
 		resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
 		re.NoError(err)
 		re.NotNil(resp.Header)
 		re.Nil(resp.Header.Error)
-		re.Equal(uint64(24), resp.GetNewTxnSafePoint())
-		re.Equal(uint64(20), resp.GetOldTxnSafePoint())
+		re.Equal(globalTS+4, resp.GetNewTxnSafePoint())
+		re.Equal(globalTS, resp.GetOldTxnSafePoint())
 		re.Contains(resp.GetBlockerDescription(), "b2")
 	}
 }
@@ -820,10 +822,10 @@ func TestGetGCStateGlobalBarriersReturnsReadSnapshot(t *testing.T) {
 	re.NotNil(leaderServer)
 	req.IncludeGlobalGcBarriers = true
 	manager := leaderServer.GetServer().GetGCStateManager()
-	_, err := manager.SetGlobalGCBarrier(
+	initial, err := manager.SetGlobalGCBarrier(
 		context.Background(),
 		"snapshot",
-		100,
+		0,
 		time.Duration(math.MaxInt64),
 		time.Now(),
 	)
@@ -846,7 +848,7 @@ func TestGetGCStateGlobalBarriersReturnsReadSnapshot(t *testing.T) {
 	_, err = manager.SetGlobalGCBarrier(
 		context.Background(),
 		"snapshot",
-		200,
+		initial.BarrierTS+1,
 		time.Duration(math.MaxInt64),
 		time.Now(),
 	)
@@ -857,7 +859,7 @@ func TestGetGCStateGlobalBarriersReturnsReadSnapshot(t *testing.T) {
 	case res := <-resultCh:
 		re.NoError(res.err)
 		re.Len(res.resp.GetGlobalGcBarriers().GetBarriers(), 1)
-		re.Equal(uint64(100), res.resp.GetGlobalGcBarriers().GetBarriers()[0].GetBarrierTs())
+		re.Equal(initial.BarrierTS, res.resp.GetGlobalGcBarriers().GetBarriers()[0].GetBarrierTs())
 	case <-time.After(5 * time.Second):
 		re.FailNow("GetGCState did not return after releasing the failpoint")
 	}
@@ -865,7 +867,7 @@ func TestGetGCStateGlobalBarriersReturnsReadSnapshot(t *testing.T) {
 	freshResp, err := getGCStateFromAddr(context.Background(), re, leaderServer.GetAddr(), req)
 	re.NoError(err)
 	re.Len(freshResp.GetGlobalGcBarriers().GetBarriers(), 1)
-	re.Equal(uint64(200), freshResp.GetGlobalGcBarriers().GetBarriers()[0].GetBarrierTs())
+	re.Equal(initial.BarrierTS+1, freshResp.GetGlobalGcBarriers().GetBarriers()[0].GetBarrierTs())
 }
 
 func TestGetGCStateRejectsOldLeaderAfterTransfer(t *testing.T) {

@@ -136,11 +136,14 @@ type GCStatesClient interface {
 	//
 	// The barrierID must be non-empty.
 	//
-	// The given barrierTS must be greater than or equal to the current txn safe points of all keyspaces,
-	// otherwise an error will be returned.
+	// Passing zero asks PD to select the smallest active global barrier timestamp, including the
+	// current record for this ID. With no active barrier, PD selects an upper bound from the
+	// persisted TSO windows. An explicit timestamp must be at least as large as the selected bound.
+	// On rejection the existing timestamp and expiration are preserved.
 	//
-	// Currently, the caller is responsible for guaranteeing the given barrierTS does not exceed any of the max allocated
-	// timestamps of all TSOs in the cluster. Note that a cluster might have multiple TSOs for different keyspaces.
+	// The returned BarrierTS is the timestamp stored. Pass it explicitly to renew at that point.
+	// It may be ahead of timestamps already issued. Obtain a read or backup timestamp separately
+	// and ensure it is at least BarrierTS before relying on this protection.
 	//
 	// When this function executes successfully, its result is never nil.
 	SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*GlobalGCBarrierInfo, error)

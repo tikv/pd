@@ -130,8 +130,9 @@ const (
 	resourceGroupStatesPathFormat   = "resource_group/states/%s"   // "resource_group/states/{group_name}"
 	controllerConfigPath            = "resource_group/controller"  // "resource_group/controller"
 
-	timestampPathFormat   = "/pd/%d/timestamp"              // "/pd/{cluster_id}/timestamp"
-	msTimestampPathFormat = "/ms/%d/tso/%05d/gta/timestamp" // "/ms/{cluster_id}/tso/{group_id}/gta/timestamp"
+	timestampPathFormat   = "/pd/%d/timestamp" // "/pd/{cluster_id}/timestamp"
+	msTSOPrefixFormat     = "/ms/%d/tso/"
+	msTimestampPathFormat = msTSOPrefixFormat + "%05d/gta/timestamp" // "/ms/{cluster_id}/tso/{group_id}/gta/timestamp"
 
 	affinityGroupPathFormat = "/pd/%d/affinity_groups/%s" // "/pd/{cluster_id}/affinity_groups/{group_id}"
 
@@ -272,6 +273,21 @@ func TimestampPath(groupID uint32) string {
 		return fmt.Sprintf(timestampPathFormat, ClusterID())
 	}
 	return fmt.Sprintf(msTimestampPathFormat, ClusterID(), groupID)
+}
+
+// RetiredTSOWindowPath stores the largest window of deleted TSO groups.
+func RetiredTSOWindowPath() string {
+	return fmt.Sprintf("/pd/%d/gc/retired_tso_window", ClusterID())
+}
+
+// LegacyLocalTSOPrefix contains the default group's historical per-DC windows.
+func LegacyLocalTSOPrefix() string {
+	return fmt.Sprintf("/pd/%d/lta/", ClusterID())
+}
+
+// TSOMicroservicePrefix contains the numbered TSO group directories.
+func TSOMicroservicePrefix() string {
+	return fmt.Sprintf(msTSOPrefixFormat, ClusterID())
 }
 
 // RegionPath returns the region meta info key path with the given region ID.
