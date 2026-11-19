@@ -3300,7 +3300,6 @@ func TestStoreLimitPersistenceIsSerialized(t *testing.T) {
 
 func (*failingSaveConfigStorage) SaveConfig(any) error {
 	return errors.New("save config failed")
-
 }
 
 // TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit guards against

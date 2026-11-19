@@ -489,10 +489,10 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 
 // GetStoreLimit returns the limit of a store.
 func (o *PersistOptions) GetStoreLimit(storeID uint64) sc.StoreLimitConfig {
-	return o.getStoreLimit(storeID, true)
+	return o.lookupStoreLimit(storeID, true)
 }
 
-func (o *PersistOptions) getStoreLimit(storeID uint64, create bool) (returnSC sc.StoreLimitConfig) {
+func (o *PersistOptions) lookupStoreLimit(storeID uint64, create bool) (returnSC sc.StoreLimitConfig) {
 	defer func() {
 		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
 		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
@@ -557,7 +557,7 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 // deliberately removed, since a tombstoned store stays in that "known store"
 // set until its final removal.
 func (o *PersistOptions) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
-	return storeLimitByType(o.getStoreLimit(storeID, false), typ)
+	return storeLimitByType(o.lookupStoreLimit(storeID, false), typ)
 }
 
 func storeLimitByType(limit sc.StoreLimitConfig, typ storelimit.Type) float64 {
