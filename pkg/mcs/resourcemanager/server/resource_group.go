@@ -141,7 +141,6 @@ func (rg *ResourceGroup) getOverrideFillRate() float64 {
 func (rg *ResourceGroup) overrideFillRate(new float64) {
 	rg.Lock()
 	defer rg.Unlock()
-	rg.RUSettings.RU.settleModeratedDebt(time.Now())
 	rg.overrideFillRateLocked(new)
 }
 
@@ -185,7 +184,6 @@ func (rg *ResourceGroup) getOverrideBurstLimit() int64 {
 func (rg *ResourceGroup) overrideBurstLimit(new int64) {
 	rg.Lock()
 	defer rg.Unlock()
-	rg.RUSettings.RU.settleModeratedDebt(time.Now())
 	rg.overrideBurstLimitLocked(new)
 }
 
@@ -196,7 +194,6 @@ func (rg *ResourceGroup) overrideBurstLimitLocked(new int64) {
 func (rg *ResourceGroup) overrideFillRateAndBurstLimit(fillRate float64, burstLimit int64) {
 	rg.Lock()
 	defer rg.Unlock()
-	rg.RUSettings.RU.settleModeratedDebt(time.Now())
 	rg.overrideFillRateLocked(fillRate)
 	rg.overrideBurstLimitLocked(burstLimit)
 }
@@ -298,7 +295,6 @@ func (rg *ResourceGroup) RequestRU(
 	limitedTokens, minTrickleTimeMs := sl.applyServiceLimit(now, grantedTokens)
 	if limitedTokens < grantedTokens {
 		tb.Tokens = limitedTokens
-		rg.RUSettings.RU.refundModeratedGrant(grantedTokens - limitedTokens)
 		// Retain the unused tokens for the later requests if it has a burst limit.
 		if rg.getBurstLimitLocked() > 0 {
 			rg.RUSettings.RU.reservedServiceTokens += grantedTokens - limitedTokens

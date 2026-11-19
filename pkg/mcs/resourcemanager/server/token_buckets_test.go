@@ -685,8 +685,6 @@ func TestBalanceSlotTokensRequesterFloorTakesFromSlotsAboveBasic(t *testing.T) {
 func TestBalanceSlotTokensDecaysAndFloorsOnlyWithoutExtraBurst(t *testing.T) {
 	// Beyond the 6.25 s grace, 13.75 s is 2.75 EMA half-lives.
 	overdue := 1000 * math.Pow(2, -2.75)
-	moderatedExtra := (12000 - 1100 - overdue) / 3
-	moderatedOnTime := 1000 + moderatedExtra - (4000 - 100 - moderatedExtra)
 	for _, tc := range []struct {
 		name          string
 		burstLimit    int64
@@ -694,7 +692,7 @@ func TestBalanceSlotTokensDecaysAndFloorsOnlyWithoutExtraBurst(t *testing.T) {
 		wantFill      [3]float64
 	}{
 		{"burst limit at the fill rate", 2000, -1, [3]float64{2000.0 / 3, 2000 - 2000.0/3 - overdue, overdue}},
-		{"moderated", -2, -1, [3]float64{4000, moderatedOnTime, overdue + moderatedExtra}},
+		{"moderated", -2, -1, [3]float64{3400, 4300, 4300}},
 		{"burst limit above the fill rate", 4000, -1, [3]float64{100, 950, 950}},
 		{"zero burst limit override", 2000, 0, [3]float64{100, 950, 950}},
 	} {
@@ -703,7 +701,6 @@ func TestBalanceSlotTokensDecaysAndFloorsOnlyWithoutExtraBurst(t *testing.T) {
 			gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: tc.burstLimit},
 			})
-			gtb.overrideBurstLimit = tc.overrideBurst
 			gtb.grt = newGroupRUTracker()
 			now := time.Now()
 			for i, seen := range []struct {
@@ -718,9 +715,21 @@ func TestBalanceSlotTokensDecaysAndFloorsOnlyWithoutExtraBurst(t *testing.T) {
 				gtb.tokenSlots[clientID] = newTokenSlot(clientID, seen.request)
 				mockRUTracker(gtb, clientID, seen.ruPerSec, seen.sample)
 			}
-			gtb.balanceSlotTokens(now, 1, 1, 0, 5000)
-			for i, want := range tc.wantFill {
-				re.InDelta(want, gtb.tokenSlots[uint64(i+1)].fillRate, 1e-9, "client %d", i+1)
+			overrides := []int64{tc.overrideBurst}
+			if tc.burstLimit == -2 {
+				overrides = append(overrides, 2000, -1)
+			}
+			for _, override := range overrides {
+				gtb.overrideBurstLimit = override
+				gtb.tokenSlots[1].lastReqTime = now.Add(-time.Minute)
+				gtb.balanceSlotTokens(now, 1, 1, 0, 5000)
+				wantFill := tc.wantFill
+				if tc.burstLimit == -2 && override >= 0 {
+					wantFill = [3]float64{100, 950, 950}
+				}
+				for i, want := range wantFill {
+					re.InDelta(want, gtb.tokenSlots[uint64(i+1)].fillRate, 1e-9, "override %d, client %d", override, i+1)
+				}
 			}
 		})
 	}
@@ -980,18 +989,17 @@ type sequenceResult struct {
 	granted     []float64
 	byClient    []map[uint64]float64
 	groupTokens []float64
-	gtb         *GroupTokenBucket
 }
 
 // The sequence starts at the real clock because slot expiry uses time.Since.
-func runRequestSequence(burstLimit int64, clients []sequencedClient, checkpoints ...time.Duration) sequenceResult {
+func runRequestSequence(clients []sequencedClient, checkpoints ...time.Duration) sequenceResult {
 	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
-		Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: burstLimit},
+		Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: 2000},
 	})
 	gtb.grt = newGroupRUTracker()
 	start := time.Now()
 	var (
-		res      = sequenceResult{gtb: gtb}
+		res      sequenceResult
 		total    float64
 		byClient = make(map[uint64]float64)
 	)
@@ -1003,9 +1011,6 @@ func runRequestSequence(burstLimit int64, clients []sequencedClient, checkpoints
 			}
 			requiredToken := c.amount(int((sec - c.offset) / c.period))
 			targetPeriod := cmp.Or(c.targetPeriod, 5*time.Second)
-			if requiredToken < 0 {
-				continue
-			}
 			gtb.grt.sample(c.id, now, requiredToken)
 			if tb, _ := gtb.request(now, requiredToken, uint64(targetPeriod.Milliseconds()), c.id); tb != nil {
 				total += tb.GetTokens()
@@ -1042,7 +1047,7 @@ func TestBalanceSlotTokensRecreatedSlotsStayWithinFillRate(t *testing.T) {
 		})
 	}
 	checkpoints := []time.Duration{600 * time.Second, 1800 * time.Second}
-	res := runRequestSequence(int64(fillRate), clients, checkpoints...)
+	res := runRequestSequence(clients, checkpoints...)
 	var excess []float64
 	for i, checkpoint := range checkpoints {
 		excess = append(excess, res.granted[i]-fillRate*checkpoint.Seconds())
@@ -1066,8 +1071,8 @@ func TestBalanceSlotTokensSmallRepeatedRequesterKeepsOthersCapacity(t *testing.T
 			busy := sequencedClient{id: 0, period: 5 * time.Second, amount: func(int) float64 { return tc.amount }}
 			small := sequencedClient{id: 1, offset: 4 * time.Second, period: 10 * time.Second, amount: func(int) float64 { return 10 }}
 			checkpoints := []time.Duration{600 * time.Second, 1800 * time.Second}
-			alone := runRequestSequence(2000, []sequencedClient{busy}, checkpoints...)
-			shared := runRequestSequence(2000, []sequencedClient{busy, small}, checkpoints...)
+			alone := runRequestSequence([]sequencedClient{busy}, checkpoints...)
+			shared := runRequestSequence([]sequencedClient{busy, small}, checkpoints...)
 			re.InEpsilon(alone.granted[1]-alone.granted[0], shared.granted[1]-shared.granted[0], 0.005)
 		})
 	}
@@ -1087,230 +1092,14 @@ func TestBalanceSlotTokensMixedTargetPeriods(t *testing.T) {
 		amount: func(int) float64 { return 50 },
 	}
 	checkpoints := []time.Duration{600 * time.Second, 3600 * time.Second}
-	alone := runRequestSequence(2000, []sequencedClient{slow}, checkpoints...)
-	shared := runRequestSequence(2000, []sequencedClient{slow, fast}, checkpoints...)
+	alone := runRequestSequence([]sequencedClient{slow}, checkpoints...)
+	shared := runRequestSequence([]sequencedClient{slow, fast}, checkpoints...)
 	window := (checkpoints[1] - checkpoints[0]).Seconds()
 	aloneRate := (alone.byClient[1][slow.id] - alone.byClient[0][slow.id]) / window
 	sharedRate := (shared.byClient[1][slow.id] - shared.byClient[0][slow.id]) / window
 	re.InDelta(1900, aloneRate, 1)
 	// Allow the loan of one target period at the window boundary.
 	re.GreaterOrEqual(sharedRate, 1900-fillRate*20/window)
-}
-
-func TestBalanceSlotTokensModeratedFloorAfterGrants(t *testing.T) {
-	defer log.SetLevel(log.GetLevel())
-	log.SetLevel(zapcore.FatalLevel)
-	busy := sequencedClient{id: 1, period: 5 * time.Second, amount: func(int) float64 { return 150000 }}
-	returning := sequencedClient{id: 2, period: 5 * time.Second, amount: func(k int) float64 {
-		switch k {
-		case 0:
-			return 1
-		case 1:
-			return 0
-		case 12:
-			return 10
-		}
-		return -1
-	}}
-	for name, clients := range map[string][]sequencedClient{
-		"busy first":      {busy, returning},
-		"returning first": {returning, busy},
-	} {
-		t.Run(name, func(t *testing.T) {
-			re := require.New(t)
-			res := runRequestSequence(-2, clients, 60*time.Second)
-			gtb := res.gtb
-			fillRate, _ := gtb.getFillRateAndBurstLimit()
-			re.Less(gtb.Tokens, -fillRate*5)
-			re.LessOrEqual(gtb.guardDebt.amount, fillRate*5)
-			re.InDelta(11.0, res.byClient[0][returning.id], 1e-9)
-			if name == "busy first" {
-				// A later busy-client request would rebalance this share.
-				re.InDelta(fillRate/2, gtb.tokenSlots[returning.id].fillRate, 1e-6)
-			}
-		})
-	}
-}
-
-func newModeratedTestGroup() *ResourceGroup {
-	return FromProtoResourceGroup(&rmpb.ResourceGroup{
-		Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
-			Settings: &rmpb.TokenLimitSettings{FillRate: 2000, BurstLimit: -2},
-		}},
-	})
-}
-
-func TestModeratedDebtSurvivesSlotRemoval(t *testing.T) {
-	re := require.New(t)
-	gtb := newModeratedTestGroup().RUSettings.RU
-	now := time.Now()
-	first, _ := gtb.request(now, 60000, 5000, 1)
-	re.Equal(60000.0, first.Tokens)
-	gtb.request(now, 0, 5000, 1)
-	re.Empty(gtb.tokenSlots)
-	re.Equal(first.Tokens, gtb.guardDebt.amount)
-	second, _ := gtb.request(now, 10, 5000, 1)
-	re.Equal(60000.0+second.Tokens, gtb.guardDebt.amount)
-	gtb.resetLoan()
-	re.False(gtb.debtWithin(60000))
-	gtb.settleModeratedDebt(now.Add(time.Second))
-	re.Equal(48000.0+second.Tokens, gtb.guardDebt.amount)
-	gtb.settleModeratedDebt(now)
-	gtb.settleModeratedDebt(now.Add(time.Second))
-	re.Equal(48000.0+second.Tokens, gtb.guardDebt.amount)
-	gtb.settleModeratedDebt(now.Add(time.Hour))
-	re.Zero(gtb.guardDebt.amount)
-	third, _ := gtb.request(now.Add(time.Hour), 10, 5000, 1)
-	re.Equal(third.Tokens, gtb.guardDebt.amount, "idle time must not bank credit")
-}
-
-func TestModeratedDebtGatesReturningFloor(t *testing.T) {
-	re := require.New(t)
-	gtb := newModeratedTestGroup().RUSettings.RU
-	gtb.grt = newGroupRUTracker()
-	now := time.Now()
-	gtb.request(now, 60000, 5000, 1)
-	gtb.request(now, 10, 5000, 1)
-	mockRUTracker(gtb, 1, 12000, now)
-	mockRUTracker(gtb, 2, 1, now)
-	gtb.request(now, 10, 5000, 2)
-	re.InDelta(1.0, gtb.tokenSlots[2].fillRate, 1e-9, "outstanding grants must close the floor")
-	gtb.request(now, 0, 5000, 2)
-	gtb.request(now.Add(time.Second), 10, 5000, 2)
-	re.InDelta(6000.0, gtb.tokenSlots[2].fillRate, 1e-9, "repayment must reopen the floor")
-}
-
-func TestModeratedDebtFloorAfterOverride(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		re := require.New(t)
-		rg := newModeratedTestGroup()
-		gtb := rg.RUSettings.RU
-		gtb.grt = newGroupRUTracker()
-		request := func(id uint64, amount float64) *rmpb.TokenBucket {
-			now := time.Now()
-			gtb.grt.sample(id, now, amount)
-			grant, _ := gtb.request(now, amount, 5000, id)
-			return grant
-		}
-		request(2, 1)
-		for range 12 {
-			request(1, 150000)
-			request(2, 0)
-			time.Sleep(5 * time.Second)
-		}
-		rg.overrideFillRateAndBurstLimit(500, 500)
-		re.Equal(limited, gtb.getBurstableMode())
-		re.Zero(gtb.guardDebt.amount)
-		grant := request(2, 10)
-		re.Less(gtb.Tokens, -500.0*5)
-		re.InDelta(250.0, gtb.tokenSlots[2].fillRate, 1e-9)
-		re.Equal(10.0, grant.Tokens)
-		re.Equal(grant.Tokens, gtb.guardDebt.amount)
-
-		rg.overrideFillRateAndBurstLimit(-1, -1)
-		re.Equal(moderated, gtb.getBurstableMode())
-		re.Equal(grant.Tokens, gtb.guardDebt.amount)
-		request(2, 0)
-		grant = request(2, 10)
-		re.InDelta(6000.0, gtb.tokenSlots[2].fillRate, 1e-9)
-		re.Equal(10.0, grant.Tokens)
-		re.Equal(20.0, gtb.guardDebt.amount)
-	})
-}
-
-func TestModeratedDebtSettingsAndOverrides(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		re := require.New(t)
-		rg := newModeratedTestGroup()
-		gtb := rg.RUSettings.RU
-		gtb.request(time.Now(), 50000, 5000, 1)
-		time.Sleep(time.Second)
-		gtb.applySettings(&rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 3000, BurstLimit: -2}})
-		re.Equal(38000.0, gtb.guardDebt.amount, "settle the old rate before replacing settings")
-		time.Sleep(time.Second)
-		gtb.request(time.Now(), 10, 5000, 1)
-		re.Equal(25010.0, gtb.guardDebt.amount, "resetLoan must preserve issuance history")
-		time.Sleep(time.Second)
-		rg.overrideFillRateAndBurstLimit(500, 500)
-		re.Equal(12010.0, gtb.guardDebt.amount)
-		time.Sleep(time.Second)
-		grant, _ := gtb.request(time.Now(), 10, 5000, 1)
-		re.Equal(10.0, grant.Tokens)
-		re.Equal(11520.0, gtb.guardDebt.amount, "track grants during the temporary LIMITED interval")
-		time.Sleep(time.Second)
-		rg.overrideFillRateAndBurstLimit(-1, -1)
-		re.Equal(11020.0, gtb.guardDebt.amount)
-		time.Sleep(time.Second)
-		gtb.request(time.Now(), 0, 5000, 1)
-		re.Zero(gtb.guardDebt.amount)
-
-		gtb.request(time.Now(), 1000, 5000, 1)
-		gtb.patch(&rmpb.TokenBucket{Tokens: 100000})
-		re.Equal(1000.0, gtb.guardDebt.amount, "a token patch is not repayment")
-		gtb.applySettings(&rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 3000, BurstLimit: -1}})
-		re.Zero(gtb.guardDebt, "an explicit mode switch ends the accounting epoch")
-	})
-}
-
-func TestModeratedDebtIndividualOverrides(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		re := require.New(t)
-		rg := newModeratedTestGroup()
-		gtb := rg.RUSettings.RU
-		gtb.request(time.Now(), 50000, 5000, 1)
-		time.Sleep(time.Second)
-		rg.overrideFillRate(1000)
-		re.Equal(38000.0, gtb.guardDebt.amount)
-		time.Sleep(time.Second)
-		rg.overrideBurstLimit(1000)
-		re.Equal(27000.0, gtb.guardDebt.amount)
-		time.Sleep(time.Second)
-		rg.overrideBurstLimit(-1)
-		re.Equal(26000.0, gtb.guardDebt.amount)
-		time.Sleep(time.Second)
-		rg.overrideFillRate(-1)
-		re.Equal(15000.0, gtb.guardDebt.amount)
-	})
-}
-
-func TestModeratedDebtAfterServiceLimit(t *testing.T) {
-	for _, override := range []bool{false, true} {
-		t.Run(fmt.Sprintf("override=%t", override), func(t *testing.T) {
-			re := require.New(t)
-			rg := newModeratedTestGroup()
-			if override {
-				rg.overrideFillRateAndBurstLimit(1000, 1000)
-			}
-			now := time.Now()
-			sl := &serviceLimiter{ServiceLimit: 100, AvailableTokens: 250, LastUpdate: now}
-			res := rg.RequestRU(now, 50000, 5000, 1, newGroupRUTracker(), sl)
-			re.Equal(250.0, res.GrantedTokens.Tokens)
-			gtb := rg.RUSettings.RU
-			re.Equal(250.0, gtb.guardDebt.amount)
-			res = rg.RequestRU(now, 100, 5000, 1, gtb.grt, sl)
-			re.Zero(res.GrantedTokens.Tokens)
-			re.Equal(250.0, gtb.guardDebt.amount)
-		})
-	}
-}
-
-func TestModeratedDebtCloneAndState(t *testing.T) {
-	re := require.New(t)
-	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
-		Settings: &rmpb.TokenLimitSettings{BurstLimit: -2},
-	})
-	now := time.Now()
-	gtb.request(now, 50000, 5000, 1)
-	re.Equal(uint64(defaultRefillRate), gtb.Settings.FillRate)
-	clone := gtb.clone()
-	re.Equal(grantDebt{amount: 50000, settledAt: now}, clone.guardDebt)
-	restored := NewGroupTokenBucket(testResourceGroupName, gtb.GetTokenBucket())
-	restored.setState(gtb.GroupTokenBucketState.clone())
-	re.Equal(grantDebt{amount: 50000, settledAt: now}, restored.guardDebt)
-	clone.settleModeratedDebt(now.Add(time.Second))
-	re.Equal(30000.0, clone.guardDebt.amount)
-	re.Equal(50000.0, gtb.guardDebt.amount)
 }
 
 func BenchmarkBalanceSlotTokens(b *testing.B) {
