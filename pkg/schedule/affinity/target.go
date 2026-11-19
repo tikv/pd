@@ -28,6 +28,9 @@ import (
 // ErrTargetWriterNotReady indicates that no request could be sent yet.
 var ErrTargetWriterNotReady = errors.New("affinity target writer is not ready")
 
+// ErrTargetWriterUnsupported indicates that PD does not implement the target endpoint.
+var ErrTargetWriterUnsupported = errors.New("affinity target endpoint is unsupported")
+
 // GroupTarget is a target decided from the persisted group in Expected.
 // NOTE: This type is exported by HTTP API.
 type GroupTarget struct {
@@ -130,7 +133,8 @@ func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
 	if stored != nil {
 		m.Lock()
 		if group, ok := m.groups[stored.ID]; ok {
-			if changed := m.syncGroupTargetLocked(group, stored); written && !changed {
+			wasUnpersisted := group.targetUnpersisted
+			if changed := m.syncGroupTargetLocked(group, stored); written && !changed && (!wasUnpersisted || !group.IsAvailable()) {
 				m.setTargetAvailabilityLocked(group)
 				m.resetCountLocked(group)
 			}

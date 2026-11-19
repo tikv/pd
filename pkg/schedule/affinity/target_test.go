@@ -407,6 +407,268 @@ func TestFirstWinReplyKeepsNewerWatcherTarget(t *testing.T) {
 	})
 }
 
+func TestFirstWinLateUnsupportedReplyKeepsGroupExpired(t *testing.T) {
+	for _, attempt := range []string{"initialization", "persistence retry"} {
+		t.Run(attempt, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				m, _ := newTargetTestManager(t)
+				re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+				release := make(chan struct{})
+				defer close(release)
+				blockOn := 1
+				if attempt == "persistence retry" {
+					blockOn = 2
+				}
+				calls := 0
+				m.SetTargetWriter(targetWriterFunc(func(_ context.Context, _ []GroupTarget) ([]string, error) {
+					calls++
+					if calls == blockOn {
+						<-release
+					}
+					return nil, ErrTargetWriterUnsupported
+				}))
+				oldRegion := generateRegionForTest(10, []uint64{1, 2, 3}, nonOverlappingRange)
+				if blockOn == 2 {
+					m.ObserveAvailableRegion(oldRegion, m.GetAffinityGroupState("g"))
+					synctest.Wait()
+					state := m.GetAffinityGroupState("g")
+					re.True(state.AffinitySchedulingAllowed)
+					re.True(state.HasUnpersistedTarget())
+					time.Sleep(time.Second)
+				}
+
+				m.ObserveAvailableRegion(oldRegion, m.GetAffinityGroupState("g"))
+				synctest.Wait()
+				re.Equal(blockOn, calls)
+				m.ExpireAffinityGroup("g")
+				expired := m.GetAffinityGroupState("g")
+				release <- struct{}{}
+				synctest.Wait()
+				state := m.GetAffinityGroupState("g")
+				re.True(state.RegularSchedulingAllowed, "a late 404 must leave the group expired")
+				re.False(state.AffinitySchedulingAllowed)
+				re.Equal(expired.Group, state.Group)
+				re.Equal(expired.affinityVer, state.affinityVer)
+
+				replacement := generateRegionForTest(20, []uint64{2, 1}, nonOverlappingRange)
+				m.ObserveAvailableRegion(replacement, state)
+				synctest.Wait()
+				state = m.GetAffinityGroupState("g")
+				re.True(state.AffinitySchedulingAllowed)
+				re.True(state.HasUnpersistedTarget())
+				re.Equal([]uint64{1, 2}, state.VoterStoreIDs)
+				re.Equal(blockOn, calls, "the fresh observation replaces the target during the 404 cooldown")
+			})
+		})
+	}
+}
+
+func TestFirstWinUnsupportedTargetWriter(t *testing.T) {
+	t.Run("self heal after pd upgrade", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			re := require.New(t)
+			pdManager, store := newTargetTestManager(t)
+			m, _ := newTargetTestManager(t)
+			re.NoError(pdManager.CreateAffinityGroups([]GroupKeyRanges{
+				{GroupID: "g", KeyRanges: []keyutil.KeyRange{nonOverlappingRange}},
+				{GroupID: "h"},
+			}))
+			createdG := loadStoredGroup(re, store, "g")
+			createdH := loadStoredGroup(re, store, "h")
+			m.SyncGroupFromEtcd(createdG)
+			m.SyncGroupFromEtcd(createdH)
+			re.NoError(m.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}}, nil))
+
+			calls, failures := 0, testutil.ToFloat64(targetWriteFailureCounter)
+			supported := false
+			var lastSent GroupTarget
+			m.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []GroupTarget) ([]string, error) {
+				calls++
+				lastSent = targets[0]
+				if !supported {
+					return nil, errors.Annotate(ErrTargetWriterUnsupported, "404 Not Found")
+				}
+				return pdManager.UpdateAffinityGroupTargets(targets)
+			}))
+
+			regionG := generateRegionForTest(10, []uint64{2, 1}, nonOverlappingRange)
+			regionH := generateRegionForTest(20, []uint64{1, 2}, nonOverlappingRange)
+			regionOther := generateRegionForTest(30, []uint64{3, 1}, nonOverlappingRange)
+			observe := func(id string, region *core.RegionInfo) {
+				m.ObserveAvailableRegion(region, m.GetAffinityGroupState(id))
+				synctest.Wait()
+			}
+
+			// Old PD returns 404: group initializes locally and activates immediately.
+			observe("g", regionG)
+			re.Equal(1, calls)
+			stateG := m.GetAffinityGroupState("g")
+			re.Equal(uint64(2), stateG.LeaderStoreID)
+			re.Equal([]uint64{1, 2}, stateG.VoterStoreIDs)
+			re.True(stateG.AffinitySchedulingAllowed)
+			re.False(stateG.RegularSchedulingAllowed)
+			re.True(stateG.HasUnpersistedTarget())
+			re.Zero(loadStoredGroup(re, store, "g").LeaderStoreID)
+			re.Equal(failures, testutil.ToFloat64(targetWriteFailureCounter))
+
+			// The HTTP cooldown still lets a second group initialize locally.
+			observe("h", regionH)
+			re.Equal(1, calls)
+			stateH := m.GetAffinityGroupState("h")
+			re.Equal(uint64(1), stateH.LeaderStoreID)
+			re.True(stateH.AffinitySchedulingAllowed)
+			re.True(stateH.HasUnpersistedTarget())
+			re.Zero(loadStoredGroup(re, store, "h").LeaderStoreID)
+
+			// Cache regionG so g reaches PhaseStable; active local target ignores conflicting observations.
+			_, isAffinity := m.GetAndCacheRegionAffinityGroupState(regionG)
+			re.True(isAffinity)
+			stateG = m.GetAffinityGroupState("g")
+			re.Equal(PhaseStable, stateG.Phase)
+			verBefore := stateG.affinityVer
+			observe("g", regionOther)
+			re.Equal(1, calls)
+			re.Equal(uint64(2), m.GetAffinityGroupState("g").LeaderStoreID)
+
+			// Retrying while PD is still old keeps AffinityVer and PhaseStable intact.
+			time.Sleep(time.Second)
+			observe("g", regionG)
+			re.Equal(2, calls)
+			re.Equal(GroupTarget{Expected: *createdG, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2}}, lastSent)
+			re.Equal(verBefore, m.GetAffinityGroupState("g").affinityVer)
+			re.Equal(PhaseStable, m.GetAffinityGroupState("g").Phase)
+			// A watcher reload of the still-empty stored group does not drop the local target.
+			m.SyncGroupFromEtcd(createdG)
+			re.Equal(verBefore, m.GetAffinityGroupState("g").affinityVer)
+			re.True(m.GetAffinityGroupState("g").HasUnpersistedTarget())
+
+			// A leader-only condition permits local failover with the same voters.
+			m.applyStoreConditions(map[uint64]storeCondition{1: storeLeaderEvicted})
+			observe("h", regionOther)
+			re.Equal(2, calls, "degraded local target preserves voter stability")
+			re.Equal([]uint64{1, 2}, m.GetAffinityGroupState("h").VoterStoreIDs)
+			observe("h", regionG)
+			stateH = m.GetAffinityGroupState("h")
+			re.Equal(uint64(2), stateH.LeaderStoreID)
+			re.True(stateH.AffinitySchedulingAllowed)
+			re.True(stateH.HasUnpersistedTarget())
+			re.Equal(2, calls, "leader failover uses the local path during the cooldown")
+
+			// After expiration, a healthy observation can also replace the voters locally.
+			m.ExpireAffinityGroup("h")
+			observe("h", regionOther)
+			re.Equal(2, calls)
+			re.Equal(uint64(3), m.GetAffinityGroupState("h").LeaderStoreID)
+			re.Equal([]uint64{1, 3}, m.GetAffinityGroupState("h").VoterStoreIDs)
+			re.True(m.GetAffinityGroupState("h").AffinitySchedulingAllowed)
+			re.True(m.GetAffinityGroupState("h").HasUnpersistedTarget())
+
+			// PD upgrades and accepts /targets; next matching observation persists without resetting AffinityVer.
+			supported = true
+			time.Sleep(time.Second)
+			observe("g", regionG)
+			re.Equal(3, calls)
+			re.Equal(GroupTarget{Expected: *createdG, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2}}, lastSent)
+			storedG := loadStoredGroup(re, store, "g")
+			re.Equal(uint64(2), storedG.LeaderStoreID)
+			re.Equal([]uint64{1, 2}, storedG.VoterStoreIDs)
+			m.SyncGroupFromEtcd(storedG)
+			stateG = m.GetAffinityGroupState("g")
+			re.False(stateG.HasUnpersistedTarget())
+			re.Equal(verBefore, stateG.affinityVer)
+			re.Equal(PhaseStable, stateG.Phase)
+
+			observe("h", regionOther)
+			re.Equal(4, calls, "the successful probe lets another group persist without waiting")
+			re.Equal(GroupTarget{Expected: *createdH, LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 3}}, lastSent)
+			storedH := loadStoredGroup(re, store, "h")
+			re.Equal(uint64(3), storedH.LeaderStoreID)
+			m.SyncGroupFromEtcd(storedH)
+			re.False(m.GetAffinityGroupState("h").HasUnpersistedTarget())
+
+			// Once synced, matching observations no longer send conditional target writes.
+			observe("g", regionG)
+			observe("h", regionOther)
+			re.Equal(4, calls)
+			re.Equal(failures, testutil.ToFloat64(targetWriteFailureCounter))
+		})
+	})
+
+	t.Run("admin target wins", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			re := require.New(t)
+			pdManager, store := newTargetTestManager(t)
+			m, _ := newTargetTestManager(t)
+			m.checkGroupsAvailability()
+			re.NoError(pdManager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}, {GroupID: "h"}, {GroupID: "k"}}))
+			for _, id := range []string{"g", "h", "k"} {
+				m.SyncGroupFromEtcd(loadStoredGroup(re, store, id))
+			}
+
+			supported := false
+			syncInFlightAdmin := false
+			m.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []GroupTarget) ([]string, error) {
+				if syncInFlightAdmin {
+					_, err := pdManager.UpdateAffinityGroupPeers("k", 4, []uint64{1, 4})
+					re.NoError(err)
+					m.SyncGroupFromEtcd(loadStoredGroup(re, store, "k"))
+				}
+				if !supported {
+					return nil, errors.Annotate(ErrTargetWriterUnsupported, "404 Not Found")
+				}
+				return pdManager.UpdateAffinityGroupTargets(targets)
+			}))
+
+			region := generateRegionForTest(10, []uint64{2, 1}, nonOverlappingRange)
+			observe := func(id string) {
+				m.ObserveAvailableRegion(region, m.GetAffinityGroupState(id))
+				synctest.Wait()
+			}
+
+			observe("g")
+			time.Sleep(time.Second)
+			observe("h")
+			re.True(m.GetAffinityGroupState("g").HasUnpersistedTarget())
+			re.True(m.GetAffinityGroupState("h").HasUnpersistedTarget())
+
+			// Case 1: Admin sets target on PD and watcher delivers it while targetUnpersisted is true.
+			_, err := pdManager.UpdateAffinityGroupPeers("g", 3, []uint64{1, 3})
+			re.NoError(err)
+			adminG := loadStoredGroup(re, store, "g")
+			m.SyncGroupFromEtcd(adminG)
+			stateG := m.GetAffinityGroupState("g")
+			re.Equal(*adminG, stateG.Group)
+			re.False(stateG.HasUnpersistedTarget())
+			re.True(stateG.AffinitySchedulingAllowed)
+
+			// Case 2: Admin target arrives while a 404 request is still in flight.
+			time.Sleep(time.Second)
+			syncInFlightAdmin = true
+			observe("k")
+			syncInFlightAdmin = false
+			stateK := m.GetAffinityGroupState("k")
+			re.Equal(uint64(4), stateK.LeaderStoreID)
+			re.Equal([]uint64{1, 4}, stateK.VoterStoreIDs)
+			re.False(stateK.HasUnpersistedTarget())
+
+			// Case 3: Admin writes on upgraded PD before watcher delivers to scheduling; PD CAS rejects Expected={0, nil}.
+			supported = true
+			_, err = pdManager.UpdateAffinityGroupPeers("h", 4, []uint64{2, 4})
+			re.NoError(err)
+			time.Sleep(time.Second)
+			observe("h")
+			adminH := loadStoredGroup(re, store, "h")
+			re.Equal(uint64(4), adminH.LeaderStoreID)
+			re.Equal([]uint64{2, 4}, adminH.VoterStoreIDs)
+			m.SyncGroupFromEtcd(adminH)
+			stateH := m.GetAffinityGroupState("h")
+			re.Equal(*adminH, stateH.Group)
+			re.False(stateH.HasUnpersistedTarget())
+		})
+	})
+}
+
 type targetReplyStorage struct {
 	endpoint.AffinityStorage
 	beforeCommit func()

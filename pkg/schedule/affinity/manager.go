@@ -71,10 +71,11 @@ type Manager struct {
 	// targetWriter writes the targets this Manager decides when it does not own the storage,
 	// as in the scheduling service. When it is nil, the Manager writes its own storage.
 	targetWriter TargetWriter
-	// The following three fields serialize background first-win requests.
-	targetWriteMutex    syncutil.Mutex
-	targetWriteInFlight bool
-	targetWriteRetryAt  time.Time
+	// targetWriteMutex protects admission and backoff for background first-win requests.
+	targetWriteMutex               syncutil.Mutex
+	targetWriteInFlight            bool
+	targetWriteRetryAt             time.Time
+	targetEndpointUnsupportedUntil time.Time
 
 	// labelRuleVer is increased while holding RWMutex whenever a group's label rule may change.
 	// A lookup reads it before the region labeler and saves its result only if it is unchanged,
@@ -254,6 +255,7 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 	groupInfo.SetAvailability(groupAvailable)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
+	groupInfo.targetUnpersisted = false
 	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil
@@ -514,9 +516,12 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	// Fast path: avoid taking write lock if nothing changes.
 	m.RLock()
 	existingGroup, exists := m.groups[group.ID]
-	if exists && sameStoredGroup(&existingGroup.Group, group) {
-		m.RUnlock()
-		return
+	if exists {
+		stored := existingGroup.storedGroup()
+		if sameStoredGroup(&stored, group) {
+			m.RUnlock()
+			return
+		}
 	}
 	m.RUnlock()
 
@@ -580,13 +585,18 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
 		return true
 	}
+	if groupInfo.targetUnpersisted && group.LeaderStoreID == 0 && len(group.VoterStoreIDs) == 0 {
+		return false
+	}
 
 	// Publishing a normalized target also normalizes the voter order in memory.
 	if sameStoredGroup(&groupInfo.Group, group) && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
+		groupInfo.targetUnpersisted = false
 		return false
 	}
 	groupInfo.Group = *group
 	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
+	groupInfo.targetUnpersisted = false
 	// A changed target gets its own grace period, even if the old target expired.
 	groupInfo.availability = groupDegraded
 	groupInfo.degradedExpiredAt = newDegradedExpiredAtFromNow()
