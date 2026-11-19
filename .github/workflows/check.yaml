@@ -15,10 +15,11 @@ jobs:
         with:
           cache-scope: check
       - name: Restore linter cache
-        uses: actions/cache@v4
+        id: lint-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('Makefile', 'tools.go', '**/go.mod', '**/go.sum', '**/.golangci.*') }}-${{ github.sha }}
+          key: golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('Makefile', 'tools.go', '**/go.mod', '**/go.sum', '**/.golangci.*') }}
           restore-keys: |
             golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('Makefile', 'tools.go', '**/go.mod', '**/go.sum', '**/.golangci.*') }}-
       - name: Make Check
@@ -26,3 +27,9 @@ jobs:
           SWAGGER=1 make build
           make tools
           make check
+      - name: Save linter cache on push
+        if: github.event_name == 'push' && steps.lint-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: ${{ steps.lint-cache.outputs.cache-primary-key }}
