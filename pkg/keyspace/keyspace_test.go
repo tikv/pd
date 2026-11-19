@@ -34,7 +34,10 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -139,6 +142,456 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	return requests
 }
 
+func (suite *keyspaceTestSuite) TestInitTwice() {
+	re := suite.Require()
+	manager := suite.manager
+	re.NoError(manager.initReserveKeyspace(GetBootstrapKeyspaceID(), GetBootstrapKeyspaceName()))
+	re.NoError(manager.initReserveKeyspace(GetBootstrapKeyspaceID(), GetBootstrapKeyspaceName()))
+}
+
+// TestInitReserveKeyspaceRepairsGroupMembership verifies that when the reserved
+// keyspace's meta already exists, initReserveKeyspace still
+// repairs its TSO keyspace-group membership if that was somehow lost, instead of
+// silently returning success once it sees ErrKeyspaceExists.
+func (suite *keyspaceTestSuite) TestInitReserveKeyspaceRepairsGroupMembership() {
+	re := suite.Require()
+	manager := suite.manager
+	id := GetBootstrapKeyspaceID()
+
+	meta, err := manager.LoadKeyspaceByID(id)
+	re.NoError(err)
+	groupID := meta.GetConfig()[TSOKeyspaceGroupIDKey]
+	re.NotEmpty(groupID)
+	gid, err := strconv.ParseUint(groupID, 10, 64)
+	re.NoError(err)
+
+	// Simulate the reserved keyspace's group membership having been lost
+	// independently of its meta. Also invoke the returned callback so the
+	// in-memory group cache is made stale too (matching a real restart, where
+	// a freshly loaded cache would reflect the same incomplete storage) -
+	// otherwise the cache assertion below would trivially pass regardless of
+	// whether the repair actually refreshes the cache.
+	op, cb, err := manager.kgm.updateKeyspaceForGroupTxnOp(endpoint.Basic, groupID, id, opDelete)
+	re.NoError(err)
+	re.NoError(manager.RunTxn(uint32(gid), []txnOp{op}))
+	re.NoError(cb(nil))
+	kg, err := manager.kgm.GetKeyspaceGroupByID(uint32(gid))
+	re.NoError(err)
+	re.NotContains(kg.Keyspaces, id)
+	_, _, err = manager.kgm.GetGroupByKeyspaceID(id)
+	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
+
+	// Reinitializing the reserved keyspace should repair its membership even
+	// though the keyspace meta already exists.
+	re.NoError(manager.initReserveKeyspace(id, GetBootstrapKeyspaceName()))
+
+	kg, err = manager.kgm.GetKeyspaceGroupByID(uint32(gid))
+	re.NoError(err)
+	re.Contains(kg.Keyspaces, id)
+
+	// GetKeyspaceGroupByID reloads from storage regardless of cache state, so
+	// also check the in-memory group cache directly (what GetGroupByKeyspaceID
+	// reads) to confirm the repair's post-commit callback actually ran.
+	repairedGroupID, _, err := manager.kgm.GetGroupByKeyspaceID(id)
+	re.NoError(err)
+	re.Equal(uint32(gid), repairedGroupID)
+}
+
+func (suite *keyspaceTestSuite) TestRepairReservedKeyspaceUsesPersistedUserKind() {
+	for _, userKind := range []string{"basic", "standard", "enterprise", ""} {
+		name := userKind
+		if name == "" {
+			name = "missing_defaults_to_basic"
+		}
+		suite.Run(name, func() {
+			re := suite.Require()
+			store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+			kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+			re.NoError(kgm.Bootstrap(suite.ctx))
+			manager := NewKeyspaceManager(suite.ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
+			re.NoError(manager.Bootstrap())
+			kind := endpoint.StringUserKind(userKind)
+			re.NoError(kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 2, UserKind: kind.String()}}))
+			kindMutation := &Mutation{Op: OpPut, Key: UserKindKey, Value: userKind}
+			if userKind == "" {
+				kindMutation.Op = OpDel
+			}
+			meta, err := manager.UpdateKeyspaceConfig(GetBootstrapKeyspaceName(), []*Mutation{
+				{Op: OpPut, Key: TSOKeyspaceGroupIDKey, Value: "2"},
+				kindMutation,
+			})
+			re.NoError(err)
+			id := meta.GetId()
+			// Lose only membership, not metadata, and invalidate the cache too.
+			op, cb, err := kgm.updateKeyspaceForGroupTxnOp(kind, "2", id, opDelete)
+			re.NoError(err)
+			re.NoError(manager.RunTxn(2, []txnOp{op}))
+			re.NoError(cb(nil))
+			_, _, err = kgm.GetGroupByKeyspaceID(id)
+			re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
+
+			re.NoError(manager.initReserveKeyspace(id, meta.GetName()))
+			group, err := kgm.GetKeyspaceGroupByID(2)
+			re.NoError(err)
+			re.Equal([]uint32{id}, group.Keyspaces)
+			cachedID, cachedKind, err := kgm.GetGroupByKeyspaceID(id)
+			re.NoError(err)
+			re.Equal(uint32(2), cachedID)
+			re.Equal(kind, cachedKind)
+			defaultGroup, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+			re.NoError(err)
+			re.NotContains(defaultGroup.Keyspaces, id)
+			repaired, err := manager.LoadKeyspaceByID(id)
+			re.NoError(err)
+			re.Equal(meta.GetConfig(), repaired.GetConfig())
+		})
+	}
+}
+
+// TestSaveKeyspaceRegionLabelerTxnOpReloadsFromStorage verifies that the
+// post-commit callback returned by saveKeyspaceRegionLabelerTxnOp re-reads the
+// label rule from storage instead of caching the snapshot captured when the op
+// was built. Nothing reserves the "keyspaces/<id>" rule ID against the generic
+// label-rule API, so a concurrent SetLabelRule/DeleteLabelRule on the same ID
+// landing between commit and this callback must win, not be silently reverted
+// by our stale snapshot.
+func TestSaveKeyspaceRegionLabelerTxnOpReloadsFromStorage(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	// Rebind the mock cluster's region labeler onto the same store the
+	// manager below uses, so the op's write and the callback's reload
+	// actually see each other - mockcluster.NewCluster otherwise builds its
+	// own separate in-memory storage.
+	var err error
+	cluster.RegionLabeler, err = labeler.NewRegionLabeler(ctx, store, time.Hour)
+	re.NoError(err)
+	manager := NewKeyspaceManager(ctx, store, cluster, mockid.NewIDAllocator(), &mockConfig{}, nil, nil)
+
+	id := uint32(123)
+	op, cb, err := manager.saveKeyspaceRegionLabelerTxnOp(id, txnRegionBound)
+	re.NoError(err)
+	re.NotNil(op)
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		return op(txn)
+	}))
+
+	// Simulate a concurrent SetLabelRule on the same rule ID landing after our
+	// txn committed but before our callback reloads.
+	ruleID := getRegionLabelID(id)
+	newer := MakeTxnLabelRule(id)
+	newer.Index = 7
+	newer.Labels[0].Value = "external-write"
+	re.NoError(cluster.SetLabelRule(newer))
+
+	re.NoError(cb(nil))
+
+	got := cluster.GetLabelRule(ruleID)
+	re.NotNil(got)
+	re.Equal(newer.Labels, got.Labels)
+}
+
+// TestCheckKeyspaceRegionBoundRequiresEnabled verifies that
+// CheckKeyspaceRegionBound rejects a non-ENABLED keyspace regardless of
+// wait_region_split. wait_region_split defaults to "true" (see
+// KeyspaceConfig.adjust), so most keyspaces never take the
+// wait_region_split=="false" shortcut and would otherwise fall through to
+// hasKeyspaceRegionBound, which checks only the physical region boundary and
+// knows nothing about state - the state gate must cover that fallthrough
+// too, not just the shortcut. skipSplitRegion is enabled here specifically
+// so hasKeyspaceRegionBound (if reached) reports the region as bound
+// regardless of the manager's cluster/storage being unset, keeping this test
+// self-contained while still exercising the fallthrough path for real.
+func TestCheckKeyspaceRegionBoundRequiresEnabled(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	manager := &Manager{}
+
+	disabledWaitTrue := &keyspacepb.KeyspaceMeta{
+		State:  keyspacepb.KeyspaceState_DISABLED,
+		Config: map[string]string{WaitRegionSplitKey: "true"},
+	}
+	re.False(manager.CheckKeyspaceRegionBound(disabledWaitTrue))
+
+	disabledWaitFalse := &keyspacepb.KeyspaceMeta{
+		State:  keyspacepb.KeyspaceState_DISABLED,
+		Config: map[string]string{WaitRegionSplitKey: "false"},
+	}
+	re.False(manager.CheckKeyspaceRegionBound(disabledWaitFalse))
+
+	// With the region actually bound (simulated here via skipSplitRegion),
+	// wait_region_split's value must not matter - an ENABLED keyspace with
+	// its bound satisfied is ready regardless of whether it waited for
+	// split at creation time.
+	enabledWaitTrue := &keyspacepb.KeyspaceMeta{
+		State:  keyspacepb.KeyspaceState_ENABLED,
+		Config: map[string]string{WaitRegionSplitKey: "true"},
+	}
+	re.True(manager.CheckKeyspaceRegionBound(enabledWaitTrue))
+
+	enabledWaitFalse := &keyspacepb.KeyspaceMeta{
+		State:  keyspacepb.KeyspaceState_ENABLED,
+		Config: map[string]string{WaitRegionSplitKey: "false"},
+	}
+	re.True(manager.CheckKeyspaceRegionBound(enabledWaitFalse))
+}
+
+// TestCheckKeyspaceRegionBoundIgnoresWaitRegionSplit verifies that
+// wait_region_split=="false" never shortcuts CheckKeyspaceRegionBound past
+// the real bound check. wait_region_split only controls whether creation
+// blocks waiting for the split synchronously - it says nothing about
+// whether the region has actually been split yet, since the split still
+// happens asynchronously via the Coordinator's patrolRegion. A keyspace
+// created with wait_region_split "false" is ENABLED immediately but its
+// region may not be split for a while; TestCreateClientWithKeyspaceCheck
+// (tests/integrations/client) reproduces the resulting bug under the
+// nextgen tag, where the auto-created system keyspace has wait_region_split
+// "false" and is reported ready before its region is actually split. This
+// test exercises the same invariant without needing a real cluster: with no
+// failpoint forcing the bound check to succeed and no cluster to satisfy
+// it, an ENABLED, wait_region_split=="false" keyspace must still report
+// unbound.
+func TestCheckKeyspaceRegionBoundIgnoresWaitRegionSplit(t *testing.T) {
+	re := require.New(t)
+	manager := &Manager{}
+	enabledWaitFalseUnbound := &keyspacepb.KeyspaceMeta{
+		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 1},
+		State:    keyspacepb.KeyspaceState_ENABLED,
+		Config:   map[string]string{WaitRegionSplitKey: "false"},
+	}
+	re.False(manager.CheckKeyspaceRegionBound(enabledWaitFalseUnbound))
+}
+
+func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
+	re := suite.Require()
+	// A manager that waits for the region split during creation, so the
+	// waitSplitKeyspaceFailed failpoint below is actually exercised (suite.manager
+	// uses a mockConfig with WaitRegionSplit false, which would skip that branch
+	// entirely and make the failpoint a no-op).
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+	re.NoError(kgm.Bootstrap(suite.ctx))
+	manager := NewKeyspaceManager(suite.ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{
+		WaitRegionSplit:          true,
+		WaitRegionSplitTimeout:   typeutil.Duration{Duration: time.Second},
+		CheckRegionSplitInterval: typeutil.Duration{Duration: time.Millisecond},
+	}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+	requests := makeCreateKeyspaceRequests(1)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceGroupsTxnOpFailed", `return(true)`))
+
+	// Create a keyspace with existing name must return error.
+	_, err := manager.CreateKeyspace(requests[0])
+	re.Error(err)
+	_, err = manager.LoadKeyspace(requests[0].Name)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceGroupsTxnOpFailed"))
+
+	// A wait-split failure preserves a complete pending object. The next
+	// request resumes it rather than allocating a new ID.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed", `return(true)`))
+	_, err = manager.CreateKeyspace(requests[0])
+	re.Error(err)
+	pending, err := manager.LoadKeyspace(requests[0].Name)
+	re.NoError(err)
+	re.NotEmpty(pending.GetConfig()[creationPendingKey])
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
+
+	ks, err := manager.CreateKeyspace(requests[0])
+	re.NoError(err)
+	re.Equal(pending.GetId(), ks.GetId())
+	km, err := manager.LoadKeyspace(ks.Name)
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, km.State)
+}
+
+// TestWaitSplitFailurePreservesPendingKeyspace verifies that a failed wait
+// retains the persisted creation identity for a user-initiated retry.
+func (suite *keyspaceTestSuite) TestWaitSplitFailurePreservesPendingKeyspace() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	// A manager that waits for the region split during creation, so the
+	// waitSplitKeyspaceFailed failpoint below is actually exercised.
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{
+		WaitRegionSplit:          true,
+		WaitRegionSplitTimeout:   typeutil.Duration{Duration: time.Second},
+		CheckRegionSplitInterval: typeutil.Duration{Duration: time.Millisecond},
+	}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
+	}()
+
+	ks, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "waitsplitfail",
+		CreateTime: time.Now().Unix(),
+	})
+	re.Error(err)
+	re.Nil(ks)
+	pending, err := manager.LoadKeyspace("waitsplitfail")
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_DISABLED, pending.GetState())
+	re.NotEmpty(pending.GetConfig()[creationPendingKey])
+}
+
+// TestWaitSplitFailurePreservesCrossSubsystemState verifies that a failed wait
+// and its retry neither undo nor duplicate group assignments.
+func (suite *keyspaceTestSuite) TestWaitSplitFailurePreservesCrossSubsystemState() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{
+		WaitRegionSplit:          true,
+		WaitRegionSplitTimeout:   typeutil.Duration{Duration: time.Second},
+		CheckRegionSplitInterval: typeutil.Duration{Duration: time.Millisecond},
+	}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	metaServiceGroupStore, ok := manager.store.(endpoint.MetaServiceGroupStorage)
+	re.True(ok)
+	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]string{}, nil)
+	manager.mgm.SetKeyspaceAssignmentCounter(manager.CountKeyspacesByMetaServiceGroup)
+	manager.mgm.updateGroups(map[string]string{"meta-1": "meta-1.svc.local"})
+	enabled := true
+	re.NoError(manager.mgm.PatchStatus(ctx, "meta-1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
+	}()
+
+	ks, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "rollback-cross-state",
+		CreateTime: time.Now().Unix(),
+	})
+	re.Error(err)
+	re.Nil(ks)
+	pending, err := manager.LoadKeyspace("rollback-cross-state")
+	re.NoError(err)
+	re.NotEmpty(pending.GetConfig()[creationPendingKey])
+
+	// The allocator hands out sequential ids starting at 1, and Bootstrap
+	// doesn't consume one (the reserved keyspace's id is fixed, not
+	// allocated), so this failed creation must have taken id 1.
+	_, _, err = manager.kgm.GetGroupByKeyspaceID(pending.GetId())
+	re.NoError(err)
+
+	status, err := manager.mgm.GetStatus(ctx)
+	re.NoError(err)
+	re.Equal(1, status["meta-1"].AssignmentCount)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
+	resumed, err := manager.CreateKeyspace(&CreateKeyspaceRequest{Name: pending.GetName()})
+	re.NoError(err)
+	re.Equal(pending.GetId(), resumed.GetId())
+	re.NotContains(resumed.GetConfig(), creationPendingKey)
+	status, err = manager.mgm.GetStatus(ctx)
+	re.NoError(err)
+	re.Equal(1, status["meta-1"].AssignmentCount)
+}
+
+// TestRefreshPendingKeyspaceGroupCache restores a missing cache membership
+// without modifying the durable assignment.
+func TestRefreshPendingKeyspaceGroupCache(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "rollback_cache_miss",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	created, err = manager.UpdateKeyspaceStateByID(
+		created.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix(),
+	)
+	re.NoError(err)
+	groupID, _, err := kgm.GetGroupByKeyspaceID(created.GetId())
+	re.NoError(err)
+
+	kgm.Lock()
+	if g := kgm.groups[endpoint.Basic].Get(groupID); g != nil {
+		kept := make([]uint32, 0, len(g.Keyspaces))
+		for _, id := range g.Keyspaces {
+			if id != created.GetId() {
+				kept = append(kept, id)
+			}
+		}
+		g.Keyspaces = kept
+	}
+	kgm.Unlock()
+	_, _, err = kgm.GetGroupByKeyspaceID(created.GetId())
+	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
+
+	re.NoError(kgm.refreshKeyspaceGroupForKeyspace(created))
+	restoredID, _, err := kgm.GetGroupByKeyspaceID(created.GetId())
+	re.NoError(err)
+	re.Equal(groupID, restoredID)
+
+	meta, err := manager.LoadKeyspace(created.GetName())
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_DISABLED, meta.GetState())
+	group, err := kgm.GetKeyspaceGroupByID(groupID)
+	re.NoError(err)
+	re.Contains(group.Keyspaces, created.GetId())
+}
+
+// TestWaitSplitSuccessEnablesKeyspacePersistently verifies that once the
+// post-commit wait-for-split succeeds, the keyspace's ENABLED state is actually
+// persisted to storage, not just reflected in the in-memory state cache.
+func (suite *keyspaceTestSuite) TestWaitSplitSuccessEnablesKeyspacePersistently() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	// A manager that waits for the region split during creation. skipSplitRegion
+	// is enabled suite-wide (see SetupSuite), which makes the wait succeed
+	// immediately, so this exercises the enable-after-split path without an
+	// injected failure.
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{
+		WaitRegionSplit:          true,
+		WaitRegionSplitTimeout:   typeutil.Duration{Duration: time.Second},
+		CheckRegionSplitInterval: typeutil.Duration{Duration: time.Millisecond},
+	}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	ks, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "waitsplitsuccess",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.NotNil(ks)
+
+	// Bypass the in-memory state cache: read directly from storage.
+	loaded, err := manager.LoadKeyspace("waitsplitsuccess")
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, loaded.State)
+}
+
 func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	re := suite.Require()
 	manager := suite.manager
@@ -214,8 +667,6 @@ func expectedCreateKeyspaceSteps() []string {
 		StepGetConfig,
 		StepSaveKeyspaceMeta,
 		StepSplitRegion,
-		StepEnableKeyspace,
-		StepUpdateKeyspaceGroup,
 		StepTotal,
 	}
 }
@@ -224,7 +675,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
 	re := suite.Require()
 	manager := suite.manager
 	expectedSteps := expectedCreateKeyspaceSteps()
-	re.Len(expectedSteps, 7, "expected 7 steps in create keyspace")
+	re.Len(expectedSteps, 5, "expected 5 steps in create keyspace")
 
 	before := getCreateKeyspaceStepCounts(re)
 
@@ -470,6 +921,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	delete(updated.Config, UserKindKey)
 	delete(updated.Config, GCManagementType)
 	delete(updated.Config, RegionBoundType)
+	delete(updated.Config, WaitRegionSplitKey)
 	checkMutations(re, nil, updated.Config, mutations)
 }
 
@@ -550,6 +1002,44 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigWithPreconditions() {
 	}, map[string]*string{})
 	re.NoError(err)
 	re.Equal("3000", meta.Config[currentKey])
+}
+
+// TestUpdateKeyspaceStateCacheNotUpdatedOnCommitFailure verifies that
+// keyspaceStateLookup is not updated when the underlying transaction that
+// persists the new state fails to commit: transformKeyspaceState mutates
+// meta.State in memory before the transaction commits, but the cache must
+// only be updated by the caller after RunInTxn actually succeeds.
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceStateCacheNotUpdatedOnCommitFailure() {
+	re := suite.Require()
+	manager := suite.manager
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "cache_commit_fail",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, created.State)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceMetaFailed", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceMetaFailed"))
+	}()
+
+	_, err = manager.UpdateKeyspaceStateByID(created.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.Error(err)
+
+	// The commit failed, so neither the durable meta nor the state cache should
+	// have moved to DISABLED.
+	state, err := manager.GetKeyspaceStateByID(created.GetId())
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, state)
+
+	cached, found := manager.cache.getKeyspaceByID(created.GetId())
+	re.True(found)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, cached.state)
+
+	loaded, err := manager.LoadKeyspaceByID(created.GetId())
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, loaded.State)
 }
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
@@ -838,18 +1328,26 @@ func updateKeyspaceConfig(re *require.Assertions, manager *Manager, name string,
 	}
 }
 
+func saveNewKeyspaceForTest(re *require.Assertions, manager *Manager, keyspace *keyspacepb.KeyspaceMeta) {
+	op, cb := manager.saveNewKeyspaceTxnOp(keyspace)
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		return op(txn)
+	})
+	re.NoError(cb(err))
+	re.NoError(err)
+}
+
 func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 	re := suite.Require()
 	// Create a keyspace without any keyspace group.
 	now := time.Now().Unix()
-	err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+	saveNewKeyspaceForTest(re, suite.manager, &keyspacepb.KeyspaceMeta{
 		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 111},
 		Name:           "111",
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
 		StateChangedAt: now,
 	})
-	re.NoError(err)
 	// Check if the keyspace is not attached to the default group.
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
@@ -870,14 +1368,13 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	// Create some keyspaces without any keyspace group.
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
-		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+		saveNewKeyspaceForTest(re, suite.manager, &keyspacepb.KeyspaceMeta{
 			Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: uint32(i)},
 			Name:           strconv.Itoa(i),
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
 			StateChangedAt: now,
 		})
-		re.NoError(err)
 	}
 	// Check if all the keyspaces are not attached to the default group.
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
@@ -903,14 +1400,13 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	// Create some keyspaces without any keyspace group.
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
-		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+		saveNewKeyspaceForTest(re, suite.manager, &keyspacepb.KeyspaceMeta{
 			Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: uint32(i)},
 			Name:           strconv.Itoa(i),
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
 			StateChangedAt: now,
 		})
-		re.NoError(err)
 	}
 	// Check if all the keyspaces are not attached to the default group.
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
@@ -1063,14 +1559,13 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	// Create some keyspaces without any keyspace group.
 	for i := 1; i <= n; i++ {
 		now := time.Now().Unix()
-		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+		saveNewKeyspaceForTest(re, suite.manager, &keyspacepb.KeyspaceMeta{
 			Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: uint32(i)},
 			Name:           strconv.Itoa(i),
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
 			StateChangedAt: now,
 		})
-		re.NoError(err)
 	}
 	// Benchmark the keyspace assignment patrol.
 
@@ -1092,7 +1587,7 @@ func (suite *keyspaceTestSuite) TestChecker() {
 		CreatedAt:      time.Now().Unix(),
 		StateChangedAt: time.Now().Unix(),
 	}
-	re.NoError(suite.manager.saveNewKeyspace(meta))
+	saveNewKeyspaceForTest(re, suite.manager, meta)
 
 	meta = &keyspacepb.KeyspaceMeta{
 		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 10001},
@@ -1101,7 +1596,7 @@ func (suite *keyspaceTestSuite) TestChecker() {
 		CreatedAt:      time.Now().Unix(),
 		StateChangedAt: time.Now().Unix(),
 	}
-	re.NoError(suite.manager.saveNewKeyspace(meta))
+	saveNewKeyspaceForTest(re, suite.manager, meta)
 
 	// keyspace exist check.
 	re.True(suite.manager.KeyspaceExist(10000))
@@ -1121,7 +1616,7 @@ func (suite *keyspaceTestSuite) TestGCBarrierRemovalInvalidationAfterCommit() {
 	re := suite.Require()
 	m := suite.manager
 	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 20000}, Name: "barrier-remove", State: keyspacepb.KeyspaceState_TOMBSTONE}
-	re.NoError(m.saveNewKeyspace(meta))
+	saveNewKeyspaceForTest(re, m, meta)
 	re.NoError(m.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{20000}}}))
 	calls := 0
 	m.SetGCBarrierInvalidator(func(id uint32) {
@@ -1158,13 +1653,14 @@ func (suite *keyspaceTestSuite) TestRemoveKeyspaceCleansCache() {
 		CreatedAt:      time.Now().Unix(),
 		StateChangedAt: time.Now().Unix(),
 	}
-	re.NoError(suite.manager.saveNewKeyspace(meta))
+	saveNewKeyspaceForTest(re, suite.manager, meta)
 	_, found := suite.manager.cache.getKeyspaceByID(meta.GetId())
 	re.True(found)
 
 	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 		return suite.manager.RemoveKeyspace(txn, meta.GetId())
 	}))
+	suite.manager.evictKeyspacesFromCache([]uint32{meta.GetId()})
 	_, found = suite.manager.cache.getKeyspaceByID(meta.GetId())
 	re.False(found)
 }
@@ -1173,22 +1669,31 @@ func (suite *keyspaceTestSuite) TestRemoveKeyspaceCleansCache() {
 // stale pre-lock group check: if all meta-service groups are gone by the time
 // the lock is held, the keyspace is created without an assignment instead of
 // failing, while a present group is still assigned normally.
-func TestAssignGroupAndSaveKeyspace(t *testing.T) {
+func TestAssignMetaServiceGroupTxnOp(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
 
-	// No groups available: assign=true (stale pre-check) must not fail creation.
+	// runAssign mimics the real create path: the assignment op runs inside the
+	// transaction while the meta-service group manager's read lock is held, and
+	// the post-commit callback runs only after the lock has been released (the
+	// callback re-acquires the read lock via AttachEndpoints, so running it while
+	// still holding the lock would be a recursive RLock).
+	runAssign := func(manager *Manager, keyspace *keyspacepb.KeyspaceMeta) error {
+		op, cb := manager.assignMetaServiceGroupTxnOp(keyspace)
+		manager.mgm.RLock()
+		err := manager.store.RunInTxn(ctx, op)
+		manager.mgm.RUnlock()
+		return cb(err)
+	}
+
+	// No groups available: the assignment op must not fail and must not assign a group.
 	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{}, nil)
 	managerNoGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, emptyMgm)
-	cfg := map[string]string{}
-	ks := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 100}, Name: "ks-stale-precheck", Config: cfg}
-	re.NoError(managerNoGroup.assignGroupAndSaveKeyspace(true, &cfg, ks))
-	re.NotContains(ks.GetConfig(), MetaServiceGroupIDKey)
-	loaded, err := managerNoGroup.LoadKeyspace("ks-stale-precheck")
-	re.NoError(err)
-	re.Empty(loaded.GetConfig()[MetaServiceGroupIDKey])
+	ks := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 100}, Name: "ks-stale-precheck", Config: map[string]string{}}
+	re.NoError(runAssign(managerNoGroup, ks))
+	re.Empty(ks.GetConfig()[MetaServiceGroupIDKey])
 
 	// A present, enabled group is still assigned. Groups are disabled by
 	// default, so it must be enabled before it is eligible for assignment.
@@ -1196,9 +1701,8 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	enabled := true
 	re.NoError(mgm.PatchStatus(ctx, "g1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
-	cfg2 := map[string]string{}
-	ks2 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101}, Name: "ks-with-group", Config: cfg2}
-	re.NoError(managerWithGroup.assignGroupAndSaveKeyspace(true, &cfg2, ks2))
+	ks2 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101}, Name: "ks-with-group", Config: map[string]string{}}
+	re.NoError(runAssign(managerWithGroup, ks2))
 	re.Equal("g1", ks2.GetConfig()[MetaServiceGroupIDKey])
 
 	// A group that exists but is disabled must not fail creation: the keyspace is
@@ -1207,7 +1711,7 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	managerDisabled := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, disabledMgm)
 	cfg3 := map[string]string{}
 	ks3 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 102}, Name: "ks-disabled-group", Config: cfg3}
-	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
+	re.NoError(runAssign(managerDisabled, ks3))
 	re.NotContains(ks3.GetConfig(), MetaServiceGroupIDKey)
 }
 
@@ -1252,7 +1756,7 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	manager.mgm.updateGroups(map[string]string{groupID: groupEndpoint})
 	assignKeyspaceToGroup(created.GetId())
 
-	counts, err := manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err := metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(1, counts[groupID])
 
@@ -1267,7 +1771,7 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	loaded, err := manager.LoadKeyspace(created.GetName())
 	re.NoError(err)
 	re.NotContains(loaded.GetConfig(), MetaServiceGroupIDKey)
-	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err = metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
 
@@ -1275,13 +1779,13 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	// binding and an inflated counter. Re-applying the TOMBSTONE state (a
 	// same-state update) must repair it rather than being skipped.
 	assignKeyspaceToGroup(updated.GetId())
-	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err = metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(1, counts[groupID])
 	repaired, err := manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
 	re.NoError(err)
 	re.NotContains(repaired.GetConfig(), MetaServiceGroupIDKey)
-	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err = metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
 
@@ -1291,9 +1795,21 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 		return manager.RemoveKeyspace(txn, updated.GetId())
 	}))
-	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err = metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
+}
+
+func metaServiceGroupAssignmentCounts(ctx context.Context, manager *MetaServiceGroupManager) (map[string]int, error) {
+	statusMap, err := manager.GetStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(statusMap))
+	for id, status := range statusMap {
+		counts[id] = status.AssignmentCount
+	}
+	return counts, nil
 }
 
 func TestLoadKeyspaceByIDWithRevision(t *testing.T) {

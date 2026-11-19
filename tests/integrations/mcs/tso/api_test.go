@@ -168,17 +168,26 @@ func TestTSOServerStartFirst(t *testing.T) {
 	primary := tsoCluster.WaitForDefaultPrimaryServing(re)
 	re.NotNil(primary)
 
+	var keyspace2ID uint32
 	testutil.Eventually(re, func() bool {
-		group, err := pdLeaderServer.GetServer().GetKeyspaceGroupManager().GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
-		if err != nil || group == nil || len(group.Members) != 2 || !slices.Contains(group.Keyspaces, uint32(2)) {
+		ks, err := pdLeaderServer.GetServer().GetKeyspaceManager().LoadKeyspace("k2")
+		if err != nil {
 			return false
 		}
-		_, group, _, _, err = primary.GetKeyspaceGroupManager().FindGroupByKeyspaceID(2)
-		return err == nil && group != nil && slices.Contains(group.Keyspaces, uint32(2))
+		keyspace2ID = ks.GetId()
+		return true
+	})
+	testutil.Eventually(re, func() bool {
+		group, err := pdLeaderServer.GetServer().GetKeyspaceGroupManager().GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+		if err != nil || group == nil || len(group.Members) != 2 || !slices.Contains(group.Keyspaces, keyspace2ID) {
+			return false
+		}
+		_, group, _, _, err = primary.GetKeyspaceGroupManager().FindGroupByKeyspaceID(keyspace2ID)
+		return err == nil && group != nil && slices.Contains(group.Keyspaces, keyspace2ID)
 	})
 	input := make(map[string]any)
 	input["new-id"] = 1
-	input["keyspaces"] = []uint32{2}
+	input["keyspaces"] = []uint32{keyspace2ID}
 	jsonBody, err := json.Marshal(input)
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, addr+"/pd/api/v2/tso/keyspace-groups/0/split", bytes.NewBuffer(jsonBody))
