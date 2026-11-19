@@ -277,6 +277,8 @@ def update_profile(profile, reports):
     for filename in reports:
         for seconds, package, test in successful_test_timings(filename):
             samples[(package, test)].append(seconds)
+    profile["tests"] = {}
+    profile["packages"] = {}
     for (package, test), values in samples.items():
         profile["tests"][f"{package}.{test}"] = round(statistics.median(values), 3)
     for package in {package for package, _ in samples}:
