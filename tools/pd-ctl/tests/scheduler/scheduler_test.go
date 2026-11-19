@@ -514,7 +514,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler"}, nil)
 	re.NotContains(echo, "Success!")
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "test", "a", "b"}, nil)
-	re.Contains(echo, "Success!")
+	re.Equal("Success! 0", strings.TrimSpace(echo))
 	var rangeConf []map[string]any
 	var jobConf map[string]any
 	testutil.Eventually(re, func() bool {
@@ -535,7 +535,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	re.NotContains(echo, "Success!")
 
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "learner", "a", "b"}, nil)
-	re.Contains(echo, "Success!")
+	re.Equal("Success! 1", strings.TrimSpace(echo))
 	testutil.Eventually(re, func() bool {
 		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &rangeConf)
 		return len(rangeConf) == 2

@@ -70,7 +70,7 @@ type Client interface {
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
-	CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error
+	CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) (string, error)
 	CancelSchedulerJob(ctx context.Context, name string, jobID uint64) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
@@ -887,18 +887,25 @@ func (c *client) CancelSchedulerJob(ctx context.Context, name string, jobID uint
 		WithMethod(http.MethodDelete))
 }
 
-// CreateSchedulerWithInput creates a scheduler with the specified input.
-func (c *client) CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error {
+// CreateSchedulerWithInput creates a scheduler with the specified input and returns
+// the server response. For balance-range-scheduler, it is the ID of the created job.
+func (c *client) CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) (string, error) {
 	input["name"] = name
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		return errors.Trace(err)
+		return "", errors.Trace(err)
 	}
-	return c.request(ctx, newRequestInfo().
+	var resp string
+	err = c.request(ctx, newRequestInfo().
 		WithName(createSchedulerNameWithInput).
 		WithURI(Schedulers).
 		WithMethod(http.MethodPost).
-		WithBody(inputJSON))
+		WithBody(inputJSON).
+		WithResp(&resp))
+	if err != nil {
+		return "", err
+	}
+	return resp, nil
 }
 
 // CreateScheduler creates a scheduler to PD cluster.

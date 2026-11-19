@@ -15,9 +15,11 @@
 package schedulers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -38,10 +40,15 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
+
+// BalanceRangeFirstJobID is the ID of the job created along with a new
+// balance-range-scheduler.
+const BalanceRangeFirstJobID uint64 = 0
 
 var (
 	defaultJobTimeout = 30 * time.Minute
@@ -150,11 +157,12 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 	}
 	log.Info("add balance key range job", zap.String("alias", job.Alias))
 	job.Ranges = krs
-	if err := handler.config.addJob(job); err != nil {
+	jobID, err := handler.config.addJob(job)
+	if err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, strconv.FormatUint(jobID, 10))
 }
 
 func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r *http.Request) {
@@ -181,7 +189,10 @@ type balanceRangeSchedulerConfig struct {
 	jobs []*balanceRangeSchedulerJob
 }
 
-func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) error {
+// addJob adds the job and returns its ID. If an uncompleted job with the same
+// alias and parameters already exists, it returns the existing job's ID instead,
+// so that retrying the same request is idempotent.
+func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) (uint64, error) {
 	conf.Lock()
 	defer conf.Unlock()
 	for _, c := range conf.jobs {
@@ -189,7 +200,10 @@ func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) e
 			continue
 		}
 		if job.Alias == c.Alias {
-			return errors.New("job already exists")
+			if job.sameParams(c) {
+				return c.JobID, nil
+			}
+			return 0, errors.New("job already exists")
 		}
 	}
 	job.Status = pending
@@ -198,9 +212,12 @@ func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) e
 	} else {
 		job.JobID = conf.jobs[len(conf.jobs)-1].JobID + 1
 	}
-	return conf.persistLocked(func() {
+	if err := conf.persistLocked(func() {
 		conf.jobs = append(conf.jobs, job)
-	})
+	}); err != nil {
+		return 0, err
+	}
+	return job.JobID, nil
 }
 
 func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
@@ -359,6 +376,16 @@ func (job *balanceRangeSchedulerJob) isComplete() bool {
 	return job.Status == finished || job.Status == cancelled
 }
 
+// sameParams reports whether the two jobs are created with the same parameters.
+func (job *balanceRangeSchedulerJob) sameParams(other *balanceRangeSchedulerJob) bool {
+	return job.Rule == other.Rule &&
+		job.Engine == other.Engine &&
+		job.Timeout == other.Timeout &&
+		slices.EqualFunc(job.Ranges, other.Ranges, func(a, b keyutil.KeyRange) bool {
+			return bytes.Equal(a.StartKey, b.StartKey) && bytes.Equal(a.EndKey, b.EndKey)
+		})
+}
+
 // EncodeConfig serializes the config.
 func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 	s.conf.Lock()
@@ -370,6 +397,22 @@ func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
+	return s.reloadConfigLocked()
+}
+
+func (s *balanceRangeScheduler) updateConfig(storage endpoint.ConfigStorage, data []byte) error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	// GC and local status updates also persist under this lock. Keep the cache
+	// write and in-memory reload together so they cannot write an older job list
+	// between these two steps.
+	if err := storage.SaveSchedulerConfig(s.GetName(), data); err != nil {
+		return err
+	}
+	return s.reloadConfigLocked()
+}
+
+func (s *balanceRangeScheduler) reloadConfigLocked() error {
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
 	if err := s.conf.load(&jobs); err != nil {
 		return err

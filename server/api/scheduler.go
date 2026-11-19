@@ -31,6 +31,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -83,7 +84,7 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 //	@Accept		json
 //	@Param		body	body	object	true	"json params"
 //	@Produce	json
-//	@Success	200	{string}	string	"The scheduler is created."
+//	@Success	200	{string}	string	"The scheduler is created. For balance-range-scheduler, returns the created job ID as a decimal string."
 //	@Failure	400	{string}	string	"Bad format request."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/schedulers [post]
@@ -111,29 +112,16 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 
 	switch tp {
 	case types.BalanceRangeScheduler:
-		exist, _ := h.IsSchedulerExisted(name)
-		if exist {
-			handler, err := h.GetSchedulerConfigHandler()
-			if err == nil && handler != nil {
-				r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
-				r.Method = http.MethodPut
-				data, err := json.Marshal(input)
-				if err != nil {
-					h.r.JSON(w, http.StatusInternalServerError, err.Error())
-					return
-				}
-
-				r.Body = io.NopCloser(bytes.NewBuffer(data))
-				handler.ServeHTTP(w, r)
-				return
-			}
-			if err != nil {
-				h.r.JSON(w, http.StatusNotAcceptable, err.Error())
-				return
-			}
-			h.r.JSON(w, http.StatusNotAcceptable, "scheduler config handler is unavailable")
+		exist, err := h.IsSchedulerExisted(name)
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if exist {
+			h.addBalanceRangeJob(w, r, input)
+			return
+		}
+		failpoint.InjectCall("beforeCreateBalanceRangeScheduler")
 		if err := apiutil.CollectStringOption("rule", input, collector); err != nil {
 			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
@@ -153,7 +141,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		if err := apiutil.CollectStringOption("alias", input, collector); err != nil {
+		// The slice decoder unescapes the alias, so escape it here to keep the raw
+		// alias, the same as the one stored by the job handler.
+		if err := apiutil.CollectStringOption("alias", input, func(v string) {
+			collector(url.QueryEscape(v))
+		}); err != nil {
 			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -298,11 +290,33 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := h.AddScheduler(tp, args...); err != nil {
+		if tp == types.BalanceRangeScheduler && errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+			// Another request may have created the scheduler after the absence
+			// check. Reuse the job handler's idempotency check in that case too.
+			h.addBalanceRangeJob(w, r, input)
+			return
+		}
 		h.r.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if tp == types.BalanceRangeScheduler {
+		h.r.JSON(w, http.StatusOK, strconv.FormatUint(schedulers.BalanceRangeFirstJobID, 10))
 		return
 	}
 
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
+}
+
+func (h *schedulerHandler) addBalanceRangeJob(w http.ResponseWriter, r *http.Request, input map[string]any) {
+	data, err := json.Marshal(input)
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
+	r.Method = http.MethodPut
+	r.Body = io.NopCloser(bytes.NewBuffer(data))
+	newSchedulerConfigHandler(h.svr, h.r).handleSchedulerConfig(w, r)
 }
 
 // collectEvictLeaderStoreIDs reads the target store IDs for evict-leader-scheduler
@@ -473,6 +487,15 @@ func (h *schedulerConfigHandler) handleSchedulerConfig(w http.ResponseWriter, r 
 	handler := h.svr.GetHandler()
 	sh, err := handler.GetSchedulerConfigHandler()
 	if err == nil && sh != nil {
+		if r.Method == http.MethodPut && r.URL.Path == path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job") {
+			// A failed initial create may leave the handler and jobs registered
+			// without persisting the scheduler list. Repair it before either
+			// matching or adding a job, for both direct PUT and forwarded POST.
+			if err := handler.PersistScheduleConfig(); err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
 		sh.ServeHTTP(w, r)
 		return
 	}
