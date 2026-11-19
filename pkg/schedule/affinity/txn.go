@@ -619,6 +619,12 @@ func (m *Manager) loadAffinityGroupInTxn(txn kv.Txn, groupID string) (*Group, er
 	return &group, nil
 }
 
+type plannedRangeUpdate struct {
+	ranges    GroupKeyRanges
+	labelRule *labeler.LabelRule
+	isRemove  bool
+}
+
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
 // Note: Validates add and remove operations separately, then writes both in one batch, which spans several
 // transactions when it has more than MaxEtcdTxnOps operations.
@@ -633,38 +639,25 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 			}
 		}
 	}
-	toAdd := make(map[string]GroupKeyRanges, len(addOps))
-	toRemove := make(map[string]GroupKeyRanges, len(removeOps))
-	newAddedLabelRules := make(map[string]*labeler.LabelRule, len(addOps))
-	newRemovedLabelRules := make(map[string]*labeler.LabelRule, len(removeOps))
-
-	plan := m.regionLabeler.NewPlan()
 
 	// Step 0: Validate that a Group is either fully added or fully removed.
-	for _, op := range addOps {
-		if len(op.KeyRanges) == 0 {
-			continue
+	seenGroups := make(map[string]struct{}, len(addOps)+len(removeOps))
+	for _, ops := range [][]GroupKeyRanges{addOps, removeOps} {
+		for _, op := range ops {
+			if len(op.KeyRanges) == 0 {
+				continue
+			}
+			if _, exists := seenGroups[op.GroupID]; exists {
+				return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
+			}
+			seenGroups[op.GroupID] = struct{}{}
 		}
-		if _, exists := toAdd[op.GroupID]; exists {
-			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
-		}
-		toAdd[op.GroupID] = GroupKeyRanges{}
-	}
-	for _, op := range removeOps {
-		if len(op.KeyRanges) == 0 {
-			continue
-		}
-		if _, exists := toRemove[op.GroupID]; exists {
-			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
-		}
-		if _, exists := toAdd[op.GroupID]; exists {
-			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
-		}
-		toRemove[op.GroupID] = GroupKeyRanges{}
 	}
 
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
+
+	planned := make([]plannedRangeUpdate, 0, len(addOps)+len(removeOps))
 
 	// Step 1: Validate the added KeyRanges.
 	for _, op := range addOps {
@@ -672,12 +665,15 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		if err != nil {
 			return err
 		}
-
-		// Merge current ranges with new ranges to add
-		toAdd[op.GroupID] = GroupKeyRanges{
-			GroupID:   op.GroupID,
-			KeyRanges: slices.Concat(currentRanges.KeyRanges, op.KeyRanges),
+		if len(op.KeyRanges) == 0 {
+			continue
 		}
+		planned = append(planned, plannedRangeUpdate{
+			ranges: GroupKeyRanges{
+				GroupID:   op.GroupID,
+				KeyRanges: slices.Concat(currentRanges.KeyRanges, op.KeyRanges),
+			},
+		})
 	}
 	// Validate no overlaps with newly added ranges
 	if len(addOps) > 0 {
@@ -692,107 +688,96 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		if err != nil {
 			return err
 		}
-		currentRanges, err = applyRemoveOps(currentRanges, op)
+		if len(op.KeyRanges) == 0 {
+			continue
+		}
+		remaining, err := applyRemoveOps(currentRanges, op)
 		if err != nil {
 			return err
 		}
-		toRemove[op.GroupID] = currentRanges
+		planned = append(planned, plannedRangeUpdate{
+			ranges:   remaining,
+			isRemove: true,
+		})
+	}
+	if len(planned) == 0 {
+		return nil
 	}
 
-	// Step 3: Create the change plan for the Label
-	for _, op := range addOps {
-		// For addOps, directly SetLabelRule (Save will overwrite the old value).
-		// No need to Delete first.
-		labelRule := MakeLabelRule(toAdd[op.GroupID])
-		if err := plan.SetLabelRule(labelRule); err != nil {
-			log.Error("failed to create label rule",
-				zap.String("failed-group-id", op.GroupID),
-				zap.Int("total-groups", len(addOps)+len(removeOps)),
-				zap.Error(err))
-			return err
-		}
-		newAddedLabelRules[op.GroupID] = labelRule
-	}
-	for _, op := range removeOps {
-		ranges := toRemove[op.GroupID]
-		var labelRule *labeler.LabelRule
-
-		if len(ranges.KeyRanges) > 0 {
-			// If there are still ranges after removal, SetLabelRule (overwrite the old value).
-			labelRule = MakeLabelRule(ranges)
+	// Step 3: Create the change plan for the Label.
+	plan := m.regionLabeler.NewPlan()
+	for i := range planned {
+		item := &planned[i]
+		if !item.isRemove || len(item.ranges.KeyRanges) > 0 {
+			// Overwrite the old rule when ranges are added or still remain after removal.
+			labelRule := MakeLabelRule(item.ranges)
 			if err := plan.SetLabelRule(labelRule); err != nil {
 				log.Error("failed to create label rule",
-					zap.String("failed-group-id", op.GroupID),
-					zap.Int("total-groups", len(addOps)+len(removeOps)),
+					zap.String("failed-group-id", item.ranges.GroupID),
+					zap.Int("total-groups", len(planned)),
 					zap.Error(err))
 				return err
 			}
+			item.labelRule = labelRule
 		} else {
-			// If no ranges remain after removal, DeleteLabelRule.
-			labelRuleID := GetLabelRuleID(op.GroupID)
+			// Delete the rule when no ranges remain after removal.
+			labelRuleID := GetLabelRuleID(item.ranges.GroupID)
 			if err := plan.DeleteLabelRule(labelRuleID); err != nil {
 				log.Error("failed to delete label rule for affinity group",
-					zap.String("group-id", op.GroupID),
+					zap.String("group-id", item.ranges.GroupID),
 					zap.String("label-rule-id", labelRuleID),
 					zap.Error(err))
 				return err
 			}
 		}
-		newRemovedLabelRules[op.GroupID] = labelRule
 	}
 
 	// Step 4: Save the Label information in storage. Each operation writes one
 	// label rule.
 	labelOps := plan.CommitOps()
-	ruleOps := make([][]func(kv.Txn) error, len(labelOps))
-	for i, op := range labelOps {
-		ruleOps[i] = []func(kv.Txn) error{op}
+	ruleOps := make([][]func(kv.Txn) error, len(planned))
+	for i := range planned {
+		ruleOps[i] = []func(kv.Txn) error{labelOps[i]}
 	}
 	committed, err := m.runGroupOpsInTxn(ruleOps)
 	if err != nil {
 		log.Error("failed to update affinity group ranges",
-			zap.Int("total-groups", len(addOps)+len(removeOps)),
+			zap.Int("total-groups", len(planned)),
 			zap.Int("committed-groups", committed),
 			zap.Error(err))
 		// Publish the rules that have committed and treat the failed
-		// transaction as not committed. The rules of addOps come first.
-		plan = plan.Prefix(committed)
-		added := min(committed, len(addOps))
-		toAdd, newAddedLabelRules = filterGroups(toAdd, addOps[:added]), filterGroups(newAddedLabelRules, addOps[:added])
-		toRemove, newRemovedLabelRules = filterGroups(toRemove, removeOps[:committed-added]), filterGroups(newRemovedLabelRules, removeOps[:committed-added])
+		// transaction as not committed.
+		plan, planned = plan.Prefix(committed), planned[:committed]
+	}
+	if len(planned) == 0 {
+		return err
 	}
 
 	// Step 5: Save the Group and Label information in memory.
 	plan.Apply()
 
-	maps.Copy(m.keyRanges, toAdd)
-	for groupID, currentRanges := range toRemove {
-		if len(currentRanges.KeyRanges) > 0 {
-			m.keyRanges[groupID] = currentRanges
+	for _, item := range planned {
+		if len(item.ranges.KeyRanges) > 0 {
+			m.keyRanges[item.ranges.GroupID] = item.ranges
 		} else {
-			delete(m.keyRanges, groupID)
+			delete(m.keyRanges, item.ranges.GroupID)
 		}
+	}
+
+	var conflicts map[string]struct{}
+	if m.hasRangeConflicts {
+		conflicts = m.collectRangeConflictsLocked()
 	}
 
 	m.Lock()
 	defer m.Unlock()
-	m.updateGroupLabelRulesLocked(newAddedLabelRules, false)
-	m.updateGroupLabelRulesLocked(newRemovedLabelRules, true)
+	for _, item := range planned {
+		m.updateGroupLabelRuleLocked(item.ranges.GroupID, item.labelRule, item.isRemove)
+	}
 	if m.hasRangeConflicts {
-		m.reconcileRangeConflictsLocked(m.collectRangeConflictsLocked())
+		m.reconcileRangeConflictsLocked(conflicts)
 	}
 	return err
-}
-
-// filterGroups returns the entries of m for the groups of ops.
-func filterGroups[V any](m map[string]V, ops []GroupKeyRanges) map[string]V {
-	filtered := make(map[string]V, len(ops))
-	for _, op := range ops {
-		if v, ok := m[op.GroupID]; ok {
-			filtered[op.GroupID] = v
-		}
-	}
-	return filtered
 }
 
 // getCurrentRanges retrieves the current key ranges for a group.
