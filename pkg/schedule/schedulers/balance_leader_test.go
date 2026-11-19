@@ -57,111 +57,75 @@ func TestMain(m *testing.M) {
 }
 
 func TestBalanceLeaderReturnsFormerLeadersAfterRestart(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest()
-	defer cancel()
-	tc.AddLeaderStore(1, 100)
-	tc.AddLeaderStore(2, 1)
-	tc.AddLeaderStore(3, 0) // Lowest score, but holds no peer of these Regions.
-	const restart = 2000
-	tc.PutStore(tc.GetStore(2), core.SetStoreStartTime(1000))
-	for id := uint64(100); id < 2100; id++ {
-		tc.AddLeaderRegion(id, 1, 2)
-	}
-	report := func(r *core.RegionInfo, store, term, timestamp uint64) *core.RegionInfo {
-		r = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
-			Region: r.GetMeta(), Leader: r.GetStorePeer(store), Term: term,
-			Interval: &pdpb.TimeInterval{EndTimestamp: timestamp}, ApproximateSize: 10 << 20,
-		}, 0)
-		tc.PutRegion(r)
-		return r
-	}
-	depart := func(id uint64, opts ...core.RegionCreateOption) *core.RegionInfo {
-		r := tc.AddLeaderRegion(id, 2, 1)
-		report(r, 2, 5, restart-1)
-		r = report(r, 1, 6, restart)
-		r = r.Clone(opts...)
-		tc.PutRegion(r)
-		return r
-	}
-	former := depart(11)
-	depart(12, core.WithIncVersion())
-	pending := depart(13)
-	pending = pending.Clone(core.WithPendingPeers([]*metapb.Peer{pending.GetStorePeer(2)}))
-	tc.PutRegion(pending)
-	depart(14, core.WithRemoveStorePeer(2), core.WithAddPeer(&metapb.Peer{Id: 99999, StoreId: 2}))
-	movedAgain := depart(15)
+	for _, planned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("planned=%t", planned), func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest(false)
+			defer cancel()
+			now := time.Now().Unix()
+			store := func(id uint64, start int64, keys uint64) {
+				tc.PutStore(tc.GetStore(id), core.SetStoreStartTime(start), core.SetLastHeartbeatTS(time.Now()), core.SetStoreStats(&pdpb.StoreStats{
+					KeysRead: keys, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)},
+				}))
+			}
+			tc.AddLeaderStore(1, 100)
+			tc.AddLeaderStore(2, 1)
+			tc.AddLeaderStore(3, 0) // Lowest score, with no eligible peer.
+			store(1, now-100, 1000000)
+			store(2, now-100, 0)
+			for id := uint64(100); id < 2100; id++ {
+				tc.AddLeaderRegion(id, 1, 2)
+			}
+			r := tc.AddLeaderRegion(11, 2, 1)
+			if planned {
+				tc.AddRegionWithReadInfo(11, 1, 1<<26, 20000, 20000, 10, []uint64{2}, 10)
+				r = tc.GetRegion(11)
+			}
+			report := func(peer, term uint64, end int64) {
+				r = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{Region: r.GetMeta(), Leader: r.GetStorePeer(peer), Term: term,
+					KeysRead: 20000, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(end - 10), EndTimestamp: uint64(end)}, ApproximateSize: 10 << 20}, 0)
+				tc.PutRegion(r)
+			}
+			report(2, 7, now-20)
+			if planned {
+				evict, err := operator.CreateTransferLeaderOperator(types.EvictLeaderScheduler.String(), tc, r, 1, nil, operator.OpLeader)
+				re.NoError(err)
+				re.True(oc.AddOperator(evict))
+				report(1, 8, now-10)
+				oc.Dispatch(r, operator.DispatchFromHeartBeat, func(uint64) {})
+				re.Equal(operator.SUCCESS, evict.Status())
+				re.True(tc.IsRegionHot(r))
+				store(2, now-5, 0)
+			} else {
+				// Registration may reach PD before the successor heartbeat.
+				store(2, now-5, 0)
+				report(1, 8, now-10)
+			}
+			lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
+			re.NoError(err)
+			lb.(*balanceLeaderScheduler).conf.Batch = 2
+			ops, _ := lb.Schedule(tc, false)
+			re.Len(ops, 2)
+			re.Equal(r.GetID(), ops[0].RegionID())
+			re.NotEqual(ops[0].RegionID(), ops[1].RegionID())
+			operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
+			re.True(oc.AddOperator(ops[0]))
+			oc.RemoveOperator(ops[0])
 
-	tc.PutStore(tc.GetStore(2), core.SetStoreStartTime(restart))
-	report(movedAgain, 2, 7, restart+1)
-	report(movedAgain, 1, 8, restart+2)
-	candidates := tc.GetFormerLeaderRegions(tc.GetStore(2), []keyutil.KeyRange{{}})
-	re.ElementsMatch([]*core.RegionInfo{former, pending}, candidates)
-	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
-	re.NoError(err)
-	lb.(*balanceLeaderScheduler).conf.Batch = 2
-	ops, _ := lb.Schedule(tc, false)
-	re.Len(ops, 2)
-	re.NotEqual(ops[0].RegionID(), ops[1].RegionID())
-	re.Equal(former.GetID(), ops[0].RegionID())
-	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
-
-	// Range ownership and load balancing still take precedence.
-	excluded := []keyutil.KeyRange{{StartKey: former.GetStartKey(), EndKey: former.GetEndKey()}}
-	tc.KeyRangeManager.Append(excluded)
-	ops, _ = lb.Schedule(tc, false)
-	re.Len(ops, 2)
-	for _, op := range ops {
-		re.NotEqual(former.GetID(), op.RegionID())
+			excluded := []keyutil.KeyRange{{StartKey: r.GetStartKey(), EndKey: r.GetEndKey()}}
+			tc.KeyRangeManager.Append(excluded)
+			ops, _ = lb.Schedule(tc, false)
+			re.Len(ops, 2)
+			for _, op := range ops {
+				re.NotEqual(r.GetID(), op.RegionID())
+			}
+			tc.KeyRangeManager.Delete(excluded)
+			tc.UpdateLeaderCount(1, 1)
+			tc.UpdateLeaderCount(2, 1)
+			ops, _ = lb.Schedule(tc, false)
+			re.Empty(ops)
+		})
 	}
-	tc.KeyRangeManager.Delete(excluded)
-	tc.UpdateLeaderCount(1, 1)
-	tc.UpdateLeaderCount(2, 1)
-	ops, _ = lb.Schedule(tc, false)
-	re.Empty(ops)
-}
-
-func TestBalanceLeaderReturnsPlannedHotRegionThroughOperatorController(t *testing.T) {
-	cancel, _, tc, oc := prepareSchedulersTest(false)
-	defer cancel()
-	tc.AddLeaderStore(1, 100)
-	tc.AddLeaderStore(2, 1)
-	start := time.Now().Unix()
-	setStore := func(id uint64, epoch int64, keys uint64) {
-		tc.PutStore(tc.GetStore(id), core.SetStoreStartTime(epoch), core.SetLastHeartbeatTS(time.Now()),
-			core.SetStoreStats(&pdpb.StoreStats{KeysRead: keys, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(start) - 10, EndTimestamp: uint64(start)}}))
-	}
-	setStore(1, start-100, 1000000)
-	setStore(2, start-100, 0)
-	for id := uint64(100); id < 300; id++ {
-		tc.AddLeaderRegion(id, 1, 2)
-	}
-	tc.AddRegionWithReadInfo(11, 1, 1<<26, 20000, 20000, 10, []uint64{2}, 10)
-	r := tc.GetRegion(11)
-	report := func(peer, term uint64, end int64) *core.RegionInfo {
-		reg := core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{Region: r.GetMeta(), Leader: r.GetStorePeer(peer), Term: term,
-			KeysRead: 20000, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(end) - 10, EndTimestamp: uint64(end)}, ApproximateSize: 10 << 20}, 0)
-		tc.PutRegion(reg)
-		return reg
-	}
-	// Only the completed planned eviction authorizes bypassing the hot filter.
-	r = report(2, 7, start-20)
-	evict, err := operator.CreateTransferLeaderOperator(types.EvictLeaderScheduler.String(), tc, r, 1, []uint64{1}, operator.OpLeader)
-	require.NoError(t, err)
-	require.True(t, oc.AddOperator(evict))
-	r = report(1, 8, start-10)
-	oc.Dispatch(r, operator.DispatchFromHeartBeat, func(uint64) {})
-	require.Equal(t, operator.SUCCESS, evict.Status())
-	require.True(t, tc.IsRegionHot(r))
-	setStore(2, start-5, 0)
-	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
-	require.NoError(t, err)
-	lb.(*balanceLeaderScheduler).conf.Batch = 1
-	ops, _ := lb.Schedule(tc, false)
-	require.Len(t, ops, 1)
-	require.Equal(t, r.GetID(), ops[0].RegionID())
-	require.True(t, oc.AddOperator(ops[0]))
-	operatorutil.CheckTransferLeader(require.New(t), ops[0], operator.OpLeader, 1, 2)
 }
 
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {

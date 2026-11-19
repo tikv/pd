@@ -85,6 +85,9 @@ type StoreInfo struct {
 	networkSlowTriggers    uint64
 }
 
+// LeaderReturnWindow bounds how long PD retains restart-locality hints.
+const LeaderReturnWindow = 10 * time.Minute
+
 // storeRestart identifies the previous process on this store. observedAt is
 // local to this PD process and is used only to expire the return preference.
 type storeRestart struct {
@@ -95,12 +98,26 @@ type storeRestart struct {
 // RecentlyRestarted reports whether PD observed this store change to a new
 // process within the leader-return window. Initial discovery has no history.
 func (s *StoreInfo) RecentlyRestarted() bool {
-	return s.restart != nil && time.Since(s.restart.observedAt) < leaderReturnWindow
+	return s.restart != nil && time.Since(s.restart.observedAt) < LeaderReturnWindow
 }
 
 // RestartedFrom reports whether the current recovery window follows the given process.
 func (s *StoreInfo) RestartedFrom(start int64) bool {
 	return s.RecentlyRestarted() && s.restart.previousStart == start
+}
+
+// ReadStats returns one usable Store heartbeat, including its matching read count and interval.
+func (s *StoreInfo) ReadStats() *pdpb.StoreStats {
+	if s == nil || s.IsDisconnected() {
+		return nil
+	}
+	stats := s.GetStoreStats()
+	i := stats.GetInterval()
+	start, end := i.GetStartTimestamp(), i.GetEndTimestamp()
+	if end <= start || end-start > statsReportMaxInterval {
+		return nil
+	}
+	return stats
 }
 
 // NewStoreInfo creates StoreInfo with meta data.

@@ -96,6 +96,7 @@ type Operator struct {
 	// (see SetStoreHealthCheck), similar to additionalInfos.
 	needStoreHealthCheck atomic.Bool
 	recovery             *recoveryChoice
+	transfer             *recoveryTransfer // protected by Controller.recovery
 }
 
 // SetStoreHealthCheck marks whether the operator's in-progress steps should

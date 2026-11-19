@@ -22,73 +22,63 @@ import (
 	"github.com/google/btree"
 
 	"github.com/tikv/pd/pkg/core"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-const recoveryWindow = 10 * time.Minute
-
 // A departure is inserted only on the successful heartbeat for a planned
 // evacuation. Peer ID and term fence replacements, splits and intervening elections.
 type departure struct {
-	home, region, peer, version, term, successor uint64
-	rate                                         float64
-	report                                       uint64
+	core.FormerLeader
+	successor uint64
+	rate      float64
 }
 
 func (d departure) matches(r *core.RegionInfo, store *core.StoreInfo) bool {
-	if store == nil || r == nil || d.region != r.GetID() || r.GetTerm() <= 1 || r.GetTerm()-1 != d.term ||
-		r.GetRegionEpoch().GetVersion() != d.version || r.GetLeader().GetStoreId() != d.successor {
-		return false
-	}
-	start := store.GetMeta().GetStartTimestamp()
-	if start <= 0 || d.report >= uint64(start) || int64(d.report) < start-int64(recoveryWindow/time.Second) {
-		return false
-	}
-	peer := r.GetStoreVoter(store.GetID())
-	return peer != nil && peer.GetId() == d.peer && core.IsVoterOrIncomingVoter(peer) && !peer.GetIsWitness()
+	return r != nil && r.GetLeader().GetStoreId() == d.successor && d.CanReturn(r, store)
+}
+
+type returnCandidate struct {
+	id     uint64
+	volume float64
 }
 
 type sourceQueue struct {
-	regions []uint64
+	regions []returnCandidate
 	next    int
 }
 type evacuation struct {
-	start   int64
-	last    time.Time
-	closed  bool
-	regions map[uint64]departure
-	queues  map[uint64]*sourceQueue
-	delta   map[uint64]*destinationDelta
-}
-
-// Pending changes in opposite directions cannot cancel each other until they
-// succeed. Either operator might fail or finish at a different target.
-type destinationDelta struct{ completed, adding, removing int }
-
-func (h *evacuation) receiver(id uint64) *destinationDelta {
-	d := h.delta[id]
-	if d == nil {
-		d = &destinationDelta{}
-		h.delta[id] = d
-	}
-	return d
+	id         uint64
+	inflight   int // verified returns to this Store awaiting completion
+	start      int64
+	last       time.Time
+	yielded    bool   // the hot scheduler moved load away
+	lastReturn uint64 // Store heartbeat end observed at the last confirmed return
+	regions    map[uint64]departure
+	queues     map[uint64]*sourceQueue
+	// Bounds on net deviations from the default if pending changes fail or succeed.
+	minDelta, maxDelta map[uint64]int
 }
 
 type recoveryChoice struct {
-	home, original uint64
-	targets        []uint64
-	batch          int
-	fallback       *Operator
+	process  int64 // restarted balance target at selection
+	window   *evacuation
+	original uint64
+	targets  []uint64
+	batch    int
+	fallback *Operator
 }
 
 type recoveryTransfer struct {
-	from, to uint64
-	window   uint64 // recovering Store whose preference selected this transfer
-	sent     bool
-	start    int64
-	original uint64 // nonzero only for a voluntary destination change
-	move     departure
+	from, to   uint64
+	window     *evacuation // the recovery which authorized this command
+	drain      *evacuation
+	targetHome *evacuation // receiver generation at admission
+	returning  bool        // a verified former leader on the primary receiver
+	sent       bool
+	original   uint64 // nonzero only for a voluntary destination change
+	move       departure
 }
 
 // Keep finished transfers through the first mixed heartbeat interval. Both
@@ -103,7 +93,6 @@ type readAdjustment struct {
 type leaderRecovery struct {
 	syncutil.Mutex
 	homes     map[uint64]*evacuation
-	pending   map[*Operator]*recoveryTransfer
 	coldest   *btree.BTreeG[departure]
 	reads     map[uint64]*readAdjustment
 	lastPrune time.Time
@@ -114,7 +103,13 @@ func (s *leaderRecovery) active(store *core.StoreInfo) *evacuation {
 		return nil
 	}
 	h := s.homes[store.GetID()]
-	if h == nil || h.closed || !store.RestartedFrom(h.start) || time.Since(h.last) > recoveryWindow {
+	if h == nil || h.regions == nil || !store.RestartedFrom(h.start) || time.Since(h.last) > core.LeaderReturnWindow {
+		return nil
+	}
+	// The first interval straddling a transfer may already include part of it.
+	// A later full interval with no more returns ends the preference permanently.
+	if h.inflight == 0 && h.lastReturn != 0 && store.ReadStats().GetInterval().GetStartTimestamp() > h.lastReturn {
+		s.release(h)
 		return nil
 	}
 	return h
@@ -127,26 +122,34 @@ func (s *leaderRecovery) forget(h *evacuation, id uint64) {
 	}
 }
 
+func (s *leaderRecovery) release(h *evacuation) {
+	for _, d := range h.regions {
+		s.coldest.Delete(d)
+	}
+	h.regions, h.queues = nil, nil
+}
+
 func (s *leaderRecovery) forgetStore(id uint64) {
 	if h := s.homes[id]; h != nil {
-		for k := range h.regions {
-			s.forget(h, k)
-		}
+		s.release(h)
 		delete(s.homes, id)
 	}
 }
 
-func (s *leaderRecovery) prune() {
+func (s *leaderRecovery) prune(c *core.BasicCluster) {
 	if time.Since(s.lastPrune) < time.Minute {
 		return
 	}
 	for id, h := range s.homes {
-		if time.Since(h.last) > recoveryWindow {
+		if time.Since(h.last) > core.LeaderReturnWindow {
+			if st := c.GetStore(id); st != nil && st.RestartedFrom(h.start) {
+				continue
+			}
 			s.forgetStore(id)
 		}
 	}
 	for id, a := range s.reads {
-		if a.operators == 0 && time.Since(a.last) > recoveryWindow {
+		if a.operators == 0 && time.Since(a.last) > core.LeaderReturnWindow {
 			delete(s.reads, id)
 		}
 	}
@@ -156,12 +159,12 @@ func (s *leaderRecovery) prune() {
 func (s *leaderRecovery) draining(store *core.StoreInfo) *evacuation {
 	id, start := store.GetID(), store.GetMeta().GetStartTimestamp()
 	h := s.homes[id]
-	if h == nil || h.start != start || time.Since(h.last) > recoveryWindow {
+	if h == nil || h.start != start || time.Since(h.last) > core.LeaderReturnWindow {
 		s.forgetStore(id)
 		if s.homes == nil {
 			s.homes = make(map[uint64]*evacuation)
 		}
-		h = &evacuation{start: start, regions: make(map[uint64]departure), delta: make(map[uint64]*destinationDelta)}
+		h = &evacuation{id: id, start: start, regions: make(map[uint64]departure), minDelta: make(map[uint64]int), maxDelta: make(map[uint64]int)}
 		s.homes[id] = h
 	}
 	h.last = time.Now()
@@ -172,25 +175,25 @@ func (s *leaderRecovery) draining(store *core.StoreInfo) *evacuation {
 // busiest departing Regions across the whole controller.
 func (s *leaderRecovery) remember(h *evacuation, m departure) {
 	const maxRegions = 8192
-	if h.queues != nil {
+	if h.regions == nil || h.queues != nil {
 		return
 	}
 	if s.coldest == nil {
 		s.coldest = btree.NewG(16, func(a, b departure) bool {
-			return cmp.Or(cmp.Compare(a.rate, b.rate), cmp.Compare(a.home, b.home), cmp.Compare(a.region, b.region)) < 0
+			return cmp.Or(cmp.Compare(a.rate, b.rate), cmp.Compare(a.StoreID, b.StoreID), cmp.Compare(a.RegionID, b.RegionID)) < 0
 		})
 	}
-	s.forget(h, m.region)
-	h.regions[m.region] = m
+	s.forget(h, m.RegionID)
+	h.regions[m.RegionID] = m
 	s.coldest.ReplaceOrInsert(m)
 	if s.coldest.Len() > maxRegions {
 		old, _ := s.coldest.DeleteMin()
-		delete(s.homes[old.home].regions, old.region)
+		delete(s.homes[old.StoreID].regions, old.RegionID)
 	}
 }
 
 // FormerLeaders tries up to ten planned departures and offers the first one with headroom.
-// Candidates are ranked once per recovery by reusable fraction, then volume.
+// Candidates are ranked once per recovery by reusable read volume.
 func (oc *Controller) FormerLeaders(source, target *core.StoreInfo, ordinary *core.RegionInfo) ([]*core.RegionInfo, bool) {
 	s := &oc.recovery
 	s.Lock()
@@ -215,7 +218,7 @@ func (oc *Controller) FormerLeaders(source, target *core.StoreInfo, ordinary *co
 		return nil, true
 	}
 	for range min(10, len(q.regions)) {
-		id := q.regions[q.next]
+		id := q.regions[q.next].id
 		q.next = (q.next + 1) % len(q.regions)
 		r := oc.cluster.GetRegion(id)
 		if r != nil && oc.GetOperator(id) == nil && len(r.GetPendingPeers()) == 0 && len(r.GetDownPeers()) == 0 && s.fitsReturn(r, source, target) {
@@ -226,13 +229,9 @@ func (oc *Controller) FormerLeaders(source, target *core.StoreInfo, ordinary *co
 }
 
 func (h *evacuation) rank(cluster *core.BasicCluster, target *core.StoreInfo) {
-	type candidate struct {
-		id               uint64
-		fraction, volume float64
-	}
-	groups := make(map[uint64][]candidate)
+	h.queues = make(map[uint64]*sourceQueue)
 	for _, d := range h.regions {
-		r := cluster.GetRegion(d.region)
+		r := cluster.GetRegion(d.RegionID)
 		if !d.matches(r, target) {
 			continue
 		}
@@ -240,37 +239,31 @@ func (h *evacuation) rank(cluster *core.BasicCluster, target *core.StoreInfo) {
 		if !ok || rate <= 0 {
 			continue
 		}
-		volume := min(d.rate, rate)
-		groups[d.successor] = append(groups[d.successor], candidate{d.region, volume / rate, volume})
-	}
-	h.queues = make(map[uint64]*sourceQueue, len(groups))
-	for sid, group := range groups {
-		slices.SortFunc(group, func(a, b candidate) int {
-			return cmp.Or(cmp.Compare(b.fraction, a.fraction), cmp.Compare(b.volume, a.volume), cmp.Compare(a.id, b.id))
-		})
-		q := &sourceQueue{}
-		for _, c := range group {
-			q.regions = append(q.regions, c.id)
+		q := h.queues[d.successor]
+		if q == nil {
+			q = &sourceQueue{}
+			h.queues[d.successor] = q
 		}
-		h.queues[sid] = q
+		q.regions = append(q.regions, returnCandidate{d.RegionID, min(d.rate, rate)})
+	}
+	for _, q := range h.queues {
+		slices.SortFunc(q.regions, func(a, b returnCandidate) int {
+			return cmp.Or(cmp.Compare(b.volume, a.volume), cmp.Compare(a.id, b.id))
+		})
 	}
 }
 
 func (s *leaderRecovery) load(store *core.StoreInfo) (float64, bool) {
-	if store == nil || store.GetLeaderWeight() <= 0 {
+	stats := store.ReadStats()
+	if stats == nil || store.GetLeaderWeight() <= 0 {
 		return 0, false
 	}
-	stats := store.GetStoreStats()
 	i := stats.GetInterval()
-	end, start := i.GetEndTimestamp(), i.GetStartTimestamp()
-	if end <= start || end-start > 300 || time.Since(store.GetLastHeartbeatTS()) > time.Minute {
-		return 0, false
-	}
-	load := float64(stats.GetKeysRead()) / float64(end-start)
+	load := float64(stats.GetKeysRead()) / float64(i.GetEndTimestamp()-i.GetStartTimestamp())
 	if change := s.reads[store.GetID()]; change != nil {
 		load += change.active
 		for stamp, rate := range change.completed {
-			if stamp < start {
+			if stamp < i.GetStartTimestamp() {
 				delete(change.completed, stamp)
 			} else {
 				load += rate
@@ -280,10 +273,7 @@ func (s *leaderRecovery) load(store *core.StoreInfo) (float64, bool) {
 	return max(0, load), true
 }
 
-func (s *leaderRecovery) adjustPending(id uint64, rate float64, count int) {
-	if rate == 0 {
-		return
-	}
+func (s *leaderRecovery) adjustment(id uint64) *readAdjustment {
 	if s.reads == nil {
 		s.reads = make(map[uint64]*readAdjustment)
 	}
@@ -292,24 +282,27 @@ func (s *leaderRecovery) adjustPending(id uint64, rate float64, count int) {
 		a = &readAdjustment{completed: make(map[uint64]float64)}
 		s.reads[id] = a
 	}
+	a.last = time.Now()
+	return a
+}
+
+func (s *leaderRecovery) adjustPending(id uint64, rate float64, count int) {
+	if rate == 0 {
+		return
+	}
+	a := s.adjustment(id)
 	a.operators += count
 	a.active += rate
 	if a.operators == 0 {
 		a.active = 0
 	}
-	a.last = time.Now()
 }
 
 func (s *leaderRecovery) settle(store *core.StoreInfo, rate float64) {
 	if rate == 0 || store == nil {
 		return
 	}
-	id := store.GetID()
-	a := s.reads[id]
-	if a == nil { // A multi-target evacuation finished on a different Store.
-		a = &readAdjustment{completed: make(map[uint64]float64)}
-		s.reads[id] = a
-	}
+	a := s.adjustment(store.GetID())
 	interval := store.GetStoreStats().GetInterval()
 	for stamp := range a.completed {
 		if stamp < interval.GetStartTimestamp() {
@@ -317,7 +310,6 @@ func (s *leaderRecovery) settle(store *core.StoreInfo, rate float64) {
 		}
 	}
 	a.completed[interval.GetEndTimestamp()] += rate
-	a.last = time.Now()
 }
 
 func (s *leaderRecovery) fitsReturn(region *core.RegionInfo, from, to *core.StoreInfo) bool {
@@ -336,112 +328,121 @@ func (s *leaderRecovery) fitsReturn(region *core.RegionInfo, from, to *core.Stor
 }
 
 // MarkLeaderReturn requests a final check when the operator is admitted.
-func (op *Operator) MarkLeaderReturn(home uint64, fallback *Operator) {
-	op.recovery = &recoveryChoice{home: home, fallback: fallback}
+func (op *Operator) MarkLeaderReturn(target *core.StoreInfo, fallback *Operator) {
+	op.recovery = &recoveryChoice{process: target.GetMeta().GetStartTimestamp(), fallback: fallback}
 	op.SetAdditionalInfo("cache-return", "balance")
 }
 
-func (s *leaderRecovery) evictionTarget(c *core.BasicCluster, r *core.RegionInfo, original uint64, targets []uint64, batch int) (uint64, bool) {
-	if len(targets) < 2 {
-		return original, false
-	}
-	var home uint64
-	for _, id := range targets {
-		store := c.GetStore(id)
-		if h := s.homes[id]; h != nil && h.closed && store != nil && store.RestartedFrom(h.start) {
-			return original, false
-		}
-		if h := s.active(store); h != nil {
-			if home != 0 {
-				return original, false
-			} // overlapping recovery windows
-			home = id
-		}
-	}
-	if home == 0 {
-		return original, false
-	}
+func (s *leaderRecovery) evictionTarget(c *core.BasicCluster, r *core.RegionInfo, original uint64, targets []uint64, batch int) (uint64, *evacuation, bool) {
 	src := c.GetStore(r.GetLeader().GetStoreId())
 	rate, valid := r.ReadKeysPerSecond()
 	total, ok := s.load(src)
-	if !ok || !valid {
-		return original, false
+	if len(targets) < 2 || !ok || !valid {
+		return original, nil, false
 	}
 	type receiver struct {
-		id           uint64
-		load, weight float64
+		id            uint64
+		before, after float64 // read load per unit of Leader weight
 	}
+	var home *evacuation
 	var weights float64
-	destinations := make([]receiver, 0, len(targets))
+	receivers := make([]receiver, 0, len(targets))
 	for _, id := range targets {
 		store := c.GetStore(id)
 		load, ok := s.load(store)
 		if !ok {
-			return original, false
+			return original, nil, false
 		}
-		destinations = append(destinations, receiver{id, load, store.GetLeaderWeight()})
+		if h := s.homes[id]; h != nil && h.yielded && store.RestartedFrom(h.start) {
+			return original, nil, false
+		}
+		if h := s.active(store); h != nil && h.lastReturn != 0 && len(h.regions) != 0 {
+			if home != nil { // Multiple recovering peers have conflicting preferences.
+				return original, nil, false
+			}
+			home = h
+		}
+		weight := store.GetLeaderWeight()
+		receivers = append(receivers, receiver{id, load / weight, (load + rate) / weight})
 		total += load
-		weights += store.GetLeaderWeight()
+		weights += weight
 	}
-	former := s.homes[home].regions[r.GetID()]
-	wantsHome := former.matches(r, c.GetStore(home))
-	perWeight := total / weights
-	var first, second *receiver
-	for i := range destinations {
-		t := &destinations[i]
-		if (t.load+rate)/t.weight > perWeight {
+	if home == nil {
+		return original, nil, false
+	}
+	wantsHome := home.regions[r.GetID()].matches(r, c.GetStore(home.id))
+	// Prefer cache locality, then the default target, then the lightest peer.
+	// A change is voluntary only when the original target also fits.
+	var best *receiver
+	bestRank := -1
+	originalFits := false
+	for i := range receivers {
+		t := &receivers[i]
+		if t.after > total/weights {
 			continue
 		}
-		if (t.id == home) == wantsHome {
-			if t.id == original {
-				return original, false
-			}
-			if first == nil || t.load/t.weight < first.load/first.weight {
-				first = t
-			}
-		} else if t.id == original || second == nil || second.id != original && t.load/t.weight < second.load/second.weight {
-			second = t
+		rank := 0
+		if (t.id == home.id) == wantsHome {
+			rank = 2
+		}
+		if t.id == original {
+			originalFits = true
+			rank++
+		}
+		if rank > bestRank || rank == bestRank && t.before < best.before {
+			best, bestRank = t, rank
 		}
 	}
-	if first == nil {
-		if second == nil {
-			return original, false
-		}
-		return second.id, false
+	if best == nil || best.id == original {
+		return original, nil, false
 	}
-	if second == nil || second.id != original {
-		return first.id, false
-	}
-	if h := s.homes[src.GetID()]; h != nil && h.start == src.GetMeta().GetStartTimestamp() {
-		to, from := h.receiver(first.id), h.receiver(original)
-		if to.completed+to.adding >= batch || from.completed-from.removing <= -batch {
-			return original, false
+	if h := s.homes[src.GetID()]; originalFits && h != nil && h.start == src.GetMeta().GetStartTimestamp() {
+		if h.maxDelta[best.id] >= batch || h.minDelta[original] <= -batch {
+			return original, nil, false
 		}
 	}
-	return first.id, true
+	return best.id, home, originalFits
 }
 
-// EvictionTarget prefers a recovering former leader among legal targets.
-// The batch bounds each receiver's net voluntary deviations from the default.
-func (oc *Controller) EvictionTarget(r *core.RegionInfo, original uint64, targets []uint64, batch int) uint64 {
+// PreferEvictionTarget preserves the urgent fallback and considers only peers that
+// would be legal primary targets. The builder's multi-target list can be broader.
+func (oc *Controller) PreferEvictionTarget(cluster sche.SharedCluster, region *core.RegionInfo, original uint64, targets []uint64, batch int, fallback *Operator) *Operator {
+	if len(region.GetPendingPeers()) != 0 || len(region.GetDownPeers()) != 0 {
+		return fallback
+	}
+	eligible := make([]uint64, 0, len(targets))
+	for _, id := range targets {
+		if peer := region.GetStoreVoter(id); peer != nil && IsAllowedLeaderTarget(cluster, region, peer) {
+			eligible = append(eligible, id)
+		}
+	}
+	if !slices.Contains(eligible, original) {
+		return fallback
+	}
 	s := &oc.recovery
 	s.Lock()
-	defer s.Unlock()
-	id, _ := s.evictionTarget(oc.cluster, r, original, targets, batch)
-	return id
+	id, home, _ := s.evictionTarget(oc.cluster, region, original, eligible, batch)
+	s.Unlock()
+	if id == original {
+		return fallback
+	}
+	op, err := CreateTransferLeaderOperator(fallback.Desc(), cluster, region, id, eligible, OpLeader)
+	if err != nil {
+		return fallback
+	}
+	op.SetPriorityLevel(fallback.GetPriorityLevel())
+	op.Counters = fallback.Counters
+	op.recovery = &recoveryChoice{window: home, original: original, targets: eligible, batch: batch, fallback: fallback}
+	op.SetAdditionalInfo("cache-return", "evict")
+	return op
 }
 
-// MarkEvictionChoice preserves the original urgent operator if read headroom
-// or the batch allowance changes while the preferred operator waits.
-func (op *Operator) MarkEvictionChoice(original uint64, targets []uint64, batch int, fallback *Operator) {
-	op.recovery = &recoveryChoice{original: original, targets: slices.Clone(targets), batch: batch, fallback: fallback}
-	op.SetAdditionalInfo("cache-return", "evict")
+func (op *Operator) tracksLeaderRecovery() bool {
+	return op.recovery != nil || op.Kind()&OpHotRegion != 0 || op.Desc() == types.EvictLeaderScheduler.String() || op.Desc() == types.BalanceLeaderScheduler.String()
 }
 
 func (oc *Controller) admitRecovery(op *Operator) bool {
-	evict := op.Desc() == types.EvictLeaderScheduler.String()
-	hot := op.Kind()&OpHotRegion != 0
-	if !evict && !hot && op.recovery == nil && op.Desc() != types.BalanceLeaderScheduler.String() {
+	if !op.tracksLeaderRecovery() {
 		return true
 	}
 	if oc.cluster == nil {
@@ -454,12 +455,13 @@ func (oc *Controller) admitRecovery(op *Operator) bool {
 		return false
 	}
 	if len(s.homes) > 0 || len(s.reads) > 0 {
-		s.prune()
+		s.prune(oc.cluster)
 	}
+	evict := op.Desc() == types.EvictLeaderScheduler.String()
 	if !evict && len(s.homes) == 0 {
 		return op.recovery == nil
 	}
-	if hot {
+	if op.Kind()&OpHotRegion != 0 {
 		for _, step := range op.steps {
 			var id uint64
 			switch m := step.(type) {
@@ -468,8 +470,10 @@ func (oc *Controller) admitRecovery(op *Operator) bool {
 			case RemovePeer:
 				id = m.FromStore
 			}
-			if h := s.active(oc.cluster.GetStore(id)); h != nil {
-				h.closed = true
+			store := oc.cluster.GetStore(id)
+			if h := s.homes[id]; h != nil && store != nil && store.RestartedFrom(h.start) {
+				s.release(h)
+				h.yielded = true
 			}
 		}
 		// A single-step inbound hot transfer also consumes receiver headroom.
@@ -489,46 +493,42 @@ func (oc *Controller) admitRecovery(op *Operator) bool {
 	if from == nil || to == nil {
 		return op.recovery == nil
 	}
-	m := &recoveryTransfer{from: step.FromStore, to: step.ToStore, start: from.GetMeta().GetStartTimestamp()}
-	rate, valid := r.ReadKeysPerSecond()
-	m.move = departure{home: m.from, region: r.GetID(), peer: r.GetLeader().GetId(), version: r.GetRegionEpoch().GetVersion(), term: r.GetTerm(), report: r.GetInterval().GetEndTimestamp(), rate: rate}
+	m := &recoveryTransfer{from: step.FromStore, to: step.ToStore}
+	m.targetHome = s.active(to)
+	m.returning = m.targetHome != nil && m.targetHome.regions[r.GetID()].matches(r, to)
+	rate, _ := r.ReadKeysPerSecond()
+	m.move = departure{FormerLeader: r.FormerLeader(), rate: rate}
 	if evict {
 		h := s.draining(from)
+		m.drain = h
 		if choice := op.recovery; choice != nil {
-			id, voluntary := s.evictionTarget(oc.cluster, r, choice.original, choice.targets, choice.batch)
-			if id != step.ToStore {
+			id, home, voluntary := s.evictionTarget(oc.cluster, r, choice.original, choice.targets, choice.batch)
+			if id != step.ToStore || choice.window != home {
 				return false
 			}
-			for _, id := range choice.targets {
-				if s.active(oc.cluster.GetStore(id)) != nil {
-					m.window = id
-					break
-				}
-			}
+			m.window = home
 			if voluntary {
 				m.original = choice.original
-				h.receiver(m.to).adding++
-				h.receiver(m.original).removing++
+				h.maxDelta[m.to]++
+				h.minDelta[m.original]--
 			}
 		}
 	} else if op.recovery != nil {
-		if op.recovery.home != to.GetID() || !s.fitsReturn(r, from, to) {
+		if op.recovery.process != to.GetMeta().GetStartTimestamp() || !s.fitsReturn(r, from, to) {
 			return false
 		}
-		m.window = to.GetID()
+		m.window = m.targetHome
 		s.forget(s.homes[to.GetID()], r.GetID())
 	} else if s.active(from) == nil && s.active(to) == nil {
 		return true
 	}
-	if s.pending == nil {
-		s.pending = make(map[*Operator]*recoveryTransfer)
+	// Even a transfer without a read measurement can be the first Leader back.
+	if m.returning {
+		m.targetHome.inflight++
 	}
-	// Even an unknown rate can carry a voluntary count reservation.
-	if valid || m.original != 0 {
-		s.pending[op] = m
-		s.adjustPending(m.from, -m.move.rate, 1)
-		s.adjustPending(m.to, m.move.rate, 1)
-	}
+	op.transfer = m
+	s.adjustPending(m.from, -m.move.rate, 1)
+	s.adjustPending(m.to, m.move.rate, 1)
 	return true
 }
 
@@ -541,11 +541,11 @@ func (oc *Controller) canSendRecovery(op *Operator) bool {
 	s := &oc.recovery
 	s.Lock()
 	defer s.Unlock()
-	m := s.pending[op]
+	m := op.transfer
 	if m == nil {
 		return false
 	}
-	if !m.sent && s.active(oc.cluster.GetStore(m.window)) == nil {
+	if !m.sent && (m.window == nil || s.active(oc.cluster.GetStore(m.window.id)) != m.window) {
 		return false
 	}
 	m.sent = true
@@ -553,39 +553,49 @@ func (oc *Controller) canSendRecovery(op *Operator) bool {
 }
 
 func (oc *Controller) finishRecovery(op *Operator, r *core.RegionInfo) {
-	if op.recovery == nil && op.Kind()&OpHotRegion == 0 && op.Desc() != types.EvictLeaderScheduler.String() && op.Desc() != types.BalanceLeaderScheduler.String() {
+	if !op.tracksLeaderRecovery() {
 		return
 	}
 	s := &oc.recovery
 	s.Lock()
 	defer s.Unlock()
-	m := s.pending[op]
+	m := op.transfer
 	if m == nil {
 		return
 	}
 	h := s.homes[m.from]
 	success := r != nil && op.Status() == SUCCESS && op.steps[0].IsFinish(r)
-	if h != nil && h.start == m.start {
+	direct := success && r.GetTerm() > 1 && r.GetTerm()-1 == m.move.Term && r.GetRegionEpoch().GetVersion() == m.move.Version
+	if h != nil && h == m.drain {
 		if m.original != 0 {
-			to, original := h.receiver(m.to), h.receiver(m.original)
-			to.adding--
-			original.removing--
 			if success && r.GetLeader().GetStoreId() == m.to {
-				to.completed++
-				original.completed--
+				h.minDelta[m.to]++
+				h.maxDelta[m.original]--
+			} else {
+				h.maxDelta[m.to]--
+				h.minDelta[m.original]++
 			}
 		}
-		if success && op.Desc() == types.EvictLeaderScheduler.String() && r.GetTerm() > 1 && r.GetTerm()-1 == m.move.term &&
-			r.GetRegionEpoch().GetVersion() == m.move.version && m.move.rate > 0 && int64(m.move.report) >= m.start {
+		if direct && m.move.rate > 0 && int64(m.move.ReportEnd) >= h.start {
 			m.move.successor = r.GetLeader().GetStoreId()
 			s.remember(h, m.move)
 		}
 	}
-	delete(s.pending, op)
+	op.transfer = nil
 	s.adjustPending(m.from, m.move.rate, -1)
 	s.adjustPending(m.to, -m.move.rate, -1)
 	if success {
 		s.settle(oc.cluster.GetStore(m.from), -m.move.rate)
-		s.settle(oc.cluster.GetStore(r.GetLeader().GetStoreId()), m.move.rate)
+		target := oc.cluster.GetStore(r.GetLeader().GetStoreId())
+		s.settle(target, m.move.rate)
+		if h := s.active(target); direct && h != nil && h == m.targetHome && (m.returning || h.lastReturn == 0 && op.Desc() == types.BalanceLeaderScheduler.String()) {
+			// Use the receiver's clock. Ignore samples from its old process.
+			if end := target.ReadStats().GetInterval().GetEndTimestamp(); int64(end) >= target.GetMeta().GetStartTimestamp() {
+				h.lastReturn = max(h.lastReturn, end)
+			}
+		}
+	}
+	if m.returning {
+		m.targetHome.inflight--
 	}
 }

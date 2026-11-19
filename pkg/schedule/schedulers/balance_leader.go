@@ -508,7 +508,7 @@ func (s *balanceLeaderScheduler) preferFormerLeader(solver *solver, fallback *op
 		solver.Region = region
 		if op := s.transferLeaderInRegion(solver, nil, planned); op != nil {
 			if planned {
-				op.MarkLeaderReturn(solver.Target.GetID(), fallback)
+				op.MarkLeaderReturn(solver.Target, fallback)
 			}
 			return op
 		}

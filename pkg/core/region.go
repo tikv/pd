@@ -1100,12 +1100,30 @@ type RegionsInfo struct {
 	overlapTree *regionTree
 }
 
-const leaderReturnWindow = 10 * time.Minute
+// FormerLeader identifies the last report of a Region before its Leader moved.
+type FormerLeader struct {
+	StoreID, RegionID, PeerID, Version, Term, ReportEnd uint64
+}
 
-type leaderMove struct {
-	store, region, peer, version uint64
-	leaderTerm                   uint64
-	lastLeaderReport             uint64 // heartbeat end timestamp from the departing leader
+// FormerLeader records the identity and interval of the departing Leader.
+func (r *RegionInfo) FormerLeader() FormerLeader {
+	return FormerLeader{
+		StoreID: r.GetLeader().GetStoreId(), RegionID: r.GetID(), PeerID: r.GetLeader().GetId(),
+		Version: r.GetRegionEpoch().GetVersion(), Term: r.GetTerm(), ReportEnd: r.GetInterval().GetEndTimestamp(),
+	}
+}
+
+// CanReturn checks the old process, uninterrupted handover and surviving voter.
+func (m FormerLeader) CanReturn(r *RegionInfo, store *StoreInfo) bool {
+	if store == nil || !store.RecentlyRestarted() || store.GetID() != m.StoreID || r == nil || r.GetID() != m.RegionID ||
+		r.GetTerm() <= 1 || r.GetTerm()-1 != m.Term || r.GetRegionEpoch().GetVersion() != m.Version || r.GetLeader().GetStoreId() == m.StoreID {
+		return false
+	}
+	start := store.meta.GetStartTimestamp()
+	from := max(store.restart.previousStart, start-int64(LeaderReturnWindow/time.Second))
+	peer := r.GetStoreVoter(m.StoreID)
+	return uint64(from) <= m.ReportEnd && m.ReportEnd < uint64(start) &&
+		peer != nil && peer.GetId() == m.PeerID && !peer.GetIsWitness() && IsVoterOrIncomingVoter(peer)
 }
 
 // Keep recent departures observed through heartbeats, including Raft elections.
@@ -1115,27 +1133,27 @@ type leaderMoveHistory struct {
 	byStore map[uint64]map[uint64]*list.Element
 }
 
-func (h *leaderMoveHistory) add(m leaderMove) {
+func (h *leaderMoveHistory) add(m FormerLeader) {
 	const capacity = 8192
 	if h.byStore == nil {
 		h.byStore = make(map[uint64]map[uint64]*list.Element)
 	}
-	index := h.byStore[m.store]
+	index := h.byStore[m.StoreID]
 	if index == nil {
 		index = make(map[uint64]*list.Element)
-		h.byStore[m.store] = index
+		h.byStore[m.StoreID] = index
 	}
-	if e := index[m.region]; e != nil {
+	if e := index[m.RegionID]; e != nil {
 		e.Value = m
 		h.recent.MoveToFront(e)
 		return
 	}
-	index[m.region] = h.recent.PushFront(m)
+	index[m.RegionID] = h.recent.PushFront(m)
 	if h.recent.Len() > capacity {
-		old := h.recent.Remove(h.recent.Back()).(leaderMove)
-		delete(h.byStore[old.store], old.region)
-		if len(h.byStore[old.store]) == 0 {
-			delete(h.byStore, old.store)
+		old := h.recent.Remove(h.recent.Back()).(FormerLeader)
+		delete(h.byStore[old.StoreID], old.RegionID)
+		if len(h.byStore[old.StoreID]) == 0 {
+			delete(h.byStore, old.StoreID)
 		}
 	}
 }
@@ -1147,14 +1165,11 @@ func (r *RegionsInfo) GetFormerLeaderRegions(store *StoreInfo, ranges []keyutil.
 	if !store.RecentlyRestarted() {
 		return nil
 	}
-	storeID := store.GetID()
-	start := store.meta.GetStartTimestamp()
-	from := max(store.restart.previousStart, start-int64(leaderReturnWindow/time.Second))
 	// Sample departures before applying any filters so misses also have bounded cost.
-	moves := make([]leaderMove, 0, randomRegionMaxRetry)
+	moves := make([]FormerLeader, 0, randomRegionMaxRetry)
 	r.t.RLock()
-	for _, e := range r.leaderMoves.byStore[storeID] {
-		moves = append(moves, e.Value.(leaderMove))
+	for _, e := range r.leaderMoves.byStore[store.GetID()] {
+		moves = append(moves, e.Value.(FormerLeader))
 		if len(moves) == cap(moves) {
 			break
 		}
@@ -1162,22 +1177,8 @@ func (r *RegionsInfo) GetFormerLeaderRegions(store *StoreInfo, ranges []keyutil.
 	r.t.RUnlock()
 	var candidates []*RegionInfo
 	for _, m := range moves {
-		if m.lastLeaderReport < uint64(from) || m.lastLeaderReport >= uint64(start) {
-			continue
-		}
-		region := r.GetRegion(m.region)
-		if region == nil || region.GetRegionEpoch().GetVersion() != m.version || region.GetLeader().GetStoreId() == storeID {
-			continue
-		}
-		// A gap could hide a new leader on the restarted store followed by another transfer.
-		if term := region.GetTerm(); term <= 1 || term-1 != m.leaderTerm {
-			continue
-		}
-		voter := region.GetStoreVoter(storeID)
-		if voter.GetId() != m.peer || voter.GetIsWitness() {
-			continue
-		}
-		if region.WithinRanges(ranges) {
+		region := r.GetRegion(m.RegionID)
+		if m.CanReturn(region, store) && region.WithinRanges(ranges) {
 			candidates = append(candidates, region)
 		}
 	}
@@ -1482,11 +1483,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		rangeChanged = !origin.rangeEqualsTo(region)
 		old, current := origin.GetLeader(), region.GetLeader()
 		if old.GetId() != 0 && current.GetId() != 0 && old.GetStoreId() != current.GetStoreId() && !rangeChanged {
-			r.leaderMoves.add(leaderMove{
-				store: old.GetStoreId(), region: region.GetID(), peer: old.GetId(),
-				version: origin.GetRegionEpoch().GetVersion(), leaderTerm: origin.GetTerm(),
-				lastLeaderReport: origin.GetInterval().GetEndTimestamp(),
-			})
+			r.leaderMoves.add(origin.FormerLeader())
 		}
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
