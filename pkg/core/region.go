@@ -1134,15 +1134,22 @@ func (r *RegionsInfo) GetFormerLeaderRegions(store *StoreInfo, ranges []keyutil.
 	storeID := store.GetID()
 	start := store.meta.GetStartTimestamp()
 	from := max(store.restart.previousStart, start-int64(leaderReturnWindow/time.Second))
+	// Sample departures before applying any filters so misses also have bounded cost.
+	moves := make([]leaderMove, 0, randomRegionMaxRetry)
 	r.t.RLock()
-	defer r.t.RUnlock()
+	for _, e := range r.leaderMoves.byStore[storeID] {
+		moves = append(moves, e.Value.(leaderMove))
+		if len(moves) == cap(moves) {
+			break
+		}
+	}
+	r.t.RUnlock()
 	var candidates []*RegionInfo
-	for id, e := range r.leaderMoves.byStore[storeID] {
-		m := e.Value.(leaderMove)
+	for _, m := range moves {
 		if m.lastLeaderReport < uint64(from) || m.lastLeaderReport >= uint64(start) {
 			continue
 		}
-		region := r.getRegionLocked(id)
+		region := r.GetRegion(m.region)
 		if region == nil || region.GetRegionEpoch().GetVersion() != m.version || region.GetLeader().GetStoreId() == storeID {
 			continue
 		}
@@ -1156,9 +1163,6 @@ func (r *RegionsInfo) GetFormerLeaderRegions(store *StoreInfo, ranges []keyutil.
 		}
 		if slices.ContainsFunc(ranges, func(kr keyutil.KeyRange) bool { return region.isInvolved(kr.StartKey, kr.EndKey) }) {
 			candidates = append(candidates, region)
-			if len(candidates) == randomRegionMaxRetry {
-				break
-			}
 		}
 	}
 	return candidates

@@ -351,32 +351,6 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
-	// Try a restart return before the normal source-first path fills the batch.
-	for _, target := range targetCandidate.stores {
-		if s.GetName() != types.BalanceLeaderScheduler.String() || !typeutil.Float64Equal(scoreFunc(target), scoreFunc(targetCandidate.getStore())) {
-			break
-		}
-		solver.Target = target
-		for _, region := range s.formerLeaders(solver) {
-			if s.OpController.GetOperator(region.GetID()) != nil {
-				continue
-			}
-			solver.Region = region
-			if op := s.transferLeaderInRegion(solver, nil); op != nil {
-				result = append(result, op)
-				if len(result) == batch {
-					return result, collector.GetPlans()
-				}
-				makeInfluence(op, solver, usedRegions, sourceCandidate, targetCandidate)
-				if targetCandidate.getStore().GetID() != solver.targetStoreID() {
-					break
-				}
-			}
-		}
-		if len(result) > 0 {
-			break // Applying influence may have reordered the target stores.
-		}
-	}
 	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
 		// first choose source
 		if sourceCandidate.hasStore() {
@@ -431,6 +405,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLea
 	}
 	if op != nil {
 		s.resetLimit(store)
+		op = s.preferFormerLeader(ssolver, op, usedRegions)
 	} else {
 		s.attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", s.GetName()), zap.Uint64(dir, store.GetID()))
@@ -509,12 +484,27 @@ func (s *balanceLeaderScheduler) balanceRanges(solver *solver) []keyutil.KeyRang
 	return rs
 }
 
-func (s *balanceLeaderScheduler) formerLeaders(solver *solver) []*core.RegionInfo {
-	if !solver.Target.RecentlyRestarted() {
-		return nil
+// Prefer a former leader only for the store pair already chosen by the balancer.
+func (s *balanceLeaderScheduler) preferFormerLeader(solver *solver, fallback *operator.Operator, usedRegions map[uint64]struct{}) *operator.Operator {
+	if s.GetName() != types.BalanceLeaderScheduler.String() || !solver.Target.RecentlyRestarted() {
+		return fallback
 	}
+	source, original := solver.Source, solver.Region
 	regions := solver.GetBasicCluster().GetFormerLeaderRegions(solver.Target, s.balanceRanges(solver))
-	return filter.SelectRegions(regions, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
+	for _, region := range filter.SelectRegions(regions, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster)) {
+		if _, used := usedRegions[region.GetID()]; used || region.GetLeader().GetStoreId() != source.GetID() || s.OpController.GetOperator(region.GetID()) != nil {
+			continue
+		}
+		if region.GetID() == fallback.RegionID() {
+			break
+		}
+		solver.Region = region
+		if op := s.transferLeaderInRegion(solver, nil); op != nil {
+			return op
+		}
+	}
+	solver.Source, solver.Region = source, original
+	return fallback
 }
 
 // transferLeaderIn samples a healthy follower on the target store.

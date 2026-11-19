@@ -61,8 +61,8 @@ func TestBalanceLeaderReturnsFormerLeadersAfterRestart(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.AddLeaderStore(1, 100)
-	tc.AddLeaderStore(2, 0)
-	tc.AddLeaderStore(3, 0) // Equal score, normally ranked first by store ID.
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 0) // Lowest score, but holds no peer of these Regions.
 	const restart = 2000
 	tc.PutStore(tc.GetStore(2), core.SetStoreStartTime(1000))
 	for id := uint64(100); id < 2100; id++ {
@@ -99,9 +99,10 @@ func TestBalanceLeaderReturnsFormerLeadersAfterRestart(t *testing.T) {
 	re.ElementsMatch([]*core.RegionInfo{former, pending}, candidates)
 	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
 	re.NoError(err)
-	lb.(*balanceLeaderScheduler).conf.Batch = 1
+	lb.(*balanceLeaderScheduler).conf.Batch = 2
 	ops, _ := lb.Schedule(tc, false)
-	re.Len(ops, 1)
+	re.Len(ops, 2)
+	re.NotEqual(ops[0].RegionID(), ops[1].RegionID())
 	re.Equal(former.GetID(), ops[0].RegionID())
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 
@@ -109,8 +110,10 @@ func TestBalanceLeaderReturnsFormerLeadersAfterRestart(t *testing.T) {
 	excluded := []keyutil.KeyRange{{StartKey: former.GetStartKey(), EndKey: former.GetEndKey()}}
 	tc.KeyRangeManager.Append(excluded)
 	ops, _ = lb.Schedule(tc, false)
-	re.Len(ops, 1)
-	re.NotEqual(former.GetID(), ops[0].RegionID())
+	re.Len(ops, 2)
+	for _, op := range ops {
+		re.NotEqual(former.GetID(), op.RegionID())
+	}
 	tc.KeyRangeManager.Delete(excluded)
 	tc.UpdateLeaderCount(1, 1)
 	tc.UpdateLeaderCount(2, 1)
