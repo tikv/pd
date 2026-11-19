@@ -410,6 +410,11 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		leaderServer := cluster.GetServer(cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
 		leaderServer.GetRaftCluster().SetPrepared()
+		// Log redaction is process-wide, and InitLogger applies it only once. Apply
+		// the PD setting first so that the scheduling server's default does not
+		// override a test that disables redaction on the PD cluster.
+		leaderCfg := leaderServer.GetConfig()
+		re.NoError(InitLogger(leaderCfg.Log, leaderCfg.Logger, leaderCfg.LogProps, leaderCfg.Security.RedactInfoLog))
 		// start scheduling cluster
 		tc, err := NewTestSchedulingCluster(ctx, 1, leaderServer.GetAddr())
 		re.NoError(err)

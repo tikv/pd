@@ -478,7 +478,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s)
+	// The TSO storage shares the election etcd client, which only connects to the local etcd member.
+	tsoStorage := storage.NewStorageWithEtcdBackend(s.electionClient, s.rootPath)
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, tsoStorage, s)
 	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 	if !s.cfg.EnableLocalTSO {
 		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
@@ -555,6 +557,9 @@ func (s *Server) Close() {
 	s.stopServerLoop()
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager.Close()
+	}
+	if s.tsoAllocatorManager != nil {
+		s.tsoAllocatorManager.Close()
 	}
 
 	if s.client != nil {

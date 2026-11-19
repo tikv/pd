@@ -217,6 +217,7 @@ func cmdList(args ...string) bool {
 
 		err := buildTestBinary(pkg)
 		if err != nil {
+			// #nosec G706 -- pd-ut logs developer-selected package names and compiler errors.
 			log.Println("build package error", pkg, err)
 			return false
 		}
@@ -324,6 +325,7 @@ func cmdRun(args ...string) bool {
 		pkg := args[0]
 		err := buildTestBinary(pkg)
 		if err != nil {
+			// #nosec G706 -- pd-ut logs developer-selected package names and compiler errors.
 			log.Println("build package error", pkg, err)
 			return false
 		}
@@ -576,10 +578,8 @@ type testResult struct {
 
 func (n *numa) runTestCase(pkg string, fn string) testResult {
 	res := testResult{
-		JUnitTestCase: JUnitTestCase{
-			ClassName: filepath.Join(modulePath, pkg),
-			Name:      fn,
-		},
+		ClassName: filepath.Join(modulePath, pkg),
+		Name:      fn,
 	}
 
 	var buf bytes.Buffer
@@ -833,6 +833,7 @@ func testFileFullPath(pkg string) string {
 func listNewTestCases(pkg string) []string {
 	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	// core.test -test.list Test
+	// #nosec G702 -- pd-ut intentionally executes the test binary in the selected package directory.
 	cmd := exec.Command(exe, "-test.list", "Test")
 	cmd.Dir = filepath.Join(workDir, pkg)
 	var buf bytes.Buffer
@@ -863,6 +864,7 @@ func cmdToLines(cmd *exec.Cmd) ([]string, error) {
 // Keep child go commands on the same toolchain as pd-ut itself to avoid
 // mixing PATH's go binary with an auto-downloaded newer toolchain in CI.
 func goCommand(args ...string) *exec.Cmd {
+	// #nosec G702 -- The executable is fixed and all arguments are constructed internally.
 	cmd := exec.Command("go", args...)
 	if toolchain := pdUTToolchain(); toolchain != "" {
 		cmd.Env = append(os.Environ(), "GOTOOLCHAIN="+toolchain)

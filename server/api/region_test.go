@@ -23,10 +23,12 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -254,7 +256,9 @@ func (suite *regionTestSuite) TestStoreRegions() {
 	err = tu.ReadGetJSON(re, testDialClient, url, r5)
 	re.NoError(err)
 	re.Len(regionIDs, r5.Count)
+	re.Len(r5.Regions, len(regionIDs))
 	for i, r := range r5.Regions {
+		// #nosec G602 -- Both response and expected slice lengths are checked above.
 		re.Equal(regionIDs[i], r.ID)
 	}
 
@@ -384,6 +388,7 @@ func (suite *regionTestSuite) TestTopN() {
 	}
 }
 
+// TestRegionsWithKillRequest verifies that an in-flight region request exits on cancellation.
 func TestRegionsWithKillRequest(t *testing.T) {
 	re := require.New(t)
 	svr, cleanup := mustNewServer(re)
@@ -404,9 +409,17 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	doneCh := make(chan struct{})
+	requestStarted := make(chan struct{})
+	notifyStarted := sync.OnceFunc(func() { close(requestStarted) })
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/api/slowRequest", func(ctx context.Context) {
+		notifyStarted()
+		<-ctx.Done()
+	}))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/slowRequest")) }()
 	go func() {
 		resp, err := testDialClient.Do(req)
 		defer func() {
@@ -419,7 +432,11 @@ func TestRegionsWithKillRequest(t *testing.T) {
 		re.Nil(resp)
 		doneCh <- struct{}{}
 	}()
-	time.Sleep(100 * time.Millisecond) // wait for the request to be sent
+	select {
+	case <-requestStarted:
+	case <-time.After(5 * time.Second):
+		re.FailNow("request did not reach the server")
+	}
 	cancel()
 	<-doneCh
 	close(doneCh)

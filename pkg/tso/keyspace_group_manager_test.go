@@ -931,9 +931,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	kgm := &KeyspaceGroupManager{
-		state: state{
-			keyspaceLookupTable: make(map[uint32]uint32),
-		}}
+		keyspaceLookupTable: make(map[uint32]uint32)}
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
 	verifyLocalKeyspaceLookupTable(re, newGroup.KeyspaceLookupTable, newGroup.Keyspaces)

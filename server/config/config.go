@@ -18,7 +18,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -356,7 +355,12 @@ func (c *Config) Validate() error {
 
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
-	configMetaData := configutil.NewConfigMetadata(meta)
+	return c.AdjustWithMetadata(configutil.NewConfigMetadata(meta), reloading)
+}
+
+// AdjustWithMetadata is used to adjust the PD configurations whose metadata may
+// be nested in a larger configuration file.
+func (c *Config) AdjustWithMetadata(configMetaData *configutil.ConfigMetaData, reloading bool) error {
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
 	}
@@ -396,8 +400,12 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustString(&c.InitialClusterState, defaultInitialClusterState)
 	configutil.AdjustString(&c.InitialClusterToken, defaultInitialClusterToken)
 
+	// Join is a comma-separated list of endpoints (see the field comment and
+	// server/join, which splits it on ","), so validate it per endpoint rather
+	// than passing the whole list to a single url.Parse, which accepts it as
+	// one malformed URL with a host of "pd-0:2379,http:".
 	if len(c.Join) > 0 {
-		if _, err := url.Parse(c.Join); err != nil {
+		if _, err := parseUrls(c.Join); err != nil {
 			return errors.Errorf("failed to parse join addr:%s, err:%v", c.Join, err)
 		}
 	}
@@ -467,7 +475,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.MicroService.adjust(configMetaData.Child("micro-service"))
 
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 

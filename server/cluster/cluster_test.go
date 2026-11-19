@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -40,6 +41,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -65,6 +67,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
+	"go.uber.org/zap"
 )
 
 func TestStoreHeartbeat(t *testing.T) {
@@ -1750,13 +1753,132 @@ func TestCalculateStoreSize1(t *testing.T) {
 
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
+	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
-	re.Equal(4500.0, cluster.getThreshold(stores, store))
+	re.Equal(4500.0, cluster.getThreshold(stores, store, regionSizes))
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
+	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
-	re.Equal(2250.0, cluster.getThreshold(stores, store))
+	re.Equal(2250.0, cluster.getThreshold(stores, store, regionSizes))
+}
+
+func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cfg := opt.GetReplicationConfig()
+	cfg.EnablePlacementRules = true
+	opt.SetReplicationConfig(cfg)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+
+	for _, store := range newTestStores(2, "6.0.0") {
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
+	}
+	re.NoError(cluster.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+	}))
+
+	kr := keyutil.NewKeyRange("a", "m")
+	otherKR := keyutil.NewKeyRange("m", "z")
+	re.Len(cluster.ruleManager.GetRulesForApplyRange(kr.StartKey, kr.EndKey), 2)
+	loadCounts := make(map[regionSizeCacheKey]int)
+	loader := func(startKey, endKey []byte) int64 {
+		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
+		loadCounts[key]++
+		switch key {
+		case regionSizeCacheKey{startKey: "a", endKey: "m"}:
+			return 100
+		case regionSizeCacheKey{startKey: "m", endKey: "z"}:
+			return 200
+		default:
+			re.FailNow("unexpected range", "start-key: %q, end-key: %q", startKey, endKey)
+			return 0
+		}
+	}
+	regionSizes := newRegionSizeCache(loader)
+
+	stores := cluster.GetStores()
+	threshold1 := cluster.calculateRange(stores, cluster.GetStore(1), kr.StartKey, kr.EndKey, regionSizes) * 0.9
+	threshold2 := cluster.calculateRange(stores, cluster.GetStore(2), kr.StartKey, kr.EndKey, regionSizes) * 0.9
+	// (100 * 3 replicas / 2 stores + 100 * 1 learner / 2 stores) * 0.9 = 180.
+	re.Equal(180.0, threshold1)
+	re.Equal(180.0, threshold2)
+	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
+
+	// A different range is loaded separately, then shared by all rules.
+	re.Equal(360.0, cluster.calculateRange(stores, cluster.GetStore(1), otherKR.StartKey, otherKR.EndKey, regionSizes)*0.9)
+	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "m", endKey: "z"}])
+
+	nextRoundRegionSizes := newRegionSizeCache(loader)
+	re.Equal(threshold1, cluster.calculateRange(stores, cluster.GetStore(1), kr.StartKey, kr.EndKey, nextRoundRegionSizes)*0.9)
+	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
+}
+
+func TestCalculateRangeLogRedact(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			manager := placement.NewRuleManager(context.Background(), storage.NewStorageWithMemoryBackend(), nil, mockconfig.NewTestOptions())
+			re.NoError(manager.Initialize(1, nil, ""))
+			rule := &placement.Rule{
+				GroupID: placement.DefaultGroupID, ID: "range", Index: 1, Override: true,
+				StartKeyHex: "6161", EndKeyHex: "7a7a", Role: placement.Voter, Count: 1,
+			}
+			re.NoError(manager.SetRule(rule))
+			cluster := &RaftCluster{ruleManager: manager}
+			store := core.NewStoreInfo(&metapb.Store{Id: 1})
+			regionSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
+				re.Equal([]byte("ab"), startKey)
+				re.Equal([]byte("zy"), endKey)
+				return 100
+			})
+
+			fname := testutil.InitTempFileLogger("debug")
+			defer os.RemoveAll(fname)
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+			// Use a subrange so unredacted rule boundaries cannot hide behind range fields.
+			re.Equal(100.0, cluster.calculateRange([]*core.StoreInfo{store}, store, []byte("ab"), []byte("zy"), regionSizes))
+
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.Contains(string(output), "calculate range result")
+			if mode.typ == logutil.RedactInfoLogON {
+				re.Contains(string(output), "[rule=?]")
+				re.NotContains(string(output), rule.StartKeyHex)
+				re.NotContains(string(output), rule.EndKeyHex)
+			} else {
+				re.Contains(string(output), rule.StartKeyHex)
+				re.Contains(string(output), rule.EndKeyHex)
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Contains(string(output), `[rule="‹{`)
+				}
+			}
+			re.Equal("6161", rule.StartKeyHex)
+			re.Equal("7a7a", rule.EndKeyHex)
+		})
+	}
 }
 
 func TestCalculateStoreSize2(t *testing.T) {
@@ -1834,9 +1956,9 @@ func TestCalculateStoreSize2(t *testing.T) {
 
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
-
+	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
-	re.Equal(3000.0, cluster.getThreshold(stores, store))
+	re.Equal(3000.0, cluster.getThreshold(stores, store, regionSizes))
 }
 
 func TestStores(t *testing.T) {
@@ -4153,8 +4275,9 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	re.Equal(int(storeCount), cluster.GetStoreCount())
 
 	upStoreCount := 0
+	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID())
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
 		if isUp {
 			upStoreCount++
 		}
@@ -4173,8 +4296,9 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 		}
 		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 	}
+	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID())
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
 		if isUp {
 			upStoreCount++
 		}

@@ -236,10 +236,12 @@ func (h *adminHandler) deleteRegionCacheInSchedulingServer(id ...uint64) error {
 		idStr = strconv.FormatUint(id[0], 10)
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions/%s", addr, idStr)
+	// #nosec G704 -- The target is the scheduling-service endpoint from service discovery.
 	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	if err != nil {
 		return err
 	}
+	// #nosec G704 -- The target is the scheduling-service endpoint from service discovery.
 	resp, err := h.svr.GetHTTPClient().Do(req)
 	if err != nil {
 		return err

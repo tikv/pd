@@ -21,6 +21,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 func TestControllerConfig(t *testing.T) {
@@ -51,4 +53,21 @@ read-cpu-ms-cost =  5.0
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteBaseCost-3), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.ReadCostPerByte-2), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.ReadBaseCost-1), 1e-7)
+}
+
+func TestRedactInfoLogDefault(t *testing.T) {
+	re := require.New(t)
+	for _, tc := range []struct {
+		data     string
+		expected logutil.RedactInfoLogType
+	}{
+		{"", logutil.RedactInfoLogON},
+		{"[security]\nredact-info-log = false", logutil.RedactInfoLogOFF},
+	} {
+		cfg := NewConfig()
+		meta, err := toml.Decode(tc.data, cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta))
+		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
+	}
 }

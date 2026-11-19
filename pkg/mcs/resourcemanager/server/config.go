@@ -247,7 +247,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 

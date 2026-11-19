@@ -17,6 +17,10 @@ package configutil
 import (
 	"bytes"
 	"testing"
+
+	"github.com/BurntSushi/toml"
+	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 func TestPrintConfigCheckMsg(t *testing.T) {
@@ -50,5 +54,25 @@ func TestPrintConfigCheckMsg(t *testing.T) {
 				t.Errorf("PrintConfigCheckMsg() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSecurityConfigAdjustRedactInfoLog(t *testing.T) {
+	re := require.New(t)
+	for _, tc := range []struct {
+		data     string
+		expected logutil.RedactInfoLogType
+	}{
+		{"", logutil.RedactInfoLogON},
+		{"[security]\nredact-info-log = false", logutil.RedactInfoLogOFF},
+		{"[security]\nredact-info-log = \"MARKER\"", logutil.RedactInfoLogMarker},
+	} {
+		var cfg struct {
+			Security SecurityConfig `toml:"security"`
+		}
+		meta, err := toml.Decode(tc.data, &cfg)
+		re.NoError(err)
+		re.NoError(cfg.Security.Adjust(NewConfigMetadata(&meta).Child("security")))
+		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
 	}
 }
