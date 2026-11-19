@@ -34,7 +34,9 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
@@ -406,4 +408,55 @@ func (suite *keyspaceTestSuite) TestKeyspaceErrorMessage() {
 	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
 	re.NotEmpty(errorMsg, "Error message should not be empty")
 	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+}
+
+func (suite *keyspaceTestSuite) TestGCModePolicy() {
+	re := suite.Require()
+	matching, other := "unified", "keyspace_level"
+	if kerneltype.IsNextGen() {
+		matching, other = other, matching
+	}
+	for routeIndex, route := range []string{"", "/id"} {
+		for caseIndex, config := range []map[string]string{nil, {keyspace.GCManagementType: matching}, {keyspace.GCManagementType: other}, {keyspace.GCManagementType: ""}, {keyspace.GCManagementType: "invalid"}, {"safe_point_version": "v2"}, {keyspace.GCManagementType: matching, "safe_point_version": ""}} {
+			name := fmt.Sprintf("gc_policy_%d_%d", routeIndex, caseIndex)
+			id := uint32(100 + routeIndex*10 + caseIndex)
+			data, err := json.Marshal(&handlers.CreateKeyspaceByIDParams{ID: &id, Name: name, Config: config})
+			re.NoError(err)
+			response, err := tests.TestDialClient.Post(suite.server.GetAddr()+keyspacesPrefix+route, "application/json", bytes.NewReader(data))
+			re.NoError(err)
+			var body json.RawMessage
+			re.NoError(json.NewDecoder(response.Body).Decode(&body))
+			re.NoError(response.Body.Close())
+			if caseIndex > 1 {
+				re.Equal(http.StatusBadRequest, response.StatusCode, string(body))
+				continue
+			}
+			re.Equal(http.StatusOK, response.StatusCode, string(body))
+			loaded := mustLoadKeyspaces(re, suite.server, name)
+			re.Equal(matching, loaded.Config[keyspace.GCManagementType])
+		}
+	}
+	// Existing independent and unified modes remain usable under either kernel.
+	for index, mode := range []string{"unified", "keyspace_level"} {
+		meta, err := suite.server.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{Name: fmt.Sprintf("history_%d", index)})
+		re.NoError(err)
+		meta.Config[keyspace.GCManagementType] = mode
+		storage := suite.server.GetServer().GetStorage()
+		re.NoError(storage.RunInTxn(context.Background(), func(txn kv.Txn) error { return storage.SaveKeyspaceMeta(txn, meta) }))
+		status, body, updated := tryUpdateKeyspaceConfig(re, suite.server, meta.Name, &handlers.UpdateConfigParams{Config: map[string]*string{keyspace.GCManagementType: &mode}})
+		re.Equal(http.StatusOK, status, body)
+		re.Equal(mode, updated.Config[keyspace.GCManagementType])
+		opposite := "keyspace_level"
+		if mode == opposite {
+			opposite = "unified"
+		}
+		invalid := "invalid"
+		empty := ""
+		legacy := "v2"
+		for _, patch := range []map[string]*string{{keyspace.GCManagementType: &opposite}, {keyspace.GCManagementType: &invalid}, {keyspace.GCManagementType: &empty}, {"safe_point_version": &legacy}, {"safe_point_version": nil}} {
+			status, body, _ = tryUpdateKeyspaceConfig(re, suite.server, meta.Name, &handlers.UpdateConfigParams{Config: patch})
+			re.Equal(http.StatusBadRequest, status, body)
+			re.Equal(mode, mustLoadKeyspaces(re, suite.server, meta.Name).Config[keyspace.GCManagementType])
+		}
+	}
 }

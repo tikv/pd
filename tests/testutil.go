@@ -37,6 +37,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
@@ -45,6 +46,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	router "github.com/tikv/pd/pkg/mcs/router/server"
 	rc "github.com/tikv/pd/pkg/mcs/router/server/config"
@@ -56,6 +58,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -813,4 +816,30 @@ func NewResourceManagerTestServer(ctx context.Context, cfg *rm.Config) (*rm.Serv
 		s.Close()
 	}
 	return s, cleanup, nil
+}
+
+// CreateKeyspaceWithHistoricalGCMode creates a test fixture with a persisted GC
+// configuration that may predate the current write policy. Public creation still
+// validates the initial metadata; only test storage writes model historical modes.
+func CreateKeyspaceWithHistoricalGCMode(srv *server.Server, req *keyspace.CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
+	requestCopy := *req
+	requestCopy.Config = maps.Clone(req.Config)
+	delete(requestCopy.Config, keyspace.GCManagementType)
+	delete(requestCopy.Config, "safe_point_version")
+	meta, err := srv.GetKeyspaceManager().CreateKeyspace(&requestCopy)
+	if err != nil {
+		return nil, err
+	}
+	if mode, ok := req.Config[keyspace.GCManagementType]; ok {
+		meta.Config[keyspace.GCManagementType] = mode
+	}
+	if legacy, ok := req.Config["safe_point_version"]; ok {
+		if _, present := req.Config[keyspace.GCManagementType]; !present {
+			delete(meta.Config, keyspace.GCManagementType)
+		}
+		meta.Config["safe_point_version"] = legacy
+	}
+	storage := srv.GetStorage()
+	err = storage.RunInTxn(context.Background(), func(txn kv.Txn) error { return storage.SaveKeyspaceMeta(txn, meta) })
+	return meta, err
 }

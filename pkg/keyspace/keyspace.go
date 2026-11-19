@@ -42,7 +42,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -276,9 +275,14 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err := validateName(request.Name); err != nil {
 		return nil, err
 	}
+	var err error
+	request.Config, err = prepareNewGCConfig(request.Config)
+	if err != nil {
+		return nil, err
+	}
 	// Check if keyspace with that name already exists before allocating ID.
 	// This prevents unnecessary ID allocation when the name already exists.
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		nameExists, _, err := manager.store.LoadKeyspaceID(txn, request.Name)
 		if err != nil {
 			return err
@@ -322,15 +326,6 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		request.Config[RegionBoundType] = boundType.String()
 	}
 
-	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
-	if kerneltype.IsNextGen() {
-		if request.Config == nil {
-			request.Config = make(map[string]string)
-		}
-		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
-			request.Config[GCManagementType] = KeyspaceLevelGC
-		}
-	}
 	tracer.OnGetConfigFinished()
 
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
@@ -429,9 +424,14 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	if err := validateName(name); err != nil {
 		return nil, err
 	}
+	var err error
+	request.Config, err = prepareNewGCConfig(request.Config)
+	if err != nil {
+		return nil, err
+	}
 	// Check if keyspace with that name or ID already exists before processing.
 	// This provides early validation and better error handling.
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		nameExists, _, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
 			return err
@@ -470,15 +470,6 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
 		request.Config[RegionBoundType] = boundType.String()
-	}
-	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
-	if kerneltype.IsNextGen() {
-		if request.Config == nil {
-			request.Config = make(map[string]string)
-		}
-		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
-			request.Config[GCManagementType] = KeyspaceLevelGC
-		}
 	}
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
@@ -552,10 +543,15 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 }
 
 func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
+	var err error
+	keyspace.Config, err = prepareNewGCConfig(keyspace.Config)
+	if err != nil {
+		return err
+	}
 	manager.metaLock.Lock(keyspace.GetId())
 	defer manager.metaLock.Unlock(keyspace.GetId())
 
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// Save keyspace ID.
 		// Check if keyspace with that name already exists.
 		nameExists, _, err := manager.store.LoadKeyspaceID(txn, keyspace.Name)
@@ -864,7 +860,7 @@ const (
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
 	return manager.updateKeyspaceConfigTxn(name, mutationsAffectKeyspaceGroupMembership(mutations), func(meta *keyspacepb.KeyspaceMeta) error {
-		return applyKeyspaceConfigMutations(meta.Config, mutations)
+		return applyGCConfigMutations(meta.Config, mutations)
 	})
 }
 
@@ -881,7 +877,7 @@ func (manager *Manager) UpdateKeyspaceConfigWithPreconditions(name string, mutat
 		if err := checkKeyspaceConfigPreconditions(meta.GetConfig(), preconditions); err != nil {
 			return err
 		}
-		return applyKeyspaceConfigMutations(meta.Config, mutations)
+		return applyGCConfigMutations(meta.Config, mutations)
 	})
 }
 

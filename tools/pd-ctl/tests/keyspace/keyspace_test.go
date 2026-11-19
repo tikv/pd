@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	api "github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
@@ -892,4 +893,40 @@ func (suite *keyspaceTestSuite) TestShowKeyspaceRange() {
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
 	re.Contains(string(output), "Fail")
+}
+
+func (suite *keyspaceTestSuite) TestGCModePolicy() {
+	re := suite.Require()
+	mode, opposite := "unified", "keyspace_level"
+	if kerneltype.IsNextGen() {
+		mode, opposite = opposite, mode
+	}
+	meta := suite.mustCreateKeyspace(api.CreateKeyspaceParams{Name: "gc_policy"})
+	re.Equal(mode, meta.Config[keyspace.GCManagementType])
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "keyspace", "update-config", meta.Name, "--update", "gc_management_type="+mode)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &meta))
+	re.Equal(mode, meta.Config[keyspace.GCManagementType])
+	for _, flags := range [][]string{{"--update", "gc_management_type=" + opposite}, {"--update", "gc_management_type=invalid"}, {"--update", "safe_point_version=v2"}, {"--remove", "safe_point_version"}} {
+		args := append([]string{"-u", suite.pdAddr, "keyspace", "update-config", meta.Name}, flags...)
+		output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+		re.NoError(err)
+		re.Contains(string(output), "400")
+	}
+	// Repeat a grandfathered mode and reject the reverse conversion as well.
+	historical, err := pdTests.CreateKeyspaceWithHistoricalGCMode(suite.cluster.GetLeaderServer().GetServer(), &keyspace.CreateKeyspaceRequest{Name: "gc_history", Config: map[string]string{keyspace.GCManagementType: opposite}})
+	re.NoError(err)
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "keyspace", "update-config", historical.Name, "--update", "gc_management_type="+opposite)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &meta))
+	re.Equal(opposite, meta.Config[keyspace.GCManagementType])
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "keyspace", "update-config", historical.Name, "--update", "gc_management_type="+mode)
+	re.NoError(err)
+	re.Contains(string(output), "400")
+
+	for index, config := range []string{"gc_management_type=" + opposite, "gc_management_type=invalid", "safe_point_version=v2"} {
+		output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "keyspace", "create", fmt.Sprintf("gc_rejected_%d", index), "--config", config)
+		re.NoError(err)
+		re.Contains(string(output), "400")
+	}
 }

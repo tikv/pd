@@ -198,6 +198,8 @@ func (suite *clientStatelessTestSuite) TestUpdateKeyspaceState() {
 
 func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
 	re := s.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck")) }()
 
 	meta, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       "ks1",
@@ -205,41 +207,29 @@ func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	// By the time this test is write, only for next-gen deployment we enable keyspace level GC by default.
-	// Update this test when this
 	re.Equal(kerneltype.IsNextGen(), pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
-
-	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name: "ks2",
-		Config: map[string]string{
-			keyspace.GCManagementType: keyspace.KeyspaceLevelGC,
-		},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.True(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
-
-	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name: "ks3",
-		Config: map[string]string{
-			keyspace.GCManagementType: keyspace.UnifiedGC,
-		},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.False(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
-
-	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name: "ks4",
-		Config: map[string]string{
-			keyspace.GCManagementType: "",
-		},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	// In NextGen build, empty gc_management_type is automatically set to "keyspace_level"
-	// In Classic build, empty gc_management_type remains empty and returns false
-	re.Equal(kerneltype.IsNextGen(), pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+	for index, tc := range []struct {
+		config      map[string]string
+		independent bool
+	}{
+		{map[string]string{keyspace.GCManagementType: "keyspace_level"}, true},
+		{map[string]string{keyspace.GCManagementType: "unified"}, false},
+		{map[string]string{keyspace.GCManagementType: ""}, false},
+		{map[string]string{"safe_point_version": "v2"}, true},
+		{map[string]string{keyspace.GCManagementType: "", "safe_point_version": "v2"}, false},
+		{map[string]string{keyspace.GCManagementType: "invalid", "safe_point_version": "v2"}, false},
+	} {
+		meta, err := tests.CreateKeyspaceWithHistoricalGCMode(s.srv, &keyspace.CreateKeyspaceRequest{Name: fmt.Sprintf("history_%d", index), Config: tc.config, CreateTime: time.Now().Unix()})
+		re.NoError(err)
+		loaded, err := s.client.LoadKeyspace(s.ctx, meta.Name)
+		re.NoError(err)
+		re.Equal(meta.Config, loaded.Config)
+		re.Equal(tc.independent, pd.IsKeyspaceUsingKeyspaceLevelGC(loaded))
+		if tc.independent {
+			_, err := s.client.GetGCInternalController(meta.GetId()).AdvanceTxnSafePoint(s.ctx, 10)
+			re.NoError(err)
+		}
+	}
 }
 
 func TestProtectedKeyspace(t *testing.T) {
