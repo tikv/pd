@@ -133,6 +133,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	kgm := keyspace.NewKeyspaceGroupManager(ctx, s, client)
 	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm)
 	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager)
+	t.Cleanup(gcStateManager.CloseBarrierMetrics)
 
 	err = kgm.Bootstrap(ctx)
 	re.NoError(err)
