@@ -79,11 +79,10 @@ type Manager struct {
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
 
+	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// Validated PD writes cannot introduce conflicts, so they only need to
 	// recompute when existing conflicts may have been resolved.
 	hasRangeConflicts bool
-
-	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// rangeConflictsStale is set when the etcd sync methods change groups or key
 	// ranges without recomputing range conflicts.
 	rangeConflictsStale bool
@@ -291,12 +290,6 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	groupInfo.RangeCount = rangeCount
 }
 
-func (m *Manager) updateGroupLabelRulesLocked(labels map[string]*labeler.LabelRule, needClear bool) {
-	for groupID, labelRule := range labels {
-		m.updateGroupLabelRuleLocked(groupID, labelRule, needClear)
-	}
-}
-
 func (m *Manager) clearGroupCacheLocked(groupID string) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
@@ -316,14 +309,23 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	delete(m.groups, groupID)
 }
 
+// deleteGroups requires metaMutex so range conflicts can be scanned before
+// taking the manager write lock.
 func (m *Manager) deleteGroups(groupIDs []string) {
+	if len(groupIDs) == 0 {
+		return
+	}
+	var conflicts map[string]struct{}
+	if m.hasRangeConflicts {
+		conflicts = m.collectRangeConflictsLocked()
+	}
 	m.Lock()
 	defer m.Unlock()
 	for _, groupID := range groupIDs {
 		m.deleteGroupLocked(groupID)
 	}
 	if m.hasRangeConflicts {
-		m.reconcileRangeConflictsLocked(m.collectRangeConflictsLocked())
+		m.reconcileRangeConflictsLocked(conflicts)
 	}
 }
 

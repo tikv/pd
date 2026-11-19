@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -354,37 +355,156 @@ func TestSyncOverlappingAffinityRanges(t *testing.T) {
 	}
 }
 
-func TestReconcileRangeConflictsAllowsLookups(t *testing.T) {
-	re := require.New(t)
+func seedOverlappingGroupsForTest(re *require.Assertions, t *testing.T) (*Manager, *labeler.RegionLabeler) {
+	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
-	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, 5*time.Second)
-	re.NoError(err)
-	manager, err := NewManager(t.Context(), store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
-	re.NoError(err)
-	ranges := createGroupForTest(re, manager, "unrelated", 1)
-	region := generateRegionForTest(1, []uint64{1}, ranges[0])
-	manager.SyncGroupFromEtcd(&Group{ID: "changed"})
-
-	const hook = "github.com/tikv/pd/pkg/schedule/affinity/beforeRangeConflictScan"
-	lookedUp := make(chan *GroupState, 1)
-	re.NoError(failpoint.EnableCall(hook, func() {
-		go func() {
-			// A failed try-lock proves the scan would block the lookup without
-			// leaving a goroutine waiting for the paused reconciliation.
-			if !manager.TryRLock() {
-				lookedUp <- nil
-				return
+	storeInfos := core.NewStoresInfo()
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"}, core.SetLastHeartbeatTS(time.Now())))
+	conflicts := []GroupKeyRanges{
+		{GroupID: "conflict-a", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("d")}}},
+		{GroupID: "conflict-b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
+	}
+	for _, change := range conflicts {
+		re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+			if err := store.SaveAffinityGroup(txn, change.GroupID, &Group{
+				ID: change.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1},
+			}); err != nil {
+				return err
 			}
-			manager.RUnlock()
-			group, _ := manager.GetRegionAffinityGroupState(region)
-			lookedUp <- group
-		}()
-		group := <-lookedUp
-		re.NotNil(group, "unrelated Region lookups must finish while the conflict scan is paused")
-		re.Equal("unrelated", group.ID)
-	}))
-	defer func() { re.NoError(failpoint.Disable(hook)) }()
-	manager.ReconcileRangeConflicts()
+			return store.SaveRegionRule(txn, GetLabelRuleID(change.GroupID), MakeLabelRule(change))
+		}))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	manager.RestoreAffinityGroup("conflict-a")
+	manager.RestoreAffinityGroup("conflict-b")
+	return manager, regionLabeler
+}
+
+func TestReconcileRangeConflictsAllowsLookups(t *testing.T) {
+	const hook = "github.com/tikv/pd/pkg/schedule/affinity/beforeRangeConflictScan"
+	for _, tc := range []struct {
+		name string
+		run  func(re *require.Assertions, manager *Manager)
+	}{
+		{
+			name: "watcher reconcile",
+			run: func(_ *require.Assertions, manager *Manager) {
+				manager.SyncGroupFromEtcd(&Group{ID: "changed"})
+				manager.ReconcileRangeConflicts()
+			},
+		},
+		{
+			name: "update key ranges",
+			run: func(re *require.Assertions, manager *Manager) {
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{
+					GroupID:   "conflict-b",
+					KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}},
+				}}))
+				re.True(manager.GetAffinityGroupState("conflict-a").AffinitySchedulingAllowed)
+			},
+		},
+		{
+			name: "delete groups",
+			run: func(re *require.Assertions, manager *Manager) {
+				re.NoError(manager.DeleteAffinityGroups([]string{"conflict-b"}, true))
+				re.True(manager.GetAffinityGroupState("conflict-a").AffinitySchedulingAllowed)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			manager, _ := seedOverlappingGroupsForTest(re, t)
+			ranges := createGroupForTest(re, manager, "unrelated", 1)
+			region := generateRegionForTest(1, []uint64{1}, ranges[0])
+
+			scans := 0
+			lookedUp := make(chan *GroupState, 1)
+			re.NoError(failpoint.EnableCall(hook, func() {
+				scans++
+				go func() {
+					// A failed try-lock proves the scan would block the lookup without
+					// leaving a goroutine waiting for the paused reconciliation.
+					if !manager.TryRLock() {
+						lookedUp <- nil
+						return
+					}
+					manager.RUnlock()
+					group, _ := manager.GetRegionAffinityGroupState(region)
+					lookedUp <- group
+				}()
+				group := <-lookedUp
+				re.NotNil(group, "unrelated Region lookups must finish while the conflict scan is paused")
+				re.Equal("unrelated", group.ID)
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(hook)) })
+			tc.run(re, manager)
+			re.Equal(1, scans)
+		})
+	}
+}
+
+func TestRangeConflictOperationsConcurrentWithLookups(t *testing.T) {
+	re := require.New(t)
+	manager, _ := seedOverlappingGroupsForTest(re, t)
+	ranges := createGroupForTest(re, manager, "unrelated", 1)
+	_, err := manager.UpdateAffinityGroupPeers("unrelated", 1, []uint64{1})
+	re.NoError(err)
+
+	unrelatedRegion := generateRegionForTest(1, []uint64{1}, ranges[0])
+	conflictRegion := generateRegionForTest(2, []uint64{1}, keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("c")})
+
+	done := make(chan struct{})
+	errCh := make(chan error, 4)
+	var wg sync.WaitGroup
+	for worker := range 4 {
+		wg.Add(1)
+		go func(saveCache bool) {
+			defer wg.Done()
+			lookup := manager.GetRegionAffinityGroupState
+			if saveCache {
+				lookup = manager.GetAndCacheRegionAffinityGroupState
+			}
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				group, isAffinity := lookup(unrelatedRegion)
+				if group == nil || group.ID != "unrelated" || !isAffinity {
+					errCh <- fmt.Errorf("unexpected unrelated lookup result: group=%v isAffinity=%t", group, isAffinity)
+					return
+				}
+				_, _ = lookup(conflictRegion)
+			}
+		}(worker%2 == 0)
+	}
+
+	for i := range 20 {
+		id := fmt.Sprintf("tmp-%d", i)
+		first := []keyutil.KeyRange{{StartKey: fmt.Appendf(nil, "x-%04d", 2*i), EndKey: fmt.Appendf(nil, "x-%04d", 2*i+1)}}
+		second := []keyutil.KeyRange{{StartKey: fmt.Appendf(nil, "y-%04d", 2*i), EndKey: fmt.Appendf(nil, "y-%04d", 2*i+1)}}
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id, KeyRanges: first}}))
+		re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: id, KeyRanges: second}}, nil))
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: id, KeyRanges: first}}))
+		re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
+	}
+	re.NoError(manager.DeleteAffinityGroups([]string{"conflict-b"}, true))
+
+	close(done)
+	wg.Wait()
+	close(errCh)
+	for lookupErr := range errCh {
+		re.NoError(lookupErr)
+	}
+
+	group, isAffinity := manager.GetRegionAffinityGroupState(conflictRegion)
+	re.NotNil(group)
+	re.Equal("conflict-a", group.ID)
+	re.True(isAffinity)
 }
 
 // TestDeleteGroupClearsCache verifies that deleting a group clears all related region caches.

@@ -547,15 +547,17 @@ func (s *failingAffinityStorage) RunInTxn(ctx context.Context, f func(kv.Txn) er
 // creates the rest.
 func TestAffinityGroupsBatchFailure(t *testing.T) {
 	for _, tc := range []struct {
-		name, op  string
-		addCount  int
-		removeAll bool
+		name, op     string
+		addCount     int
+		removeAll    bool
+		mixedRemoves bool
 	}{
 		{name: "create", op: "create"},
 		{name: "delete", op: "delete"},
 		{name: "update/inside adds", op: "update", addCount: etcdutil.MaxEtcdTxnOps + 1},
 		{name: "update/inside partial removes", op: "update", addCount: 1},
 		{name: "update/inside remove-all", op: "update", addCount: 1, removeAll: true},
+		{name: "update/mixed removes", op: "update", addCount: 1, mixedRemoves: true},
 		{name: "update/end of adds", op: "update", addCount: etcdutil.MaxEtcdTxnOps},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -563,10 +565,12 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 			re := require.New(t)
 			ctx := t.Context()
 			store := storage.NewStorageWithMemoryBackend()
+			storeInfos := core.NewStoresInfo()
+			storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"}, core.SetLastHeartbeatTS(time.Now())))
 			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 			re.NoError(err)
 			failingStore := &failingAffinityStorage{AffinityStorage: store}
-			manager, err := NewManager(ctx, failingStore, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+			manager, err := NewManager(ctx, failingStore, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
 			re.NoError(err)
 			// Each request needs two transactions. To create or delete, the first
 			// group has no label rule, so cutting the operations every
@@ -575,6 +579,9 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 			count := etcdutil.MaxEtcdTxnOps/2 + 2
 			if op == "update" {
 				count = etcdutil.MaxEtcdTxnOps + 2
+			}
+			removeAllAt := func(i int) bool {
+				return tc.removeAll || (tc.mixedRemoves && i%2 == 1)
 			}
 			changes, ids := make([]GroupKeyRanges, count), make([]string, count)
 			for i := range changes {
@@ -593,7 +600,7 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 					initial[i].GroupID = ids[i]
 					if i >= tc.addCount {
 						initial[i].KeyRanges = changes[i].KeyRanges
-						if !tc.removeAll {
+						if !removeAllAt(i) {
 							initial[i].KeyRanges = append(initial[i].KeyRanges, keyutil.KeyRange{
 								StartKey: fmt.Appendf(nil, "%04d", 2*i+1), EndKey: fmt.Appendf(nil, "%04d", 2*i+2),
 							})
@@ -601,6 +608,27 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 					}
 				}
 				re.NoError(manager.CreateAffinityGroups(initial))
+				cacheRegionAt := func(idx int) {
+					_, err = manager.UpdateAffinityGroupPeers(ids[idx], 1, []uint64{1})
+					re.NoError(err)
+					_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(
+						generateRegionForTest(uint64(idx+1), []uint64{1}, initial[idx].KeyRanges[0]),
+					)
+					re.True(isAffinity)
+				}
+				if tc.addCount < etcdutil.MaxEtcdTxnOps {
+					cacheRegionAt(tc.addCount)
+				}
+				cacheRegionAt(count - 1)
+				failingStore.txnCount, failingStore.failAt = 0, 1
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(
+					[]GroupKeyRanges{{GroupID: ids[0]}},
+					[]GroupKeyRanges{{GroupID: ids[count-1]}},
+				))
+				re.Zero(failingStore.txnCount)
+				err = manager.UpdateAffinityGroupKeyRanges(changes[:tc.addCount], changes[tc.addCount:])
+				re.ErrorContains(err, "injected affinity transaction failure")
+				re.Equal(1, failingStore.txnCount)
 			}
 			failingStore.txnCount, failingStore.failAt = 0, 2
 			switch op {
@@ -617,7 +645,7 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 			// Rebuild the labeler and the manager from storage as a restart does.
 			reloadedLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 			re.NoError(err)
-			reloaded, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), reloadedLabeler)
+			reloaded, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), reloadedLabeler)
 			re.NoError(err)
 			for i, change := range changes {
 				ruleID := GetLabelRuleID(change.GroupID)
@@ -641,7 +669,7 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 							expectedCount = 1
 						}
 					} else {
-						if !tc.removeAll {
+						if !removeAllAt(i) {
 							expectedCount = 1
 						}
 						if i >= etcdutil.MaxEtcdTxnOps {
@@ -651,6 +679,12 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 					re.Equal(expectedCount, stored.RangeCount, change.GroupID)
 					re.Equal(expectedCount > 0, hasRule, change.GroupID)
 				}
+			}
+			if op == "update" {
+				if tc.addCount < etcdutil.MaxEtcdTxnOps {
+					re.Zero(manager.GetAffinityGroupState(ids[tc.addCount]).RegionCount)
+				}
+				re.Equal(1, manager.GetAffinityGroupState(ids[count-1]).RegionCount)
 			}
 			re.Equal(reloaded.keyRanges, manager.keyRanges)
 			// Only the first transaction committed.
