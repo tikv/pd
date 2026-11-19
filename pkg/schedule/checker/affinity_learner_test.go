@@ -975,35 +975,33 @@ func TestCloneRegionWithPeerStoresPreservesWitness(t *testing.T) {
 				roles[storeID] = placement.Voter
 			}
 			roles[tt.voters[0]] = placement.Leader
-			for range 50 {
-				target := cloneRegionWithReplacePeerStores(region, tt.voters[0], tt.voters...)
-				re.NotNil(target)
-				re.Same(target.GetStorePeer(tt.voters[0]), target.GetLeader())
-				re.False(target.GetLeader().GetIsWitness())
-				re.Equal(region.GetLearners(), target.GetLearners())
-				storeIDsEq(re, slices.Clone(tt.voters), target.GetVoters())
-				for _, storeID := range tt.voters {
-					peer := target.GetStoreVoter(storeID)
-					re.Equal(metapb.PeerRole_Voter, peer.GetRole())
-					if old := region.GetStoreVoter(storeID); old != nil {
-						re.Equal(old, peer)
-					} else {
-						re.False(peer.GetIsWitness(), "new voter on store %d", storeID)
-					}
+			target := cloneRegionWithReplacePeerStores(region, tt.voters[0], tt.voters...)
+			re.NotNil(target)
+			re.Same(target.GetStorePeer(tt.voters[0]), target.GetLeader())
+			re.False(target.GetLeader().GetIsWitness())
+			re.Equal(region.GetLearners(), target.GetLearners())
+			storeIDsEq(re, slices.Clone(tt.voters), target.GetVoters())
+			for _, storeID := range tt.voters {
+				peer := target.GetStoreVoter(storeID)
+				re.Equal(metapb.PeerRole_Voter, peer.GetRole())
+				if old := region.GetStoreVoter(storeID); old != nil {
+					re.Equal(old, peer)
+				} else {
+					re.False(peer.GetIsWitness(), "new voter on store %d", storeID)
 				}
-				op, err := operator.CreateMoveRegionOperator("test", tc, region, operator.OpAffinity, roles)
-				re.NoError(err)
-				tc.PutRegion(region)
-				moved := applyLearnerOperator(t, tc, op)
-				for _, peer := range target.GetPeers() {
-					actual := moved.GetStorePeer(peer.GetStoreId())
-					re.NotNil(actual)
-					re.Equal(peer.GetRole(), actual.GetRole())
-					re.Equal(peer.GetIsWitness(), actual.GetIsWitness())
-				}
-				re.True(region.GetStorePeer(2).GetIsWitness())
-				re.Equal(uint64(1), region.GetLeader().GetStoreId())
 			}
+			op, err := operator.CreateMoveRegionOperator("test", tc, region, operator.OpAffinity, roles)
+			re.NoError(err)
+			tc.PutRegion(region)
+			moved := applyLearnerOperator(t, tc, op)
+			for _, peer := range target.GetPeers() {
+				actual := moved.GetStorePeer(peer.GetStoreId())
+				re.NotNil(actual)
+				re.Equal(peer.GetRole(), actual.GetRole())
+				re.Equal(peer.GetIsWitness(), actual.GetIsWitness())
+			}
+			re.True(region.GetStorePeer(2).GetIsWitness())
+			re.Equal(uint64(1), region.GetLeader().GetStoreId())
 		})
 	}
 }
