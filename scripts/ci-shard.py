@@ -30,6 +30,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parent.parent
 MODULE_PREFIX = "github.com/tikv/pd"
 MODULES = (".", "client", "tools", "tests/integrations")
+PLANNING_PARALLELISM = 4
 # A scheduling preference for keeping modules together; common dependency
 # compilation is already part of the runner's preparation step.
 MODULE_PENALTY_SECONDS = 30
@@ -41,11 +42,34 @@ Package = collections.namedtuple("Package", "module path seconds longest")
 
 def read_profile(filename):
     profile = json.loads(Path(filename).read_text())
+    if not isinstance(profile, dict) or not isinstance(profile.get("packages"), dict):
+        raise ValueError("test durations must contain a package map")
+    if not isinstance(profile.setdefault("tests", {}), dict):
+        raise ValueError("test durations must contain package and test maps")
     for package, timing in profile["packages"].items():
         for field in ("seconds", "longest"):
             value = timing[field]
             if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
                 raise ValueError(f"invalid {field} for {package}: {value}")
+    for test, seconds in profile["tests"].items():
+        if not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds < 0:
+            raise ValueError(f"invalid duration for {test}: {seconds}")
+    return profile
+
+
+def empty_profile():
+    return {"parallel": PLANNING_PARALLELISM, "packages": {}, "tests": {}}
+
+
+def prepare_profile(history):
+    try:
+        profile = read_profile(history)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f"Duration history unavailable; using default estimates: {error}", flush=True)
+        return empty_profile()
+    # Keep the current planning parallelism; history supplies timing weights only.
+    profile["parallel"] = PLANNING_PARALLELISM
+    print(f"Using duration history from {profile.get('source', 'a previous successful run')}", flush=True)
     return profile
 
 
@@ -190,8 +214,8 @@ def successful_test_timings(filename):
         yield seconds, case.attrib["classname"], case.attrib["name"]
 
 
-def print_slowest(directory, native_timings):
-    timings = list(native_timings)
+def print_slowest(directory):
+    timings = []
     for filename in sorted(directory.glob("*.xml")):
         timings.extend(successful_test_timings(filename))
     print("\nSlowest successful tests on this runner (actual elapsed; top-level tests/suites):", flush=True)
@@ -207,7 +231,6 @@ def run_shard(root, packages, durations, parallel):
         by_module[package.module].append(package)
     with tempfile.TemporaryDirectory(prefix="pd-ci-results-") as temp:
         results = Path(temp)
-        native_timings = []
         try:
             for index, (module, group) in enumerate(sorted(by_module.items(), key=lambda item: -estimate(item[1], parallel))):
                 environment = os.environ.copy()
@@ -224,23 +247,28 @@ def run_shard(root, packages, durations, parallel):
                     command = [
                         str(root / "bin/pd-ut"), "run", "--module", module,
                         "--packages", ",".join(sorted(p.path for p in group)),
-                        "--test-durations", str(durations.resolve()), "--parallel", str(parallel),
+                        "--parallel", str(parallel),
                         "--cpu-budget", str(available_parallelism()),
                         "--race", "--coverprofile", str(results / f"{index}.cov"),
                         "--junitfile", str(results / f"{index}.xml"),
                     ]
+                    if durations is not None:
+                        command.extend(["--test-durations", str(durations.resolve())])
                     directory = root
                 print(f"Running {len(group)} packages from {module}", flush=True)
                 if module in ("client", "tools"):
                     returncode, timings = run_native_tests(command, directory, environment)
-                    native_timings.extend(timings)
+                    report = ET.Element("testsuite", name=module)
+                    for seconds, package, test in timings:
+                        ET.SubElement(report, "testcase", classname=package, name=test, time=str(seconds))
+                    ET.ElementTree(report).write(results / f"{index}.xml", encoding="utf-8", xml_declaration=True)
                 else:
                     returncode = subprocess.run(command, cwd=directory, env=environment, check=False).returncode
                 if returncode:
                     return returncode
             return 0
         finally:
-            print_slowest(results, native_timings)
+            print_slowest(results)
             merge_results(results, root)
 
 
@@ -278,19 +306,31 @@ def available_parallelism():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "run", "update"))
+    parser.add_argument("action", choices=("plan", "run", "update", "prepare"))
     parser.add_argument("--count", type=int)
     parser.add_argument("--layout", default="standard", choices=("standard", "nextgen"))
     parser.add_argument("--index", type=int, default=1, help="one-based runner index")
     parser.add_argument("--parallel", type=int, default=available_parallelism(), help="test processes on this runner; package assignments use the profile's fixed parallelism")
-    parser.add_argument("--durations", type=Path, default=ROOT / "scripts/ci-test-durations.json")
+    parser.add_argument("--durations", type=Path, help="optional CI duration profile")
+    parser.add_argument("--history", type=Path, help="optional previous CI duration profile")
+    parser.add_argument("--output", type=Path, help="prepared profile shared by all runners")
+    parser.add_argument("--source", help="CI run that produced updated timings")
     parser.add_argument("reports", nargs="*", type=Path)
     args = parser.parse_args()
-    profile = read_profile(args.durations)
+    if args.action == "prepare":
+        if args.history is None or args.output is None:
+            parser.error("prepare requires --history and --output")
+        profile = prepare_profile(args.history)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(profile, indent=2, sort_keys=True) + "\n")
+        return 0
+    profile = read_profile(args.durations) if args.durations is not None else empty_profile()
     if args.action == "update":
-        if not args.reports:
-            parser.error("update requires at least one JUnit report")
+        if not args.reports or args.durations is None:
+            parser.error("update requires JUnit reports and --durations")
         updated = update_profile(profile, args.reports)
+        if args.source:
+            updated["source"] = args.source
         args.durations.write_text(json.dumps(updated, indent=2, sort_keys=True) + "\n")
         return 0
     config = json.loads((ROOT / "scripts/ci-test-groups.json").read_text())
@@ -302,7 +342,7 @@ def main():
         parser.error("runner index must be between 1 and shard count")
     if args.parallel < 1:
         parser.error("parallelism must be positive")
-    planning_parallel = profile.get("parallel", 4)
+    planning_parallel = profile.get("parallel", PLANNING_PARALLELISM)
     if not isinstance(planning_parallel, int) or planning_parallel < 1:
         parser.error("profile parallelism must be a positive integer")
     shards = plan_layout(discover_packages(ROOT, profile), config, args.layout, planning_parallel)
