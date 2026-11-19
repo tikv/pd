@@ -1461,7 +1461,7 @@ func (m *GCStateManager) setGlobalGCBarrierImpl(ctx context.Context, barrierID s
 			barrierTS = floor
 		} else if barrierTS < floor {
 			// Validate the read-only transaction's revision before reporting this threshold.
-			rejection = errs.ErrGlobalGCBarrierTSBelowFloor.GenWithStackByArgs(barrierTS, floor)
+			rejection = errs.ErrGlobalGCBarrierTSUnsafe.GenWithStackByArgs(barrierTS, floor)
 			return nil
 		}
 		var expiresAt *time.Time

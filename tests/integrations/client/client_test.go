@@ -2817,13 +2817,13 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	// Reject a new ID below the remaining active minimum.
 	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", higher-1, math.MaxInt64)
 	re.Error(err)
-	re.Contains(err.Error(), "ErrGlobalGCBarrierTSBelowFloor")
+	re.Contains(err.Error(), "ErrGlobalGCBarrierTSUnsafe")
 	s.checkGlobalGCBarrier(re, "b2", 0)
 
 	// The remaining ID also participates when checking its own update.
 	_, err = getCli().SetGlobalGCBarrier(ctx, "b1", higher-1, math.MaxInt64)
 	re.Error(err)
-	re.Contains(err.Error(), "ErrGlobalGCBarrierTSBelowFloor")
+	re.Contains(err.Error(), "ErrGlobalGCBarrierTSUnsafe")
 
 	// The existing global GC barrier remains unchanged.
 	s.checkGlobalGCBarrier(re, "b1", higher)

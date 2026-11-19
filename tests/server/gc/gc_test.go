@@ -760,7 +760,7 @@ func TestGCOperations(t *testing.T) {
 		re.NoError(err)
 		re.NotNil(resp.Header)
 		re.NotNil(resp.Header.Error)
-		re.Contains(resp.Header.Error.Message, "ErrGlobalGCBarrierTSBelowFloor")
+		re.Contains(resp.Header.Error.Message, "ErrGlobalGCBarrierTSUnsafe")
 	}
 
 	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {

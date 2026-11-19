@@ -1470,7 +1470,8 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierAdmission() {
 	_, err = s.manager.DeleteGlobalGCBarrier(ctx, "")
 	re.ErrorIs(err, errs.ErrInvalidArgument)
 	_, err = s.manager.SetGlobalGCBarrier(ctx, "a", floor-1, time.Hour, now)
-	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSBelowFloor)
+	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSUnsafe)
+	re.ErrorContains(err, fmt.Sprintf("cannot guarantee global GC protection at timestamp %d (minimum accepted timestamp %d)", floor-1, floor))
 	re.Empty(s.getAllGlobalGCBarriers())
 	// An explicit timestamp equal to F is admissible from the empty state.
 	set("explicit", floor, time.Hour, now)
@@ -1492,7 +1493,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierAdmission() {
 	re.Equal(gcTestTS(160), b.BarrierTS)
 	// A rejected change preserves both the timestamp and the expiration.
 	_, err = s.manager.SetGlobalGCBarrier(ctx, "b", floor-1, time.Minute, now)
-	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSBelowFloor)
+	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSUnsafe)
 	re.Equal(b, s.getGlobalGCBarrier("b"))
 	b = set("b", 0, 3*time.Minute, now)
 	re.Equal(endpoint.NewGlobalGCBarrier("b", floor, new(now.Add(3*time.Minute))), b)
@@ -1517,7 +1518,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierAdmission() {
 	re.Nil(deleted)
 
 	_, err = s.manager.SetGlobalGCBarrier(ctx, "a", floor, time.Hour, afterExpiry)
-	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSBelowFloor)
+	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSUnsafe)
 	a = set("a", 0, time.Hour, afterExpiry)
 	re.Equal(gcTestTS(200), a.BarrierTS)
 }
@@ -1535,7 +1536,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierProtectsRetainedSafePoints(
 	re.NoError(err)
 	// The retained safe point cannot be reconstructed by enumerating enabled keyspaces.
 	_, err = s.manager.SetGlobalGCBarrier(ctx, "backup", gcTestTS(100), time.Hour, now)
-	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSBelowFloor)
+	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSUnsafe)
 	b, err := s.manager.SetGlobalGCBarrier(ctx, "backup", 0, time.Hour, now)
 	re.NoError(err)
 	re.Equal(gcTestTS(150), b.BarrierTS)
@@ -1600,7 +1601,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierRechecksFloorOnRevisionConf
 	s.manager.gcMetaStorage = endpoint.NewStorageEndpoint(store, nil).GetGCStateProvider()
 	setTestTSOWindow(s.T(), s.storage, 2)
 	_, err = s.manager.SetGlobalGCBarrier(ctx, "copy", initial.BarrierTS, time.Hour, now)
-	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSBelowFloor)
+	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSUnsafe)
 	re.Nil(s.getGlobalGCBarrier("copy"))
 
 	store.beforeCommit = nil
