@@ -31,12 +31,14 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -601,5 +603,94 @@ func TestDisabled(t *testing.T) {
 			func(string) error { return nil })
 		re.NoError(err)
 		re.True(scheduling.IsDisable())
+	}
+}
+
+// fixedShuffleLeaderSample supplies one target and a fixed, ordered Region sample.
+type fixedShuffleLeaderSample struct {
+	sche.SchedulerCluster
+	target  *core.StoreInfo
+	regions []*core.RegionInfo
+}
+
+func (c fixedShuffleLeaderSample) GetStores() []*core.StoreInfo {
+	return []*core.StoreInfo{c.target}
+}
+
+func (c fixedShuffleLeaderSample) RandFollowerRegions(uint64, []keyutil.KeyRange) []*core.RegionInfo {
+	return c.regions
+}
+
+func setupOverlappingLeaderRules(t *testing.T, tc *mockcluster.Cluster) {
+	t.Helper()
+	tc.SetEnablePlacementRules(true)
+	for i, zone := range []string{"A", "B", "A", "B"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone})
+	}
+	require.NoError(t, tc.GetRuleManager().SetRules([]*placement.Rule{
+		{GroupID: "pd", ID: "default", Role: placement.Leader, Count: 1},
+		{GroupID: "pd", ID: "zone-b-voter", Index: 1, Role: placement.Voter, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"B"}}}},
+		{GroupID: "pd", ID: "other-voter", Index: 2, Role: placement.Voter, Count: 1},
+	}))
+}
+
+func TestShuffleLeaderRetriesPlacementRoleRejection(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	setupOverlappingLeaderRules(t, tc)
+	rejected := tc.AddLeaderRegion(1, 1, 2, 3)
+	allowed := tc.AddLeaderRegion(2, 1, 2, 4)
+	cluster := fixedShuffleLeaderSample{SchedulerCluster: tc, target: tc.GetStore(2), regions: []*core.RegionInfo{rejected, allowed}}
+	scheduler := newShuffleLeaderScheduler(oc, &shuffleLeaderSchedulerConfig{})
+	ops, _ := scheduler.Schedule(cluster, false)
+	require.Len(t, ops, 1)
+	require.Equal(t, allowed.GetID(), ops[0].RegionID())
+	operatorutil.CheckTransferLeader(require.New(t), ops[0], operator.OpLeader|operator.OpAdmin, 1, 2)
+}
+
+func TestRejectLeaderRetriesPlacementRoleRejection(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetLabelProperty(config.RejectLeader, "noleader", "true")
+	setupOverlappingLeaderRules(t, tc)
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "A", "noleader": "true"})
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	scheduler := newLabelScheduler(oc, &labelSchedulerConfig{Ranges: []keyutil.KeyRange{{}}})
+	// The result is independent of which of the two stores is tried first.
+	for range 32 {
+		ops, _ := scheduler.Schedule(tc, false)
+		require.Len(t, ops, 1)
+		operatorutil.CheckTransferLeader(require.New(t), ops[0], operator.OpLeader, 1, 3)
+	}
+}
+
+func setupConstrainedLeaderReplacement(t *testing.T, tc *mockcluster.Cluster) {
+	t.Helper()
+	tc.SetEnablePlacementRules(true)
+	for i, zone := range []string{"A", "B", "B", "A", "A"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone})
+	}
+	tc.SetStoreEvictLeader(4, true)
+	require.NoError(t, tc.GetRuleManager().SetRules([]*placement.Rule{
+		{GroupID: "pd", ID: "default", Role: placement.Leader, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}}},
+		{GroupID: "pd", ID: "voters", Index: 1, Role: placement.Voter, Count: 2},
+	}))
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+	require.True(t, tc.GetRuleManager().FitRegion(tc, region).IsSatisfied())
+	_, err := operator.CreateMovePeerOperator("test", tc, region, operator.OpRegion, 1, &metapb.Peer{StoreId: 4})
+	require.ErrorIs(t, err, operator.ErrTargetRole)
+}
+
+func TestShuffleRegionRetriesPlacementRoleRejection(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	setupConstrainedLeaderReplacement(t, tc)
+	scheduler := newShuffleRegionScheduler(oc, &shuffleRegionSchedulerConfig{Ranges: []keyutil.KeyRange{{}}, Roles: []string{"leader"}})
+	for range 32 {
+		ops, _ := scheduler.Schedule(tc, false)
+		require.Len(t, ops, 1)
+		operatorutil.CheckTransferPeer(require.New(t), ops[0], operator.OpRegion, 1, 5)
 	}
 }

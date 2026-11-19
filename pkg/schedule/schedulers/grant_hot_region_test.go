@@ -74,3 +74,15 @@ func TestGrantHotRegionTransferLeaderInLimit(t *testing.T) {
 	re.NoError(err)
 	operatorutil.CheckTransferLeader(re, op, operator.OpLeader, 1, 2)
 }
+
+func TestGrantHotRegionRetriesPlacementRoleRejection(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	setupConstrainedLeaderReplacement(t, tc)
+	scheduler := newGrantHotRegionScheduler(oc, &grantHotRegionSchedulerConfig{StoreLeaderID: 5, StoreIDs: []uint64{1, 4, 5}})
+	for range 32 {
+		op, err := scheduler.transfer(tc, 1, 1, false)
+		require.NoError(t, err)
+		operatorutil.CheckTransferPeer(require.New(t), op, operator.OpRegion, 1, 5)
+	}
+}

@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -654,6 +655,9 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 
 		if err != nil {
 			balanceRangeCreateOpFailCounter.Inc()
+			if stderrors.Is(err, operator.ErrTargetRole) {
+				continue
+			}
 			return nil
 		}
 		op.FinishedCounters = append(op.FinishedCounters,

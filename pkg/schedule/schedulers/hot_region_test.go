@@ -3100,3 +3100,40 @@ func TestSummaryPendingInfluenceCannotRepublishAfterBury(t *testing.T) {
 	// reports its last-set value through that handle.
 	re.Equal(0, HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": "1"}))
 }
+
+func TestShuffleHotRegionRetriesPlacementRoleRejection(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetEnablePlacementRules(true)
+	for i, zone := range []string{"A", "B", "B", "C", "A"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone})
+	}
+	rm := tc.GetRuleManager()
+	re.NoError(rm.SetRules([]*placement.Rule{
+		{GroupID: "pd", ID: "default", Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"}},
+		{
+			GroupID: "pd", ID: "leader", Index: 1, Role: placement.Leader, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}},
+		},
+	}))
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+	// The first rule's isolation score makes FitRegion assign the leader to the
+	// voter rule. A complete role match instead assigns both B peers to that rule.
+	fit := rm.FitRegion(tc, region)
+	re.False(fit.IsSatisfied())
+	re.True(fit.Replace(1, tc.GetStore(4)))
+	re.True(fit.Replace(1, tc.GetStore(5)))
+	_, err := operator.CreateMoveLeaderOperator("test", tc, region, operator.OpRegion, 1, &metapb.Peer{StoreId: 4})
+	re.ErrorIs(err, operator.ErrTargetRole)
+
+	scheduler := newShuffleHotRegionScheduler(oc, &shuffleHotRegionSchedulerConfig{}).(*shuffleHotRegionScheduler)
+	loads := map[uint64]*statistics.StoreLoadDetail{
+		1: {HotPeers: []*statistics.HotPeerStat{{StoreID: 1, RegionID: region.GetID()}}},
+	}
+	for range 32 {
+		ops := scheduler.randomSchedule(tc, loads)
+		re.Len(ops, 1)
+		operatorutil.CheckTransferPeer(re, ops[0], operator.OpRegion|operator.OpLeader, 1, 5)
+	}
+}

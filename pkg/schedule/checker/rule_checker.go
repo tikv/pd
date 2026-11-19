@@ -119,9 +119,11 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		c.pendingList.Remove(region.GetID())
 		return op
 	}
+	var rejectedTargetRole bool
 	for _, rf := range fit.RuleFits {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
+			rejectedTargetRole = rejectedTargetRole || errors.Is(err, operator.ErrTargetRole)
 			log.Debug("fail to fix rule peer", zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID), errs.ZapError(err))
 			continue
 		}
@@ -130,7 +132,9 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			return op
 		}
 	}
-	if c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() {
+	// The fit tracks current members, so it cannot invalidate a cached miss
+	// when an unused replacement store later becomes eligible to lead.
+	if !rejectedTargetRole && c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() {
 		if placement.ValidateFit(fit) && placement.ValidateRegion(region) && placement.ValidateStores(fit.GetRegionStores()) {
 			// If there is no need to fix, we will cache the fit
 			c.ruleManager.SetRegionFitCache(c.cluster, region, fit)
@@ -293,35 +297,47 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 		fastFailover = false
 	}
 	ruleStores := getRuleFitStores(c.cluster, rf)
-	storeID, filterByTempState := c.strategy(region, rf.Rule, fastFailover).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	replacingLeader := region.GetLeader().GetId() == peer.GetId()
+	var newPeer, newLeader *metapb.Peer
+	makePeer := func(storeID uint64) *metapb.Peer {
+		return &metapb.Peer{StoreId: storeID, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: fastFailover}
+	}
+	strategy := c.strategy(region, rf.Rule, fastFailover)
+	var rejectedTargetRole bool
+	// A replacement must preserve a feasible leader when the origin admits a
+	// complete assignment. A satisfied fit already covers non-leader swaps.
+	// Incomplete repairs and witness failover keep their incremental behavior.
+	roleUnchanged := peer.GetRole() == rf.Rule.Role.MetaPeerRole() && peer.GetIsWitness() == fastFailover
+	if roleUnchanged && (replacingLeader || !fit.IsSatisfied()) && c.hasCompleteRoleAssignment(region, fit) {
+		strategy.allowReplacement = func(_, storeID uint64) bool {
+			replacement := makePeer(storeID)
+			if !replacingLeader {
+				rejectedTargetRole = !c.replacementHasLeader(region, peer, replacement)
+				return !rejectedTargetRole
+			}
+			leader, feasible := c.selectLeaderForReplacement(region, peer, replacement, true)
+			rejectedTargetRole = !feasible
+			if feasible {
+				newPeer, newLeader = replacement, leader
+			}
+			return feasible
+		}
+	}
+	storeID, filterByTempState := strategy.SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if storeID == 0 {
 		ruleCheckerNoStoreReplaceCounter.Inc()
+		if rejectedTargetRole {
+			return nil, operator.ErrTargetRole
+		}
 		c.handleFilterState(region, filterByTempState)
 		return nil, errs.ErrNoStoreToReplace
 	}
-	newPeer := &metapb.Peer{StoreId: storeID, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: fastFailover}
-	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
-	var newLeader *metapb.Peer
-	if region.GetLeader().GetId() == peer.GetId() {
-		minCount := uint64(math.MaxUint64)
-		for _, p := range region.GetPeers() {
-			count := c.record.getOfflineLeaderCount(p.GetStoreId())
-			checkPeerHealth := func() bool {
-				if p.GetId() == peer.GetId() {
-					return true
-				}
-				if region.GetDownPeer(p.GetId()) != nil || region.GetPendingPeer(p.GetId()) != nil {
-					return false
-				}
-				return c.allowLeader(fit, p)
-			}
-			if minCount > count && checkPeerHealth() {
-				minCount = count
-				newLeader = p
-			}
+	if newPeer == nil {
+		newPeer = makePeer(storeID)
+		if replacingLeader {
+			newLeader, _ = c.selectLeaderForReplacement(region, peer, newPeer, false)
 		}
 	}
-
 	createOp := func() (*operator.Operator, error) {
 		if newLeader != nil && newLeader.GetId() != peer.GetId() {
 			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
@@ -349,6 +365,68 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 	return op, nil
 }
 
+// Topology fitting favors the isolation of earlier rules. Complete role
+// matching can find a valid assignment even when that fit has a loose match.
+func (c *RuleChecker) hasCompleteRoleAssignment(region *core.RegionInfo, fit *placement.RegionFit) bool {
+	if fit.IsSatisfied() {
+		return true
+	}
+	roles := placement.NewRoleChecker(c.cluster, region.GetPeers(), fit.GetRules(), c.cluster.GetSharedConfig().IsWitnessAllowed())
+	return roles.IsSatisfied(region.GetLeader().GetStoreId())
+}
+
+// Prefer a less frequently selected leader to spread snapshot generation.
+// Selecting the outgoing leader lets the builder choose the final leader.
+func (c *RuleChecker) selectLeaderForReplacement(region *core.RegionInfo, oldPeer, newPeer *metapb.Peer, checkLayout bool) (*metapb.Peer, bool) {
+	var selected *metapb.Peer
+	var allowTargetLeader func(*metapb.Peer) bool
+	allowsLeader := func(candidate *metapb.Peer) bool {
+		if allowTargetLeader == nil {
+			allowTargetLeader = c.replacementLeaderChecker(region, oldPeer, newPeer)
+		}
+		return allowTargetLeader(candidate)
+	}
+	feasible := !checkLayout
+	minCount := uint64(math.MaxUint64)
+	for _, peer := range region.GetPeers() {
+		count := c.record.getOfflineLeaderCount(peer.GetStoreId())
+		if count >= minCount && feasible {
+			continue
+		}
+		if peer.GetId() != oldPeer.GetId() {
+			if region.GetDownPeer(peer.GetId()) != nil || region.GetPendingPeer(peer.GetId()) != nil || !allowsLeader(peer) {
+				continue
+			}
+			feasible = true
+		}
+		if count < minCount {
+			minCount, selected = count, peer
+		}
+	}
+	return selected, feasible || allowsLeader(newPeer)
+}
+
+func (c *RuleChecker) replacementLeaderChecker(region *core.RegionInfo, oldPeer, newPeer *metapb.Peer) func(*metapb.Peer) bool {
+	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+	for _, peer := range region.GetPeers() {
+		if peer.GetStoreId() != oldPeer.GetStoreId() {
+			targetPeers[peer.GetStoreId()] = peer
+		}
+	}
+	targetPeers[newPeer.GetStoreId()] = newPeer
+	return operator.NewLeaderTargetChecker(c.cluster, region, targetPeers)
+}
+
+func (c *RuleChecker) replacementHasLeader(region *core.RegionInfo, oldPeer, newPeer *metapb.Peer) bool {
+	allowsLeader := c.replacementLeaderChecker(region, oldPeer, newPeer)
+	for _, candidate := range region.GetPeers() {
+		if candidate.GetStoreId() != oldPeer.GetStoreId() && allowsLeader(candidate) {
+			return true
+		}
+	}
+	return allowsLeader(newPeer)
+}
+
 func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer) (*operator.Operator, error) {
 	if core.IsLearner(peer) && rf.Rule.Role != placement.Learner {
 		ruleCheckerFixPeerRoleCounter.Inc()
@@ -364,10 +442,20 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	}
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
 		ruleCheckerFixFollowerRoleCounter.Inc()
+		var roleErr error
 		for _, p := range region.GetPeers() {
-			if c.allowLeader(fit, p) {
-				return operator.CreateTransferLeaderOperator("fix-follower-role", c.cluster, region, p.GetStoreId(), []uint64{}, 0)
+			if p.GetId() == peer.GetId() || region.GetDownPeer(p.GetId()) != nil || region.GetPendingPeer(p.GetId()) != nil ||
+				!c.allowLeader(fit, p) {
+				continue
 			}
+			op, err := operator.CreateTransferLeaderOperator("fix-follower-role", c.cluster, region, p.GetStoreId(), []uint64{}, 0)
+			if !errors.Is(err, operator.ErrTargetRole) {
+				return op, err
+			}
+			roleErr = err
+		}
+		if roleErr != nil {
+			return nil, roleErr
 		}
 		ruleCheckerNoNewLeaderCounter.Inc()
 		return nil, errs.ErrNoNewLeader
@@ -435,9 +523,33 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.
 	isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
 	// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
 	strategy := c.strategy(region, rf.Rule, isWitness)
+	var rejectedTargetRole bool
+	if !isWitness {
+		fitSatisfied := fit.IsSatisfied()
+		var complete, checked bool
+		strategy.allowReplacement = func(oldStoreID, newStoreID uint64) bool {
+			if fitSatisfied && oldStoreID != region.GetLeader().GetStoreId() {
+				return true
+			}
+			if !checked {
+				complete = c.hasCompleteRoleAssignment(region, fit)
+				checked = true
+			}
+			if !complete {
+				return true
+			}
+			replacement := &metapb.Peer{StoreId: newStoreID, Role: rf.Rule.Role.MetaPeerRole()}
+			feasible := c.replacementHasLeader(region, region.GetStorePeer(oldStoreID), replacement)
+			rejectedTargetRole = !feasible
+			return feasible
+		}
+	}
 	oldStoreID, newStoreID, filterByTempState := strategy.getBetterLocation(c.cluster, region, fit, rf)
 	if newStoreID == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
+		if rejectedTargetRole {
+			return nil, operator.ErrTargetRole
+		}
 		c.handleFilterState(region, filterByTempState)
 		return nil, nil
 	}

@@ -485,29 +485,58 @@ func (b *Builder) prepareBuild() (string, error) {
 			continue
 		}
 
-		// If the peer id in the target is different from that in the origin,
-		// modify it to the peer id of the origin.
-		if o.GetId() != n.GetId() {
+		restoreWitness := core.IsWitness(o) && !core.IsWitness(n)
+		becomeWitness := !core.IsWitness(o) && core.IsWitness(n)
+		replaceForWitness := !b.useJointConsensus && !core.IsLearner(o) && (restoreWitness || becomeWitness && core.IsLearner(n))
+		id := o.GetId()
+		if replaceForWitness {
+			// Reusing the store requires an ID above the removed peer's tombstone.
+			id = n.GetId()
+			if id <= o.GetId() {
+				var err error
+				if id, _, err = b.AllocID(1); err != nil {
+					return "", err
+				}
+			}
+		}
+		if id != n.GetId() {
 			n = &metapb.Peer{
-				Id:        o.GetId(),
+				Id:        id,
 				StoreId:   o.GetStoreId(),
 				Role:      n.GetRole(),
 				IsWitness: n.GetIsWitness(),
 			}
 		}
 
-		isOriginPeerWitness := core.IsWitness(o)
-		isTargetPeerWitness := core.IsWitness(n)
-		if isOriginPeerWitness && !isTargetPeerWitness {
-			// Demote voter to learner before switch witness to non-witness if needed.
+		if restoreWitness {
+			b.toNonWitness.set(n)
 			if !core.IsLearner(n) {
-				n.Role = metapb.PeerRole_Learner
-				n.IsWitness = true
 				b.toPromoteNonWitness.set(n)
 			}
-			b.toNonWitness.set(n)
-		} else if !isOriginPeerWitness && isTargetPeerWitness {
+			if !core.IsLearner(o) {
+				// Only the demotion or replacement uses the temporary witness learner.
+				learner := &metapb.Peer{Id: id, StoreId: o.GetStoreId(), Role: metapb.PeerRole_Learner, IsWitness: true}
+				if b.useJointConsensus {
+					b.toDemote.set(learner)
+				} else {
+					b.toRemove.set(o)
+					b.toAdd.set(learner)
+				}
+			}
+			continue
+		}
+		if becomeWitness {
+			if replaceForWitness {
+				// The replacement is created as a witness learner.
+				b.toRemove.set(o)
+				b.toAdd.set(n)
+				continue
+			}
 			b.toWitness.set(n)
+			if o.GetRole() != n.GetRole() {
+				// The Raft role changes before the witness switch.
+				n = &metapb.Peer{Id: id, StoreId: o.GetStoreId(), Role: n.GetRole()}
+			}
 		}
 
 		isOriginPeerLearner := core.IsLearner(o)
@@ -529,6 +558,9 @@ func (b *Builder) prepareBuild() (string, error) {
 		// old peer not exists, or target is learner while old one is voter.
 		o := b.originPeers[n.GetStoreId()]
 		if o == nil || (!b.useJointConsensus && !core.IsLearner(o) && core.IsLearner(n)) {
+			if b.toAdd[n.GetStoreId()] != nil {
+				continue // The replacement witness learner is already planned.
+			}
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
 				id, _, err := b.AllocID(1)
@@ -661,8 +693,23 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 		}
 	}
 
-	if targetLeaderBefore, ok := b.originPeers[b.targetLeaderStoreID]; ok && !core.IsLearner(targetLeaderBefore) {
-		// target leader is a voter in `originPeers`, transfer leader first.
+	if leader := b.toPromoteNonWitness[b.targetLeaderStoreID]; leader != nil {
+		// Restore the target leader's data first so the normal membership change
+		// can promote it and transfer leadership, even if it removes the old leader.
+		if demote := b.toDemote[b.targetLeaderStoreID]; demote != nil {
+			b.steps = append(b.steps, ChangePeerV2Enter{DemoteVoters: []DemoteVoter{{
+				ToStore: demote.GetStoreId(), PeerID: demote.GetId(), IsWitness: true,
+			}}})
+			delete(b.toDemote, b.targetLeaderStoreID)
+		}
+		b.execSwitchToNonWitness(leader)
+		b.toPromote.set(leader)
+		delete(b.toPromoteNonWitness, b.targetLeaderStoreID)
+		kind |= OpRegion
+	}
+
+	if before := b.originPeers[b.targetLeaderStoreID]; before != nil && !core.IsLearner(before) && !core.IsWitness(before) {
+		// The target already has a voting data replica. Transfer leader first.
 		if b.originLeaderStoreID != b.targetLeaderStoreID {
 			b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 			kind |= OpLeader
@@ -692,7 +739,6 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 
 	for _, promote := range b.toPromoteNonWitness.IDs() {
 		peer := b.toPromoteNonWitness[promote]
-		peer.IsWitness = false
 		b.toPromote.set(peer)
 		kind |= OpRegion
 	}
@@ -823,6 +869,14 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			b.execPromoteNonWitness(plan.promoteNonWitness)
 		}
 		if plan.witness != nil {
+			if plan.witness.GetStoreId() == b.currentLeaderStoreID {
+				b.setTargetLeaderIfNotExist()
+				if b.targetLeaderStoreID == 0 {
+					return kind, errors.New("cannot switch the current leader to witness without a target leader")
+				}
+				b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
+				kind |= OpLeader
+			}
 			b.execSwitchToWitness(plan.witness)
 			kind |= OpRegion
 		}
@@ -1042,6 +1096,12 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 		return true
 	}
 
+	// Replacing the original leader may require a transfer before adding the
+	// replacement. Both that interim leader and the final leader must be healthy.
+	if b.unhealthyPeers[peer.GetStoreId()] != nil && b.targetPeers[b.originLeaderStoreID] == nil {
+		return false
+	}
+
 	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 	// store state filter
 	if !stateFilter.Target(b.GetSharedConfig(), store).IsOK() {
@@ -1176,6 +1236,9 @@ func (b *Builder) planReplace() stepPlan {
 }
 
 func (b *Builder) planReplaceLeaders(best, next stepPlan) stepPlan {
+	if next.add != nil && b.currentPeers[next.add.GetStoreId()] != nil {
+		return best
+	}
 	// Brute force all possible leader combinations to find the best plan.
 	for _, leaderBeforeAdd := range b.currentPeers.IDs() {
 		if !b.allowLeader(b.currentPeers[leaderBeforeAdd], false) {
@@ -1273,6 +1336,9 @@ func (b *Builder) planAddPeer() stepPlan {
 	var best stepPlan
 	for _, i := range b.toAdd.IDs() {
 		a := b.toAdd[i]
+		if b.currentPeers[i] != nil {
+			continue
+		}
 		for _, leader := range b.currentPeers.IDs() {
 			if b.allowLeader(b.currentPeers[leader], false) {
 				best = b.comparePlan(best, stepPlan{add: a, leaderBeforeAdd: leader})

@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"errors"
 	"math/rand/v2"
 	"net/http"
 
@@ -170,24 +171,30 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster
 		if len(destStoreIDs) == 0 {
 			return nil
 		}
-		// random pick a dest store
-		destStoreID := destStoreIDs[rand.IntN(len(destStoreIDs))]
-		if destStoreID == 0 {
+		if srcRegion.GetStorePeer(srcStoreID) == nil {
 			return nil
 		}
-		srcPeer := srcRegion.GetStorePeer(srcStoreID)
-		if srcPeer == nil {
-			return nil
+		rand.Shuffle(len(destStoreIDs), func(i, j int) {
+			destStoreIDs[i], destStoreIDs[j] = destStoreIDs[j], destStoreIDs[i]
+		})
+		for _, destStoreID := range destStoreIDs {
+			if destStoreID == 0 {
+				return nil
+			}
+			destPeer := &metapb.Peer{StoreId: destStoreID}
+			op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
+			if err != nil {
+				log.Debug("fail to create move leader operator", errs.ZapError(err))
+				if errors.Is(err, operator.ErrTargetRole) {
+					continue
+				}
+				return nil
+			}
+			op.SetPriorityLevel(constant.Low)
+			op.Counters = append(op.Counters, shuffleHotRegionNewOperatorCounter)
+			return []*operator.Operator{op}
 		}
-		destPeer := &metapb.Peer{StoreId: destStoreID}
-		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
-		if err != nil {
-			log.Debug("fail to create move leader operator", errs.ZapError(err))
-			return nil
-		}
-		op.SetPriorityLevel(constant.Low)
-		op.Counters = append(op.Counters, shuffleHotRegionNewOperatorCounter)
-		return []*operator.Operator{op}
+		return nil
 	}
 	shuffleHotRegionSkipCounter.Inc()
 	return nil

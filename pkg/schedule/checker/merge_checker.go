@@ -17,6 +17,7 @@ package checker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"time"
 
 	"github.com/pingcap/log"
@@ -138,37 +139,46 @@ func (c *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	prev, next := c.cluster.GetAdjacentRegions(region)
 
-	var target *core.RegionInfo
+	var target, alternative *core.RegionInfo
 	if c.checkTarget(region, next) {
 		target = next
 	}
-	if !c.conf.IsOneWayMergeEnabled() && c.checkTarget(region, prev) { // allow a region can be merged by two ways.
-		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
-			target = prev
+	if !c.conf.IsOneWayMergeEnabled() && c.checkTarget(region, prev) {
+		if target == nil || prev.GetApproximateSize() < target.GetApproximateSize() {
+			target, alternative = prev, target
+		} else {
+			alternative = prev
 		}
 	}
-
 	if target == nil {
 		mergeCheckerNoTargetCounter.Inc()
 		return nil
 	}
 
+	ops, err := c.buildMergeOperator(region, target)
+	if errors.Is(err, operator.ErrTargetRole) && alternative != nil {
+		ops, _ = c.buildMergeOperator(region, alternative)
+	}
+	return ops
+}
+
+func (c *MergeChecker) buildMergeOperator(region, target *core.RegionInfo) ([]*operator.Operator, error) {
 	regionMaxSize := c.cluster.GetStoreConfig().GetRegionMaxSize()
 	maxTargetRegionSizeThreshold := max(int64(float64(regionMaxSize)*float64(maxTargetRegionFactor)), maxTargetRegionSize)
 	if target.GetApproximateSize() > maxTargetRegionSizeThreshold {
 		mergeCheckerTargetTooLargeCounter.Inc()
-		return nil
+		return nil, nil
 	}
 	if err := c.cluster.GetStoreConfig().CheckRegionSize(uint64(target.GetApproximateSize()+region.GetApproximateSize()),
 		c.conf.GetMaxMergeRegionSize()); err != nil {
 		mergeCheckerSplitSizeAfterMergeCounter.Inc()
-		return nil
+		return nil, nil
 	}
 
 	if err := c.cluster.GetStoreConfig().CheckRegionKeys(uint64(target.GetApproximateKeys()+region.GetApproximateKeys()),
 		c.conf.GetMaxMergeRegionKeys()); err != nil {
 		mergeCheckerSplitKeysAfterMergeCounter.Inc()
-		return nil
+		return nil, nil
 	}
 
 	log.Debug("try to merge region",
@@ -177,14 +187,14 @@ func (c *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	ops, err := operator.CreateMergeRegionOperator("merge-region", c.cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Warn("create merge region operator failed", errs.ZapError(err))
-		return nil
+		return nil, err
 	}
 	mergeCheckerNewOpCounter.Inc()
 	if region.GetApproximateSize() > target.GetApproximateSize() ||
 		region.GetApproximateKeys() > target.GetApproximateKeys() {
 		mergeCheckerLargerSourceCounter.Inc()
 	}
-	return ops
+	return ops, nil
 }
 
 func (c *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {

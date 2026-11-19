@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"errors"
 	"math/rand/v2"
 	"net/http"
 	"slices"
@@ -320,13 +321,19 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	if srcPeer == nil {
 		return nil, errs.ErrStoreNotFound
 	}
-	i := rand.Int() % len(destStoreIDs)
-	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
-
 	if isLeader {
-		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
+		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, destStoreIDs[0], nil, operator.OpLeader)
 	} else {
-		op, err = operator.CreateMovePeerOperator(s.GetName()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
+		rand.Shuffle(len(destStoreIDs), func(i, j int) {
+			destStoreIDs[i], destStoreIDs[j] = destStoreIDs[j], destStoreIDs[i]
+		})
+		for _, storeID := range destStoreIDs {
+			dstPeer := &metapb.Peer{StoreId: storeID}
+			op, err = operator.CreateMovePeerOperator(s.GetName()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstPeer)
+			if !errors.Is(err, operator.ErrTargetRole) {
+				break
+			}
+		}
 	}
 	if err != nil {
 		log.Debug("fail to create grant hot leader operator", errs.ZapError(err))

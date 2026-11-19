@@ -1381,11 +1381,11 @@ func TestInternalScatterPeerSelection(t *testing.T) {
 			filters := newTestExcludedStoreFilter(testCase.excludedStores...)
 
 			if testCase.checkAdmin {
-				adminPeer := scatterer.selectNewPeer(scatterer.ordinaryEngine.asSelectionContext(), group, peer, filters, false)
+				adminPeer := scatterer.selectNewPeer(scatterer.ordinaryEngine.asSelectionContext(), group, peer, filters, false, nil)
 				re.Equal(testCase.wantAdmin, adminPeer.GetStoreId())
 			}
 
-			internalPeer := scatterer.selectNewPeer(state.ordinaryEngine.asSelectionContext(), group, peer, filters, true)
+			internalPeer := scatterer.selectNewPeer(state.ordinaryEngine.asSelectionContext(), group, peer, filters, true, nil)
 			if len(testCase.wantAny) > 0 {
 				re.Contains(testCase.wantAny, internalPeer.GetStoreId())
 			} else {

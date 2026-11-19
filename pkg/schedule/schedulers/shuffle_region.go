@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -90,20 +91,27 @@ func (s *shuffleRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 		return nil, nil
 	}
 
-	newPeer := s.scheduleAddPeer(cluster, region, oldPeer)
-	if newPeer == nil {
+	targets := s.selectAddPeerStores(cluster, region, oldPeer)
+	if len(targets) == 0 {
 		shuffleRegionNoNewPeerCounter.Inc()
 		return nil, nil
 	}
 
-	op, err := operator.CreateMovePeerOperator(s.GetName(), cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
-	if err != nil {
-		shuffleRegionCreateOperatorFailCounter.Inc()
-		return nil, nil
+	for _, target := range targets {
+		newPeer := &metapb.Peer{StoreId: target.GetID(), Role: oldPeer.GetRole()}
+		op, err := operator.CreateMovePeerOperator(s.GetName(), cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+		if err != nil {
+			shuffleRegionCreateOperatorFailCounter.Inc()
+			if errors.Is(err, operator.ErrTargetRole) {
+				continue
+			}
+			return nil, nil
+		}
+		op.Counters = append(op.Counters, shuffleRegionNewOperatorCounter)
+		op.SetPriorityLevel(constant.Low)
+		return []*operator.Operator{op}, nil
 	}
-	op.Counters = append(op.Counters, shuffleRegionNewOperatorCounter)
-	op.SetPriorityLevel(constant.Low)
-	return []*operator.Operator{op}, nil
+	return nil, nil
 }
 
 func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster sche.SchedulerCluster) (*core.RegionInfo, *metapb.Peer) {
@@ -139,7 +147,7 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster sche.SchedulerCluste
 	return nil, nil
 }
 
-func (s *shuffleRegionScheduler) scheduleAddPeer(cluster sche.SchedulerCluster, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
+func (s *shuffleRegionScheduler) selectAddPeerStores(cluster sche.SchedulerCluster, region *core.RegionInfo, oldPeer *metapb.Peer) []*core.StoreInfo {
 	store := cluster.GetStore(oldPeer.GetStoreId())
 	if store == nil {
 		return nil
@@ -147,11 +155,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster sche.SchedulerCluster, 
 	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), region, store, nil)
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIDs())
 
-	target := filter.NewCandidates(cluster.GetStores()).
+	return filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster.GetSchedulerConfig(), nil, nil, append(s.filters, scoreGuard, excludedFilter)...).
-		RandomPick()
-	if target == nil {
-		return nil
-	}
-	return &metapb.Peer{StoreId: target.GetID(), Role: oldPeer.GetRole()}
+		Shuffle().Stores
 }
