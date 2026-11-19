@@ -565,18 +565,21 @@ func (f *HotPeerCache) gc() {
 	// remove tombstone stores
 	stores := make(map[uint64]struct{})
 	for _, storeID := range f.cluster.GetStores() {
-		stores[storeID.GetID()] = struct{}{}
-	}
-	for storeID := range f.peersOfStore {
-		if _, ok := stores[storeID]; !ok {
-			delete(f.peersOfStore, storeID)
-			delete(f.regionsOfStore, storeID)
-			delete(f.thresholdsOfStore, storeID)
-			delete(f.metrics, storeID)
+		if !storeID.IsRemoved() {
+			stores[storeID.GetID()] = struct{}{}
 		}
 	}
-<<<<<<< HEAD
-=======
+	removed := make(map[uint64]struct{})
+	for storeID := range f.peersOfStore {
+		if _, ok := stores[storeID]; !ok {
+			removed[storeID] = struct{}{}
+		}
+	}
+	for storeID := range f.metrics {
+		if _, ok := stores[storeID]; !ok {
+			removed[storeID] = struct{}{}
+		}
+	}
 	for storeID := range f.thresholdsOfStore {
 		if _, ok := stores[storeID]; !ok {
 			removed[storeID] = struct{}{}
@@ -600,7 +603,6 @@ func (f *HotPeerCache) gc() {
 		delete(f.metrics, storeID)
 		hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
 	}
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	// remove expired items
 	for _, peers := range f.peersOfStore {
 		regions := peers.RemoveExpired()

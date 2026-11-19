@@ -221,17 +221,13 @@ func (conf *evictSlowStoreSchedulerConfig) addNetworkSlowStoreLocked(storeID uin
 		log.Warn("failed to persist evict slow store config",
 			zap.Uint64("store-id", storeID),
 			zap.Error(err))
-<<<<<<< HEAD
 		cluster.ResumeLeaderTransfer(storeID)
-=======
-		cluster.ResumeLeaderTransfer(storeID, constant.In)
 		// The pause never took effect (both the leader-transfer pause and the
 		// config-map entry were rolled back above), so the store isn't
 		// actually evicted -- publishing the gauge here would misreport it
 		// as paused. Skip it; the next round re-evaluates this store (it's
 		// absent from networkSlowStoreRecoverStartAts) and retries.
 		return
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	}
 	evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Set(1)
 }

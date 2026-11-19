@@ -1728,20 +1728,15 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 	c.OnStoreVersionChange()
 	if err == nil {
 		// clean up the residual information.
-<<<<<<< HEAD
 		delete(c.prevStoreLimit, storeID)
-		c.RemoveStoreLimit(storeID)
 		addr := store.GetAddress()
 		c.resetProgress(storeID, addr)
-=======
-		c.prevStoreLimit.Delete(storeID)
 		if err := c.RemoveStoreLimit(storeID); err != nil {
 			log.Error("remove store limit failed",
 				zap.Uint64("store-id", storeID),
 				errs.ZapError(err))
 		}
 		c.ruleManager.RemoveStoreCache(storeID)
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 		storeIDStr := strconv.FormatUint(storeID, 10)
 		statistics.ResetStoreStatistics(addr, storeIDStr)
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
@@ -1818,21 +1813,12 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	if err == nil {
 		if exist {
 			// persist the store limit
-			_ = c.SetStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
-			_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
+			_ = c.setStoreLimitLocked(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
+			_ = c.setStoreLimitLocked(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
 		}
 		c.resetProgress(storeID, store.GetAddress())
 	}
-<<<<<<< HEAD
 	return err
-=======
-	if exist {
-		// persist the store limit
-		_ = c.setStoreLimitLocked(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
-		_ = c.setStoreLimitLocked(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
-	}
-	return nil
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 }
 
 // ReadyToServeLocked change store's node state to Serving.
@@ -2343,8 +2329,6 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
-<<<<<<< HEAD
-=======
 	// Remove the store before the metric cleanup below, not after: a metrics
 	// collection tick observing this store concurrently re-checks GetStore
 	// right after it writes and undoes its own write if the store is already
@@ -2356,9 +2340,8 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	c.DeleteStore(store)
 	c.ruleManager.RemoveStoreCache(store.GetID())
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	statistics.DeleteClusterStatusMetrics(store)
-	c.DeleteStore(store)
+	statistics.ResetStoreStatistics(store.GetAddress(), storeIDStr)
 	return nil
 }
 
@@ -2599,30 +2582,8 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 // still race a later retry that never re-reads store state.
 func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved bool) {
 	storeID := store.GetId()
-	cfg := c.opt.GetScheduleConfig().Clone()
-	if _, ok := cfg.StoreLimit[storeID]; ok {
-		return
-	}
-
-	slc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-	}
-	if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
-		slc = sc.StoreLimitConfig{
-			AddPeer:    sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-			RemovePeer: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-		}
-	}
-
-	cfg.StoreLimit[storeID] = slc
-	c.opt.SetScheduleConfig(cfg)
 	var err error
 	for range persistLimitRetryTimes {
-<<<<<<< HEAD
-		if err = c.opt.Persist(c.storage); err == nil {
-			log.Info("store limit added", zap.Uint64("store-id", storeID))
-=======
 		added := false
 		err = c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 			if skipIfRemoved {
@@ -2634,12 +2595,14 @@ func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved b
 				return false, nil
 			}
 
-			slc := cfg.GetDefaultStoreLimit()
+			slc := sc.StoreLimitConfig{
+				AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+				RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+			}
 			if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 				slc = sc.StoreLimitConfig{
-					AddPeer:          sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-					RemovePeer:       sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-					TransferLeaderIn: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.TransferLeaderIn),
+					AddPeer:    sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+					RemovePeer: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 				}
 			}
 			cfg.StoreLimit[storeID] = slc
@@ -2650,7 +2613,6 @@ func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved b
 			if added {
 				log.Info("store limit added", zap.Uint64("store-id", storeID))
 			}
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 			return
 		}
 		time.Sleep(persistLimitWaitTime)
@@ -2658,19 +2620,6 @@ func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved b
 	log.Error("persist store limit meet error", errs.ZapError(err))
 }
 
-<<<<<<< HEAD
-// RemoveStoreLimit remove a store limit for a given store ID.
-func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
-	cfg := c.opt.GetScheduleConfig().Clone()
-	for _, limitType := range storelimit.TypeNameValue {
-		c.ResetStoreLimit(storeID, limitType)
-	}
-	delete(cfg.StoreLimit, storeID)
-	c.opt.SetScheduleConfig(cfg)
-	var err error
-	for range persistLimitRetryTimes {
-		if err = c.opt.Persist(c.storage); err == nil {
-=======
 // RemoveStoreLimit removes a store limit for a given store ID.
 func (c *RaftCluster) RemoveStoreLimit(storeID uint64) error {
 	var err error
@@ -2686,17 +2635,11 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) error {
 			for _, limitType := range storelimit.TypeNameValue {
 				c.ResetStoreLimit(storeID, limitType)
 			}
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			id := strconv.FormatUint(storeID, 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
-<<<<<<< HEAD
-			return
-=======
-			statistics.StoreLimitGauge.DeleteLabelValues(id, "transfer-leader-in")
 			return nil
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 		}
 		time.Sleep(persistLimitWaitTime)
 	}
@@ -2851,13 +2794,6 @@ func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
-<<<<<<< HEAD
-	old := c.opt.GetScheduleConfig().Clone()
-	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
-	if err := c.opt.Persist(c.storage); err != nil {
-		// roll back the store limit
-		c.opt.SetScheduleConfig(old)
-=======
 	failpoint.InjectCall("setStoreLimitBeforeStateLock")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
@@ -2888,13 +2824,21 @@ func (c *RaftCluster) setStoreLimitLocked(storeID uint64, typ storelimit.Type, r
 	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 		slc, ok := cfg.StoreLimit[storeID]
 		if !ok {
-			slc = cfg.GetDefaultStoreLimit()
+			slc = sc.StoreLimitConfig{
+				AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+				RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+			}
 		}
-		cfg.StoreLimit[storeID] = slc.SetLimit(typ, ratePerMin)
+		switch typ {
+		case storelimit.AddPeer:
+			slc.AddPeer = ratePerMin
+		case storelimit.RemovePeer:
+			slc.RemovePeer = ratePerMin
+		}
+		cfg.StoreLimit[storeID] = slc
 		return true, nil
 	})
 	if err != nil {
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
@@ -2905,15 +2849,7 @@ func (c *RaftCluster) setStoreLimitLocked(storeID uint64, typ storelimit.Type, r
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
-	old := c.opt.GetScheduleConfig().Clone()
-	oldAdd := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
-	oldRemove := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
-	c.opt.SetAllStoresLimit(typ, ratePerMin)
-	if err := c.opt.Persist(c.storage); err != nil {
-		// roll back the store limit
-		c.opt.SetScheduleConfig(old)
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAdd)
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemove)
+	if err := c.opt.PersistAllStoresLimit(c.storage, typ, ratePerMin); err != nil {
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}

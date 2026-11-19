@@ -499,6 +499,11 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
+	cluster := s.cluster
+	s.metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
+		cluster.hotStat.RemoveRollingStoreStats(storeID)
+		cluster.ruleManager.RemoveStoreCache(storeID)
+	})
 	// Inject the cluster components into the config watcher after the scheduler controller is created.
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
 	// Start the rule watcher after the cluster is created.

@@ -19,13 +19,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-<<<<<<< HEAD
-=======
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
@@ -70,7 +67,7 @@ func TestHistoryLoads(t *testing.T) {
 
 func TestHistoryGCDoesNotReaddRemovedStore(t *testing.T) {
 	re := require.New(t)
-	history := NewStoreHistoryLoads(time.Minute, 0)
+	history := NewStoreHistoryLoads(utils.DimLen, time.Minute, 0)
 	rw := utils.Read
 	kind := constant.RegionKind
 	storeID := uint64(1)
@@ -82,8 +79,8 @@ func TestHistoryGCDoesNotReaddRemovedStore(t *testing.T) {
 	infos := map[uint64]*StoreSummaryInfo{
 		storeID: {StoreInfo: live},
 	}
-	loads := map[uint64]StoreKindLoads{
-		storeID: {1, 0, 0, 0, 0},
+	loads := map[uint64][]float64{
+		storeID: make([]float64, utils.StoreStatCount),
 	}
 
 	SummaryStoresLoad(infos, loads, history, nil, false, rw, kind)
@@ -91,11 +88,11 @@ func TestHistoryGCDoesNotReaddRemovedStore(t *testing.T) {
 
 	removed := live.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
 	history.GC([]*core.StoreInfo{removed})
-	re.Empty(history.Get(storeID, rw, kind)[0])
+	re.Empty(history.Get(storeID, rw, kind))
 
 	SummaryStoresLoad(
 		map[uint64]*StoreSummaryInfo{storeID: {StoreInfo: removed}},
 		loads, history, nil, false, rw, kind,
 	)
-	re.Empty(history.Get(storeID, rw, kind)[0])
+	re.Empty(history.Get(storeID, rw, kind))
 }

@@ -22,16 +22,12 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-<<<<<<< HEAD
-=======
 	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -3222,7 +3218,6 @@ func TestEncodeConfig(t *testing.T) {
 	re.NotEqual("null", string(data))
 }
 
-<<<<<<< HEAD
 func TestBucketFirstStat(t *testing.T) {
 	re := require.New(t)
 	testdata := []struct {
@@ -3276,7 +3271,8 @@ func TestBucketFirstStat(t *testing.T) {
 		}
 		re.Equal(data.expect, bs.bucketFirstStat())
 	}
-=======
+}
+
 func TestSummaryPendingInfluenceSkipsRemovedStoreMetric(t *testing.T) {
 	re := require.New(t)
 	defer HotPendingSum.Reset()
@@ -3368,5 +3364,4 @@ func TestSummaryPendingInfluenceCannotRepublishAfterBury(t *testing.T) {
 	// reading the already-obtained Gauge handle, since a deleted series still
 	// reports its last-set value through that handle.
 	re.Equal(0, HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": "1"}))
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 }

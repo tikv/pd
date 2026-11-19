@@ -16,13 +16,7 @@ package schedulers
 
 import (
 	"context"
-<<<<<<< HEAD
-=======
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strconv"
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 	"testing"
 	"time"
 

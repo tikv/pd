@@ -41,9 +41,11 @@ type Watcher struct {
 	//  - Value: meta store proto.
 	storePathPrefix string
 
-	etcdClient   *clientv3.Client
-	basicCluster *core.BasicCluster
-	storeWatcher *etcdutil.LoopWatcher
+	etcdClient        *clientv3.Client
+	basicCluster      *core.BasicCluster
+	storeWatcher      *etcdutil.LoopWatcher
+	callbackMu        sync.RWMutex
+	onStoreTombstoned func(uint64)
 }
 
 // NewWatcher creates a new watcher to watch the meta change from PD API server.
@@ -67,6 +69,22 @@ func NewWatcher(
 	return w, nil
 }
 
+// SetOnStoreTombstoned installs a cleanup hook after cluster initialization.
+// Replay already-loaded tombstones, since the meta watcher starts before the cluster.
+func (w *Watcher) SetOnStoreTombstoned(fn func(uint64)) {
+	w.callbackMu.Lock()
+	w.onStoreTombstoned = fn
+	w.callbackMu.Unlock()
+	if fn == nil {
+		return
+	}
+	for _, store := range w.basicCluster.GetStores() {
+		if store.IsRemoved() {
+			fn(store.GetID())
+		}
+	}
+}
+
 func (w *Watcher) initializeStoreWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		store := &metapb.Store{}
@@ -85,7 +103,12 @@ func (w *Watcher) initializeStoreWatcher() error {
 
 		if store.GetNodeState() == metapb.NodeState_Removed {
 			statistics.ResetStoreStatistics(store.GetAddress(), strconv.FormatUint(store.GetId(), 10))
-			// TODO: remove hot stats
+			w.callbackMu.RLock()
+			fn := w.onStoreTombstoned
+			w.callbackMu.RUnlock()
+			if fn != nil {
+				fn(store.GetId())
+			}
 		}
 
 		return nil

@@ -291,8 +291,6 @@ func TestPutStore(t *testing.T) {
 	re.Equal(store, storesInfo.GetStore(store.GetID()))
 }
 
-<<<<<<< HEAD
-=======
 // TestPutStoreSkipsPatchForRemovedStore guards against a nil-pointer panic in
 // putStoreLocked: an opts-passing PutStore call always treats its store
 // argument as a patch onto whatever's currently in the map (see the
@@ -316,117 +314,6 @@ func TestPutStoreSkipsPatchForRemovedStore(t *testing.T) {
 	re.Nil(storesInfo.GetStore(store.GetID()))
 }
 
-func TestStoreInfoIsTiFlash(t *testing.T) {
-	re := require.New(t)
-
-	testCases := []struct {
-		name                   string
-		labels                 map[string]string
-		expectedTiKV           bool
-		expectedTiFlashWrite   bool
-		expectedTiFlashCompute bool
-	}{
-		{
-			name:                   "TiKV node without engine label",
-			labels:                 map[string]string{},
-			expectedTiKV:           true,
-			expectedTiFlashWrite:   false,
-			expectedTiFlashCompute: false,
-		},
-		{
-			name: "TiKV node with engine label",
-			labels: map[string]string{
-				EngineKey: EngineTiKV,
-			},
-			expectedTiKV:           true,
-			expectedTiFlashWrite:   false,
-			expectedTiFlashCompute: false,
-		},
-		{
-			name: "TiFlash classic node or write node",
-			labels: map[string]string{
-				EngineKey: EngineTiFlash,
-			},
-			expectedTiKV:           false,
-			expectedTiFlashWrite:   true,
-			expectedTiFlashCompute: false,
-		},
-		{
-			name: "TiFlash compute node",
-			labels: map[string]string{
-				EngineKey: EngineTiFlashCompute,
-			},
-			expectedTiKV:           false,
-			expectedTiFlashWrite:   false,
-			expectedTiFlashCompute: true,
-		},
-		{
-			name: "TiFlash node with additional labels",
-			labels: map[string]string{
-				EngineKey: EngineTiFlash,
-				"zone":    "zone1",
-				"rack":    "rack1",
-				"host":    "host1",
-			},
-			expectedTiKV:           false,
-			expectedTiFlashWrite:   true,
-			expectedTiFlashCompute: false,
-		},
-		{
-			name: "TiFlash compute node with additional labels",
-			labels: map[string]string{
-				EngineKey: EngineTiFlashCompute,
-				"zone":    "zone2",
-				"rack":    "rack2",
-				"host":    "host2",
-			},
-			expectedTiKV:           false,
-			expectedTiFlashWrite:   false,
-			expectedTiFlashCompute: true,
-		},
-		{
-			name: "Store with wrong engine value",
-			labels: map[string]string{
-				EngineKey: "unknown_engine",
-			},
-			expectedTiKV:           false,
-			expectedTiFlashWrite:   false,
-			expectedTiFlashCompute: false,
-		},
-		{
-			name: "Store with case sensitive engine label",
-			labels: map[string]string{
-				EngineKey: "TiFlash", // uppercase, should not match
-			},
-			expectedTiKV:           false,
-			expectedTiFlashWrite:   false,
-			expectedTiFlashCompute: false,
-		},
-		{
-			name: "Store with empty engine value",
-			labels: map[string]string{
-				EngineKey: "",
-			},
-			expectedTiKV:           true,
-			expectedTiFlashWrite:   false,
-			expectedTiFlashCompute: false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(*testing.T) {
-			store := NewStoreInfoWithLabel(1, tc.labels)
-			result := store.IsTiKV()
-			re.Equal(tc.expectedTiKV, result, "Expected to return %v for test case: %s", tc.expectedTiKV, tc.name)
-			result = store.IsTiFlashWrite()
-			re.Equal(tc.expectedTiFlashWrite, result, "Expected to return %v for test case: %s", tc.expectedTiFlashWrite, tc.name)
-			result = store.IsTiFlashCompute()
-			re.Equal(tc.expectedTiFlashCompute, result, "Expected to return %v for test case: %s", tc.expectedTiFlashCompute, tc.name)
-		})
-	}
-}
-
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 func TestGetAvgNetworkSlowScore(t *testing.T) {
 	re := require.New(t)
 

@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -45,6 +46,7 @@ import (
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
+	persistMu sync.Mutex
 	// configuration -> ttl value
 	ttl             *cache.TTLString
 	schedule        atomic.Value
@@ -486,7 +488,11 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 }
 
 // GetStoreLimit returns the limit of a store.
-func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
+func (o *PersistOptions) GetStoreLimit(storeID uint64) sc.StoreLimitConfig {
+	return o.getStoreLimit(storeID, true)
+}
+
+func (o *PersistOptions) getStoreLimit(storeID uint64, create bool) (returnSC sc.StoreLimitConfig) {
 	defer func() {
 		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
 		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
@@ -494,7 +500,6 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
-	cfg := o.GetScheduleConfig().Clone()
 	sc := sc.StoreLimitConfig{
 		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
@@ -520,6 +525,10 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 	if canSetAddPeer || canSetRemovePeer {
 		return returnSC
 	}
+	if !create {
+		return sc
+	}
+	cfg := o.GetScheduleConfig().Clone()
 	cfg.StoreLimit[storeID] = sc
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
@@ -548,12 +557,7 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 // deliberately removed, since a tombstoned store stays in that "known store"
 // set until its final removal.
 func (o *PersistOptions) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
-	cfg := o.GetScheduleConfig()
-	limit, ok := cfg.StoreLimit[storeID]
-	if !ok {
-		limit = cfg.GetDefaultStoreLimit()
-	}
-	return storeLimitByType(limit, typ)
+	return storeLimitByType(o.getStoreLimit(storeID, false), typ)
 }
 
 func storeLimitByType(limit sc.StoreLimitConfig, typ storelimit.Type) float64 {
@@ -840,6 +844,30 @@ func (o *PersistOptions) SwitchRaftV2(storage endpoint.ConfigStorage) error {
 
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
+	o.persistMu.Lock()
+	defer o.persistMu.Unlock()
+	return o.persistLocked(storage)
+}
+
+// UpdateScheduleConfig serializes a schedule update with configuration persistence.
+func (o *PersistOptions) UpdateScheduleConfig(storage endpoint.ConfigStorage, update func(current, next *sc.ScheduleConfig) (bool, error)) error {
+	o.persistMu.Lock()
+	defer o.persistMu.Unlock()
+	current := o.GetScheduleConfig()
+	next := current.Clone()
+	changed, err := update(current, next)
+	if err != nil || !changed {
+		return err
+	}
+	o.SetScheduleConfig(next)
+	if err := o.persistLocked(storage); err != nil {
+		o.SetScheduleConfig(current)
+		return err
+	}
+	return nil
+}
+
+func (o *PersistOptions) persistLocked(storage endpoint.ConfigStorage) error {
 	cfg := &persistedConfig{
 		Config: &Config{
 			Schedule:        *o.GetScheduleConfig(),
@@ -857,6 +885,23 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 		failpoint.Return(errors.New("fail to persist"))
 	})
 	return storage.SaveConfig(cfg)
+}
+
+// PersistAllStoresLimit updates limits without racing another persisted update.
+func (o *PersistOptions) PersistAllStoresLimit(storage endpoint.ConfigStorage, typ storelimit.Type, rate float64) error {
+	o.persistMu.Lock()
+	defer o.persistMu.Unlock()
+	old := o.GetScheduleConfig()
+	oldAdd := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemove := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	o.SetAllStoresLimit(typ, rate)
+	if err := o.persistLocked(storage); err != nil {
+		o.SetScheduleConfig(old)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAdd)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemove)
+		return err
+	}
+	return nil
 }
 
 // Reload reloads the configuration from the storage.

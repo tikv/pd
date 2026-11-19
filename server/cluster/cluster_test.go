@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -3095,23 +3096,12 @@ func TestStoreLimitChangeRefreshLimiter(t *testing.T) {
 	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Low))
 	re.False(store.IsAvailable(storelimit.AddPeer, constant.Low))
 
-<<<<<<< HEAD
 	// Increase store limit via config API. Without refreshing the in-memory limiter,
 	// the store would remain throttled and be filtered out.
 	re.NoError(rc.SetStoreLimit(storeID, storelimit.AddPeer, 30))
 	store = rc.GetStore(storeID)
 	re.NotNil(store)
 	re.True(store.IsAvailable(storelimit.AddPeer, constant.Low))
-=======
-	opt.SetStoreLimit(2, storelimit.RemovePeer, 80)
-	rc.AddStoreLimit(&metapb.Store{Id: 2})
-	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 80, TransferLeaderIn: 90}, opt.GetScheduleConfig().StoreLimit[2])
-
-	rc.AddStoreLimit(&metapb.Store{
-		Id:     3,
-		Labels: []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
-	})
-	re.Equal(sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30, TransferLeaderIn: storelimit.Unlimited}, opt.GetScheduleConfig().StoreLimit[3])
 }
 
 func TestRemoveTombstoneRecordsKeepsStoreWhenLimitRemovalFails(t *testing.T) {
@@ -3247,10 +3237,6 @@ type failingSaveConfigStorage struct {
 	storage.Storage
 }
 
-func (*failingSaveConfigStorage) SaveConfig(any) error {
-	return errors.New("save config failed")
-}
-
 type blockingSaveConfigStorage struct {
 	storage.Storage
 	saveStarted chan struct{}
@@ -3259,151 +3245,62 @@ type blockingSaveConfigStorage struct {
 	saveCount   int
 }
 
-type blockingSaveSchedulerConfigStorage struct {
-	storage.Storage
-	saveStarted chan struct{}
-	releaseSave chan struct{}
-	mu          sync.Mutex
-	saveCount   int
-}
-
-func (s *blockingSaveSchedulerConfigStorage) SaveSchedulerConfig(name string, data []byte) error {
-	s.mu.Lock()
-	s.saveCount++
-	isFirstSave := s.saveCount == 1
-	s.mu.Unlock()
-	if isFirstSave {
-		close(s.saveStarted)
-		<-s.releaseSave
-	}
-	return s.Storage.SaveSchedulerConfig(name, data)
-}
-
 func (s *blockingSaveConfigStorage) SaveConfig(cfg any) error {
 	s.mu.Lock()
 	s.saveCount++
-	isFirstSave := s.saveCount == 1
+	first := s.saveCount == 1
 	s.mu.Unlock()
-	if isFirstSave {
+	if first {
 		close(s.saveStarted)
 		<-s.releaseSave
 	}
 	return s.Storage.SaveConfig(cfg)
 }
 
-func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
+func TestStoreLimitPersistenceIsSerialized(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	storage := &blockingSaveConfigStorage{
+	backend := &blockingSaveConfigStorage{
 		Storage:     storage.NewStorageWithMemoryBackend(),
 		saveStarted: make(chan struct{}),
 		releaseSave: make(chan struct{}),
 	}
-	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage)
-
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
+	opt.SetStoreLimit(1, storelimit.AddPeer, 30)
+	oldDefault := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	t.Cleanup(func() { sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldDefault) })
 	var releaseOnce sync.Once
-	release := func() {
-		releaseOnce.Do(func() { close(storage.releaseSave) })
-	}
+	release := func() { releaseOnce.Do(func() { close(backend.releaseSave) }) }
 	t.Cleanup(release)
-
 	persistDone := make(chan error, 1)
-	go func() {
-		persistDone <- opt.Persist(storage)
-	}()
-
+	go func() { persistDone <- opt.Persist(backend) }()
 	select {
-	case <-storage.saveStarted:
-	case <-time.After(time.Second):
-		t.Fatal("the initial config persistence did not start")
+	case <-backend.saveStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("config persistence did not start")
 	}
-
 	setAllDone := make(chan error, 1)
-	go func() {
-		setAllDone <- rc.SetAllStoresLimit(storelimit.AddPeer, 60)
-	}()
-
+	go func() { setAllDone <- rc.SetAllStoresLimit(storelimit.AddPeer, 60) }()
 	select {
-	case err := <-setAllDone:
-		re.NoError(err)
-		t.Fatal("SetAllStoresLimit was not serialized with an in-flight full-config persistence")
+	case <-setAllDone:
+		t.Fatal("store limit update was not serialized with config persistence")
 	case <-time.After(100 * time.Millisecond):
 	}
-
 	release()
-	select {
-	case err := <-persistDone:
-		re.NoError(err)
-	case <-time.After(time.Second):
-		t.Fatal("the initial config persistence did not finish")
-	}
-	select {
-	case err := <-setAllDone:
-		re.NoError(err)
-	case <-time.After(time.Second):
-		t.Fatal("SetAllStoresLimit did not finish")
-	}
-
-	cfg := opt.GetScheduleConfig()
-	re.Equal(float64(60), cfg.DefaultStoreLimit.AddPeer)
-
-	_, reloadedOpt, err := newTestScheduleConfig()
+	re.NoError(<-persistDone)
+	re.NoError(<-setAllDone)
+	_, reloaded, err := newTestScheduleConfig()
 	re.NoError(err)
-	re.NoError(reloadedOpt.Reload(storage))
-	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
+	re.NoError(reloaded.Reload(backend))
+	re.Equal(float64(60), reloaded.GetScheduleConfig().StoreLimit[1].AddPeer)
 }
 
-func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
-	re := require.New(t)
-	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
-	defer sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+func (*failingSaveConfigStorage) SaveConfig(any) error {
+	return errors.New("save config failed")
 
-	blockingStorage := &blockingSaveSchedulerConfigStorage{
-		saveStarted: make(chan struct{}),
-		releaseSave: make(chan struct{}),
-	}
-	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		blockingStorage.Storage = tc.storage
-		tc.storage = blockingStorage
-	}, nil, re)
-	defer cleanup()
-
-	var releaseOnce sync.Once
-	release := func() {
-		releaseOnce.Do(func() { close(blockingStorage.releaseSave) })
-	}
-	defer release()
-
-	initDone := make(chan struct{})
-	go func() {
-		co.InitSchedulers(false)
-		close(initDone)
-	}()
-
-	select {
-	case <-blockingStorage.saveStarted:
-	case <-time.After(time.Second):
-		t.Fatal("InitSchedulers did not start saving scheduler config")
-	}
-
-	re.NoError(tc.SetAllStoresLimit(storelimit.AddPeer, 60))
-	release()
-	select {
-	case <-initDone:
-	case <-time.After(time.Second):
-		t.Fatal("InitSchedulers did not finish")
-	}
-
-	re.Equal(float64(60), tc.GetScheduleConfig().DefaultStoreLimit.AddPeer)
-	_, reloadedOpt, err := newTestScheduleConfig()
-	re.NoError(err)
-	re.NoError(reloadedOpt.Reload(tc.GetStorage()))
-	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
->>>>>>> 05d2376711 (statistics, schedule: stop republishing metrics for a known-tombstoned store (#11166))
 }
 
 // TestSetAllStoresLimitDoesNotRestoreRemovedStoreLimit guards against
