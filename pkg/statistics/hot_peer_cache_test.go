@@ -23,15 +23,10 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-<<<<<<< HEAD
-=======
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
-	"github.com/stretchr/testify/require"
-
->>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockid"

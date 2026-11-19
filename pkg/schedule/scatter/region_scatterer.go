@@ -1013,12 +1013,6 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 		}
 		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
-<<<<<<< HEAD
-			scatterDistributionCounter.WithLabelValues(
-				fmt.Sprintf("%v", storeID),
-				fmt.Sprintf("%v", false),
-				core.EngineTiKV).Inc()
-=======
 			// A force-buried store can still show up in a region's existing
 			// placement; skip the metric so DeleteStoreMetrics' one-shot
 			// cleanup at bury time isn't undone by a later scatter that keeps
@@ -1029,7 +1023,6 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 					strconv.FormatBool(false),
 					core.EngineTiKV).Inc()
 			}
->>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 			continue
 		}
 		engine := store.GetLabelValue(core.EngineKey)
@@ -1043,19 +1036,12 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 		}
 	}
 	r.ordinaryEngine.selectedLeader.Put(leaderStoreID, group)
-<<<<<<< HEAD
-	scatterDistributionCounter.WithLabelValues(
-		fmt.Sprintf("%v", leaderStoreID),
-		fmt.Sprintf("%v", true),
-		core.EngineTiKV).Inc()
-=======
 	if leaderStore := r.cluster.GetStore(leaderStoreID); leaderStore != nil && !leaderStore.IsRemoved() {
 		scatterDistributionCounter.WithLabelValues(
 			strconv.FormatUint(leaderStoreID, 10),
 			strconv.FormatBool(true),
 			core.EngineTiKV).Inc()
 	}
->>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 }
 
 // applyScatterStateDelta records a local scatter state change after scattering a

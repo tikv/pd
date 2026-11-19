@@ -52,8 +52,8 @@ type Watcher struct {
 	storeWatcher *etcdutil.LoopWatcher
 
 	// onStoreTombstoned is late-bound via SetOnStoreTombstoned once the parent
-	// Cluster (which owns hotStat and the scheduling-server-only metrics that this
-	// package can't import without a cycle) finishes construction. The watcher
+	// Cluster (which owns hotStat, which this package can't import without a
+	// cycle) finishes construction. The watcher
 	// itself starts watching before that point, so it's read through an atomic
 	// pointer to stay safe against a store event racing the setup.
 	onStoreTombstoned atomic.Pointer[func(storeID uint64)]
@@ -153,8 +153,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 
 // SetOnStoreTombstoned sets the callback invoked (at least once) when a store
 // transitions to tombstone, for cleanup that only the parent Cluster can do
-// without an import cycle (removing rolling hot stats, resetting the
-// scheduling-server-owned heartbeat metrics). NewWatcher's initial load runs
+// without an import cycle (removing rolling hot stats). NewWatcher's initial load runs
 // before the caller has a chance to install this callback, so a store already
 // tombstoned at startup would otherwise never get it invoked; reconcile against
 // whatever the watcher has already loaded here to close that gap.

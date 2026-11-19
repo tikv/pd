@@ -3,11 +3,7 @@ package server
 import (
 	"context"
 	"runtime"
-<<<<<<< HEAD
-=======
 	"strconv"
-	"strings"
->>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	"sync"
 	"sync/atomic"
 	"time"
@@ -241,93 +237,6 @@ func (c *Cluster) GetStorage() storage.Storage {
 	return c.storage
 }
 
-<<<<<<< HEAD
-=======
-// GetHeartbeatStreams returns the heartbeat streams.
-func (c *Cluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
-	if c == nil {
-		return nil
-	}
-	c.runtimeMu.RLock()
-	defer c.runtimeMu.RUnlock()
-	return c.hbStreams
-}
-
-// GetMetaWatcher returns the meta watcher.
-func (c *Cluster) GetMetaWatcher() *meta.Watcher {
-	if c == nil {
-		return nil
-	}
-	c.runtimeMu.RLock()
-	defer c.runtimeMu.RUnlock()
-	return c.metaWatcher
-}
-
-// SetRuntimeResources installs the cluster-scoped runtime resources after they are created.
-func (c *Cluster) SetRuntimeResources(
-	metaWatcher *meta.Watcher,
-	configWatcher *config.Watcher,
-	ruleWatcher *rule.Watcher,
-	affinityWatcher *mcsaffinity.Watcher,
-) {
-	c.runtimeMu.Lock()
-	defer c.runtimeMu.Unlock()
-	c.metaWatcher = metaWatcher
-	c.configWatcher = configWatcher
-	c.ruleWatcher = ruleWatcher
-	c.affinityWatcher = affinityWatcher
-	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
-		c.hotStat.RemoveRollingStoreStats(storeID)
-		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
-	})
-}
-
-func (c *Cluster) stopCluster() {
-	c.StopBackgroundJobs()
-	c.cleanupRuntimeResources()
-}
-
-func (c *Cluster) cleanupRuntimeResources() {
-	c.runtimeMu.Lock()
-	affinityWatcher := c.affinityWatcher
-	ruleWatcher := c.ruleWatcher
-	metaWatcher := c.metaWatcher
-	configWatcher := c.configWatcher
-	hbStreams := c.hbStreams
-	storage := c.storage
-	c.affinityWatcher = nil
-	c.ruleWatcher = nil
-	c.metaWatcher = nil
-	c.configWatcher = nil
-	c.hbStreams = nil
-	c.storage = nil
-	c.runtimeMu.Unlock()
-
-	now := time.Now()
-	if affinityWatcher != nil {
-		affinityWatcher.Close()
-	}
-	if ruleWatcher != nil {
-		ruleWatcher.Close()
-	}
-	if metaWatcher != nil {
-		metaWatcher.Close()
-	}
-	if configWatcher != nil {
-		configWatcher.Close()
-	}
-	if storage != nil {
-		storage.Close()
-	}
-	if hbStreams != nil {
-		start := time.Now()
-		hbStreams.Close()
-		log.Info("close stream takes", zap.Duration("cost", time.Since(start)))
-	}
-	log.Info("clean up runtime resources takes", zap.Duration("cost", time.Since(now)))
-}
-
->>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 // GetCheckerConfig returns the checker config.
 func (c *Cluster) GetCheckerConfig() sc.CheckerConfigProvider { return c.persistConfig }
 
@@ -701,7 +610,6 @@ func resetMetrics() {
 	schedule.ResetHotSpotMetrics()
 	filter.ResetFilterMetrics()
 	hbstream.ResetHeartbeatStreamMetrics()
-	ResetStoreMetrics()
 }
 
 // StartBackgroundJobs starts background jobs.
@@ -854,45 +762,6 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 	return nil
 }
 
-<<<<<<< HEAD
-=======
-// HandleRegionBuckets processes region buckets from client
-func (c *Cluster) HandleRegionBuckets(b *metapb.Buckets) error {
-	applied, err := c.processRegionBuckets(b)
-	if err != nil {
-		return err
-	}
-	if applied {
-		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
-	}
-	return nil
-}
-
-// processRegionBuckets updates the bucket information. The first return
-// value reports whether the report was actually applied, so callers don't
-// enqueue hot-bucket work for a report that was ignored because its leader
-// is tombstoned.
-func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) (bool, error) {
-	region := c.GetRegion(buckets.GetRegionId())
-	if region == nil {
-		return false, errors.Errorf("region %v not found", buckets.GetRegionId())
-	}
-	if store := c.GetStore(region.GetLeader().GetStoreId()); store != nil && store.IsRemoved() {
-		return false, nil
-	}
-	// use CAS to update the bucket information.
-	// the two request(A:3,B:2) get the same region and need to update the buckets.
-	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
-	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
-	for range 3 {
-		if success := region.CompareAndSetReportBuckets(buckets); success {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
->>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 // IsPrepared return true if the prepare checker is ready.
 func (c *Cluster) IsPrepared() bool {
 	return c.coordinator.GetPrepareChecker().IsPrepared()

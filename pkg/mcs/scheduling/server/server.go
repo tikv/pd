@@ -499,6 +499,11 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Bind metric cleanup to this cluster instance, not a later primary's cluster.
+	c := s.cluster
+	s.metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
+		c.hotStat.RemoveRollingStoreStats(storeID)
+	})
 	// Inject the cluster components into the config watcher after the scheduler controller is created.
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
 	// Start the rule watcher after the cluster is created.

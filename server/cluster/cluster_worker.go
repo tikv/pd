@@ -272,16 +272,10 @@ func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
 
-<<<<<<< HEAD
 // HandleReportBuckets processes buckets reports from client
 func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
-	if err := c.processReportBuckets(b); err != nil {
-=======
-// HandleRegionBuckets processes region buckets from client
-func (c *RaftCluster) HandleRegionBuckets(b *metapb.Buckets) error {
-	applied, err := c.processRegionBuckets(b)
+	applied, err := c.processReportBuckets(b)
 	if err != nil {
->>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 		return err
 	}
 	if applied && !c.IsServiceIndependent(constant.SchedulingServiceName) {
