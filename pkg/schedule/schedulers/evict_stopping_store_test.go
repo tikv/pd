@@ -18,6 +18,7 @@ import (
 	"context"
 	"testing"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -143,4 +144,39 @@ func (suite *evictStoppingStoreTestSuite) TestRemovedStoppingStore() {
 	// Should not panic and not generate any operators
 	ops, _ = suite.es.Schedule(suite.tc, false)
 	re.Empty(ops)
+}
+
+func (suite *evictStoppingStoreTestSuite) TestEvictedStoreMetricsCleanup() {
+	es := suite.es.(*evictStoppingStoreScheduler)
+	gauge := evictedStoppingStoreStatusGauge
+	for _, state := range []string{"recovered", "tombstone", "deleted"} {
+		suite.Run(state, func() {
+			re := suite.Require()
+			const storeID = 5
+			gauge.Reset()
+			suite.T().Cleanup(gauge.Reset)
+			suite.tc.AddLeaderStore(storeID, 0)
+			re.NoError(es.prepareEvictLeader(suite.tc, storeID))
+			metric := gauge.WithLabelValues("5")
+			metric.Set(1)
+			store := suite.tc.GetStore(storeID)
+			switch state {
+			case "tombstone":
+				suite.tc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+				gauge.DeleteLabelValues("5") // Simulate metric cleanup before the scheduler runs.
+			case "deleted":
+				suite.tc.DeleteStore(store)
+			}
+
+			ops, _ := es.Schedule(suite.tc, false)
+			re.Empty(ops)
+			re.Zero(es.conf.evictStore())
+			if state == "recovered" {
+				re.Equal(1, promtestutil.CollectAndCount(gauge))
+				re.Zero(promtestutil.ToFloat64(metric))
+			} else {
+				re.Zero(promtestutil.CollectAndCount(gauge))
+			}
+		})
+	}
 }
