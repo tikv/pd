@@ -55,9 +55,10 @@ const (
 	batchSearchSize = 128
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
-	// MaxBatchSplitCount rounds the maximum normal batch of 100,000 new regions
-	// up to the next power of two, leaving headroom without accepting unbounded
-	// response construction, split bookkeeping, or ID allocation work.
+	// MaxBatchSplitCount caps the number of new regions in one request.
+	// ValidateBatchSplitRequest also applies a peer-dependent response budget:
+	// three-peer regions can reach this cap, while six-peer regions are limited
+	// to 90,189 splits and seven-peer regions to 81,432.
 	MaxBatchSplitCount = 1 << 17
 	// MaxBatchSplitResponseSize bounds the encoded response and the region/peer
 	// ID work needed to construct it. Forwarding RPCs must accept this size.

@@ -581,6 +581,9 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			}
 			forwardedHostChecked = true
 		}
+		if err := tsoutil.ValidateTSOCount(uint64(request.GetCount())); err != nil {
+			return errs.ErrUnknown(err)
+		}
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardedClientConn == nil {
 				forwardedClientConn, err = s.getDelegateClient(s.ctx, forwardedHost)
@@ -596,10 +599,6 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		if s.IsServiceIndependent(constant.TSOServiceName) {
-			if request.GetCount() == 0 {
-				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
-				return errs.ErrUnknown(err)
-			}
 			tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
 			if tsoStreamErr != nil {
 				return tsoStreamErr
@@ -1782,6 +1781,14 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 	if done != nil {
 		defer done()
 	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(core.MaxBatchSplitResponseSize))
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.AskBatchSplitResponse), nil
+	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -1806,15 +1813,6 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 			return convertAskBatchSplitResponse(resp), nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(core.MaxBatchSplitResponseSize))
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.AskBatchSplitResponse), err
-	}
-
 	if !versioninfo.IsFeatureSupported(rc.GetOpts().GetClusterVersion(), versioninfo.BatchSplit) {
 		return &pdpb.AskBatchSplitResponse{Header: s.incompatibleVersion("batch_split")}, nil
 	}

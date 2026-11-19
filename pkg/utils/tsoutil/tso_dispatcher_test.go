@@ -87,7 +87,8 @@ func TestTSODispatcherCountValidation(t *testing.T) {
 		valid  bool
 	}{
 		{name: "single", counts: []uint32{1}, valid: true},
-		{name: "largest batch", counts: []uint32{1, logicalBits - 1}, valid: true},
+		{name: "merged batch", counts: []uint32{1, 1<<17 - 1}, valid: true},
+		{name: "largest request", counts: []uint32{logicalBits}, valid: true},
 		{name: "zero", counts: []uint32{0}},
 		{name: "logical overflow", counts: []uint32{logicalBits + 1}},
 		{name: "uint32 overflow", counts: []uint32{math.MaxUint32, 2}},
@@ -325,7 +326,7 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 
 func TestTSODispatcherPartitionsValidRequests(t *testing.T) {
 	dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "partition_requests"}), nil)
-	counts := []uint32{logicalBits, 1, logicalBits - 1, logicalBits}
+	counts := []uint32{logicalBits, 1, 1<<17 - 1, 1, 1 << 17, logicalBits - 1, logicalBits}
 	requests := make([]Request, 0, len(counts))
 	responses := make([]*countResponseStream, 0, len(counts))
 	for _, count := range counts {
@@ -339,7 +340,7 @@ func TestTSODispatcherPartitionsValidRequests(t *testing.T) {
 		pending, err = dispatcher.processRequests(forward, pending)
 		require.NoError(t, err)
 	}
-	require.Equal(t, []uint32{logicalBits, logicalBits, logicalBits}, forward.counts)
+	require.Equal(t, []uint32{logicalBits, 1 << 17, 1, 1 << 17, logicalBits - 1, logicalBits}, forward.counts)
 	var previous uint64
 	for i, response := range responses {
 		require.Equal(t, counts[i], response.response.GetCount())

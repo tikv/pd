@@ -36,6 +36,9 @@ import (
 
 const (
 	maxMergeRequests = 10000
+	// Leave logical space for concurrent requests to the same oracle. A single
+	// larger request is still forwarded on its own.
+	maxMergedTSOCount = (logicalBits + 1) / 2
 	// DefaultTSOProxyTimeout defines the default timeout value of TSP Proxying
 	DefaultTSOProxyTimeout = 3 * time.Second
 	// tsoProxyStreamIdleTimeout defines how long Proxy stream will live if no request is received
@@ -184,7 +187,7 @@ func (s *TSODispatcher) dispatch(
 	}
 }
 
-// processRequests forwards one logical-capacity batch and returns the remaining requests.
+// processRequests forwards one bounded batch and returns the remaining requests.
 func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) ([]Request, error) {
 	if len(requests) == 0 {
 		return nil, ValidateTSOCount(0)
@@ -196,7 +199,7 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 		if err := ValidateTSOCount(requestCount); err != nil {
 			return nil, err
 		}
-		if count+requestCount > logicalBits {
+		if i > 0 && count+requestCount > maxMergedTSOCount {
 			batchSize = i
 			break
 		}

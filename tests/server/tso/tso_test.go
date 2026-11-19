@@ -16,6 +16,7 @@ package tso_test
 
 import (
 	"context"
+	"io"
 	"math"
 	"sync/atomic"
 	"testing"
@@ -206,6 +207,27 @@ func (s *tsoTestSuite) TestForwardedInvalidCountIsolation() {
 			invalidCancel()
 			re.ErrorContains(err, "tso count")
 
+			for _, closeSend := range []bool{false, true} {
+				pipelineCtx, pipelineCancel := context.WithCancel(ctx)
+				pipeline, err := client.Tso(pipelineCtx)
+				re.NoError(err)
+				// Establish the forwarding context before pipelining the invalid
+				// request with another message or EOF. Neither may hide its error.
+				re.NoError(pipeline.Send(request))
+				_, err = pipeline.Recv()
+				re.NoError(err)
+				re.NoError(pipeline.Send(&pdpb.TsoRequest{Header: request.Header, Count: count}))
+				if closeSend {
+					re.NoError(pipeline.CloseSend())
+				} else {
+					err = pipeline.Send(request)
+					re.True(err == nil || err == io.EOF)
+				}
+				_, err = pipeline.Recv()
+				pipelineCancel()
+				re.ErrorContains(err, "tso count")
+			}
+
 			// Keep using the same valid stream after the other stream is rejected.
 			re.NoError(valid.Send(request))
 			response, err := valid.Recv()
@@ -241,6 +263,15 @@ func (s *tsoTestSuite) TestInvalidCount() {
 		defer func() { re.NoError(failpoint.Disable(beforeGenerate)) }()
 		client, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
 		defer conn.Close()
+		validCtx, validCancel := context.WithTimeout(s.T().Context(), 10*time.Second)
+		defer validCancel()
+		valid, err := client.Tso(validCtx)
+		re.NoError(err)
+		request := &pdpb.TsoRequest{Header: testutil.NewRequestHeader(leader.GetClusterID()), Count: 1}
+		re.NoError(valid.Send(request))
+		previous, err := valid.Recv()
+		re.NoError(err)
+		checkAndReturnTimestampResponse(re, request, previous)
 		for _, count := range []uint32{0, 1 << 18, 1<<18 + 1, math.MaxUint32} {
 			ctx, cancel := context.WithTimeout(s.T().Context(), 10*time.Second)
 			stream, err := client.Tso(ctx)
@@ -250,16 +281,18 @@ func (s *tsoTestSuite) TestInvalidCount() {
 			re.Error(err)
 			re.Contains(err.Error(), "tso count")
 			cancel()
+
+			// Invalid counts must not close the delegate connection shared with
+			// an established healthy stream in independent TSO service mode.
+			re.NoError(valid.Send(request))
+			response, err := valid.Recv()
+			re.NoError(err)
+			checkAndReturnTimestampResponse(re, request, response)
+			re.Greater(tsoutil.GenerateTS(response.GetTimestamp()), tsoutil.GenerateTS(previous.GetTimestamp()))
+			previous = response
 		}
 		re.Zero(invalidAllocations.Load())
-		stream, err := client.Tso(s.T().Context())
-		re.NoError(err)
-		re.NoError(stream.Send(&pdpb.TsoRequest{Header: testutil.NewRequestHeader(leader.GetClusterID()), Count: 1}))
-		resp, err := stream.Recv()
-		re.NoError(err)
-		re.Equal(uint32(1), resp.GetCount())
-		re.Positive(resp.GetTimestamp().GetLogical())
-		re.NoError(stream.CloseSend())
+		re.NoError(valid.CloseSend())
 	})
 }
 

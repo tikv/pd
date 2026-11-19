@@ -32,6 +32,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -100,6 +101,7 @@ func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
 	log.SetLevel(zapcore.ErrorLevel)
 	defer log.SetLevel(oldLevel)
 	env := tests.NewSchedulingTestEnvironment(s.T())
+	env.PDCount = 2
 	const responseLimit = 8 << 20
 	defer env.Cleanup()
 	env.RunTest(func(cluster *tests.TestCluster) {
@@ -117,43 +119,50 @@ func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
 		if primary := cluster.GetSchedulingPrimaryServer(); primary != nil {
 			primary.GetCluster().PutRegion(regions[0])
 		}
-		client, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
-		defer conn.Close()
-		request := &pdpb.AskBatchSplitRequest{
-			Header: testutil.NewRequestHeader(leader.GetClusterID()),
-			Region: region,
-		}
-		for _, count := range []uint32{131073, math.MaxUint32} {
-			request.SplitCount = count
-			ctx, cancel := context.WithTimeout(s.T().Context(), 10*time.Second)
-			resp, err := client.AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(responseLimit))
-			cancel()
-			re.NoError(err)
-			re.Contains(resp.GetHeader().GetError().GetMessage(), "exceeds maximum")
-			re.Empty(resp.GetIds())
-		}
-		// The boundary batch exercises the monolithic handler's existing per-ID
-		// allocation under race instrumentation, so allow a longer RPC deadline.
-		for _, count := range []uint32{0, 131072, 1} {
-			request.SplitCount = count
-			ctx, cancel := context.WithTimeout(s.T().Context(), 30*time.Second)
-			resp, err := client.AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(responseLimit))
-			cancel()
-			re.NoError(err)
-			re.Nil(resp.GetHeader().GetError())
-			re.Len(resp.GetIds(), int(count))
-			if count == core.MaxBatchSplitCount {
-				re.Greater(resp.Size(), 4<<20)
-				re.LessOrEqual(resp.Size(), responseLimit)
+		for _, target := range cluster.GetServers() {
+			requestCtx := s.T().Context()
+			if target != leader {
+				re.Nil(target.GetRaftCluster())
+				requestCtx = grpcutil.BuildForwardContext(requestCtx, leader.GetAddr())
 			}
-			var previous uint64
-			for _, split := range resp.GetIds() {
-				re.Greater(split.GetNewRegionId(), previous)
-				previous = split.GetNewRegionId()
-				re.Len(split.GetNewPeerIds(), len(region.GetPeers()))
-				for _, peer := range split.GetNewPeerIds() {
-					re.Greater(peer, previous)
-					previous = peer
+			client, conn := testutil.MustNewGrpcClient(re, target.GetAddr())
+			defer conn.Close()
+			request := &pdpb.AskBatchSplitRequest{
+				Header: testutil.NewRequestHeader(leader.GetClusterID()),
+				Region: region,
+			}
+			for _, count := range []uint32{131073, math.MaxUint32} {
+				request.SplitCount = count
+				ctx, cancel := context.WithTimeout(requestCtx, 10*time.Second)
+				resp, err := client.AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(responseLimit))
+				cancel()
+				re.NoError(err)
+				re.Contains(resp.GetHeader().GetError().GetMessage(), "exceeds maximum")
+				re.Empty(resp.GetIds())
+			}
+			// The boundary batch exercises the monolithic handler's existing per-ID
+			// allocation under race instrumentation, so allow a longer RPC deadline.
+			for _, count := range []uint32{0, 131072, 1} {
+				request.SplitCount = count
+				ctx, cancel := context.WithTimeout(requestCtx, 30*time.Second)
+				resp, err := client.AskBatchSplit(ctx, request, grpc.MaxCallRecvMsgSize(responseLimit))
+				cancel()
+				re.NoError(err)
+				re.Nil(resp.GetHeader().GetError())
+				re.Len(resp.GetIds(), int(count))
+				if count == core.MaxBatchSplitCount {
+					re.Greater(resp.Size(), 4<<20)
+					re.LessOrEqual(resp.Size(), responseLimit)
+				}
+				var previous uint64
+				for _, split := range resp.GetIds() {
+					re.Greater(split.GetNewRegionId(), previous)
+					previous = split.GetNewRegionId()
+					re.Len(split.GetNewPeerIds(), len(region.GetPeers()))
+					for _, peer := range split.GetNewPeerIds() {
+						re.Greater(peer, previous)
+						previous = peer
+					}
 				}
 			}
 		}
