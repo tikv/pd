@@ -23,14 +23,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-<<<<<<< HEAD
-	"github.com/stretchr/testify/require"
-=======
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
->>>>>>> 1087576578 (split scatter: stabilize pending and avoid read-pool pressure (#10856))
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -1480,17 +1478,6 @@ func TestInternalScatterLeaderFiltersRejectedTarget(t *testing.T) {
 
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
 	re.Equal(uint64(5), leader)
-<<<<<<< HEAD
-=======
-
-	for _, id := range []uint64{1, 5} {
-		tc.ResetStoreLimit(id, storelimit.TransferLeaderIn, 0.000001)
-		re.True(tc.GetStore(id).GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.TransferLeaderIn], storelimit.TransferLeaderIn, constant.Medium))
-	}
-	candidates, _ = scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, nil, 0)
-	// Keeping the current leader does not require transfer-in budget.
-	re.Equal([]uint64{1}, candidates)
->>>>>>> 1087576578 (split scatter: stabilize pending and avoid read-pool pressure (#10856))
 }
 
 func TestInternalScatterLeaderFiltersReadPoolPressure(t *testing.T) {

@@ -48,21 +48,6 @@ var (
 	gcTTL                 = time.Minute * 3
 	operatorPriorityLevel = constant.High
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-<<<<<<< HEAD
-	scatterSkipEmptyRegionCounter   = scatterCounter.WithLabelValues("skip", "empty-region")
-	scatterSkipNoRegionCounter      = scatterCounter.WithLabelValues("skip", "no-region")
-	scatterSkipNoLeaderCounter      = scatterCounter.WithLabelValues("skip", "no-leader")
-	scatterSkipHotRegionCounter     = scatterCounter.WithLabelValues("skip", "hot")
-	scatterSkipNotReplicatedCounter = scatterCounter.WithLabelValues("skip", "not-replicated")
-	scatterSkipAffinityCounter      = scatterCounter.WithLabelValues("skip", "affinity")
-	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
-	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
-	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
-	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("skip", "running")
-	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("fail", "other-existed")
-	errRegionNotFound               = errors.New("region not found")
-	errEmptyRegion                  = errors.New("empty region")
-=======
 	scatterSkipEmptyRegionCounter      = scatterCounter.WithLabelValues("skip", "empty-region")
 	scatterSkipNoRegionCounter         = scatterCounter.WithLabelValues("skip", "no-region")
 	scatterSkipNoLeaderCounter         = scatterCounter.WithLabelValues("skip", "no-leader")
@@ -76,13 +61,14 @@ var (
 	scatterSuccessCounter              = scatterCounter.WithLabelValues("success", "")
 	scatterOperatorRunningCounter      = scatterCounter.WithLabelValues("skip", "running")
 	scatterOperatorExistedCounter      = scatterCounter.WithLabelValues("fail", "other-existed")
+	errRegionNotFound                  = errors.New("region not found")
+	errEmptyRegion                     = errors.New("empty region")
 
 	// ErrRegionHot means scatter is skipped because the region is currently hot.
 	ErrRegionHot = errors.New("region is hot")
 	// ErrInternalScatterBalancedReadCPU means split-scatter is temporarily skipped
 	// because moving the selected leader would not reduce read CPU pressure enough.
 	ErrInternalScatterBalancedReadCPU = errors.New("internal split scatter skipped due to balanced read CPU")
->>>>>>> 1087576578 (split scatter: stabilize pending and avoid read-pool pressure (#10856))
 )
 
 // InternalScatterRetryLater means internal split-scatter should keep the pending

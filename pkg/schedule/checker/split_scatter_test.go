@@ -39,22 +39,13 @@ import (
 )
 
 const (
-<<<<<<< HEAD
 	splitScatterObservedRegionID       uint64 = 101
 	splitScatterTestTableID            int64  = 42
 	splitScatterTestIndexID            int64  = 7
 	splitScatterTestKeyspaceID         uint32 = 4242
 	splitScatterTestMaxValidKeyspaceID        = uint32(0xFFFFFF)
 	splitScatterTestNextGenKeyspaceID  uint32 = splitScatterTestMaxValidKeyspaceID - 1
-	splitScatterTestSourceWaitVersion         = uint64(0)
-=======
-	splitScatterObservedRegionID      uint64 = 101
-	splitScatterTestTableID           int64  = 42
-	splitScatterTestIndexID           int64  = 7
-	splitScatterTestKeyspaceID        uint32 = 4242
-	splitScatterTestNextGenKeyspaceID uint32 = constant.SystemKeyspaceID
-	splitScatterTestSplitVersion             = uint64(0)
->>>>>>> 1087576578 (split scatter: stabilize pending and avoid read-pool pressure (#10856))
+	splitScatterTestSplitVersion              = uint64(0)
 	// CPU usage is only populated to mimic load-split region heartbeat data.
 	// Current split-scatter dispatch does not rank pending regions by CPU.
 	splitScatterNoCPUUsage       uint64 = 0
