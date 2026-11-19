@@ -3116,6 +3116,44 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 	re.Equal(sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30}, opt.GetScheduleConfig().StoreLimit[3])
 }
 
+func TestAddStoreLimitRetryPreservesTiFlashDefault(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cfg := opt.GetScheduleConfig().Clone()
+	cfg.DefaultStoreLimit = sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15}
+	opt.SetScheduleConfig(cfg)
+	store := &metapb.Store{
+		Id:     1,
+		Labels: []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
+	}
+	storage := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage)
+	rc.PutStore(core.NewStoreInfo(store))
+
+	const persistFail = "github.com/tikv/pd/server/config/persistFail"
+	re.NoError(failpoint.Enable(persistFail, "1*return"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(persistFail)) })
+	const beforeRetry = "github.com/tikv/pd/server/cluster/beforeAddStoreLimitRetry"
+	retries := 0
+	re.NoError(failpoint.EnableCall(beforeRetry, func() {
+		retries++
+		re.NotContains(opt.GetScheduleConfig().StoreLimit, store.GetId())
+		rc.refreshStoreRateLimit(store.GetId(), storelimit.AddPeer)
+		re.NotContains(opt.GetScheduleConfig().StoreLimit, store.GetId(), "refresh must not install a default before retry")
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(beforeRetry)) })
+
+	rc.AddStoreLimit(store)
+	re.Equal(1, retries)
+	expected := sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30}
+	re.Equal(expected, opt.GetScheduleConfig().StoreLimit[store.GetId()])
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(storage))
+	re.Equal(expected, reloaded.GetScheduleConfig().StoreLimit[store.GetId()])
+}
+
 type blockingSaveConfigStorage struct {
 	storage.Storage
 	saveStarted chan struct{}

@@ -536,12 +536,21 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 }
 
 // GetStoreLimit returns the limit of a store.
-func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
+func (o *PersistOptions) GetStoreLimit(storeID uint64) sc.StoreLimitConfig {
+	return o.getStoreLimit(storeID, true)
+}
+
+func (o *PersistOptions) getStoreLimit(storeID uint64, writeBack bool) (returnSC sc.StoreLimitConfig) {
 	defer func() {
 		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
 		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
 	}()
-	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
+	cfg := o.GetScheduleConfig()
+	if limit, ok := cfg.StoreLimit[storeID]; ok {
+		return limit
+	}
+	if !writeBack {
+		limit, _ := o.getDefaultStoreLimit(cfg)
 		return limit
 	}
 	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
@@ -549,36 +558,45 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 			returnSC = limit
 			return
 		}
-		limitCfg := next.GetDefaultStoreLimit()
-		v, ok1, err := o.getTTLFloat("default-add-peer")
-		if err != nil {
-			log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
+		limit, temporary := o.getDefaultStoreLimit(next)
+		returnSC = limit
+		if !temporary {
+			next.StoreLimit[storeID] = limit
 		}
-		canSetAddPeer := ok1 && err == nil
-		if canSetAddPeer {
-			returnSC.AddPeer = v
-		}
-
-		v, ok2, err := o.getTTLFloat("default-remove-peer")
-		if err != nil {
-			log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
-		}
-		canSetRemovePeer := ok2 && err == nil
-		if canSetRemovePeer {
-			returnSC.RemovePeer = v
-		}
-
-		if canSetAddPeer || canSetRemovePeer {
-			return
-		}
-		next.StoreLimit[storeID] = limitCfg
-		returnSC = limitCfg
 	})
 	return returnSC
 }
 
+func (o *PersistOptions) getDefaultStoreLimit(cfg *sc.ScheduleConfig) (limit sc.StoreLimitConfig, temporary bool) {
+	add, addOK, err := o.getTTLFloat("default-add-peer")
+	if err != nil {
+		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
+	} else if addOK {
+		limit.AddPeer, temporary = add, true
+	}
+	remove, removeOK, err := o.getTTLFloat("default-remove-peer")
+	if err != nil {
+		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
+	} else if removeOK {
+		limit.RemovePeer, temporary = remove, true
+	}
+	if !temporary {
+		limit = cfg.GetDefaultStoreLimit()
+	}
+	return limit, temporary
+}
+
 // GetStoreLimitByType returns the limit of a store with a given type.
-func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
+func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	return o.getStoreLimitByType(storeID, typ, true)
+}
+
+// PeekStoreLimitByType returns the effective limit without creating a per-store entry.
+func (o *PersistOptions) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	return o.getStoreLimitByType(storeID, typ, false)
+}
+
+func (o *PersistOptions) getStoreLimitByType(storeID uint64, typ storelimit.Type, writeBack bool) (returned float64) {
 	defer func() {
 		if typ == storelimit.RemovePeer {
 			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
@@ -586,7 +604,7 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
 		}
 	}()
-	limit := o.GetStoreLimit(storeID)
+	limit := o.getStoreLimit(storeID, writeBack)
 	switch typ {
 	case storelimit.AddPeer:
 		return limit.AddPeer

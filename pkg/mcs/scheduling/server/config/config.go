@@ -571,12 +571,17 @@ func (o *PersistConfig) GetHotRegionScheduleLimit() uint64 {
 }
 
 // GetStoreLimit returns the limit of a store.
-func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
+func (o *PersistConfig) GetStoreLimit(storeID uint64) sc.StoreLimitConfig {
+	return o.getStoreLimit(storeID, true)
+}
+
+func (o *PersistConfig) getStoreLimit(storeID uint64, writeBack bool) (returnSC sc.StoreLimitConfig) {
 	defer func() {
 		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
 		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
 	}()
-	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
+	current := o.GetScheduleConfig()
+	if limit, ok := current.StoreLimit[storeID]; ok {
 		return limit
 	}
 
@@ -601,6 +606,9 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	if canSetAddPeer || canSetRemovePeer {
 		return returnSC
 	}
+	if !writeBack {
+		return current.GetDefaultStoreLimit()
+	}
 
 	if hook := o.beforeGetStoreLimitWriteBack; hook != nil {
 		hook()
@@ -621,7 +629,16 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
-func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
+func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	return o.getStoreLimitByType(storeID, typ, true)
+}
+
+// PeekStoreLimitByType returns the effective limit without creating a per-store entry.
+func (o *PersistConfig) PeekStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	return o.getStoreLimitByType(storeID, typ, false)
+}
+
+func (o *PersistConfig) getStoreLimitByType(storeID uint64, typ storelimit.Type, writeBack bool) (returned float64) {
 	defer func() {
 		if typ == storelimit.RemovePeer {
 			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
@@ -629,7 +646,7 @@ func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type)
 			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
 		}
 	}()
-	limit := o.GetStoreLimit(storeID)
+	limit := o.getStoreLimit(storeID, writeBack)
 	switch typ {
 	case storelimit.AddPeer:
 		return limit.AddPeer

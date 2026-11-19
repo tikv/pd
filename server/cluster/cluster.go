@@ -2459,6 +2459,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 			}
 			return
 		}
+		failpoint.InjectCall("beforeAddStoreLimitRetry")
 		time.Sleep(persistLimitWaitTime)
 	}
 	log.Error("persist store limit meet error", errs.ZapError(err))
@@ -2694,7 +2695,7 @@ func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit
 	}
 	// Schedule config stores the unit in rate-per-minute, but limiter uses rate-per-second.
 	const storeBalanceBaseTime = float64(60)
-	ratePerSec := c.opt.GetStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
+	ratePerSec := c.opt.PeekStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
 	if limit.Rate(limitType) != ratePerSec {
 		c.ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
