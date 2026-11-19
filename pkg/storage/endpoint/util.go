@@ -63,15 +63,22 @@ func saveJSONInTxn(txn kv.Txn, key string, data any) error {
 func (se *StorageEndpoint) loadRangeByPrefix(prefix string, f func(k, v string)) error {
 	nextKey := prefix
 	endKey := clientv3.GetPrefixRangeEnd(prefix)
+	// Start with MaxKVRangeLimit to reduce the load time, and halve it on error,
+	// such as a timeout caused by a large page.
+	rangeLimit := MaxKVRangeLimit
 	for {
-		keys, values, err := se.LoadRange(nextKey, endKey, MinKVRangeLimit)
+		keys, values, err := se.LoadRange(nextKey, endKey, rangeLimit)
 		if err != nil {
-			return err
+			if rangeLimit == MinKVRangeLimit {
+				return err
+			}
+			rangeLimit = max(rangeLimit/2, MinKVRangeLimit)
+			continue
 		}
 		for i := range keys {
 			f(strings.TrimPrefix(keys[i], prefix), values[i])
 		}
-		if len(keys) < MinKVRangeLimit {
+		if len(keys) < rangeLimit {
 			return nil
 		}
 		nextKey = keys[len(keys)-1] + "\x00"
