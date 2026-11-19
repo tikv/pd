@@ -550,6 +550,16 @@ func (rt *ruTracker) getRUPerSec() float64 {
 	return rt.lastEMA
 }
 
+// getRUPerSecAt returns the RU/s EMA decayed to `t` as if nothing was sampled after the last sample.
+func (rt *ruTracker) getRUPerSecAt(t time.Time) float64 {
+	rt.RLock()
+	defer rt.RUnlock()
+	if rt.lastSampleTime.IsZero() || !t.After(rt.lastSampleTime) {
+		return rt.lastEMA
+	}
+	return rt.lastEMA * math.Exp(-rt.beta*t.Sub(rt.lastSampleTime).Seconds())
+}
+
 func (rt *ruTracker) isInitialized() bool {
 	rt.RLock()
 	defer rt.RUnlock()
