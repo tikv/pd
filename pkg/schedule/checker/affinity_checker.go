@@ -139,14 +139,13 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		// so expire the group first, then provide the available Region information and fetch the Group state again.
 		if !isAffinity {
 			targetRegion := cloneRegionWithReplacePeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...)
-			if targetRegion != nil {
-				// Affinity moves preserve witness stores and cannot make a witness the leader.
-				for _, peer := range region.GetVoters() {
-					if peer.GetIsWitness() && (!slices.Contains(group.VoterStoreIDs, peer.GetStoreId()) || peer.GetStoreId() == group.LeaderStoreID) {
-						if c.witnessTargetAllowed(region, group, fit, targetRegion.Clone()) {
-							return nil
-						}
-						targetRegion = nil
+			hasWitness := false
+			witnessDisplaced := false
+			for _, peer := range region.GetVoters() {
+				if peer.GetIsWitness() {
+					hasWitness = true
+					if !slices.Contains(group.VoterStoreIDs, peer.GetStoreId()) || peer.GetStoreId() == group.LeaderStoreID {
+						witnessDisplaced = true
 						break
 					}
 				}
@@ -155,9 +154,17 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 				return slices.Contains(group.VoterStoreIDs, peer.GetStoreId())
 			})
 			// Validate conflicting learners together with their final destinations.
-			if targetRegion == nil || (hasConflictingLearner && c.targetVotersRejected(targetRegion, fit)) || (!hasConflictingLearner && !c.isRegionPlacementRuleSatisfiedWithBestLocation(targetRegion, false /* isExistingRegion */)) {
-				c.affinityManager.ExpireAffinityGroup(group.ID)
-				group = c.affinityManager.GetAffinityGroupState(group.ID)
+			if targetRegion == nil || witnessDisplaced ||
+				(hasConflictingLearner && c.targetVotersRejected(targetRegion, fit)) ||
+				(!hasConflictingLearner && !c.isRegionPlacementRuleSatisfiedWithBestLocation(targetRegion, false /* isExistingRegion */)) {
+				if targetRegion != nil && hasWitness && c.witnessTargetAllowed(region, group, fit, targetRegion.Clone()) {
+					return nil
+				}
+				expired, ok := c.affinityManager.ExpireAffinityGroupIf(group)
+				if !ok {
+					return nil
+				}
+				group = expired
 				needRefetch = true
 			}
 		}
@@ -192,14 +199,19 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	// Create operator to adjust region according to affinity group
 	op, relearn := c.createAffinityOperator(region, group, fit)
 	if relearn {
-		affinityCheckerLearnerPeerConflictCounter.Inc()
+		if targetRegion := cloneRegionWithReplacePeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...); targetRegion != nil &&
+			slices.ContainsFunc(region.GetVoters(), (*metapb.Peer).GetIsWitness) &&
+			c.witnessTargetAllowed(region, group, fit, targetRegion.Clone()) {
+			return nil
+		}
 		// Local learner placement is a heuristic. Relearn from this healthy
 		// Region now instead of letting the next Region restore the old target.
-		c.affinityManager.ExpireAffinityGroup(group.ID)
-		fresh := c.affinityManager.GetAffinityGroupState(group.ID)
-		c.affinityManager.ObserveAvailableRegion(region, fresh)
-		log.Debug("relearn affinity group after learner-voter conflict",
-			zap.Uint64("region-id", region.GetID()), zap.String("group-id", group.ID))
+		if fresh, ok := c.affinityManager.ExpireAffinityGroupIf(group); ok {
+			affinityCheckerLearnerPeerConflictCounter.Inc()
+			c.affinityManager.ObserveAvailableRegion(region, fresh)
+			log.Debug("relearn affinity group after learner-voter conflict",
+				zap.Uint64("region-id", region.GetID()), zap.String("group-id", group.ID))
+		}
 		return nil
 	}
 	if op != nil {
@@ -551,18 +563,26 @@ func (c *AffinityChecker) targetVotersRejected(target *core.RegionInfo, fit *pla
 
 // witnessTargetAllowed probes at most 16 witness layouts on a private target.
 func (c *AffinityChecker) witnessTargetAllowed(region *core.RegionInfo, group *affinity.GroupState, fit *placement.RegionFit, target *core.RegionInfo) bool {
-	witnesses := len(region.GetVoters()) - len(region.GetNonWitnessVoters())
-	var candidates []*metapb.Peer
+	if target == nil {
+		return false
+	}
+	witnesses := 0
+	for _, peer := range region.GetVoters() {
+		if peer.GetIsWitness() {
+			witnesses++
+		}
+	}
+	if leader := target.GetLeader(); leader != nil {
+		leader.IsWitness = false
+	}
+	candidates := make([]*metapb.Peer, 0, len(target.GetVoters()))
 	for _, peer := range target.GetVoters() {
-		if peer.GetStoreId() == group.LeaderStoreID {
-			peer.IsWitness = false
-		} else if peer.GetIsWitness() {
-			witnesses--
-		} else {
+		peer.IsWitness = false
+		if peer.GetStoreId() != group.LeaderStoreID {
 			candidates = append(candidates, peer)
 		}
 	}
-	if witnesses < 0 || witnesses > len(candidates) {
+	if witnesses > len(candidates) {
 		return false
 	}
 	roles, remaining := affinityRoles(region, group), 16

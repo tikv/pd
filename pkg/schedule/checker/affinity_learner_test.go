@@ -15,8 +15,10 @@
 package checker
 
 import (
+	"encoding/json"
 	"slices"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -691,7 +694,7 @@ func TestAffinityCheckerLearnerExhaustedTemporaryBudget(t *testing.T) {
 		}
 		peers = append(peers, peer)
 	}
-	region := core.NewRegionInfo(&metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("b"), Peers: peers}, peers[0])
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("b"), Peers: peers}, peers[0], core.SetApproximateSize(1))
 	tc.PutRegion(region)
 	checker := newTestAffinityChecker(t.Context(), tc, tc.GetCheckerConfig())
 	manager := tc.GetAffinityManager()
@@ -1497,4 +1500,260 @@ func TestAffinityCheckerLearnerNotMoved(t *testing.T) {
 			re.Equal(wantConflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
 		})
 	}
+}
+
+type getStoreBarrierCluster struct {
+	sche.CheckerCluster
+	once             sync.Once
+	entered, release chan struct{}
+}
+
+func (b *getStoreBarrierCluster) GetStore(id uint64) *core.StoreInfo {
+	b.once.Do(func() {
+		close(b.entered)
+		<-b.release
+	})
+	return b.CheckerCluster.GetStore(id)
+}
+
+func assertCommittedAffinityTarget(re *require.Assertions, tc *mockcluster.Cluster, groupID string, leader uint64, voters []uint64) {
+	state := tc.GetAffinityManager().GetAffinityGroupState(groupID)
+	re.NotNil(state)
+	re.True(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
+	re.Equal(leader, state.LeaderStoreID)
+	re.Equal(voters, state.VoterStoreIDs)
+
+	raw, err := tc.GetStorage().LoadAffinityGroup(groupID)
+	re.NoError(err)
+	var saved affinity.Group
+	re.NoError(json.Unmarshal([]byte(raw), &saved))
+	re.Equal(leader, saved.LeaderStoreID)
+	re.Equal(voters, saved.VoterStoreIDs)
+}
+
+func TestAffinityCheckerStaleExpireRace(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		initial     []uint64
+		pinnedStore uint64
+	}{
+		{name: "unreachable-target", initial: []uint64{1, 2}},
+		{name: "conflicting-learner-relearn", initial: []uint64{1, 2, 5}, pinnedStore: 5},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			c, tc, _ := newLearnerConflictController(t)
+			region := tc.GetRegion(1)
+			if tt.pinnedStore != 0 {
+				re.NoError(tc.GetRuleManager().SetRule(newLearnerRule(strconv.FormatUint(tt.pinnedStore, 10))))
+				region = putLearners(tc, 1, tt.pinnedStore)
+			}
+			manager := tc.GetAffinityManager()
+			const id = "stale-expire-race"
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: id, LeaderStoreID: 1, VoterStoreIDs: tt.initial,
+			}, region.GetStartKey(), region.GetEndKey()))
+
+			barrier := &getStoreBarrierCluster{
+				CheckerCluster: tc,
+				entered:        make(chan struct{}),
+				release:        make(chan struct{}),
+			}
+			c.affinityChecker.cluster = barrier
+			conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				c.affinityChecker.Check(region)
+			}()
+			select {
+			case <-barrier.entered:
+			case <-time.After(3 * time.Second):
+				close(barrier.release)
+				t.Fatal("checker did not reach store lookup after reading group snapshot")
+			}
+
+			desired := []uint64{1, 2, 4}
+			fresh, err := manager.UpdateAffinityGroupPeers(id, 2, desired)
+			close(barrier.release)
+			<-done
+
+			re.NoError(err)
+			re.Equal(uint64(2), fresh.LeaderStoreID)
+			re.Equal(desired, fresh.VoterStoreIDs)
+			assertCommittedAffinityTarget(re, tc, id, 2, desired)
+			re.Equal(conflicts, promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter))
+		})
+	}
+}
+
+func TestAffinityCheckerWitnessTargetReassignment(t *testing.T) {
+	t.Run("four-replica-no-bounce", func(t *testing.T) {
+		re := require.New(t)
+		c, tc, _ := newLearnerConflictController(t)
+		tc.SetEnableWitness(true)
+		tc.SetMaxReplicas(4)
+		rm := tc.GetRuleManager()
+		makeRule := func(id string, idx int, role placement.PeerRoleType, witness bool, ids ...string) *placement.Rule {
+			return &placement.Rule{
+				GroupID:          placement.DefaultGroupID,
+				ID:               id,
+				Index:            idx,
+				Role:             role,
+				Count:            1,
+				IsWitness:        witness,
+				LabelConstraints: []placement.LabelConstraint{{Key: "ID", Op: placement.In, Values: ids}},
+			}
+		}
+		leaderRule := makeRule("leader", 10, placement.Leader, false, "1")
+		leaderRule.Override = true
+		re.NoError(rm.SetRules([]*placement.Rule{
+			leaderRule,
+			makeRule("voter-a", 11, placement.Voter, false, "2", "4"),
+			makeRule("voter-b", 12, placement.Voter, false, "3", "5"),
+			makeRule("witness", 13, placement.Voter, true, "2", "3"),
+		}))
+
+		makeRegion := func(id uint64, start, end string, last, witnessStore uint64) *core.RegionInfo {
+			tc.AddLeaderRegionWithRange(id, start, end, 1, 2, 3, last)
+			r := tc.GetRegion(id)
+			r = r.Clone(core.SetApproximateSize(1), core.WithWitness(r.GetStorePeer(witnessStore).GetId()))
+			tc.PutRegion(r)
+			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(r, true))
+			return r
+		}
+		r1 := makeRegion(1, "a", "b", 4, 2)
+		r2 := makeRegion(2, "b", "c", 5, 3)
+		orig1, orig2 := r1.Clone(), r2.Clone()
+
+		const id = "witness-no-bounce"
+		want := []uint64{1, 2, 3, 5}
+		re.NoError(createAffinityGroupForTest(tc.GetAffinityManager(), &affinity.Group{
+			ID: id, LeaderStoreID: 1, VoterStoreIDs: want,
+		}, r1.GetStartKey(), r2.GetEndKey()))
+
+		for _, r := range []*core.RegionInfo{r1, r2, r1, r2, r1, r2} {
+			re.Empty(c.affinityChecker.Check(r))
+			assertCommittedAffinityTarget(re, tc, id, 1, want)
+			re.Equal(orig1.GetPeers(), r1.GetPeers())
+			re.Equal(orig2.GetPeers(), r2.GetPeers())
+		}
+	})
+
+	t.Run("five-replica-reassigned-witnesses", func(t *testing.T) {
+		re := require.New(t)
+		c, tc, _ := newLearnerConflictController(t)
+		tc.SetEnableWitness(true)
+		tc.SetMaxReplicas(5)
+		for _, id := range []uint64{6, 7} {
+			tc.AddRegionStore(id, 10)
+		}
+		rm := tc.GetRuleManager()
+		voterRule := rm.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+		voterRule.Count = 3
+		voterRule.LabelConstraints = []placement.LabelConstraint{{Key: "ID", Op: placement.In, Values: []string{"1", "2", "4", "5"}}}
+		re.NoError(rm.SetRule(voterRule))
+		re.NoError(rm.SetRule(&placement.Rule{
+			GroupID:          placement.DefaultGroupID,
+			ID:               "witness",
+			Role:             placement.Voter,
+			IsWitness:        true,
+			Count:            2,
+			LabelConstraints: []placement.LabelConstraint{{Key: "ID", Op: placement.In, Values: []string{"2", "3", "6", "7"}}},
+		}))
+
+		tc.AddLeaderRegionWithRange(1, "a", "b", 1, 2, 3, 4, 5)
+		tc.AddLeaderRegionWithRange(2, "b", "c", 1, 2, 5, 6, 7)
+		addWitnesses := func(regionID, w1, w2 uint64) *core.RegionInfo {
+			r := tc.GetRegion(regionID)
+			r = r.Clone(
+				core.SetApproximateSize(1),
+				core.WithWitness(r.GetStorePeer(w1).GetId()),
+				core.WithWitness(r.GetStorePeer(w2).GetId()),
+			)
+			tc.PutRegion(r)
+			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(r, true))
+			return r
+		}
+		r1 := addWitnesses(1, 2, 3)
+		r2 := addWitnesses(2, 6, 7)
+		orig1 := r1.Clone()
+
+		const id = "witness-five-replica"
+		target := []uint64{1, 2, 5, 6, 7}
+		re.NoError(createAffinityGroupForTest(tc.GetAffinityManager(), &affinity.Group{
+			ID: id, LeaderStoreID: 1, VoterStoreIDs: target,
+		}, r1.GetStartKey(), r2.GetEndKey()))
+
+		for _, r := range []*core.RegionInfo{r2, r1, r2, r1} {
+			re.Empty(c.affinityChecker.Check(r))
+			assertCommittedAffinityTarget(re, tc, id, 1, target)
+			re.Equal(orig1.GetPeers(), r1.GetPeers())
+		}
+	})
+
+	t.Run("unreachable-witness-relearns", func(t *testing.T) {
+		for _, tcSpec := range []struct {
+			name         string
+			voterStores  []string
+			witnessStore []string
+			regionPeers  []uint64
+			witnessPeer  uint64
+			expected     []uint64
+		}{
+			{
+				name:         "witness-rule-moved-outside-target",
+				voterStores:  []string{"1", "2", "3", "4", "5"},
+				witnessStore: []string{"6"},
+				regionPeers:  []uint64{1, 2, 3, 6},
+				witnessPeer:  6,
+				expected:     []uint64{1, 2, 3, 6},
+			},
+			{
+				name:         "retained-witness-with-invalid-target-voter",
+				voterStores:  []string{"1", "2", "3", "5"},
+				witnessStore: []string{"2", "6"},
+				regionPeers:  []uint64{1, 2, 3, 5},
+				witnessPeer:  2,
+				expected:     []uint64{1, 2, 3, 5},
+			},
+		} {
+			t.Run(tcSpec.name, func(t *testing.T) {
+				re := require.New(t)
+				c, tc, _ := newLearnerConflictController(t)
+				tc.SetEnableWitness(true)
+				tc.SetMaxReplicas(4)
+				tc.AddRegionStore(6, 10)
+				rm := tc.GetRuleManager()
+				voterRule := rm.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+				voterRule.Count = 3
+				voterRule.LabelConstraints = []placement.LabelConstraint{{Key: "ID", Op: placement.In, Values: tcSpec.voterStores}}
+				re.NoError(rm.SetRule(voterRule))
+				re.NoError(rm.SetRule(&placement.Rule{
+					GroupID:          placement.DefaultGroupID,
+					ID:               "witness",
+					Role:             placement.Voter,
+					IsWitness:        true,
+					Count:            1,
+					LabelConstraints: []placement.LabelConstraint{{Key: "ID", Op: placement.In, Values: tcSpec.witnessStore}},
+				}))
+
+				tc.AddLeaderRegionWithRange(1, "a", "b", tcSpec.regionPeers[0], tcSpec.regionPeers[1:]...)
+				region := tc.GetRegion(1)
+				region = region.Clone(core.SetApproximateSize(1), core.WithWitness(region.GetStorePeer(tcSpec.witnessPeer).GetId()))
+				tc.PutRegion(region)
+				re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+
+				const id = "witness-unreachable"
+				re.NoError(createAffinityGroupForTest(tc.GetAffinityManager(), &affinity.Group{
+					ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3, 4},
+				}, region.GetStartKey(), region.GetEndKey()))
+
+				re.Empty(c.affinityChecker.Check(region))
+				assertCommittedAffinityTarget(re, tc, id, 1, tcSpec.expected)
+			})
+		}
+	})
 }
