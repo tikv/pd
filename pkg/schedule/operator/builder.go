@@ -16,6 +16,7 @@ package operator
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -31,6 +32,9 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
+// ErrTargetRole means complete placement roles reject an otherwise eligible leader.
+var ErrTargetRole = errors.New("target leader does not satisfy placement roles")
+
 // Builder is used to create operators. Usage:
 //
 //	op, err := NewBuilder(desc, cluster, region).
@@ -44,12 +48,16 @@ import (
 type Builder struct {
 	// basic info
 	sche.SharedCluster
-	desc            string
-	regionID        uint64
-	regionEpoch     *metapb.RegionEpoch
-	rules           []*placement.Rule
-	expectedRoles   map[uint64]placement.PeerRoleType
-	approximateSize int64
+	desc               string
+	regionID           uint64
+	regionEpoch        *metapb.RegionEpoch
+	checkTargetRules   bool
+	requireTargetRules bool
+	originRoleChecker  *placement.RoleChecker
+	targetRoleChecker  *placement.RoleChecker
+	rules              []*placement.Rule
+	expectedRoles      map[uint64]placement.PeerRoleType
+	approximateSize    int64
 
 	// operation record
 	originPeers          peersMap
@@ -57,7 +65,7 @@ type Builder struct {
 	originLeaderStoreID  uint64
 	targetPeers          peersMap
 	targetLeaderStoreID  uint64
-	targetLeaderStoreIDs []uint64 // This field is only used during multi-target evict leader, and will not be filtered during `Build`.
+	targetLeaderStoreIDs []uint64 // Alternative destinations for multi-target evict leader.
 	err                  error
 
 	// skip check flags
@@ -140,10 +148,9 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 	// placement rules
 	var rules []*placement.Rule
 	if err == nil && !b.skipPlacementRulesCheck && b.GetSharedConfig().IsPlacementRulesEnabled() {
-		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
-		for _, rf := range fit.RuleFits {
-			rules = append(rules, rf.Rule)
-		}
+		rules = b.GetRuleManager().GetRulesForApplyRegion(region)
+		b.originRoleChecker = placement.NewRoleChecker(b.GetBasicCluster(), region.GetPeers(), rules, b.GetSharedConfig().IsWitnessAllowed())
+		b.checkTargetRules = b.originRoleChecker.IsSatisfied(originLeaderStoreID)
 		if len(rules) == 0 {
 			err = errors.Errorf("cannot build operator for region match no placement rule")
 		}
@@ -170,12 +177,28 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 // IsAllowedLeaderTarget checks whether the peer can be selected as a
 // non-forced target leader by the operator builder.
 func IsAllowedLeaderTarget(ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer) bool {
+	return IsAllowedLeaderTargetForPeers(ci, region, nil, peer)
+}
+
+// IsAllowedLeaderTargetForPeers checks a candidate against the complete planned
+// membership. A nil targetPeers map uses the original membership.
+func IsAllowedLeaderTargetForPeers(ci sche.SharedCluster, region *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, peer *metapb.Peer) bool {
+	return NewLeaderTargetChecker(ci, region, targetPeers)(peer)
+}
+
+// NewLeaderTargetChecker prepares a non-forced leader check for one planned
+// membership. It reuses the builder and its role matcher across candidates.
+// Call it again when membership or placement metadata changes. The returned
+// function must not be called concurrently.
+func NewLeaderTargetChecker(ci sche.SharedCluster, region *core.RegionInfo, targetPeers map[uint64]*metapb.Peer) func(*metapb.Peer) bool {
 	b := NewBuilder("check-target-leader", ci, region)
-	if b.err != nil {
-		return false
+	if targetPeers != nil {
+		b.SetPeers(targetPeers)
 	}
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
-	return b.allowLeader(peer, false)
+	return func(peer *metapb.Peer) bool {
+		return b.err == nil && b.allowTargetLeader(peer)
+	}
 }
 
 // AddPeer records an add Peer operation in Builder. If peer.Id is 0, the builder
@@ -405,6 +428,7 @@ func (b *Builder) EnableForceTargetLeader() *Builder {
 
 // Build creates the Operator.
 func (b *Builder) Build(kind OpKind) (*Operator, error) {
+	b.targetRoleChecker = nil
 	var brief string
 
 	if b.err != nil {
@@ -421,6 +445,10 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	}
 	if b.err != nil {
 		return nil, b.err
+	}
+
+	if !b.allowTargetLeader(b.targetPeers[b.currentLeaderStoreID]) {
+		return nil, b.targetLeaderError("cannot create operator: final leader is not allowed", b.targetPeers[b.currentLeaderStoreID])
 	}
 
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
@@ -457,29 +485,58 @@ func (b *Builder) prepareBuild() (string, error) {
 			continue
 		}
 
-		// If the peer id in the target is different from that in the origin,
-		// modify it to the peer id of the origin.
-		if o.GetId() != n.GetId() {
+		restoreWitness := core.IsWitness(o) && !core.IsWitness(n)
+		becomeWitness := !core.IsWitness(o) && core.IsWitness(n)
+		replaceForWitness := !b.useJointConsensus && !core.IsLearner(o) && (restoreWitness || becomeWitness && core.IsLearner(n))
+		id := o.GetId()
+		if replaceForWitness {
+			// Reusing the store requires an ID above the removed peer's tombstone.
+			id = n.GetId()
+			if id <= o.GetId() {
+				var err error
+				if id, _, err = b.AllocID(1); err != nil {
+					return "", err
+				}
+			}
+		}
+		if id != n.GetId() {
 			n = &metapb.Peer{
-				Id:        o.GetId(),
+				Id:        id,
 				StoreId:   o.GetStoreId(),
 				Role:      n.GetRole(),
 				IsWitness: n.GetIsWitness(),
 			}
 		}
 
-		isOriginPeerWitness := core.IsWitness(o)
-		isTargetPeerWitness := core.IsWitness(n)
-		if isOriginPeerWitness && !isTargetPeerWitness {
-			// Demote voter to learner before switch witness to non-witness if needed.
+		if restoreWitness {
+			b.toNonWitness.set(n)
 			if !core.IsLearner(n) {
-				n.Role = metapb.PeerRole_Learner
-				n.IsWitness = true
 				b.toPromoteNonWitness.set(n)
 			}
-			b.toNonWitness.set(n)
-		} else if !isOriginPeerWitness && isTargetPeerWitness {
+			if !core.IsLearner(o) {
+				// Only the demotion or replacement uses the temporary witness learner.
+				learner := &metapb.Peer{Id: id, StoreId: o.GetStoreId(), Role: metapb.PeerRole_Learner, IsWitness: true}
+				if b.useJointConsensus {
+					b.toDemote.set(learner)
+				} else {
+					b.toRemove.set(o)
+					b.toAdd.set(learner)
+				}
+			}
+			continue
+		}
+		if becomeWitness {
+			if replaceForWitness {
+				// The replacement is created as a witness learner.
+				b.toRemove.set(o)
+				b.toAdd.set(n)
+				continue
+			}
 			b.toWitness.set(n)
+			if o.GetRole() != n.GetRole() {
+				// The Raft role changes before the witness switch.
+				n = &metapb.Peer{Id: id, StoreId: o.GetStoreId(), Role: n.GetRole()}
+			}
 		}
 
 		isOriginPeerLearner := core.IsLearner(o)
@@ -501,6 +558,9 @@ func (b *Builder) prepareBuild() (string, error) {
 		// old peer not exists, or target is learner while old one is voter.
 		o := b.originPeers[n.GetStoreId()]
 		if o == nil || (!b.useJointConsensus && !core.IsLearner(o) && core.IsLearner(n)) {
+			if b.toAdd[n.GetStoreId()] != nil {
+				continue // The replacement witness learner is already planned.
+			}
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
 				id, _, err := b.AllocID(1)
@@ -526,10 +586,18 @@ func (b *Builder) prepareBuild() (string, error) {
 
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
 
+	b.targetLeaderStoreIDs = slices.DeleteFunc(b.targetLeaderStoreIDs, func(storeID uint64) bool {
+		return b.unhealthyPeers[storeID] != nil || !b.allowTargetLeader(b.targetPeers[storeID])
+	})
+
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
-		if !b.allowLeader(targetLeader, b.forceTargetLeader) {
-			return "", errors.New("cannot create operator: target leader is not allowed")
+		if !b.allowTargetLeader(targetLeader) {
+			err := b.targetLeaderError("cannot create operator: target leader is not allowed", targetLeader)
+			if errors.Cause(err) != ErrTargetRole || len(b.targetLeaderStoreIDs) == 0 {
+				return "", err
+			}
+			b.targetLeaderStoreID = b.targetLeaderStoreIDs[0]
 		}
 	}
 
@@ -603,7 +671,13 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
-		return kind, errors.New("no valid leader")
+		peers := make([]*metapb.Peer, 0, len(b.targetPeers))
+		for id, peer := range b.targetPeers {
+			if b.expectedRoles[id] != placement.Follower {
+				peers = append(peers, peer)
+			}
+		}
+		return kind, b.targetLeaderError("no valid leader", peers...)
 	}
 
 	// Split `Remove Voter` to `Demote + Remove Learner`
@@ -619,8 +693,23 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 		}
 	}
 
-	if targetLeaderBefore, ok := b.originPeers[b.targetLeaderStoreID]; ok && !core.IsLearner(targetLeaderBefore) {
-		// target leader is a voter in `originPeers`, transfer leader first.
+	if leader := b.toPromoteNonWitness[b.targetLeaderStoreID]; leader != nil {
+		// Restore the target leader's data first so the normal membership change
+		// can promote it and transfer leadership, even if it removes the old leader.
+		if demote := b.toDemote[b.targetLeaderStoreID]; demote != nil {
+			b.steps = append(b.steps, ChangePeerV2Enter{DemoteVoters: []DemoteVoter{{
+				ToStore: demote.GetStoreId(), PeerID: demote.GetId(), IsWitness: true,
+			}}})
+			delete(b.toDemote, b.targetLeaderStoreID)
+		}
+		b.execSwitchToNonWitness(leader)
+		b.toPromote.set(leader)
+		delete(b.toPromoteNonWitness, b.targetLeaderStoreID)
+		kind |= OpRegion
+	}
+
+	if before := b.originPeers[b.targetLeaderStoreID]; before != nil && !core.IsLearner(before) && !core.IsWitness(before) {
+		// The target already has a voting data replica. Transfer leader first.
 		if b.originLeaderStoreID != b.targetLeaderStoreID {
 			b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 			kind |= OpLeader
@@ -650,7 +739,6 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 
 	for _, promote := range b.toPromoteNonWitness.IDs() {
 		peer := b.toPromoteNonWitness[promote]
-		peer.IsWitness = false
 		b.toPromote.set(peer)
 		kind |= OpRegion
 	}
@@ -675,7 +763,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 
 	for _, candidateStoreID := range b.targetPeers.IDs() {
 		peer := b.targetPeers[candidateStoreID]
-		if !b.allowLeader(peer, b.forceTargetLeader) {
+		if !b.allowTargetLeader(peer) {
 			continue
 		}
 		// if role info is given, store having role follower should not be target leader.
@@ -781,6 +869,14 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			b.execPromoteNonWitness(plan.promoteNonWitness)
 		}
 		if plan.witness != nil {
+			if plan.witness.GetStoreId() == b.currentLeaderStoreID {
+				b.setTargetLeaderIfNotExist()
+				if b.targetLeaderStoreID == 0 {
+					return kind, errors.New("cannot switch the current leader to witness without a target leader")
+				}
+				b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
+				kind |= OpLeader
+			}
 			b.execSwitchToWitness(plan.witness)
 			kind |= OpRegion
 		}
@@ -923,6 +1019,58 @@ func (b *Builder) execBatchSwitchWitnesses() {
 	b.steps = append(b.steps, step)
 }
 
+// targetLeaderError classifies complete-role rejection only on a failed build.
+// Store-state failures and other construction errors keep their existing meaning.
+func (b *Builder) targetLeaderError(message string, peers ...*metapb.Peer) error {
+	for _, peer := range peers {
+		if peer != nil && b.allowLeader(peer, b.forceTargetLeader) && !b.allowTargetLeader(peer) {
+			return errors.Wrap(ErrTargetRole, message)
+		}
+	}
+	return errors.New(message)
+}
+
+// allowTargetLeader checks the final membership, separately from temporary
+// leaders used while adding, promoting or removing peers. The initial scope is
+// role-preserving scheduling from a satisfied layout; repair and explicit force
+// operations retain their existing contracts.
+func (b *Builder) allowTargetLeader(peer *metapb.Peer) bool {
+	if peer == nil || !b.allowLeader(peer, b.forceTargetLeader) {
+		return false
+	}
+	if b.forceTargetLeader || b.skipPlacementRulesCheck || len(b.rules) == 0 || (!b.requireTargetRules && !b.checkTargetRules) {
+		return true
+	}
+	if b.targetRoleChecker == nil && b.originRoleChecker.MatchesPeers(b.GetBasicCluster(), b.targetPeers, b.GetSharedConfig().IsWitnessAllowed()) {
+		// A leader-only change can reuse the original matcher. Both matchers use
+		// b.rules; MatchesPeers also rejects changed labels or peer roles.
+		b.targetRoleChecker = b.originRoleChecker
+	}
+	if b.targetRoleChecker == nil {
+		type peerRole struct {
+			role    metapb.PeerRole
+			witness bool
+		}
+		countRoles := func(peers peersMap) map[peerRole]int {
+			counts := make(map[peerRole]int)
+			for _, p := range peers {
+				counts[peerRole{p.GetRole(), p.GetIsWitness()}]++
+			}
+			return counts
+		}
+		// Gradual repairs and witness changes retain the existing admission rules.
+		if !b.requireTargetRules && !maps.Equal(countRoles(b.originPeers), countRoles(b.targetPeers)) {
+			return true
+		}
+		peers := make([]*metapb.Peer, 0, len(b.targetPeers))
+		for _, p := range b.targetPeers {
+			peers = append(peers, p)
+		}
+		b.targetRoleChecker = placement.NewRoleChecker(b.GetBasicCluster(), peers, b.rules, b.GetSharedConfig().IsWitnessAllowed())
+	}
+	return b.targetRoleChecker.IsSatisfied(peer.GetStoreId())
+}
+
 // check if the peer is allowed to become the leader.
 func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	// these peer roles are not allowed to become leader.
@@ -946,6 +1094,12 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 
 	if ignoreClusterLimit {
 		return true
+	}
+
+	// Replacing the original leader may require a transfer before adding the
+	// replacement. Both that interim leader and the final leader must be healthy.
+	if b.unhealthyPeers[peer.GetStoreId()] != nil && b.targetPeers[b.originLeaderStoreID] == nil {
+		return false
 	}
 
 	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
@@ -1082,6 +1236,9 @@ func (b *Builder) planReplace() stepPlan {
 }
 
 func (b *Builder) planReplaceLeaders(best, next stepPlan) stepPlan {
+	if next.add != nil && b.currentPeers[next.add.GetStoreId()] != nil {
+		return best
+	}
 	// Brute force all possible leader combinations to find the best plan.
 	for _, leaderBeforeAdd := range b.currentPeers.IDs() {
 		if !b.allowLeader(b.currentPeers[leaderBeforeAdd], false) {
@@ -1179,6 +1336,9 @@ func (b *Builder) planAddPeer() stepPlan {
 	var best stepPlan
 	for _, i := range b.toAdd.IDs() {
 		a := b.toAdd[i]
+		if b.currentPeers[i] != nil {
+			continue
+		}
 		for _, leader := range b.currentPeers.IDs() {
 			if b.allowLeader(b.currentPeers[leader], false) {
 				best = b.comparePlan(best, stepPlan{add: a, leaderBeforeAdd: leader})

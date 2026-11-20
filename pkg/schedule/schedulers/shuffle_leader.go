@@ -15,6 +15,8 @@
 package schedulers
 
 import (
+	"errors"
+
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core/constant"
@@ -84,17 +86,23 @@ func (s *shuffleLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 	}
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
-	region := filter.SelectOneRegion(cluster.RandFollowerRegions(targetStore.GetID(), s.conf.Ranges), nil, pendingFilter, downFilter)
-	if region == nil {
+	regions := filter.SelectRegions(cluster.RandFollowerRegions(targetStore.GetID(), s.conf.Ranges), pendingFilter, downFilter)
+	if len(regions) == 0 {
 		shuffleLeaderNoFollowerCounter.Inc()
 		return nil, nil
 	}
-	op, err := operator.CreateTransferLeaderOperator(s.GetName(), cluster, region, targetStore.GetID(), []uint64{}, operator.OpAdmin)
-	if err != nil {
-		log.Debug("fail to create shuffle leader operator", errs.ZapError(err))
-		return nil, nil
+	for _, region := range regions {
+		op, err := operator.CreateTransferLeaderOperator(s.GetName(), cluster, region, targetStore.GetID(), nil, operator.OpAdmin)
+		if err != nil {
+			log.Debug("fail to create shuffle leader operator", errs.ZapError(err))
+			if errors.Is(err, operator.ErrTargetRole) {
+				continue
+			}
+			return nil, nil
+		}
+		op.SetPriorityLevel(constant.Low)
+		op.Counters = append(op.Counters, shuffleLeaderNewOperatorCounter)
+		return []*operator.Operator{op}, nil
 	}
-	op.SetPriorityLevel(constant.Low)
-	op.Counters = append(op.Counters, shuffleLeaderNewOperatorCounter)
-	return []*operator.Operator{op}, nil
+	return nil, nil
 }

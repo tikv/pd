@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 )
 
 func checkOperator(re *require.Assertions, op *operator.Operator, sourceScore string, targetScore string) {
@@ -124,6 +125,44 @@ func TestPlacementRule(t *testing.T) {
 	job.Rule = core.LearnerScatter
 	err = sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.Error(err)
+}
+
+func TestBalanceRangeLeaderScatterSkipsRejectedTarget(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetEnablePlacementRules(true)
+	for i, zone := range []string{"A", "B", "A"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone})
+	}
+	re.NoError(tc.GetRuleManager().SetRules([]*placement.Rule{
+		{GroupID: "pd", ID: "default", Role: placement.Leader, Count: 1},
+		{
+			GroupID: "pd", ID: "zone-b-voter", Index: 1, Role: placement.Voter, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"B"}}},
+		},
+		{GroupID: "pd", ID: "other-voter", Index: 2, Role: placement.Voter, Count: 1},
+	}))
+
+	// Store 2 has the fewest leaders but must fill the zone-B voter rule.
+	for i := 1; i <= 9; i++ {
+		tc.AddLeaderRegionWithRange(uint64(i), fmt.Sprintf("a%02d", i), fmt.Sprintf("a%02d", i+1), 1, 2, 3)
+	}
+	tc.AddLeaderRegionWithRange(10, "b01", "b02", 3, 1, 2)
+	region := tc.GetRegion(1)
+	_, err := operator.CreateTransferLeaderOperator("test", tc, region, 2, nil, operator.OpRange)
+	re.ErrorIs(err, operator.ErrTargetRole)
+
+	sc, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader-scatter", "tikv", "1h", "test", "", ""}))
+	re.NoError(err)
+	for _, evictFirstTarget := range []bool{true, false} {
+		tc.SetStoreEvictLeader(2, evictFirstTarget)
+		re.True(sc.IsScheduleAllowed(tc))
+		ops, _ := sc.Schedule(tc, false)
+		re.Len(ops, 1, "evict first target: %t", evictFirstTarget)
+		operatorutil.CheckTransferLeader(re, ops[0], operator.OpRange, 1, 3)
+	}
 }
 
 func TestIsBalanced(t *testing.T) {

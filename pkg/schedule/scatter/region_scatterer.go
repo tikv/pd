@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -674,6 +675,27 @@ func (r *RegionScatterer) scatterWithOptions(region *core.RegionInfo, group stri
 }
 
 func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group string, skipStoreLimit bool, internalScatter bool, state *scatterState) (*operator.Operator, error) {
+	var rejectedMoves map[scatterPeerMove]struct{}
+	for {
+		op, retry, err := r.scatterRegionOnce(region, group, skipStoreLimit, internalScatter, state, rejectedMoves)
+		if retry.to == 0 {
+			return op, err
+		}
+		if rejectedMoves == nil {
+			rejectedMoves = make(map[scatterPeerMove]struct{})
+		}
+		rejectedMoves[retry] = struct{}{}
+	}
+}
+
+type scatterPeerMove struct {
+	from, to uint64
+}
+
+// scatterRegionOnce proposes a different peer layout when placement or leader
+// eligibility rejects its plan. Selecting a different layout does not update
+// the scatter distribution counts or the outcome counters for this attempt.
+func (r *RegionScatterer) scatterRegionOnce(region *core.RegionInfo, group string, skipStoreLimit bool, internalScatter bool, state *scatterState, rejectedMoves map[scatterPeerMove]struct{}) (*operator.Operator, scatterPeerMove, error) {
 	desc := AdminScatterOperatorDesc
 	if internalScatter {
 		desc = InternalScatterOperatorDesc
@@ -698,12 +720,13 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	// After selecting A -> D for {A, B, C}, match {D, B, C} against the
 	// placement rules before checking the next candidate.
 	plannedFit := oldFit
+	var lastPeerMove scatterPeerMove
 
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {
-			return nil, errs.ErrGetSourceStore.FastGenByArgs(fmt.Sprintf("store not found, peer: %v, region id: %d", peer, region.GetID()))
+			return nil, scatterPeerMove{}, errs.ErrGetSourceStore.FastGenByArgs(fmt.Sprintf("store not found, peer: %v, region id: %d", peer, region.GetID()))
 		}
 		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			ordinaryPeers[peer.GetStoreId()] = peer
@@ -722,13 +745,13 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	if internalScatter {
 		leader := region.GetLeader()
 		if leader == nil {
-			return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no source leader store found, region: %v", region))
+			return nil, scatterPeerMove{}, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no source leader store found, region: %v", region))
 		}
 		leaderStoreID := leader.GetStoreId()
 		if !r.isAllowedLeaderSource(leaderStoreID) {
 			peer := region.GetStorePeer(leaderStoreID)
 			if peer == nil {
-				return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("source leader peer not found, region: %v", region))
+				return nil, scatterPeerMove{}, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("source leader peer not found, region: %v", region))
 			}
 			targetPeers[leaderStoreID] = peer
 			selectedStores[leaderStoreID] = struct{}{}
@@ -748,7 +771,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		for _, peer := range peers {
 			failpoint.InjectCall("scatterPeerOrder", &peer)
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
-				if collectLeaderCandidates && allowLeader(oldFit, peer) {
+				if collectLeaderCandidates && allowScatterLeader(oldFit, internalScatter, peer) {
 					leaderCandidateStores = append(leaderCandidateStores, peer.GetStoreId())
 				}
 				// It is both sourcePeer and targetPeer itself, no need to select.
@@ -764,7 +787,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 			}
 			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), plannedRegion, sourceStore, plannedFit)
 			for {
-				newPeer := r.selectNewPeer(context, group, peer, filters, internalScatter)
+				newPeer := r.selectNewPeer(context, group, peer, filters, internalScatter, rejectedMoves)
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
 				// If the selected peer is a peer other than origin peer in this region,
 				// it is considered that the selected peer select itself.
@@ -778,8 +801,9 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 						}
 						moveScatterPeer(plannedRegion, peer.GetId(), newPeer.GetStoreId())
 						plannedFit = nil
+						lastPeerMove = scatterPeerMove{from: peer.GetStoreId(), to: newPeer.GetStoreId()}
 					}
-					if collectLeaderCandidates && allowLeader(oldFit, peer) {
+					if collectLeaderCandidates && allowScatterLeader(oldFit, internalScatter, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
@@ -797,9 +821,53 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		// leader candidates so leader selection still only considers ordinary stores.
 		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
 	}
+	if !scatterPeersValid(region, targetPeers) {
+		scatterFailCounter.Inc()
+		if state == nil {
+			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+			for _, peer := range region.GetPeers() {
+				currentPeers[peer.GetStoreId()] = peer
+			}
+			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
+		}
+		return nil, scatterPeerMove{}, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
+	}
+
 	var readCPUByStore map[uint64]float64
 	readPoolThreadCount := uint64(0)
 	leaderBlockedByReadPoolPressure := false
+	checkTargetRoles := internalScatter && r.cluster.GetSharedConfig().IsPlacementRulesEnabled()
+	// Validate internal scatter leaders against the complete planned membership.
+	// Admin scatter retains its force bypass for placement rules.
+	if checkTargetRoles {
+		rules := r.cluster.GetRuleManager().GetRulesForApplyRegion(region)
+		peers := make([]*metapb.Peer, 0, len(targetPeers))
+		for _, peer := range targetPeers {
+			peers = append(peers, peer)
+		}
+		roles := placement.NewRoleChecker(r.cluster, peers, rules, r.cluster.GetSharedConfig().IsWitnessAllowed())
+		checkLeaderIsolation := slices.ContainsFunc(oldFit.RuleFits, func(fit *placement.RuleFit) bool {
+			return fit.IsolationScore > 0
+		}) && slices.ContainsFunc(rules, func(rule *placement.Rule) bool {
+			return rule.Role == placement.Leader || rule.Role == placement.Follower
+		})
+		plannedLeader := plannedRegion.GetLeader().GetStoreId()
+		// A replan must keep a previously satisfied fit satisfied. Successive
+		// peer safeguards may have used different rule assignments.
+		checkReplannedFit := len(rejectedMoves) > 0 && oldFit.IsSatisfied()
+		allowed := leaderCandidateStores[:0]
+		for _, id := range leaderCandidateStores {
+			if !roles.IsSatisfied(id) {
+				continue
+			}
+			if (checkReplannedFit || checkLeaderIsolation && id != plannedLeader) && !r.scatterLeaderPreservesIsolation(oldFit, plannedRegion, id) {
+				continue
+			}
+			allowed = append(allowed, id)
+		}
+		leaderCandidateStores = allowed
+	}
+	hasPlacementLeader := len(leaderCandidateStores) > 0
 	if internalScatter {
 		var recentMaxProvider storeReadCPURecentMaxProvider
 		if provider, ok := r.cluster.(storeReadCPURecentMaxProvider); ok {
@@ -814,24 +882,25 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
 	targetLeader, leaderStorePickedCount := r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
 	if targetLeader == 0 {
+		if checkTargetRoles && !leaderBlockedByReadPoolPressure {
+			var retry scatterPeerMove
+			if !hasPlacementLeader {
+				// A peer move can invalidate the layout even if it retains the leader.
+				retry = lastPeerMove
+			} else if from, to := region.GetLeader().GetStoreId(), plannedRegion.GetLeader().GetStoreId(); from != to {
+				// The moved leader peer can fit placement while its store rejects leadership.
+				retry = scatterPeerMove{from: from, to: to}
+			}
+			if _, tried := rejectedMoves[retry]; retry.to != 0 && !tried {
+				return nil, retry, nil
+			}
+		}
 		observeNoLeaderTargetMetrics(internalScatter, leaderBlockedByReadPoolPressure)
-		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
+		return nil, scatterPeerMove{}, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
 	}
 	if internalScatter && shouldSkipInternalScatterByBalancedReadCPU(region, targetLeader, readCPUByStore, readPoolThreadCount) {
 		scatterSkipBalancedReadCPUCounter.Inc()
-		return nil, retryInternalScatterLater(InternalScatterRetryBalancedReadCPU, ErrInternalScatterBalancedReadCPU)
-	}
-
-	if !scatterPeersValid(region, targetPeers) {
-		scatterFailCounter.Inc()
-		if state == nil {
-			currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
-			for _, peer := range region.GetPeers() {
-				currentPeers[peer.GetStoreId()] = peer
-			}
-			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
-		}
-		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("scatter changes peer count or roles for region %v", region.GetID()))
+		return nil, scatterPeerMove{}, retryInternalScatterLater(InternalScatterRetryBalancedReadCPU, ErrInternalScatterBalancedReadCPU)
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
@@ -841,7 +910,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		} else {
 			r.Put(targetPeers, targetLeader, group)
 		}
-		return nil, nil
+		return nil, scatterPeerMove{}, nil
 	}
 	createScatterOperator := operator.CreateScatterRegionOperator
 	if internalScatter {
@@ -860,7 +929,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
 		}
 		log.Debug("fail to create scatter region operator", errs.ZapError(err))
-		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("failed to create scatter region operator for region %v", region.GetID()))
+		return nil, scatterPeerMove{}, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("failed to create scatter region operator for region %v", region.GetID()))
 	}
 	if op != nil {
 		scatterSuccessCounter.Inc()
@@ -873,7 +942,24 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		}
 		op.SetPriorityLevel(operatorPriorityLevel)
 	}
-	return op, nil
+	return op, scatterPeerMove{}, nil
+}
+
+// scatterLeaderPreservesIsolation checks the standard fit and per-rule scores
+// for the chosen leader on the complete planned membership.
+func (r *RegionScatterer) scatterLeaderPreservesIsolation(before *placement.RegionFit, planned *core.RegionInfo, storeID uint64) bool {
+	target := planned.Clone(core.WithLeader(planned.GetStorePeer(storeID)))
+	fit := r.cluster.GetRuleManager().FitRegionWithoutCache(r.cluster, target)
+	if !fit.IsSatisfied() || len(fit.RuleFits) != len(before.RuleFits) {
+		return false
+	}
+	for i, old := range before.RuleFits {
+		next := fit.RuleFits[i]
+		if old.Rule.GroupID != next.Rule.GroupID || old.Rule.ID != next.Rule.ID || next.IsolationScore < old.IsolationScore {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
@@ -902,12 +988,22 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 	}
 	regionReadCPU := float64(region.GetReadCPUUsage())
 	readPoolPressureFiltered := false
+	// Prepare once for this complete target membership, not once per candidate.
+	allowLeader := operator.NewLeaderTargetChecker(r.cluster, region, targetPeers)
 	for _, storeID := range candidateStores {
 		peer := targetPeers[storeID]
 		if peer == nil {
 			continue
 		}
 		if r.cluster.GetStore(storeID) == nil {
+			continue
+		}
+		// SetLeader rejects explicit targets with a pending or down peer.
+		if oldPeer := region.GetStorePeer(storeID); oldPeer != nil &&
+			(region.GetPendingPeer(oldPeer.GetId()) != nil || region.GetDownPeer(oldPeer.GetId()) != nil) {
+			continue
+		}
+		if !allowLeader(peer) {
 			continue
 		}
 		pendingReadCPU := regionReadCPU
@@ -918,9 +1014,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 			readPoolPressureFiltered = true
 			continue
 		}
-		if operator.IsAllowedLeaderTarget(r.cluster, region, peer) {
-			filtered = append(filtered, storeID)
-		}
+		filtered = append(filtered, storeID)
 	}
 	return filtered, len(filtered) == 0 && readPoolPressureFiltered
 }
@@ -981,23 +1075,21 @@ func (r *RegionScatterer) isAllowedLeaderSource(storeID uint64) bool {
 		Len() > 0
 }
 
-func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
-	switch peer.GetRole() {
-	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
+// Internal scatter does not fix a peer to its original RuleFit: complete target
+// matching decides which rule can own each peer. Admin scatter skips that
+// matching, so it keeps the original Leader/Voter RuleFit requirement.
+func allowScatterLeader(fit *placement.RegionFit, internalScatter bool, peer *metapb.Peer) bool {
+	if core.IsLearner(peer) || peer.GetRole() == metapb.PeerRole_DemotingVoter || peer.IsWitness {
 		return false
 	}
-	if peer.IsWitness {
-		return false
+	if internalScatter {
+		return true
 	}
 	peerFit := fit.GetRuleFit(peer.GetId())
 	if peerFit == nil || peerFit.Rule == nil || peerFit.Rule.IsWitness {
 		return false
 	}
-	switch peerFit.Rule.Role {
-	case placement.Voter, placement.Leader:
-		return true
-	}
-	return false
+	return peerFit.Rule.Role == placement.Voter || peerFit.Rule.Role == placement.Leader
 }
 
 // moveScatterPeer updates only the selected peer in a request-owned layout.
@@ -1050,7 +1142,7 @@ func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.
 // 1. found the max pick count and the min pick count.
 // 2. if max pick count equals min pick count, it means all store picked count are some, return the origin peer.
 // 3. otherwise, select the store which pick count is the min pick count and pass all filter.
-func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group string, peer *metapb.Peer, filters []filter.Filter, internalScatter bool) *metapb.Peer {
+func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group string, peer *metapb.Peer, filters []filter.Filter, internalScatter bool, rejectedMoves map[scatterPeerMove]struct{}) *metapb.Peer {
 	stores := r.cluster.GetStores()
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
@@ -1077,6 +1169,9 @@ func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group s
 		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
 		// could be selected as candidate.
 		if storeCount >= maxStoreTotalCount && maxStoreTotalCount != minStoreTotalCount {
+			continue
+		}
+		if _, rejected := rejectedMoves[scatterPeerMove{from: peer.GetStoreId(), to: store.GetID()}]; rejected {
 			continue
 		}
 		if !filter.Target(r.cluster.GetSharedConfig(), store, filters) {
