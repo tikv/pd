@@ -342,39 +342,37 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 	for i := 0; i < len(ops); i++ {
 		op := ops[i]
 		desc := op.Desc()
-		isMerge := false
+		var partner *Operator
 		if op.HasRelatedMergeRegion() {
-			if i+1 >= len(ops) {
+			remaining := ops[i:]
+			if len(remaining) < 2 {
 				// should not be here forever
 				log.Error("orphan merge operators found", zap.String("desc", desc), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("orphan operator found")))
 				return added
 			}
-			if !ops[i+1].HasRelatedMergeRegion() {
+			partner = remaining[1]
+			if !partner.HasRelatedMergeRegion() {
 				log.Error("merge operator should be paired", zap.String("desc",
-					ops[i+1].Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
+					partner.Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
 				return added
 			}
-			isMerge = true
+			i++
 		}
 		if pass, reason := oc.checkAddOperator(false, op); !pass {
 			_ = op.Cancel(reason)
 			oc.buryOperator(op)
-			if isMerge {
-				// Merge operation have two operators, cancel them all
-				i++
-				next := ops[i]
-				_ = next.Cancel(reason)
-				oc.buryOperator(next)
+			if partner != nil {
+				_ = partner.Cancel(reason)
+				oc.buryOperator(partner)
 			}
 			continue
 		}
 
-		if isMerge {
+		if partner != nil {
 			// count two merge operators as one, so wopStatus.ops[desc] should
 			// not be updated here
 			// TODO: call checkAddOperator ...
-			oc.wop.PutMergeOperators([]*Operator{op, ops[i+1]})
-			i++
+			oc.wop.PutMergeOperators([]*Operator{op, partner})
 			added++
 		} else {
 			oc.wop.PutOperator(op)
