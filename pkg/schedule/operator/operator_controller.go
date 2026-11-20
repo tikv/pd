@@ -174,7 +174,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 				oc.RemoveOperator(op, StaleStatus)
 				return
 			}
-			oc.SendScheduleCommand(region, step, source)
+			oc.dispatchStep(region, step, source, op.drain)
 		case SUCCESS:
 			oc.finishRecovery(op, region)
 			if op.ContainNonWitnessStep() {
@@ -572,6 +572,9 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 				zap.Reflect("new", op))
 			return false
 		}
+		if op.drain != nil && oldOp.Kind()&OpHotRegion != 0 {
+			op.drain.command.Store(drainReplacedHot)
+		}
 		oc.counts.dec(oldOp.SchedulerKind())
 		oc.ack(oldOp)
 		if oldOp.HasRelatedMergeRegion() {
@@ -631,7 +634,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 				oc.RemoveOperator(op, StaleStatus)
 				return false
 			}
-			oc.SendScheduleCommand(region, step, DispatchFromCreate)
+			oc.dispatchStep(region, step, DispatchFromCreate, op.drain)
 		}
 	}
 
@@ -852,10 +855,17 @@ func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 
 // SendScheduleCommand sends a command to the region.
 func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, source string) {
+	oc.dispatchStep(region, step, source, nil)
+}
+
+func (oc *Controller) dispatchStep(region *core.RegionInfo, step OpStep, source string, drain *plannedDeparture) {
 	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
 	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
 		return
+	}
+	if drain != nil && drain.stillLeads(region) {
+		drain.command.CompareAndSwap(0, drainIssued)
 	}
 	log.Info("send schedule command",
 		zap.Uint64("region-id", region.GetID()),

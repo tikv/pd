@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -43,6 +44,17 @@ type departure struct {
 	process                                         int64
 	rate                                            float64
 }
+
+type plannedDeparture struct {
+	departure
+	hadOrigin bool // an evicted or spent origin must not be replaced by this temporary host
+	command   atomic.Uint32
+}
+
+const (
+	drainIssued      uint32 = iota + 1
+	drainReplacedHot        // a confirmation could belong to the already issued hot command
+)
 
 func (d departure) matches(r *core.RegionInfo, home *core.StoreInfo) bool {
 	if r == nil || !home.RestartedFrom(d.process) || r.GetID() != d.id || r.GetTerm() <= 1 ||
@@ -74,7 +86,25 @@ type transferSample struct {
 	term uint64
 }
 
+const maxRecoveryRegions = 8192
+
+// Only the exact confirming heartbeat can carry the cost to another transfer.
+type handoffReport struct {
+	term, peer, store, version, confVer, start, end uint64
+}
+
+func identifyHandoff(r *core.RegionInfo) handoffReport {
+	e, i := r.GetRegionEpoch(), r.GetInterval()
+	return handoffReport{r.GetTerm(), r.GetLeader().GetId(), r.GetLeader().GetStoreId(), e.GetVersion(), e.GetConfVer(), i.GetStartTimestamp(), i.GetEndTimestamp()}
+}
+
+type handoffCost struct {
+	report handoffReport
+	rate   float64
+}
+
 type roundRecords struct {
+	handoffs cache.Cache // Region ID -> cost on its last confirmed long heartbeat
 	pending  map[*Operator]transferSample
 	draining map[uint64]int64
 	yielded  map[uint64]bool
@@ -127,6 +157,7 @@ func (oc *Controller) UpdateRecoveryRound(round RecoveryRound, store uint64, pro
 			return nil
 		}
 		s.roundRecords = roundRecords{
+			handoffs: cache.NewCache(maxRecoveryRegions, cache.LRUCache),
 			draining: make(map[uint64]int64), yielded: make(map[uint64]bool),
 			history: make(map[uint64]departure),
 			index:   btree.NewG(16, byDirection),
@@ -147,14 +178,20 @@ func (s *leaderRecovery) forget(id uint64) {
 	}
 }
 
+func (s *leaderRecovery) consume(id uint64) {
+	if s.history[id].id != 0 {
+		s.forget(id)
+		s.history[id] = departure{}
+	}
+}
+
 // Keep the first retained origin. A Store which temporarily hosted a Region
 // during this roll must not learn it back from the return trip.
 func (s *leaderRecovery) remember(d departure) {
 	if _, known := s.history[d.id]; known {
 		return
 	}
-	const capacity = 8192
-	if len(s.history) == capacity {
+	if len(s.history) == maxRecoveryRegions {
 		cold, ok := s.coldest.Min()
 		if !ok || d.rate <= cold.rate {
 			return
@@ -267,6 +304,37 @@ func readCost(r *core.RegionInfo) float64 {
 	return math.Inf(1)
 }
 
+// reservationCost is used for other transfers' possible influence only. A
+// return candidate and its default still require measured current read rates.
+func (s *leaderRecovery) reservationCost(r *core.RegionInfo) float64 {
+	if bound, valid := r.LongIntervalReadBound(); valid {
+		if h, ok := s.handoffs.Peek(r.GetID()); ok {
+			previous := h.(handoffCost)
+			if previous.report == identifyHandoff(r) {
+				return max(previous.rate, bound)
+			}
+		}
+	}
+	return readCost(r)
+}
+
+// A new Leader's first report can include its time as a follower. For a
+// confirmed direct transfer, retain both the admitted rate and the greatest
+// read rate the reported counter could cover in a valid reporting window.
+func (v transferSample) handoffBound(op *Operator, r *core.RegionInfo) (float64, bool) {
+	bound, ok := r.LongIntervalReadBound()
+	if !ok || r.GetTerm() <= 1 || r.GetTerm()-1 != v.term {
+		return 0, false
+	}
+	step, ok := primary(op)
+	e, initial := r.GetRegionEpoch(), op.RegionEpoch()
+	if !ok || step.FromStore == r.GetLeader().GetStoreId() || !step.IsFinish(r) || e == nil || initial == nil ||
+		e.GetVersion() != initial.GetVersion() || e.GetConfVer() != initial.GetConfVer() {
+		return 0, false
+	}
+	return max(v.rate, bound), true
+}
+
 type recoveryChoice struct {
 	siblings [2]*Operator // the two independent Raft commands in an exchange
 	partner  *departure   // original Leader of the other eviction
@@ -300,29 +368,33 @@ func (oc *Controller) loadBounds(st *core.StoreInfo, p *recoveryChoice) (readBou
 		b.low += v.low
 		b.high += v.high
 	}
-	add := func(op *Operator, rate float64) {
+	add := func(op *Operator, sample transferSample) {
 		if op.recovery == p {
 			return
 		}
-		op.leaderReadChanges(max(rate, readCost(oc.cluster.GetRegion(op.RegionID()))), 0, func(id uint64, delta float64) {
+		r := oc.cluster.GetRegion(op.RegionID())
+		rate, ok := sample.handoffBound(op, r)
+		if !ok {
+			rate = max(sample.rate, oc.recovery.reservationCost(r))
+		}
+		op.leaderReadChanges(rate, 0, func(id uint64, delta float64) {
 			if id == st.GetID() {
 				b.add(delta)
 			}
 		})
 	}
 	for op, sample := range oc.recovery.pending {
-		add(op, sample.rate)
+		add(op, sample)
 	}
 	for _, op := range p.extra {
 		if _, tracked := oc.recovery.pending[op]; !tracked && op.Status() == CREATED {
-			add(op, 0)
+			add(op, transferSample{})
 		}
 	}
-	if math.IsInf(b.low, 0) || math.IsInf(b.high, 0) {
-		return readBounds{}, false
-	}
+	// Unmeasured outgoing work can reduce the load to zero. Unmeasured
+	// incoming work leaves the upper bound open, but the lower bound survives.
 	b = readBounds{max(0, b.low) / w, b.high / w}
-	return b, b.low <= math.MaxFloat64 && b.high <= math.MaxFloat64
+	return b, b.low <= math.MaxFloat64 && b.low <= b.high
 }
 
 func eligibleReturnTarget(c sche.SchedulerCluster, r *core.RegionInfo, to uint64) bool {
@@ -371,6 +443,9 @@ func (oc *Controller) fits(p *recoveryChoice) bool {
 		}
 	}
 	if p.partner != nil {
+		if d, known := s.history[p.ordinary]; known && d.id == 0 {
+			return false
+		}
 		for _, id := range []uint64{p.home.id, p.ordinary} {
 			if op := oc.GetOperator(id); op != nil && op.recovery != p {
 				return false
@@ -439,13 +514,36 @@ func (c readComparison) allows(aRate, bRate float64, p *recoveryChoice) bool {
 }
 
 func noWiderGap(lo, hi, ordinary, candidate float64) bool {
-	for _, gap := range [...]float64{lo, hi} {
-		limit := math.Abs(gap - ordinary)
-		if !(limit <= math.MaxFloat64 && math.Abs(gap-candidate) <= limit) {
-			return false
-		}
+	if !(lo <= hi && math.Abs(ordinary) <= math.MaxFloat64 && math.Abs(candidate) <= math.MaxFloat64) {
+		return false
 	}
-	return true
+	if ordinary == candidate {
+		return true
+	}
+	// The midpoint separates the gaps that prefer one allocation from those
+	// that prefer the other. Only the endpoint on the ordinary side matters.
+	if candidate < ordinary {
+		lo, ordinary, candidate = -hi, -ordinary, -candidate
+	}
+	if lo >= candidate {
+		return true
+	}
+	if lo <= ordinary {
+		return false
+	}
+	left, right := lo-ordinary, candidate-lo
+	if left != right {
+		return left > right
+	}
+	// Recover each subtraction's rounding error when distinct distances round
+	// to a tie. FastTwoSum needs the larger-magnitude summand first.
+	residual := func(a, b float64) float64 {
+		if math.Abs(a) < math.Abs(b) {
+			a, b = b, a
+		}
+		return b - (left - a)
+	}
+	return residual(lo, -ordinary) >= residual(candidate, -lo)
 }
 
 // PreferReturn checks the actual ordinary candidate and attaches its comparison
@@ -499,13 +597,17 @@ func (oc *Controller) PlanEvictions(c sche.SchedulerCluster, ops []*Operator) {
 		if from == nil || r == nil || s.draining[t.FromStore] <= 0 || s.draining[t.FromStore] != from.GetMeta().GetStartTimestamp() || r.GetLeader().GetStoreId() != t.FromStore {
 			continue
 		}
-		rate, valid := r.ReadKeysPerSecond()
-		if !valid || r.GetTerm() == 0 || int64(r.GetInterval().GetEndTimestamp()) < s.draining[t.FromStore] {
+		origin, known := s.history[r.GetID()]
+		rate := readCost(r)
+		if (!known && math.IsInf(rate, 1)) || r.GetTerm() == 0 || int64(r.GetInterval().GetEndTimestamp()) < s.draining[t.FromStore] {
 			continue
 		}
-		op.drain = &departure{round: s.ID, id: r.GetID(), home: t.FromStore, peer: r.GetLeader().GetId(), process: s.draining[t.FromStore], term: r.GetTerm(), version: r.GetRegionEpoch().GetVersion(), rate: rate}
-		if d, ok := s.history[r.GetID()]; ok && d.matches(r, oc.cluster.GetStore(d.home)) {
-			former[r.GetID()] = d
+		op.drain = &plannedDeparture{
+			departure: departure{round: s.ID, id: r.GetID(), home: t.FromStore, peer: r.GetLeader().GetId(), process: s.draining[t.FromStore], term: r.GetTerm(), version: r.GetRegionEpoch().GetVersion(), rate: rate},
+			hadOrigin: known,
+		}
+		if known && !math.IsInf(rate, 1) && origin.matches(r, oc.cluster.GetStore(origin.home)) {
+			former[r.GetID()] = origin
 		}
 	}
 	s.Unlock()
@@ -564,7 +666,7 @@ func (oc *Controller) PlanEvictions(c sche.SchedulerCluster, ops []*Operator) {
 			if _, exists := former[other.RegionID()]; exists {
 				continue
 			}
-			p := &recoveryChoice{round: round, cluster: c, home: d, ordinary: other.RegionID(), other: t.ToStore, partner: other.drain}
+			p := &recoveryChoice{round: round, cluster: c, home: d, ordinary: other.RegionID(), other: t.ToStore, partner: &other.drain.departure}
 			if !allowed[j] || !base.allows(other.drain.rate, op.drain.rate, p) || !eligibleReturnTarget(c, regions[j], t.ToStore) {
 				continue
 			}
@@ -623,12 +725,15 @@ func (oc *Controller) trackTransfer(op *Operator) {
 	if op.IsEnd() {
 		return
 	}
+	if op.Kind()&OpHotRegion != 0 {
+		s.consume(op.RegionID())
+	}
 	for _, step := range op.steps {
 		switch t := step.(type) {
 		case TransferLeader:
 			if _, ok := s.pending[op]; !ok {
 				r := oc.cluster.GetRegion(op.RegionID())
-				sample := transferSample{rate: readCost(r)}
+				sample := transferSample{rate: s.reservationCost(r)}
 				if r != nil && r.GetLeader().GetStoreId() == t.FromStore {
 					sample.term = r.GetTerm()
 				}
@@ -688,10 +793,9 @@ func (oc *Controller) canSendRecovery(op *Operator, region *core.RegionInfo) boo
 		return false
 	}
 	if !p.sent[0] && !p.sent[1] {
-		s.forget(p.home.id)
 		// The first leg claims the origin for both commands, whichever sends
 		// first. Its spent ID stays in the same bounded history until finish.
-		s.history[p.home.id] = departure{}
+		s.consume(p.home.id)
 	}
 	p.sent[slot] = true
 	return true
@@ -719,16 +823,12 @@ func (oc *Controller) finishRecovery(op *Operator, r *core.RegionInfo) {
 	if r != nil && op.Status() == SUCCESS && op.steps[len(op.steps)-1].IsFinish(r) {
 		actual = r.GetLeader().GetStoreId()
 	}
-	received := readCost(r)
-	if actual != 0 && len(op.steps) == 1 && r.GetTerm() > 1 && r.GetTerm()-1 == admitted.term &&
-		r.ReportedIdleOverLongInterval() && op.RegionEpoch() != nil &&
-		r.GetRegionEpoch() != nil && r.GetRegionEpoch().GetVersion() == op.RegionEpoch().GetVersion() &&
-		r.GetRegionEpoch().GetConfVer() == op.RegionEpoch().GetConfVer() {
-		// This confirmation includes time as a follower. Keep the admitted
-		// cost and settle on the actual receiver without inventing extra reads.
-		received = 0
+	rate := max(admitted.rate, s.reservationCost(r))
+	if bound, ok := admitted.handoffBound(op, r); actual != 0 && ok {
+		rate = bound
+		s.handoffs.Put(r.GetID(), handoffCost{identifyHandoff(r), rate})
 	}
-	op.leaderReadChanges(max(admitted.rate, received), actual, func(id uint64, delta float64) {
+	op.leaderReadChanges(rate, actual, func(id uint64, delta float64) {
 		st := oc.cluster.GetStore(id)
 		if st == nil {
 			return
@@ -753,15 +853,28 @@ func (oc *Controller) finishRecovery(op *Operator, r *core.RegionInfo) {
 		buckets[end] = b
 	})
 	d := op.drain
-	if actual == 0 || d == nil || op.recovery != nil || s.ID != d.round || actual == d.home ||
+	if actual == 0 || d == nil || op.recovery != nil || d.command.Load() != drainIssued || s.ID != d.round || actual == d.home ||
 		r.GetTerm() <= 1 || r.GetTerm()-1 != d.term || r.GetRegionEpoch().GetVersion() != d.version {
 		return
 	}
 	// A late completion for a replaced process cannot establish a new origin.
 	from := oc.cluster.GetStore(d.home)
-	if from != nil && from.GetMeta().GetStartTimestamp() == d.process {
-		h := *d
-		h.successor = actual
-		s.remember(h)
+	if from == nil || from.GetMeta().GetStartTimestamp() != d.process {
+		return
 	}
+	h := d.departure
+	if origin, known := s.history[d.id]; known {
+		// Follow only adjacent, confirmed planned drains. Any intervening
+		// Leader change through another scheduler breaks this chain.
+		if d.term <= 1 || origin.term != d.term-1 || origin.successor != d.home || origin.version != d.version || actual == origin.home {
+			return
+		}
+		s.forget(d.id)
+		h = origin
+		h.term = d.term
+	} else if d.hadOrigin {
+		return
+	}
+	h.successor = actual
+	s.remember(h)
 }

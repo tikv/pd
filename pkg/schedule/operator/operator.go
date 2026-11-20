@@ -96,7 +96,7 @@ type Operator struct {
 	// (see SetStoreHealthCheck), similar to additionalInfos.
 	needStoreHealthCheck atomic.Bool
 	recovery             *recoveryChoice
-	drain                *departure // captured at scheduling, before publication
+	drain                *plannedDeparture // captured at scheduling, before publication
 }
 
 // SetStoreHealthCheck marks whether the operator's in-progress steps should

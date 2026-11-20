@@ -825,12 +825,19 @@ func (r *RegionInfo) ReadKeysPerSecond() (float64, bool) {
 	return float64(r.GetKeysRead()) / float64(span), true
 }
 
-// ReportedIdleOverLongInterval recognizes an actual zero counter on a Leader's
-// first heartbeat after an extended period as follower.
-func (r *RegionInfo) ReportedIdleOverLongInterval() bool {
+// LongIntervalReadBound bounds the average over any valid reporting window
+// contained in this long interval, even if all keys were read in its shortest
+// possible window. It is an upper bound for reservations, not a current rate.
+func (r *RegionInfo) LongIntervalReadBound() (float64, bool) {
+	if r == nil || r.invalidReadFlow {
+		return 0, false
+	}
 	i := r.GetInterval()
 	start, end := i.GetStartTimestamp(), i.GetEndTimestamp()
-	return !r.invalidReadFlow && r.readKeys == 0 && start > 0 && end > start && end-start > statsReportMaxInterval
+	if start == 0 || end <= start || end-start <= statsReportMaxInterval {
+		return 0, false
+	}
+	return float64(r.readKeys) / statsReportMinInterval, true
 }
 
 // WithinRanges reports whether a scheduling range contains the entire Region.

@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/types"
 )
@@ -45,7 +46,9 @@ type recoveryTest struct {
 
 func newRecoveryTest(t *testing.T) *recoveryTest {
 	tc := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
-	x := &recoveryTest{T: t, tc: tc, Controller: NewController(t.Context(), tc.GetBasicCluster(), tc.GetSharedConfig(), nil), now: time.Now().Unix(), storeInterval: 10}
+	stream := hbstream.NewTestHeartbeatStreams(t.Context(), tc.GetBasicCluster(), false)
+	t.Cleanup(stream.Close)
+	x := &recoveryTest{T: t, tc: tc, Controller: NewController(t.Context(), tc.GetBasicCluster(), tc.GetSharedConfig(), stream), now: time.Now().Unix(), storeInterval: 10}
 	for _, s := range []uint64{1, 8, 12} {
 		tc.AddLeaderStore(s, 1)
 		x.store(s, x.now-120, 100)
@@ -86,8 +89,10 @@ func (x *recoveryTest) evacuate(id, successor, rate uint64) *core.RegionInfo {
 	r := x.report(id, 1, 7, rate, x.now-40)
 	op := transfer(r, types.EvictLeaderScheduler.String(), successor, OpLeader)
 	x.PlanEvictions(x.tc, []*Operator{op})
+	require.True(x, x.AddOperator(op))
 	r = x.report(id, successor, 8, rate, x.now-30)
-	x.finish(op, r)
+	x.Dispatch(r, DispatchFromHeartBeat, func(uint64) {})
+	require.Equal(x, SUCCESS, op.Status())
 	return r
 }
 
@@ -104,7 +109,7 @@ func (g *gatedHeat) LeaderReturnEligibility(r []*core.RegionInfo, degree int) []
 
 func TestRecoveryRoundFencesRetriesAndDispatch(t *testing.T) {
 	x := newRecoveryTest(t)
-	x.evacuate(1, 8, 20)
+	x.evacuate(1, 12, 20)
 	require.Empty(t, x.recovery.history, "untagged eviction")
 	x.drain(1)
 	x.drain(1)
@@ -167,6 +172,98 @@ func TestReturnRechecksSamplesAndIncomingHotOperator(t *testing.T) {
 	require.Same(t, ordinary, x.BestReturn(x.tc, x.cluster.GetStore(8), x.cluster.GetStore(1), ordinary, nil, func(*core.RegionInfo) bool { return true }))
 }
 
+func TestReturnAfterConsecutivePlannedDrains(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                         string
+		planSecond, longReport, election, evictHistory, alreadyMoved bool
+		wantReturn                                                   bool
+	}{
+		{name: "two confirmed drains", planSecond: true, wantReturn: true},
+		{name: "no fresh read rate on temporary host", planSecond: true, longReport: true, wantReturn: true},
+		{name: "hot scheduler changes leader"},
+		{name: "intervening election", planSecond: true, election: true},
+		{name: "leader already changed before dispatch", planSecond: true, alreadyMoved: true},
+		{name: "origin evicted before confirmation", planSecond: true, evictHistory: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			x := newRecoveryTest(t)
+			x.drain(1)
+			middle := x.evacuate(101, 12, 40)
+			x.store(1, x.now-20, 10)
+			x.drain(12)
+			if tc.election {
+				middle = x.report(101, 12, middle.GetTerm()+2, 12, x.now)
+			}
+			if tc.longReport {
+				middle = middle.Clone(core.SetReportInterval(uint64(x.now-501), uint64(x.now)))
+				x.cluster.CheckAndPutRegion(middle)
+			}
+			op := NewOperator("evict", "", 101, middle.GetRegionEpoch(), OpLeader, 1,
+				TransferLeader{FromStore: 12, ToStore: 1, ToStores: []uint64{1, 8}})
+			if tc.planSecond {
+				x.PlanEvictions(x.tc, []*Operator{op})
+			} else {
+				op = transfer(middle, "move-hot-read-leader", 8, OpHotRegion|OpLeader)
+			}
+			if tc.alreadyMoved {
+				x.report(101, 8, middle.GetTerm()+1, 25, x.now)
+			}
+			require.True(t, x.AddOperator(op))
+			if tc.evictHistory {
+				x.recovery.forget(101)
+			}
+			x.Dispatch(x.report(101, 8, middle.GetTerm()+1, 25, x.now), DispatchFromHeartBeat, func(uint64) {})
+			require.Equal(t, SUCCESS, op.Status())
+			if tc.evictHistory {
+				require.NotContains(t, x.recovery.history, uint64(101), "the temporary host must not become the origin")
+			}
+			x.now += 20
+			x.store(1, x.now-40, 10)
+			x.store(8, x.now-140, 100)
+			r := x.report(101, 8, middle.GetTerm()+1, 25, x.now)
+			ordinary := x.report(102, 8, 7, 5, x.now)
+			got := x.BestReturn(x.tc, x.cluster.GetStore(8), x.cluster.GetStore(1), ordinary, nil, func(*core.RegionInfo) bool { return true })
+			if tc.wantReturn {
+				require.Same(t, r, got)
+				require.Equal(t, 40.0, x.recovery.history[101].rate)
+				back := transfer(r, "balance", 1, OpLeader)
+				x.store(1, x.now-40, 110)
+				require.False(t, x.PreferReturn(x.tc, back, ordinary.GetID(), nil), "the recovered Store is busier")
+				x.store(1, x.now-40, 10)
+				require.True(t, x.PreferReturn(x.tc, back, ordinary.GetID(), nil))
+				require.True(t, x.AddOperator(back))
+				x.Dispatch(x.report(101, 1, r.GetTerm()+1, 25, x.now), DispatchFromHeartBeat, func(uint64) {})
+				require.Equal(t, SUCCESS, back.Status())
+				require.Equal(t, departure{}, x.recovery.history[101], "return consumed the original record")
+			} else {
+				require.Same(t, ordinary, got)
+			}
+		})
+	}
+}
+
+func TestPlannedDrainReplacingAHotTransferCannotSeedAReturn(t *testing.T) {
+	for _, source := range []uint64{1, 12} {
+		x := newRecoveryTest(t)
+		x.drain(1)
+		r := x.report(101, 1, 7, 40, x.now-40)
+		if source == 12 {
+			r = x.evacuate(101, 12, 40)
+			x.drain(12)
+		}
+		drain := transfer(r, "evict", 8, OpLeader)
+		drain.SetPriorityLevel(constant.Urgent)
+		x.PlanEvictions(x.tc, []*Operator{drain})
+		hot := transfer(r, "move-hot-read-leader", 8, OpHotRegion|OpLeader)
+		require.True(t, x.AddOperator(hot))
+		require.Zero(t, x.recovery.history[101].id, "once hot scheduling takes the Region, its origin is spent")
+		require.True(t, x.AddOperator(drain))
+		x.Dispatch(x.report(101, 8, r.GetTerm()+1, 40, x.now), DispatchFromHeartBeat, func(uint64) {})
+		require.Equal(t, SUCCESS, drain.Status())
+		require.Zero(t, x.recovery.history[101].id, "a shared destination does not establish a cache return")
+	}
+}
+
 func TestEvictionSwapsWithinBatchAndFollowsActualReceiver(t *testing.T) {
 	x := newRecoveryTest(t)
 	x.drain(1)
@@ -174,8 +271,9 @@ func TestEvictionSwapsWithinBatchAndFollowsActualReceiver(t *testing.T) {
 	r := x.report(1, 1, 7, 40, x.now-40)
 	ev := NewOperator("evict", "", r.GetID(), r.GetRegionEpoch(), OpLeader, 1, TransferLeader{FromStore: 1, ToStore: 8, ToStores: []uint64{8, 12}})
 	x.PlanEvictions(x.tc, []*Operator{ev})
+	require.True(t, x.AddOperator(ev))
 	r = x.report(1, 12, 8, 40, x.now-30)
-	x.finish(ev, r)
+	x.Dispatch(r, DispatchFromHeartBeat, func(uint64) {})
 	require.Equal(t, uint64(12), x.recovery.history[1].successor)
 	x.store(1, x.now-20, 40)
 	x.store(8, x.now-120, 100)
@@ -201,6 +299,9 @@ func TestEvictionSwapsWithinBatchAndFollowsActualReceiver(t *testing.T) {
 	x.operators.Delete(r.GetID())
 	require.Nil(t, batch()[0].recovery, "if only the companion succeeds it adds reads to the Store shedding heat")
 	other = x.report(2, 12, 3, 0, x.now)
+	x.recovery.history[other.GetID()] = departure{}
+	require.Nil(t, batch()[0].recovery, "a spent origin cannot be redirected as the companion either")
+	delete(x.recovery.history, other.GetID())
 	ops = batch()
 	require.NotNil(t, ops[0].recovery)
 	x.operators.Store(r.GetID(), hot)
@@ -228,7 +329,7 @@ func TestEvictionSwapsWithinBatchAndFollowsActualReceiver(t *testing.T) {
 	require.Same(t, other, x.BestReturn(x.tc, x.cluster.GetStore(1), x.cluster.GetStore(12), other, nil, func(*core.RegionInfo) bool { return true }), "temporary host must not pull the same Region back")
 }
 
-func TestEmptyHandoffReportPreservesAdmissionCost(t *testing.T) {
+func TestHandoffPreservesAdmissionAndReportedReadBound(t *testing.T) {
 	for _, tt := range []struct {
 		name                                            string
 		admitted, received                              uint64
@@ -241,7 +342,8 @@ func TestEmptyHandoffReportPreservesAdmissionCost(t *testing.T) {
 		{"unknown admission", 0, 0, 0, 301, 1, 8, false},
 		{"split during handoff", 1, 0, 10, 301, 2, 8, false},
 		{"another election intervened", 1, 0, 10, 301, 1, 9, false},
-		{"unmeasured nonzero reads", 1, 1, 10, 301, 1, 8, false},
+		{"one key over five minutes", 1, 1, 10, 301, 1, 8, true},
+		{"long report may contain a burst", 1, 600, 10, 301, 1, 8, false},
 		{"missing reporting interval", 1, 0, 10, 0, 1, 8, false},
 		{"heartbeat too short", 1, 0, 10, 1, 1, 8, false},
 		{"invalid counter on new leader", 1, core.ImpossibleFlowSize, 10, 493, 1, 8, false},
@@ -273,6 +375,73 @@ func TestEmptyHandoffReportPreservesAdmissionCost(t *testing.T) {
 			x.finishRecovery(op, receiver)
 			require.Equal(t, tt.allow, canReturn())
 		})
+	}
+}
+
+func TestUnknownTransferOnlyBlocksTheUnsafeDirection(t *testing.T) {
+	x := newRecoveryTest(t)
+	x.drain(1)
+	home := x.evacuate(1, 8, 40)
+	x.store(1, x.now-20, 40)
+	x.store(8, x.now-120, 100)
+	ordinary := x.report(2, 8, 7, 10, x.now)
+	from := x.report(3, 12, 7, 0, x.now).Clone(core.SetReportInterval(0, 0))
+	x.cluster.CheckAndPutRegion(from)
+	for _, to := range []uint64{8, 1} {
+		op := transfer(from, "balance", to, OpLeader)
+		x.observeRecovery(op)
+		got := x.PreferReturn(x.tc, transfer(home, "balance", 1, OpLeader), ordinary.GetID(), nil)
+		require.Equal(t, to == 8, got, "unmeasured traffic entering Store %d", to)
+		x.finishRecovery(op, nil)
+	}
+	require.False(t, noWiderGap(1, math.Inf(1), math.SmallestNonzeroFloat64, 2),
+		"a rounded distance must not turn a worse allocation into a tie")
+	require.True(t, noWiderGap(math.Inf(-1), 1, 2, 0))
+}
+
+// A former follower can immediately become the source of another transfer.
+// Only the confirmed reporting interval carries the previous Leader's cost.
+func TestConsecutiveTransfersCarryConfirmedReadCost(t *testing.T) {
+	for _, initial := range []uint64{0, 40} {
+		x := newRecoveryTest(t)
+		x.drain(1)
+		source := x.report(1863, 12, 7, initial, x.now)
+		first := transfer(source, "balance", 8, OpLeader)
+		x.observeRecovery(first)
+		require.True(t, first.Start())
+
+		end := uint64(x.now)
+		middle := core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+			Region: source.GetMeta(), Leader: source.GetStorePeer(8), Term: 8,
+			Interval: &pdpb.TimeInterval{StartTimestamp: end - 493, EndTimestamp: end},
+		}, 0)
+		x.cluster.CheckAndPutRegion(middle)
+		bounds, ok := x.loadBounds(x.cluster.GetStore(8), &recoveryChoice{})
+		require.True(t, ok)
+		require.Equal(t, 100+float64(initial), bounds.high, "confirmation already visible before dispatch")
+		require.Nil(t, first.Check(middle))
+		x.finishRecovery(first, middle)
+
+		second := transfer(middle, "balance", 1, OpLeader)
+		x.observeRecovery(second)
+		require.True(t, second.Start())
+		bounds, ok = x.loadBounds(x.cluster.GetStore(1), &recoveryChoice{})
+		require.True(t, ok)
+		require.Equal(t, 100+float64(initial), bounds.high, "second receiver reserves the first sender's rate")
+		last := x.report(1863, 1, 9, 0, x.now)
+		require.Nil(t, second.Check(last))
+		x.finishRecovery(second, last)
+		bounds, ok = x.loadBounds(x.cluster.GetStore(1), &recoveryChoice{})
+		require.True(t, ok)
+		require.Equal(t, 100+float64(initial), bounds.high, "keep the reservation until the Store reports")
+
+		require.True(t, math.IsInf(x.recovery.reservationCost(middle.Clone(core.SetReportInterval(end-494, end))), 1))
+		require.True(t, math.IsInf(x.recovery.reservationCost(middle.Clone(core.SetRegionConfVer(2))), 1))
+		require.True(t, math.IsInf(readCost(middle), 1), "a reservation is never a measured candidate rate")
+		next := x.round
+		next.ID++
+		require.NoError(t, x.UpdateRecoveryRound(next, 8, x.now-120))
+		require.True(t, math.IsInf(x.recovery.reservationCost(middle), 1))
 	}
 }
 
