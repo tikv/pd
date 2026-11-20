@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -74,6 +75,66 @@ func TestEvictLeader(t *testing.T) {
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 }
 
+func TestEvictReadHotLeaderBatch(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest(true)
+	defer cancel()
+	for _, id := range []uint64{1, 2, 3} {
+		tc.AddLeaderStore(id, 0)
+	}
+	for _, id := range []uint64{10, 11} {
+		tc.AddRegionWithReadInfo(id, 1, 100<<20, 10000, 10000, 10, []uint64{2, 3}, 10)
+	}
+	for id, bytes := range map[uint64]uint64{2: 40 << 20, 3: 10 << 20} {
+		tc.PutStore(tc.GetStore(id), core.SetStoreStats(&pdpb.StoreStats{
+			BytesRead: bytes, Interval: &pdpb.TimeInterval{StartTimestamp: 10, EndTimestamp: 20},
+		}), core.SetLastHeartbeatTS(time.Now()))
+	}
+	kind := types.EvictLeaderScheduler
+	sl, err := CreateScheduler(kind, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(kind, []string{"1"}), nil)
+	re.NoError(err)
+	var ops []*operator.Operator
+	testutil.Eventually(re, func() bool {
+		ops, _ = sl.Schedule(tc, false)
+		return len(ops) == 2
+	})
+	// The first hot leader fills the 3 MiB/s gap before either Store reports again.
+	re.Equal(uint64(3), ops[0].Step(0).(operator.TransferLeader).ToStore)
+	re.Equal(uint64(2), ops[1].Step(0).(operator.TransferLeader).ToStore)
+
+	// Exercise both wire formats through actual operator admission and redispatch.
+	op := ops[0]
+	region := tc.GetRegion(op.RegionID())
+	stream := mockhbstream.NewHeartbeatStream()
+	oc.GetHBStreams().BindStream(region.GetLeader().GetStoreId(), stream)
+	recv := func() *pdpb.TransferLeader {
+		var msg core.RegionHeartbeatResponse
+		testutil.Eventually(re, func() bool {
+			msg = stream.Recv()
+			return msg != nil
+		})
+		return msg.(*pdpb.RegionHeartbeatResponse).GetTransferLeader()
+	}
+	re.True(oc.AddOperator(op))
+	first := recv()
+	re.Equal(uint64(3), first.GetPeer().GetStoreId())
+	re.Empty(first.GetPeers())
+	oc.Dispatch(region, operator.DispatchFromHeartBeat, nil)
+	retry := recv()
+	re.Equal(uint64(2), retry.GetPeer().GetStoreId())
+	re.Len(retry.GetPeers(), 2)
+
+	// After one eviction completes, the other can still leave without target telemetry.
+	tc.PutRegion(region.Clone(core.WithLeader(region.GetStorePeer(3))))
+	tc.PutStore(tc.GetStore(3), core.SetStoreStats(&pdpb.StoreStats{}))
+	ops, _ = sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.NotEqual(op.RegionID(), ops[0].RegionID())
+	re.True(oc.AddOperator(ops[0]))
+	re.Len(recv().GetPeers(), 2)
+}
+
 func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -94,9 +155,15 @@ func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 	}})
 	withPendingPeer := core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[1]})
 
+	// A witness must not be offered as the primary or as a fallback.
+	tc.PutRegion(region.Clone(core.WithWitness(region.GetStorePeer(2).GetId())))
+	ops, _ := sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
+
 	// only pending
 	tc.PutRegion(region.Clone(withPendingPeer))
-	ops, _ := sl.Schedule(tc, false)
+	ops, _ = sl.Schedule(tc, false)
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
 	// only down
 	tc.PutRegion(region.Clone(withDownPeer))
