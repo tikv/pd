@@ -101,9 +101,20 @@ func TestAllowSplit(t *testing.T) {
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_ADMIN))
 	conf.SetAffinityScheduleLimit(oldLimit)
 
-	// Case 4: small affinity region will be split when affinity group expired
+	// Case 4: small affinity region will not be split after its group expires, elapsed or explicitly,
+	// because the group keeps its target
+	manager.DegradeAffinityGroup(groupID)
+	manager.Lock()
+	manager.groups[groupID].degradedExpiredAt = uint64(time.Now().Unix() - 1)
+	manager.Unlock()
+	re.False(manager.AllowSplit(smallRegion, pdpb.SplitReason_SIZE))
 	manager.ExpireAffinityGroup(groupID)
+	re.False(manager.AllowSplit(smallRegion, pdpb.SplitReason_SIZE))
+	re.False(manager.AllowSplit(smallRegion, pdpb.SplitReason_LOAD))
+	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_ADMIN))
+
+	// Case 5: small affinity region will be split when the group target is cleared
+	manager.SyncGroupFromEtcd(&Group{ID: groupID})
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_SIZE))
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_LOAD))
-	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_ADMIN))
 }

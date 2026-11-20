@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -786,6 +787,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 		wg                        sync.WaitGroup
 		ctx, cancel               = context.WithCancel(suite.ctx)
 		lastPhysical, lastLogical int64
+		successfulRequests        atomic.Uint64
 	)
 	wg.Go(func() {
 		defer tsoClient.Close()
@@ -820,15 +822,22 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 				}
 			}
 			lastPhysical, lastLogical = physical, logical
+			successfulRequests.Add(1)
 		}
 	})
-	return func() {
-		// Wait for a while to make sure the client has sent more TSO requests.
-		time.Sleep(time.Second)
-		// Cancel the context to stop the client.
+	stop := sync.OnceFunc(func() {
 		cancel()
-		// Wait for the client to stop.
 		wg.Wait()
+	})
+	suite.T().Cleanup(stop)
+	const requestCount = 10
+	// Establish monotonic requests before the caller changes group membership.
+	testutil.Eventually(re, func() bool { return successfulRequests.Load() >= requestCount })
+	return func() {
+		defer stop()
+		completed := successfulRequests.Load()
+		// Keep the same client running until it has also served requests after the transition.
+		testutil.Eventually(re, func() bool { return successfulRequests.Load() >= completed+requestCount })
 	}
 }
 

@@ -357,9 +357,12 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
-	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
 	tc.WaitForDefaultPrimaryServing(re)
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	var primary string
+	testutil.Eventually(re, func() bool {
+		primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+		return exist && primary != oldPrimary
+	})
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -374,8 +377,10 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 		}
 	}
 	tc.WaitForDefaultPrimaryServing(re)
-	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
-	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	testutil.Eventually(re, func() bool {
+		primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+		return exist && primary == oldPrimary
+	})
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -456,6 +461,7 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 		var (
 			maxGap      time.Duration
 			lastSuccess time.Time
+			stoppedAt   time.Time
 			// Stop between calls instead of canceling an in-flight GetTS, whose request
 			// may be put back to the pool while the dispatcher still holds it.
 			stopped atomic.Bool
@@ -476,6 +482,7 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 				}
 				lastSuccess = now
 			}
+			stoppedAt = time.Now()
 		}()
 		defer func() {
 			stopped.Store(true)
@@ -492,9 +499,9 @@ func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
 		time.Sleep(time.Second)
 		stopped.Store(true)
 		<-done
-		// A client that never succeeds again after the change leaves the gap open until now.
+		// End the open gap in the worker so observer scheduling after it exits is excluded.
 		re.True(lastSuccess.After(changedAt))
-		re.Less(max(maxGap, time.Since(lastSuccess)), 400*time.Millisecond)
+		re.Less(max(maxGap, stoppedAt.Sub(lastSuccess)), 400*time.Millisecond)
 	}
 	for range 3 {
 		checkMaxGap(func() {
@@ -786,17 +793,13 @@ func (suite *CommonTestSuite) SetupSuite() {
 
 func (suite *CommonTestSuite) TearDownSuite() {
 	re := suite.Require()
+	defer suite.cancel()
+	defer suite.cluster.Destroy()
 	suite.tsoCluster.Destroy()
 	etcdClient := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
 	re.NoError(err)
-	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, mcs.TSOServiceName)
-		re.NoError(err)
-		re.Empty(endpoints)
-	}
-	suite.cluster.Destroy()
-	suite.cancel()
+	re.Empty(endpoints)
 }
 
 func (suite *CommonTestSuite) TestAdvertiseAddr() {
@@ -834,14 +837,14 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	re.NoError(err)
 	re.NoError(s.Run())
 
-	// transfer leader to the new server
-	err = suite.pdLeader.ResignLeader()
-	re.NoError(err)
-	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
-	check()
-	err = suite.pdLeader.ResignLeader()
-	re.NoError(err)
-	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+	for range 2 {
+		oldLeader := suite.pdLeader.GetConfig().Name
+		re.NoError(suite.pdLeader.ResignLeaderWithRetry())
+		newLeader := suite.cluster.WaitLeaderChange(oldLeader)
+		re.NotEmpty(newLeader)
+		suite.pdLeader = suite.cluster.GetServer(newLeader)
+		check()
+	}
 }
 
 // TestTSOServiceSwitch tests the behavior of TSO service switching when `EnableTSODynamicSwitching` is enabled.
@@ -916,8 +919,11 @@ func TestTSOServiceSwitch(t *testing.T) {
 	err = pdLeader.GetServer().SetMicroserviceConfig(*cfg)
 	re.NoError(err)
 
-	// Wait for PD to detect the change
-	time.Sleep(300 * time.Millisecond)
+	// Wait for PD to initialize its allocator after the configuration change.
+	testutil.Eventually(re, func() bool {
+		return pdLeader.GetServer().GetTSOAllocator().IsInitialize()
+	})
+	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing
 	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))

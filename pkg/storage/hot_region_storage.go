@@ -29,6 +29,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -198,11 +199,10 @@ func (h *HotRegionStorage) backgroundFlush() {
 		case <-ticker.C:
 			h.updateInterval()
 			h.updateReservedDays()
-			ticker.Reset(h.getCurInterval())
-			if h.getCurReservedDays() == 0 {
-				continue
-			}
-			if h.hotRegionStorageHelper.IsLeader() {
+			interval := h.getCurInterval()
+			ticker.Reset(interval)
+			reservedDays := h.getCurReservedDays()
+			if reservedDays != 0 && h.hotRegionStorageHelper.IsLeader() {
 				if err := h.pullHotRegionInfo(); err != nil {
 					log.Error("get hot_region stat meet error", errs.ZapError(err))
 				}
@@ -210,6 +210,7 @@ func (h *HotRegionStorage) backgroundFlush() {
 					log.Error("get hot_region stat meet error", errs.ZapError(err))
 				}
 			}
+			failpoint.InjectCall("hotRegionStorageConfigUpdated", h, reservedDays, interval)
 		case <-h.hotRegionInfoCtx.Done():
 			return
 		}

@@ -88,17 +88,12 @@ func TestMemberDelete(t *testing.T) {
 			defer res.Body.Close()
 			// Check by status.
 			if table.status != 0 {
-				if res.StatusCode != table.status {
-					time.Sleep(time.Second)
-					return false
-				}
-				return true
+				return res.StatusCode == table.status
 			}
 			// Check by member list.
 			re.NotEmpty(cluster.WaitLeader())
 			if err = checkMemberList(re, leader.GetConfig().ClientUrls, table.members); err != nil {
 				t.Logf("check member fail: %v", err)
-				time.Sleep(time.Second)
 				return false
 			}
 			return true
@@ -449,17 +444,21 @@ func TestGetLeader(t *testing.T) {
 	re.NotNil(leaderServer)
 
 	// Send requests after server has started.
-	go sendRequest(re, wg, done, leaderServer.GetAddr())
-	time.Sleep(100 * time.Millisecond)
+	requestDone := make(chan struct{})
+	go sendRequest(re, wg, done, requestDone, leaderServer.GetAddr())
+	defer func() { close(done); wg.Wait() }()
+	select {
+	case <-requestDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("leader request did not complete")
+	}
 
 	re.NotNil(leaderServer.GetLeader())
-
-	done <- true
-	wg.Wait()
 }
 
-func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, addr string) {
+func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, requestDone chan struct{}, addr string) {
 	defer wg.Done()
+	notifyRequestDone := sync.OnceFunc(func() { close(requestDone) })
 
 	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(0)}
 
@@ -478,6 +477,7 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 				conn.Close()
 			}
 		}
+		notifyRequestDone()
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -543,7 +543,9 @@ func TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView(t *testing.T) {
 	})
 
 	// Negative control: a stale view alone must not end a term with a valid lease.
-	time.Sleep(2 * time.Second)
+	re.Never(func() bool {
+		return !oldLeader.IsServing() || cluster.GetLeader() != oldLeaderName
+	}, 2*time.Second, 10*time.Millisecond)
 	re.True(oldLeader.IsServing())
 	re.Equal(oldLeaderName, cluster.GetLeader())
 

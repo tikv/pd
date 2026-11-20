@@ -141,6 +141,14 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	case <-time.After(time.Second):
 		re.Fail("expected ChangeSplit heartbeat response")
 	}
+
+	// The group keeps its target after expiration, so the split is still rejected.
+	cluster.GetAffinityManager().ExpireAffinityGroup("g1")
+	resp, err = svc.AskBatchSplit(context.Background(), &schedulingpb.AskBatchSplitRequest{
+		Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_SIZE,
+	})
+	re.NoError(err)
+	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
 }
 
 func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {

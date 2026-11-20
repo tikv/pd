@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -64,7 +65,7 @@ func TestLease(t *testing.T) {
 	re.False(lease2.IsExpired())
 
 	// Wait for a while to make both two leases timeout.
-	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
+	testutil.Eventually(re, func() bool { return lease1.IsExpired() && lease2.IsExpired() })
 	re.True(lease1.IsExpired())
 	re.True(lease2.IsExpired())
 
@@ -75,7 +76,7 @@ func TestLease(t *testing.T) {
 	re.False(lease2.IsExpired())
 
 	// Wait for a while to make one of the lease timeout.
-	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
+	testutil.Eventually(re, lease1.IsExpired)
 	re.True(lease1.IsExpired())
 	re.False(lease2.IsExpired())
 
@@ -89,15 +90,24 @@ func TestLease(t *testing.T) {
 	re.NoError(lease1.Grant(defaultLeaseTimeout))
 	re.False(lease1.IsExpired())
 	ctx, cancel := context.WithCancel(context.Background())
-	go lease1.KeepAlive(ctx)
+	keepAliveDone := make(chan struct{})
+	go func() {
+		defer close(keepAliveDone)
+		lease1.KeepAlive(ctx)
+	}()
 	defer cancel()
 
-	// Wait for a timeout.
-	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
+	// The lease must stay alive beyond its original TTL.
+	re.Never(lease1.IsExpired, (defaultLeaseTimeout+1)*time.Second, 10*time.Millisecond)
 	re.False(lease1.IsExpired())
-	// Close and wait for a timeout.
+	// Drain in-flight keepalive responses before waiting for the closed lease to expire.
 	re.NoError(lease1.Close())
-	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
+	select {
+	case <-keepAliveDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("keepalive did not stop after closing the lease")
+	}
+	testutil.Eventually(re, lease1.IsExpired)
 	re.True(lease1.IsExpired())
 }
 
@@ -112,7 +122,10 @@ func TestLeaseKeepAlive(t *testing.T) {
 
 	re.NoError(lease.Grant(defaultLeaseTimeout))
 	ch := lease.keepAliveWorker(ctx, 2*time.Second)
-	time.Sleep(2 * time.Second)
-	<-ch
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("lease keepalive did not respond")
+	}
 	re.NoError(lease.Close())
 }
