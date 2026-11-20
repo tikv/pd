@@ -27,10 +27,12 @@ import (
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestTiDBGroupIDValidation(t *testing.T) {
@@ -148,4 +150,26 @@ func TestAdjustGroup(t *testing.T) {
 	group.LeaderStoreID = 1
 	group.VoterStoreIDs = []uint64{1, 4}
 	re.Error(manager.AdjustGroup(group))
+}
+
+func TestCustomGroupPolicyInheritanceKeyspace(t *testing.T) {
+	re := require.New(t)
+	re.Error(validateGroupKeyRanges(GroupKeyRanges{GroupID: "custom", InheritPolicyFrom: "bad id"}))
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 42)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 43)
+	group := GroupKeyRanges{GroupID: "custom", InheritPolicyFrom: "_tidb_ks42_t_1",
+		KeyRanges: []keyutil.KeyRange{{StartKey: lower[:], EndKey: upper[:]}}}
+	if kerneltype.IsNextGen() {
+		re.ErrorIs(validateGroupKeyRanges(group), errs.ErrAffinityGroupContent)
+	} else {
+		re.NoError(validateGroupKeyRanges(group))
+	}
+	group.InheritPolicyFrom = "_tidb_ks43_t_1"
+	if kerneltype.IsNextGen() {
+		re.ErrorIs(validateGroupKeyRanges(group), errs.ErrAffinityGroupContent)
+		group.InheritPolicyFrom = "_tidb_t_1"
+		re.Error(validateGroupKeyRanges(group))
+	} else {
+		re.NoError(validateGroupKeyRanges(group))
+	}
 }

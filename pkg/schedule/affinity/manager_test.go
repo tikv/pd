@@ -15,6 +15,7 @@
 package affinity
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -26,13 +27,19 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -175,44 +182,235 @@ func TestBasicGroupOperations(t *testing.T) {
 	re.False(manager.IsGroupExist("group1"))
 }
 
-// TestSyncLabelRuleBeforeGroup ensures label rules arriving before group sync are applied after group creation.
-func TestSyncLabelRuleBeforeGroup(t *testing.T) {
+func TestSyncGroupFromEtcdUpdatesBalancePolicy(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
-	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
-	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
-	storeInfos.PutStore(store1)
-
+	for id := uint64(1); id <= 3; id++ {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("test%d", id)}))
+	}
 	conf := mockconfig.NewTestOptions()
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	re.NoError(err)
-
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	gkr := GroupKeyRanges{
-		GroupID: "group-label-first",
-		KeyRanges: []keyutil.KeyRange{
-			{StartKey: []byte{0x01}, EndKey: []byte{0x02}},
-		},
+	ranges := createGroupForTest(re, manager, "policy", 1)
+	manager.applyStoreConditions(map[uint64]storeCondition{})
+	_, err = manager.UpdateAffinityGroupPeers("policy", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	region := generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0])
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	before := manager.GetAffinityGroupState("policy")
+	re.Equal(PhaseStable, before.Phase)
+
+	input := &Group{ID: "policy", CreateTimestamp: before.CreateTimestamp, BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{3, 1, 2}}
+	manager.SyncGroupFromEtcd(input)
+	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("policy").BalancePolicy)
+	re.Equal([]uint64{1, 2, 3}, manager.GetAffinityGroupState("policy").VoterStoreIDs)
+	re.Equal([]uint64{3, 1, 2}, input.VoterStoreIDs, "watcher input must not be mutated")
+	for _, policy := range []BalancePolicy{BalancePolicyFixed, BalancePolicyAuto} {
+		updated := *input
+		updated.BalancePolicy = policy
+		manager.SyncGroupFromEtcd(&updated)
+		after := manager.GetAffinityGroupState("policy")
+		re.Equal(policy, after.BalancePolicy)
+		re.Equal(PhaseStable, after.Phase)
+		re.Equal(before.affinityVer, after.affinityVer)
+		re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
+		re.Equal(before.RegionCount, after.RegionCount)
+		manager.RLock()
+		count := manager.affinityRegionCount
+		manager.RUnlock()
+		re.Equal(1, count)
 	}
-	labelRule := MakeLabelRule(gkr)
-	// Simulate watcher path (JSON roundtrip) to ensure Data types match real events.
-	b, err := json.Marshal(labelRule)
+	updated, err := manager.updateAffinityGroupPeersWithState("policy", before, 2, before.VoterStoreIDs)
 	re.NoError(err)
-	parsedRule, err := labeler.NewLabelRuleFromJSON(b)
+	re.Equal(uint64(2), updated.LeaderStoreID, "policy-only updates must not discard an in-flight peer update")
+}
+
+func TestSyncGroupPolicyKeepsRuntimeState(t *testing.T) {
+	re := require.New(t)
+	manager, _ := newTargetTestManager(t)
+	manager.CheckGroupsAvailability()
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}}))
+	_, err := manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
 	re.NoError(err)
-	re.NoError(manager.SyncKeyRangesFromEtcd(parsedRule))
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, nonOverlappingRange))
+	re.True(isAffinity)
+	before := manager.GetAffinityGroupState("g")
+	re.Equal(1, before.AffinityRegionCount)
 
-	// Group arrives after label rule.
-	manager.SyncGroupFromEtcd(&Group{ID: gkr.GroupID})
+	// A policy update must not recompute availability from newly known conditions.
+	manager.Lock()
+	manager.unavailableStores[1] = storeDown
+	manager.Unlock()
+	updated := before.Group
+	updated.BalancePolicy = BalancePolicyFixed
+	manager.SyncGroupFromEtcd(&updated)
+	after := manager.GetAffinityGroupState("g")
+	re.Equal(BalancePolicyFixed, after.BalancePolicy)
+	re.Equal(before.affinityVer, after.affinityVer)
+	re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
+	re.Equal(before.RegionCount, after.RegionCount)
+	re.Equal(before.AffinitySchedulingAllowed, after.AffinitySchedulingAllowed)
 
-	state := manager.GetAffinityGroupState(gkr.GroupID)
-	re.NotNil(state)
-	re.Equal(1, state.RangeCount)
+	// Changing the target still resets Region affinity and applies the conditions.
+	updated.LeaderStoreID = 2
+	manager.SyncGroupFromEtcd(&updated)
+	after = manager.GetAffinityGroupState("g")
+	re.Greater(after.affinityVer, before.affinityVer)
+	re.Zero(after.AffinityRegionCount)
+	re.False(after.AffinitySchedulingAllowed)
+}
+
+func TestBalancePolicyValidationAtMetadataEntrypoints(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	for _, group := range []*Group{
+		{ID: "empty"},
+		{ID: "auto", BalancePolicy: BalancePolicyAuto},
+		{ID: "fixed", BalancePolicy: BalancePolicyFixed},
+		{ID: "invalid", BalancePolicy: BalancePolicy("manual")},
+	} {
+		re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+			return store.SaveAffinityGroup(txn, group.ID, group)
+		}))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	// A group with an unknown policy, for example one that a newer version
+	// writes, is still loaded and keeps its target.
+	re.Equal(4, manager.GetAffinityGroupCount())
+	for id, fixed := range map[string]bool{"empty": false, "auto": false, "fixed": true, "invalid": true} {
+		re.Equal(fixed, manager.GetAffinityGroupState(id).BalancePolicy.IsFixed(), id)
+	}
+	for _, policy := range []BalancePolicy{"", BalancePolicyAuto, BalancePolicyFixed, BalancePolicy("manual")} {
+		group := &Group{ID: "watch", BalancePolicy: policy}
+		manager.SyncGroupFromEtcd(group)
+		re.Equal(policy, manager.GetAffinityGroupState("watch").BalancePolicy)
+		if policy == "manual" {
+			re.ErrorIs(manager.AdjustGroup(group), errs.ErrAffinityGroupContent)
+		} else {
+			re.NoError(manager.AdjustGroup(group))
+		}
+	}
+}
+
+func TestUpdateAffinityGroupPolicy(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for id := uint64(1); id <= 3; id++ {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("test%d", id)}, core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	ranges := createGroupForTest(re, manager, "policy", 1)
+	_, err = manager.UpdateAffinityGroupPeers("policy", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0]))
+	re.True(isAffinity)
+	before := manager.GetAffinityGroupState("policy")
+	re.Equal(PhaseStable, before.Phase)
+
+	for _, policy := range []BalancePolicy{BalancePolicyFixed, BalancePolicyFixed, BalancePolicyAuto} {
+		state, err := manager.UpdateAffinityGroupPolicy("policy", policy)
+		re.NoError(err)
+		want := policy
+		re.Equal(want, state.BalancePolicy)
+		// The target and the runtime state are kept.
+		re.Equal(before.LeaderStoreID, state.LeaderStoreID)
+		re.Equal(before.VoterStoreIDs, state.VoterStoreIDs)
+		re.Equal(PhaseStable, state.Phase)
+		re.Equal(before.affinityVer, state.affinityVer)
+		re.Equal(before.AffinityRegionCount, state.AffinityRegionCount)
+		// The policy is persisted with the target.
+		value, err := store.LoadAffinityGroup("policy")
+		re.NoError(err)
+		var persisted Group
+		re.NoError(json.Unmarshal([]byte(value), &persisted))
+		re.Equal(want, persisted.BalancePolicy)
+		re.Equal(before.LeaderStoreID, persisted.LeaderStoreID)
+		re.Equal(before.VoterStoreIDs, persisted.VoterStoreIDs)
+	}
+
+	// A request must name a valid policy; an empty one does not reset it.
+	for _, policy := range []BalancePolicy{"", BalancePolicy("manual")} {
+		_, err = manager.UpdateAffinityGroupPolicy("policy", policy)
+		re.ErrorIs(err, errs.ErrAffinityGroupContent)
+		re.Equal(BalancePolicyAuto, manager.GetAffinityGroupState("policy").BalancePolicy)
+	}
+	_, err = manager.UpdateAffinityGroupPolicy("missing", BalancePolicyFixed)
+	re.ErrorIs(err, errs.ErrAffinityGroupNotFound)
+
+	// A commit that returned an error leaves memory behind storage. Policy and
+	// peer updates keep the stored fields that they do not change.
+	lost := &lostReplyStorage{AffinityStorage: store}
+	manager.storage = lost
+	stored := func() Group {
+		value, err := store.LoadAffinityGroup("policy")
+		re.NoError(err)
+		var group Group
+		re.NoError(json.Unmarshal([]byte(value), &group))
+		return group
+	}
+	lost.lose = true
+	_, err = manager.UpdateAffinityGroupPeers("policy", 2, []uint64{1, 2, 3})
+	re.Error(err)
+	// The stored target is checked against the store conditions known now.
+	manager.Lock()
+	manager.unavailableStores = map[uint64]storeCondition{2: storeLeaderEvicted}
+	manager.Unlock()
+	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyFixed)
+	re.NoError(err)
+	re.Equal(uint64(2), stored().LeaderStoreID)
+	re.Equal(uint64(2), manager.GetAffinityGroupState("policy").LeaderStoreID)
+	re.False(manager.GetAffinityGroupState("policy").AffinitySchedulingAllowed)
+	manager.Lock()
+	manager.unavailableStores = map[uint64]storeCondition{}
+	manager.Unlock()
+
+	lost.lose = true
+	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyAuto)
+	re.Error(err)
+	_, err = manager.UpdateAffinityGroupPeers("policy", 3, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.Equal(BalancePolicyAuto, stored().BalancePolicy)
+	re.Equal(BalancePolicyAuto, manager.GetAffinityGroupState("policy").BalancePolicy)
+
+	// The stored policy is checked even if memory already has the requested one.
+	lost.lose = true
+	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyFixed)
+	re.Error(err)
+	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyAuto)
+	re.NoError(err)
+	re.Equal(BalancePolicyAuto, stored().BalancePolicy)
+}
+
+// lostReplyStorage returns an error after a transaction commits, like a reply
+// lost on its way back.
+type lostReplyStorage struct {
+	endpoint.AffinityStorage
+	lose bool
+}
+
+func (s *lostReplyStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	if err := s.AffinityStorage.RunInTxn(ctx, f); err != nil || !s.lose {
+		return err
+	}
+	s.lose = false
+	return errors.New("reply lost")
 }
 
 // TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.
@@ -223,7 +421,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for i := 1; i < 7; i++ {
-		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}))
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}, core.SetLastHeartbeatTS(time.Now())))
 	}
 
 	conf := mockconfig.NewTestOptions()
@@ -283,6 +481,269 @@ func TestRegionCountStaleCache(t *testing.T) {
 	re.Len(groupInfo.Regions, 1)
 }
 
+// TestSyncOverlappingAffinityRanges verifies that the watcher sync path suspends
+// both groups of an overlap in either event order, drops their cached Regions,
+// and restores the remaining group after the other one is deleted. Conflicts
+// change only when ReconcileRangeConflicts runs at the end of a batch.
+func TestSyncOverlappingAffinityRanges(t *testing.T) {
+	for _, labelFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("label-first=%t", labelFirst), func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			store := storage.NewStorageWithMemoryBackend()
+			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+			re.NoError(err)
+			manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+			re.NoError(err)
+			ranges := []GroupKeyRanges{
+				{GroupID: "a", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("d")}}},
+				{GroupID: "b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
+			}
+			region := generateRegionForTest(1, []uint64{1}, ranges[1].KeyRanges[0])
+			for i, groupRanges := range ranges {
+				// The affinity watcher passes rules parsed from JSON, and the rule
+				// watcher updates the labeler on its own.
+				data, err := json.Marshal(MakeLabelRule(groupRanges))
+				re.NoError(err)
+				rule, err := labeler.NewLabelRuleFromJSON(data)
+				re.NoError(err)
+				if labelFirst {
+					re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+				}
+				manager.SyncGroupFromEtcd(&Group{ID: groupRanges.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+				if !labelFirst {
+					re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+				}
+				re.Equal(1, manager.GetAffinityGroupState(groupRanges.GroupID).RangeCount)
+				re.Equal(groupRanges, manager.keyRanges[groupRanges.GroupID])
+				re.Empty(manager.labelRuleBuffer)
+				re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(groupRanges)))
+				manager.RestoreAffinityGroup(groupRanges.GroupID)
+				if i == 0 {
+					manager.ReconcileRangeConflicts()
+					// Cache the Region in group a before the conflict appears.
+					_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+					re.True(isAffinity)
+					manager.SetLabelRuleBatchInProgress(true)
+				}
+			}
+			// A group watcher post callback must not publish a partial label batch.
+			manager.ReconcileRangeConflicts()
+			// Before the batch that adds b ends, lookups see the old state.
+			for _, groupRanges := range ranges {
+				re.True(manager.GetAffinityGroupState(groupRanges.GroupID).AffinitySchedulingAllowed)
+			}
+			group, _ := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Equal("a", group.ID)
+			manager.SetLabelRuleBatchInProgress(false)
+			manager.ReconcileRangeConflicts()
+			for _, groupRanges := range ranges {
+				state := manager.GetAffinityGroupState(groupRanges.GroupID)
+				re.False(state.AffinitySchedulingAllowed)
+				re.True(state.RegularSchedulingAllowed)
+				re.Zero(state.RegionCount)
+				re.Zero(state.AffinityRegionCount)
+			}
+			group, _ = manager.GetAndCacheRegionAffinityGroupState(region)
+			re.Nil(group)
+
+			syncRanges := func(groupRanges GroupKeyRanges) {
+				data, err := json.Marshal(MakeLabelRule(groupRanges))
+				re.NoError(err)
+				rule, err := labeler.NewLabelRuleFromJSON(data)
+				re.NoError(err)
+				re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+				re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(groupRanges)))
+			}
+			// Updating just b's rule must resolve the conflict for both groups.
+			syncRanges(GroupKeyRanges{GroupID: "b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("x"), EndKey: []byte("y")}}})
+			manager.ReconcileRangeConflicts()
+			for _, groupRanges := range ranges {
+				re.True(manager.GetAffinityGroupState(groupRanges.GroupID).AffinitySchedulingAllowed)
+			}
+			syncRanges(ranges[1])
+			manager.ReconcileRangeConflicts()
+			re.False(manager.GetAffinityGroupState("a").AffinitySchedulingAllowed)
+
+			re.NoError(regionLabeler.DeleteLabelRule(GetLabelRuleID("b")))
+			if labelFirst {
+				manager.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID("b"))
+			} else {
+				manager.SyncGroupDeleteFromEtcd("b")
+			}
+			// Either deletion alone must mark conflicts stale and restore a.
+			re.False(manager.GetAffinityGroupState("a").AffinitySchedulingAllowed)
+			manager.ReconcileRangeConflicts()
+			re.True(manager.GetAffinityGroupState("a").AffinitySchedulingAllowed)
+			if labelFirst {
+				manager.SyncGroupDeleteFromEtcd("b")
+			} else {
+				manager.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID("b"))
+			}
+			re.False(manager.IsGroupExist("b"))
+			re.NotContains(manager.keyRanges, "b")
+			re.Empty(manager.labelRuleBuffer)
+			manager.ReconcileRangeConflicts()
+			group, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+			re.NotNil(group)
+			re.Equal("a", group.ID)
+			re.True(isAffinity)
+		})
+	}
+}
+
+func seedOverlappingGroupsForTest(re *require.Assertions, t *testing.T) (*Manager, *labeler.RegionLabeler) {
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"}, core.SetLastHeartbeatTS(time.Now())))
+	conflicts := []GroupKeyRanges{
+		{GroupID: "conflict-a", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("d")}}},
+		{GroupID: "conflict-b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
+	}
+	for _, change := range conflicts {
+		re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+			if err := store.SaveAffinityGroup(txn, change.GroupID, &Group{
+				ID: change.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1},
+			}); err != nil {
+				return err
+			}
+			return store.SaveRegionRule(txn, GetLabelRuleID(change.GroupID), MakeLabelRule(change))
+		}))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	manager.RestoreAffinityGroup("conflict-a")
+	manager.RestoreAffinityGroup("conflict-b")
+	return manager, regionLabeler
+}
+
+func TestReconcileRangeConflictsAllowsLookups(t *testing.T) {
+	const hook = "github.com/tikv/pd/pkg/schedule/affinity/beforeRangeConflictScan"
+	for _, tc := range []struct {
+		name string
+		run  func(re *require.Assertions, manager *Manager)
+	}{
+		{
+			name: "watcher reconcile",
+			run: func(_ *require.Assertions, manager *Manager) {
+				manager.SyncGroupFromEtcd(&Group{ID: "changed"})
+				manager.ReconcileRangeConflicts()
+			},
+		},
+		{
+			name: "update key ranges",
+			run: func(re *require.Assertions, manager *Manager) {
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{
+					GroupID:   "conflict-b",
+					KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}},
+				}}))
+				re.True(manager.GetAffinityGroupState("conflict-a").AffinitySchedulingAllowed)
+			},
+		},
+		{
+			name: "delete groups",
+			run: func(re *require.Assertions, manager *Manager) {
+				re.NoError(manager.DeleteAffinityGroups([]string{"conflict-b"}, true))
+				re.True(manager.GetAffinityGroupState("conflict-a").AffinitySchedulingAllowed)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			manager, _ := seedOverlappingGroupsForTest(re, t)
+			ranges := createGroupForTest(re, manager, "unrelated", 1)
+			region := generateRegionForTest(1, []uint64{1}, ranges[0])
+
+			scans := 0
+			lookedUp := make(chan *GroupState, 1)
+			re.NoError(failpoint.EnableCall(hook, func() {
+				scans++
+				go func() {
+					// A failed try-lock proves the scan would block the lookup without
+					// leaving a goroutine waiting for the paused reconciliation.
+					if !manager.TryRLock() {
+						lookedUp <- nil
+						return
+					}
+					manager.RUnlock()
+					group, _ := manager.GetRegionAffinityGroupState(region)
+					lookedUp <- group
+				}()
+				group := <-lookedUp
+				re.NotNil(group, "unrelated Region lookups must finish while the conflict scan is paused")
+				re.Equal("unrelated", group.ID)
+			}))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(hook)) })
+			tc.run(re, manager)
+			re.Equal(1, scans)
+		})
+	}
+}
+
+func TestRangeConflictOperationsConcurrentWithLookups(t *testing.T) {
+	re := require.New(t)
+	manager, _ := seedOverlappingGroupsForTest(re, t)
+	ranges := createGroupForTest(re, manager, "unrelated", 1)
+	_, err := manager.UpdateAffinityGroupPeers("unrelated", 1, []uint64{1})
+	re.NoError(err)
+
+	unrelatedRegion := generateRegionForTest(1, []uint64{1}, ranges[0])
+	conflictRegion := generateRegionForTest(2, []uint64{1}, keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("c")})
+
+	done := make(chan struct{})
+	errCh := make(chan error, 4)
+	var wg sync.WaitGroup
+	for worker := range 4 {
+		wg.Add(1)
+		go func(saveCache bool) {
+			defer wg.Done()
+			lookup := manager.GetRegionAffinityGroupState
+			if saveCache {
+				lookup = manager.GetAndCacheRegionAffinityGroupState
+			}
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				group, isAffinity := lookup(unrelatedRegion)
+				if group == nil || group.ID != "unrelated" || !isAffinity {
+					errCh <- fmt.Errorf("unexpected unrelated lookup result: group=%v isAffinity=%t", group, isAffinity)
+					return
+				}
+				_, _ = lookup(conflictRegion)
+			}
+		}(worker%2 == 0)
+	}
+
+	for i := range 20 {
+		id := fmt.Sprintf("tmp-%d", i)
+		first := []keyutil.KeyRange{{StartKey: fmt.Appendf(nil, "x-%04d", 2*i), EndKey: fmt.Appendf(nil, "x-%04d", 2*i+1)}}
+		second := []keyutil.KeyRange{{StartKey: fmt.Appendf(nil, "y-%04d", 2*i), EndKey: fmt.Appendf(nil, "y-%04d", 2*i+1)}}
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id, KeyRanges: first}}))
+		re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: id, KeyRanges: second}}, nil))
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: id, KeyRanges: first}}))
+		re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
+	}
+	re.NoError(manager.DeleteAffinityGroups([]string{"conflict-b"}, true))
+
+	close(done)
+	wg.Wait()
+	close(errCh)
+	for lookupErr := range errCh {
+		re.NoError(lookupErr)
+	}
+
+	group, isAffinity := manager.GetRegionAffinityGroupState(conflictRegion)
+	re.NotNil(group)
+	re.Equal("conflict-a", group.ID)
+	re.True(isAffinity)
+}
+
 // TestDeleteGroupClearsCache verifies that deleting a group clears all related region caches.
 func TestDeleteGroupClearsCache(t *testing.T) {
 	re := require.New(t)
@@ -291,7 +752,7 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for i := 1; i <= 3; i++ {
-		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}))
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}, core.SetLastHeartbeatTS(time.Now())))
 	}
 
 	conf := mockconfig.NewTestOptions()
@@ -541,7 +1002,7 @@ func TestAvailabilityChangeRegionCount(t *testing.T) {
 	storeInfos.PutStore(store2Down)
 
 	// Trigger availability check
-	manager.checkGroupsAvailability()
+	manager.CheckGroupsAvailability()
 
 	// Verify group state changed
 	groupInfo := getGroupForTest(re, manager, "availability-test")
@@ -569,7 +1030,7 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for i := 1; i <= 3; i++ {
-		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}))
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}, core.SetLastHeartbeatTS(time.Now())))
 	}
 
 	conf := mockconfig.NewTestOptions()
@@ -709,7 +1170,7 @@ func TestConcurrentOperations(t *testing.T) {
 		// Goroutine 4: Check availability
 		wg.Go(func() {
 			for range 20 {
-				manager.checkGroupsAvailability()
+				manager.CheckGroupsAvailability()
 				time.Sleep(2 * time.Millisecond)
 			}
 		})
@@ -766,7 +1227,7 @@ func TestDegradedExpiration(t *testing.T) {
 	store2 := storeInfos.GetStore(2)
 	store2Down := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
 	storeInfos.PutStore(store2Down)
-	manager.checkGroupsAvailability()
+	manager.CheckGroupsAvailability()
 
 	// Verify group became degraded
 	groupInfo := getGroupForTest(re, manager, "expiration-test")
@@ -789,7 +1250,7 @@ func TestDegradedExpiration(t *testing.T) {
 	manager.Unlock()
 
 	// Run availability check again
-	manager.checkGroupsAvailability()
+	manager.CheckGroupsAvailability()
 
 	// Verify group is now expired
 	re.True(groupInfo.IsExpired())
@@ -806,30 +1267,46 @@ func TestDegradedExpiration(t *testing.T) {
 // watcher syncs, still holds an older rule of the group.
 func TestSyncGroupPrefersBufferedLabelRule(t *testing.T) {
 	re := require.New(t)
-	const groupID = "g"
-	newer := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}
-	older := GroupKeyRanges{GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}}
+	ranges := []GroupKeyRanges{
+		{GroupID: "a", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
+		{GroupID: "b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
+	}
 	store := storage.NewStorageWithMemoryBackend()
 	stores := core.NewStoresInfo()
-	stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}).Clone(core.SetLastHeartbeatTS(time.Now())))
 	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, time.Second*5)
 	re.NoError(err)
 	manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
 	re.NoError(err)
 
-	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(older)))
-	// The affinity watcher decodes its own copy of the newer rule.
-	data, err := json.Marshal(MakeLabelRule(newer))
-	re.NoError(err)
-	rule, err := labeler.NewLabelRuleFromJSON(data)
-	re.NoError(err)
-	re.NoError(manager.SyncKeyRangesFromEtcd(rule))
-	re.Contains(manager.labelRuleBuffer, groupID)
+	// The general labeler still has A's old rule after A gives [b,c) to B.
+	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(GroupKeyRanges{
+		GroupID: "a", KeyRanges: slices.Concat(ranges[0].KeyRanges, ranges[1].KeyRanges),
+	})))
+	for _, change := range ranges {
+		// The affinity watcher decodes its own copy of the newer rule.
+		data, err := json.Marshal(MakeLabelRule(change))
+		re.NoError(err)
+		rule, err := labeler.NewLabelRuleFromJSON(data)
+		re.NoError(err)
+		re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+		re.Contains(manager.labelRuleBuffer, change.GroupID)
+		manager.SyncGroupFromEtcd(&Group{ID: change.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+		re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(change)))
+	}
 
-	manager.SyncGroupFromEtcd(&Group{ID: groupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
-	re.NotContains(manager.labelRuleBuffer, groupID)
-	re.Equal(newer, manager.keyRanges[groupID])
-	re.Equal(1, manager.GetAffinityGroupState(groupID).RangeCount)
+	// All watchers have caught up; ordinary Region lookups must use the new ranges.
+	manager.ReconcileRangeConflicts()
+	for _, change := range ranges {
+		re.Equal(change, manager.keyRanges[change.GroupID])
+		re.Equal(1, manager.GetAffinityGroupState(change.GroupID).RangeCount)
+		manager.RestoreAffinityGroup(change.GroupID)
+		group, isAffinity := manager.GetRegionAffinityGroupState(generateRegionForTest(1, []uint64{1}, change.KeyRanges[0]))
+		re.NotNil(group)
+		re.Equal(change.GroupID, group.ID)
+		re.True(isAffinity)
+	}
+	re.Empty(manager.labelRuleBuffer)
 }
 
 // TestSyncGroupAndLabelRuleInAnyOrder applies the events of the affinity group
@@ -945,4 +1422,249 @@ func interleave[T any](a, b []T) [][]T {
 		result = append(result, slices.Concat([]T{b[0]}, rest))
 	}
 	return result
+}
+
+// failingTxnStorage fails the transaction numbered fail, counting from 1,
+// without running it.
+type failingTxnStorage struct {
+	endpoint.AffinityStorage
+	count, fail int
+}
+
+func (s *failingTxnStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	s.count++
+	if s.count == s.fail {
+		return errors.New("injected transaction failure")
+	}
+	return s.AffinityStorage.RunInTxn(ctx, f)
+}
+
+func TestUpdateAffinityGroupPolicies(t *testing.T) {
+	re := require.New(t)
+	manager, store := newTargetTestManager(t)
+	manager.CheckGroupsAvailability()
+
+	ranges := createGroupForTest(re, manager, "a", 1)
+	createGroupForTest(re, manager, "b", 1)
+	_, err := manager.UpdateAffinityGroupPeers("a", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0]))
+	re.True(isAffinity)
+	before := manager.GetAffinityGroupState("a")
+
+	// Duplicates are written once, and writing the same policy again keeps the stored groups.
+	for range 2 {
+		states, err := manager.UpdateAffinityGroupPolicies([]string{"a", "b", "a"}, BalancePolicyFixed)
+		re.NoError(err)
+		re.Len(states, 2)
+		for _, state := range states {
+			re.Equal(BalancePolicyFixed, state.BalancePolicy)
+			re.Equal(BalancePolicyFixed, loadStoredGroup(re, store, state.ID).BalancePolicy)
+		}
+	}
+	// The target and the runtime state are kept.
+	after := manager.GetAffinityGroupState("a")
+	re.Equal(before.LeaderStoreID, after.LeaderStoreID)
+	re.Equal(before.VoterStoreIDs, after.VoterStoreIDs)
+	re.Equal(before.CreateTimestamp, after.CreateTimestamp)
+	re.Equal(PhaseStable, after.Phase)
+	re.Equal(before.affinityVer, after.affinityVer)
+	re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
+	re.Equal(before.LeaderStoreID, loadStoredGroup(re, store, "a").LeaderStoreID)
+
+	// A missing group fails the request before anything is written.
+	_, err = manager.UpdateAffinityGroupPolicies([]string{"a", "missing"}, BalancePolicyAuto)
+	re.ErrorIs(err, errs.ErrAffinityGroupNotFound)
+	re.Equal(BalancePolicyFixed, loadStoredGroup(re, store, "a").BalancePolicy)
+	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("a").BalancePolicy)
+
+	// A request must name a valid policy and at least one valid group.
+	for _, policy := range []BalancePolicy{"", BalancePolicy("manual")} {
+		_, err = manager.UpdateAffinityGroupPolicies([]string{"a"}, policy)
+		re.ErrorIs(err, errs.ErrAffinityGroupContent)
+	}
+	_, err = manager.UpdateAffinityGroupPolicies(nil, BalancePolicyAuto)
+	re.ErrorIs(err, errs.ErrEmptyRequest)
+	_, err = manager.UpdateAffinityGroupPolicies([]string{"bad id"}, BalancePolicyAuto)
+	re.ErrorIs(err, errs.ErrInvalidGroupID)
+	re.Equal(BalancePolicyFixed, loadStoredGroup(re, store, "b").BalancePolicy)
+}
+
+func TestUpdateAffinityGroupPoliciesInChunks(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client)
+	manager := newTargetTestManagerWithStorage(t, t.Context(), store)
+
+	// More groups than one etcd transaction can hold.
+	ids := make([]string, 0, 130)
+	changes := make([]GroupKeyRanges, 0, 130)
+	for i := range 130 {
+		id := fmt.Sprintf("g%03d", i)
+		ids = append(ids, id)
+		changes = append(changes, GroupKeyRanges{GroupID: id})
+	}
+	re.NoError(manager.CreateAffinityGroups(changes))
+	states, err := manager.UpdateAffinityGroupPolicies(ids, BalancePolicyFixed)
+	re.NoError(err)
+	re.Len(states, len(ids))
+	for _, id := range ids {
+		re.Equal(BalancePolicyFixed, loadStoredGroup(re, store, id).BalancePolicy)
+	}
+
+	// A failed chunk keeps the chunks written before it.
+	failing := &failingTxnStorage{AffinityStorage: store, fail: 2}
+	manager.storage = failing
+	_, err = manager.UpdateAffinityGroupPolicies(ids, BalancePolicyAuto)
+	re.ErrorContains(err, "updated the balance policy of 120 of 130 affinity groups before the failure")
+	for i, id := range ids {
+		want := BalancePolicyAuto
+		if i >= 120 {
+			want = BalancePolicyFixed
+		}
+		re.Equal(want, loadStoredGroup(re, store, id).BalancePolicy, id)
+		re.Equal(want, manager.GetAffinityGroupState(id).BalancePolicy, id)
+	}
+	// Repeating the request finishes it.
+	_, err = manager.UpdateAffinityGroupPolicies(ids, BalancePolicyAuto)
+	re.NoError(err)
+	for _, id := range ids {
+		re.Equal(BalancePolicyAuto, loadStoredGroup(re, store, id).BalancePolicy, id)
+	}
+}
+
+func TestCreateAffinityGroupsInheritPolicy(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client)
+	manager := newTargetTestManagerWithStorage(t, ctx, store)
+
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_1"}}))
+	_, err := manager.UpdateAffinityGroupPolicy("_tidb_ks1_t_1", BalancePolicyFixed)
+	re.NoError(err)
+	// A policy that this version does not know is copied as stored.
+	future := &Group{ID: "_tidb_ks1_t_2", CreateTimestamp: 1, BalancePolicy: BalancePolicy("future")}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, future.ID, future) }))
+	manager.SyncGroupFromEtcd(future)
+	re.Equal(BalancePolicy("future"), manager.GetAffinityGroupState("_tidb_ks1_t_2").BalancePolicy)
+
+	newRange := func(id string) []keyutil.KeyRange {
+		prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1)
+		return []keyutil.KeyRange{{StartKey: codec.EncodeBytes(append(prefix, []byte("new-"+id)...)), EndKey: codec.EncodeBytes(append(prefix, []byte("new-"+id+"~")...))}}
+	}
+	changes := []GroupKeyRanges{
+		{GroupID: "_tidb_ks1_t_4", KeyRanges: newRange("fixed"), InheritPolicyFrom: "_tidb_ks1_t_1"},
+		{GroupID: "_tidb_ks1_t_5", KeyRanges: newRange("future"), InheritPolicyFrom: "_tidb_ks1_t_2"},
+		{GroupID: "_tidb_ks1_t_6", KeyRanges: newRange("_tidb_ks1_t_3"), InheritPolicyFrom: "_tidb_ks1_t_3"},
+		{GroupID: "_tidb_ks1_t_7", KeyRanges: newRange("plain")},
+	}
+	// Group and label writes span multiple transactions.
+	for i := range 130 {
+		id := fmt.Sprintf("_tidb_ks1_t_%d", 100+i)
+		changes = append(changes, GroupKeyRanges{GroupID: id, KeyRanges: newRange(id), InheritPolicyFrom: "_tidb_ks1_t_2"})
+	}
+	re.NoError(manager.CreateAffinityGroupsIfNotExists(changes))
+	for _, change := range changes[4:] {
+		re.Equal(BalancePolicy("future"), manager.GetAffinityGroupState(change.GroupID).BalancePolicy)
+		re.Equal(BalancePolicy("future"), loadStoredGroup(re, store, change.GroupID).BalancePolicy)
+	}
+	for id, want := range map[string]BalancePolicy{
+		"_tidb_ks1_t_4": BalancePolicyFixed,
+		"_tidb_ks1_t_5": BalancePolicy("future"),
+		"_tidb_ks1_t_6": "",
+		"_tidb_ks1_t_7": "",
+	} {
+		re.Equal(want, manager.GetAffinityGroupState(id).BalancePolicy, id)
+		re.Equal(want, loadStoredGroup(re, store, id).BalancePolicy, id)
+	}
+
+	// A group that already exists keeps its policy, as a retried request finds it.
+	re.NoError(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_7", KeyRanges: newRange("plain"), InheritPolicyFrom: "_tidb_ks1_t_1"}}))
+	re.Equal(BalancePolicy(""), manager.GetAffinityGroupState("_tidb_ks1_t_7").BalancePolicy)
+	re.Equal(BalancePolicy(""), loadStoredGroup(re, store, "_tidb_ks1_t_7").BalancePolicy)
+
+	// The source must be a valid group ID.
+	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_8", InheritPolicyFrom: "bad id"}})
+	re.ErrorIs(err, errs.ErrInvalidGroupID)
+	re.False(manager.IsGroupExist("_tidb_ks1_t_8"))
+}
+
+func TestInheritPolicyAfterLostPolicyReply(t *testing.T) {
+	re := require.New(t)
+	manager, store := newTargetTestManager(t)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_9"}}))
+	manager.storage = &lostReplyStorage{AffinityStorage: store, lose: true}
+	_, err := manager.UpdateAffinityGroupPolicy("_tidb_ks1_t_9", BalancePolicyFixed)
+	re.ErrorContains(err, "reply lost")
+	re.Equal(BalancePolicyFixed, loadStoredGroup(re, store, "_tidb_ks1_t_9").BalancePolicy)
+	re.Empty(manager.GetAffinityGroupState("_tidb_ks1_t_9").BalancePolicy)
+	re.NoError(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_10", InheritPolicyFrom: "_tidb_ks1_t_9"}}))
+	re.Equal(BalancePolicyFixed, loadStoredGroup(re, store, "_tidb_ks1_t_10").BalancePolicy)
+	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("_tidb_ks1_t_10").BalancePolicy)
+}
+
+func TestExpireAffinityGroupIf(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for id := uint64(1); id <= 4; id++ {
+		storeInfo := core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id)})
+		storeInfos.PutStore(storeInfo.Clone(core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	const groupID = "conditional-expire"
+	createGroupForTest(re, manager, groupID, 1)
+	snapshot, err := manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.True(snapshot.AffinitySchedulingAllowed)
+
+	expired, ok := manager.ExpireAffinityGroupIf(nil)
+	re.False(ok)
+	re.Nil(expired)
+
+	// A concurrent peer update invalidates the stale snapshot.
+	updated, err := manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 4})
+	re.NoError(err)
+	expired, ok = manager.ExpireAffinityGroupIf(snapshot)
+	re.False(ok)
+	re.Nil(expired)
+	current := manager.GetAffinityGroupState(groupID)
+	re.True(current.AffinitySchedulingAllowed)
+	re.Equal([]uint64{1, 2, 4}, current.VoterStoreIDs)
+
+	// Matching snapshot expires atomically and yields the new version for relearning.
+	expired, ok = manager.ExpireAffinityGroupIf(updated)
+	re.True(ok)
+	re.NotNil(expired)
+	re.False(expired.AffinitySchedulingAllowed)
+	re.True(expired.RegularSchedulingAllowed)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+		{Id: 13, StoreId: 3, Role: metapb.PeerRole_Voter},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 100, Peers: peers}, peers[0])
+	manager.ObserveAvailableRegion(region, expired)
+	relearned := manager.GetAffinityGroupState(groupID)
+	re.True(relearned.AffinitySchedulingAllowed)
+	re.Equal([]uint64{1, 2, 3}, relearned.VoterStoreIDs)
+
+	// Deleting and recreating a group with the same ID must also reject an old snapshot.
+	re.NoError(manager.DeleteAffinityGroups([]string{groupID}, true))
+	createGroupForTest(re, manager, groupID, 1)
+	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	expired, ok = manager.ExpireAffinityGroupIf(relearned)
+	re.False(ok)
+	re.Nil(expired)
+	re.True(manager.GetAffinityGroupState(groupID).AffinitySchedulingAllowed)
 }

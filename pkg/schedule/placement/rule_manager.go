@@ -65,6 +65,9 @@ type RuleManager struct {
 	// storeLoadRestrictions caches ruleConfig.mayRestrictStoreLoad as bits for
 	// the hot scheduler's lock-free fast path.
 	storeLoadRestrictions atomic.Uint32
+	// revision increases after every committed rule or rule group change, so
+	// that a consumer can tell whether rules changed without reading them.
+	revision atomic.Uint64
 
 	// used for rule validation
 	keyType          string
@@ -555,8 +558,12 @@ func (m *RuleManager) IsRegionFitCached(storeSet StoreSet, region *core.RegionIn
 // FitRegionWithoutCache fits a region to the rules it matches. This function does not use or save the cache,
 // and the Region being fitted is usually not a real Region.
 func (m *RuleManager) FitRegionWithoutCache(storeSet StoreSet, region *core.RegionInfo) (fit *RegionFit) {
+	return m.FitRegionWithRules(storeSet, region, m.GetRulesForApplyRegion(region))
+}
+
+// FitRegionWithRules fits a region to the supplied rules without using or saving the cache.
+func (m *RuleManager) FitRegionWithRules(storeSet StoreSet, region *core.RegionInfo, rules []*Rule) (fit *RegionFit) {
 	regionStores := getStoresByRegion(storeSet, region)
-	rules := m.GetRulesForApplyRegion(region)
 	fit = fitRegion(regionStores, region, rules, m.conf.IsWitnessAllowed())
 	fit.regionStores = regionStores
 	fit.rules = rules
@@ -641,7 +648,13 @@ func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 	patch.commit()
 	m.updateStoreLoadRestrictions()
 	m.ruleList = ruleList
+	m.revision.Add(1)
 	return nil
+}
+
+// GetRevision returns the revision of the committed rules and rule groups.
+func (m *RuleManager) GetRevision() uint64 {
+	return m.revision.Load()
 }
 
 func (m *RuleManager) savePatch(p *ruleConfig) error {

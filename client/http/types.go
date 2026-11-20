@@ -746,6 +746,8 @@ type AffinityGroupKeyRange struct {
 // CreateAffinityGroupInput defines the input for a single group in the creation request.
 type CreateAffinityGroupInput struct {
 	Ranges []AffinityGroupKeyRange `json:"ranges"`
+	// InheritPolicyFrom names a group whose balance policy the new group takes.
+	InheritPolicyFrom string `json:"inherit_policy_from,omitempty"`
 }
 
 // CreateAffinityGroupsRequest defines the body for the POST request to create affinity groups.
@@ -759,6 +761,7 @@ type AffinityGroup struct {
 	CreateTimestamp uint64   `json:"create_timestamp"`
 	LeaderStoreID   uint64   `json:"leader_store_id,omitempty"`
 	VoterStoreIDs   []uint64 `json:"voter_store_ids,omitempty"`
+	BalancePolicy   string   `json:"balance_policy,omitempty"`
 }
 
 // AffinityGroupState defines the runtime state of an affinity group.
@@ -813,4 +816,15 @@ type BatchModifyAffinityGroupsRequest struct {
 type UpdateAffinityGroupPeersRequest struct {
 	LeaderStoreID uint64   `json:"leader_store_id"`
 	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+}
+
+// UpdateAffinityGroupPolicyRequest defines the body for updating an affinity group's balance policy.
+type UpdateAffinityGroupPolicyRequest struct {
+	BalancePolicy string `json:"balance_policy"`
+}
+
+// UpdateAffinityGroupPoliciesRequest defines the body for updating the balance policy of several affinity groups.
+type UpdateAffinityGroupPoliciesRequest struct {
+	IDs           []string `json:"ids"`
+	BalancePolicy string   `json:"balance_policy"`
 }

@@ -44,7 +44,7 @@ import (
 // cannot move. Rejection means this local search found no plan, so the caller
 // can relearn a target; it does not prove that every learner layout is invalid.
 func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group *affinity.GroupState, fit *placement.RegionFit,
-	roles map[uint64]placement.PeerRoleType) (bool, affinityPlacementStatus) {
+	roles map[uint64]placement.PeerRoleType, probe *core.RegionInfo) (bool, affinityPlacementStatus) {
 	var conflicts []*metapb.Peer
 	var stores []uint64
 	for _, learner := range region.GetLearners() {
@@ -68,10 +68,16 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 	}
 	accept := func(target map[uint64]placement.PeerRoleType) affinityPlacementStatus {
 		layout := regionWithRoles(region, group.LeaderStoreID, target)
+		if probe != nil {
+			for _, peer := range layout.GetVoters() {
+				peer.IsWitness = probe.GetStoreVoter(peer.GetStoreId()).GetIsWitness()
+			}
+		}
 		layoutFit := c.ruleManager.FitRegionWithoutCache(c.cluster, layout)
-		return c.checkRegionFitAtBestLocation(layout, layoutFit)
+		return c.checkRegionPlacement(layout, layoutFit, false).status
 	}
-	target, temporary := c.placeLearners(region, fit, roles, isolationStores, conflicts, accept)
+	remaining := 64
+	target, temporary := c.placeLearners(region, fit, roles, isolationStores, conflicts, &remaining, accept)
 	if target != nil {
 		maps.Copy(roles, target)
 		log.Debug("move learners off affinity voter stores",
@@ -84,9 +90,10 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 		// A busy learner may stop the search before another learner is checked.
 		// Wait only if each learner has a destination when considered alone.
 		for i := range conflicts {
-			target, blocked := c.placeLearners(region, fit, roles, isolationStores, conflicts[i:i+1],
+			soloRemaining := 8
+			target, blocked := c.placeLearners(region, fit, roles, isolationStores, conflicts[i:i+1], &soloRemaining,
 				func(map[uint64]placement.PeerRoleType) affinityPlacementStatus { return affinityPlacementReady })
-			if target == nil && !blocked {
+			if target == nil && !blocked && soloRemaining > 0 {
 				return false, affinityPlacementRejected
 			}
 		}
@@ -103,7 +110,11 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 // It also reports whether a store or a complete layout was temporarily blocked.
 func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.RegionFit,
 	roles map[uint64]placement.PeerRoleType, isolationStores map[*placement.Rule][]*core.StoreInfo, conflicts []*metapb.Peer,
-	accept func(map[uint64]placement.PeerRoleType) affinityPlacementStatus) (target map[uint64]placement.PeerRoleType, temporary bool) {
+	remaining *int, accept func(map[uint64]placement.PeerRoleType) affinityPlacementStatus) (target map[uint64]placement.PeerRoleType, temporary bool) {
+	if *remaining <= 0 {
+		return nil, false
+	}
+	*remaining--
 	if len(conflicts) == 0 {
 		status := accept(roles)
 		if status == affinityPlacementReady {
@@ -156,7 +167,7 @@ func (c *AffinityChecker) placeLearners(region *core.RegionInfo, fit *placement.
 			isolationStores[rf.Rule] = append(previous, store)
 		}
 		var blocked bool
-		target, blocked = c.placeLearners(region, fit, next, isolationStores, conflicts[1:], accept)
+		target, blocked = c.placeLearners(region, fit, next, isolationStores, conflicts[1:], remaining, accept)
 		isolationStores[rf.Rule] = previous
 		temporary = temporary || blocked
 		if target != nil {

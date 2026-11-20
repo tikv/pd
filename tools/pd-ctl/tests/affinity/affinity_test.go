@@ -15,6 +15,7 @@
 package affinity_test
 
 import (
+	"slices"
 	"strconv"
 	"testing"
 
@@ -95,6 +96,17 @@ func TestAffinityCommands(t *testing.T) {
 		"--partition-id", strconv.FormatUint(partitionID, 10),
 	}, targetFlags...), &state)
 	re.Equal(partitionGroup, state.ID)
+
+	// policy sets the balance policy of the partitioned table group.
+	policyArgs := append([]string{"-u", pdAddr, "config", "affinity", "policy",
+		"--partition-id", strconv.FormatUint(partitionID, 10)}, targetFlags...)
+	for _, policy := range []string{"fixed", "auto"} {
+		tests.MustExec(re, cmd, append(slices.Clone(policyArgs), "--balance-policy", policy), &state)
+		re.Equal(partitionGroup, state.ID)
+		re.Equal(policy, state.BalancePolicy)
+	}
+	_, err = tests.ExecuteCommand(ctl.GetRootCmd(), append(slices.Clone(policyArgs), "--balance-policy", "manual")...)
+	re.ErrorContains(err, "balance-policy must be")
 
 	// Keep groups with identical table/partition IDs in multiple keyspaces alive
 	// together, so updating or deleting one must preserve every other group's peers.

@@ -25,6 +25,8 @@ import (
 type AffinityStorage interface {
 	// LoadAffinityGroup loads a single affinity group as a raw JSON string.
 	LoadAffinityGroup(groupID string) (string, error)
+	// LoadAffinityGroupInTxn loads a single affinity group within a transaction.
+	LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, error)
 	// LoadAllAffinityGroups loads all affinity groups, passing raw key/value strings to the callback.
 	LoadAllAffinityGroups(f func(k, v string)) error
 
@@ -53,6 +55,11 @@ func (*StorageEndpoint) DeleteAffinityGroup(txn kv.Txn, groupID string) error {
 // The caller is responsible for JSON unmarshaling.
 func (se *StorageEndpoint) LoadAffinityGroup(groupID string) (string, error) {
 	return se.Load(keypath.AffinityGroupPath(groupID))
+}
+
+// LoadAffinityGroupInTxn loads the raw group value in the caller's transaction.
+func (*StorageEndpoint) LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, error) {
+	return txn.Load(keypath.AffinityGroupPath(groupID))
 }
 
 // LoadAllAffinityGroups loads all affinity group configurations from storage.

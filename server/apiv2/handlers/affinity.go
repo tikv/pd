@@ -33,8 +33,11 @@ func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
 	router.Use(middlewares.BootstrapChecker())
 	router.POST("", PostAffinityGroups)
+	router.POST("/targets", UpdateAffinityGroupTargets)
+	router.POST("/policies", UpdateAffinityGroupPolicies)
 	router.PATCH("", BatchModifyAffinityGroups)
 	router.PUT("/:group_id", UpdateAffinityGroupPeers)
+	router.PATCH("/:group_id/policy", UpdateAffinityGroupPolicy)
 	router.DELETE("/:group_id", DeleteAffinityGroup)
 	router.GET("", GetAllAffinityGroups)
 	router.GET("/:group_id", GetAffinityGroup)
@@ -60,6 +63,10 @@ func (r AffinityKeyRange) toKeyutilKeyRange() keyutil.KeyRange {
 // CreateAffinityGroupInput defines the input for a single group in the creation request.
 type CreateAffinityGroupInput struct {
 	Ranges []AffinityKeyRange `json:"ranges"`
+	// InheritPolicyFrom names a group whose balance policy the new group takes,
+	// such as the group that a TRUNCATE replaces. It is ignored if that group
+	// does not exist, or if the new group already exists.
+	InheritPolicyFrom string `json:"inherit_policy_from,omitempty"`
 }
 
 // CreateAffinityGroupsRequest defines the body for the POST request.
@@ -94,6 +101,17 @@ type BatchModifyAffinityGroupsRequest struct {
 type UpdateAffinityGroupPeersRequest struct {
 	LeaderStoreID uint64   `json:"leader_store_id"`
 	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+}
+
+// UpdateAffinityGroupPolicyRequest defines the body for updating an affinity group's balance policy.
+type UpdateAffinityGroupPolicyRequest struct {
+	BalancePolicy affinity.BalancePolicy `json:"balance_policy"`
+}
+
+// UpdateAffinityGroupPoliciesRequest defines the body for updating the balance policy of several affinity groups.
+type UpdateAffinityGroupPoliciesRequest struct {
+	IDs           []string               `json:"ids"`
+	BalancePolicy affinity.BalancePolicy `json:"balance_policy"`
 }
 
 // --- Handlers ---
@@ -181,8 +199,9 @@ func createAffinityGroups(c *gin.Context) {
 		}
 
 		groups = append(groups, affinity.GroupKeyRanges{
-			GroupID:   groupID,
-			KeyRanges: keyRanges,
+			GroupID:           groupID,
+			KeyRanges:         keyRanges,
+			InheritPolicyFrom: input.InheritPolicyFrom,
 		})
 	}
 
@@ -267,7 +286,7 @@ func deleteAffinityGroups(c *gin.Context) {
 // BatchModifyAffinityGroups batch modifies key ranges for multiple affinity groups.
 //
 //	@Tags		affinity-groups
-//	@Summary	Batch modify key ranges for affinity groups. Remove operations are executed before add operations.
+//	@Summary	Batch modify key ranges for affinity groups. Add operations are persisted before remove operations; a partial failure keeps the committed prefix in this order.
 //	@Param		body	body	BatchModifyAffinityGroupsRequest	true	"Batch modify request with add and remove operations"
 //	@Produce	json
 //	@Success	200	{object}	AffinityGroupsResponse	"Updated affinity groups"
@@ -380,6 +399,119 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 	}
 
 	c.IndentedJSON(http.StatusOK, state)
+}
+
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+//
+//	@Tags		affinity-groups
+//	@Summary	Update the balance policy of an affinity group.
+//	@Param		group_id	path	string								true	"The group id of the affinity group"
+//	@Param		body		body	UpdateAffinityGroupPolicyRequest	true	"New balance policy: auto or fixed"
+//	@Produce	json
+//	@Success	200	{object}	affinity.GroupState	"Updated affinity group state"
+//	@Failure	400	{string}	string				"The input is invalid."
+//	@Failure	404	{string}	string				"Affinity group not found."
+//	@Failure	500	{string}	string				"PD server failed to proceed the request."
+//	@Router		/affinity-groups/{group_id}/policy [patch]
+func UpdateAffinityGroupPolicy(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager, err := svr.GetAffinityManager()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	groupID := c.Param("group_id")
+	req := &UpdateAffinityGroupPolicyRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	if err := affinity.ValidateGroupID(groupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	state, err := manager.UpdateAffinityGroupPolicy(groupID, req.BalancePolicy)
+	if handleAffinityError(c, err) {
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, state)
+}
+
+// UpdateAffinityGroupPolicies updates the balance policy of several affinity groups.
+// Every group must exist, or nothing is written. The groups are written in
+// chunks that each fit in one etcd transaction, so a failed chunk leaves the
+// chunks written before it in place; repeating the request is safe.
+//
+//	@Tags		affinity-groups
+//	@Summary	Update the balance policy of several affinity groups.
+//	@Param		body	body	UpdateAffinityGroupPoliciesRequest	true	"Group IDs and the new balance policy: auto or fixed"
+//	@Produce	json
+//	@Success	200	{object}	AffinityGroupsResponse	"Updated affinity group states"
+//	@Failure	400	{string}	string					"The input is invalid."
+//	@Failure	404	{string}	string					"An affinity group is not found."
+//	@Failure	500	{string}	string					"PD server failed to proceed the request."
+//	@Router		/affinity-groups/policies [post]
+func UpdateAffinityGroupPolicies(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager, err := svr.GetAffinityManager()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	req := &UpdateAffinityGroupPoliciesRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	states, err := manager.UpdateAffinityGroupPolicies(req.IDs, req.BalancePolicy)
+	if handleAffinityError(c, err) {
+		return
+	}
+
+	resp := AffinityGroupsResponse{
+		AffinityGroups: make(map[string]*affinity.GroupState, len(states)),
+	}
+	for _, state := range states {
+		resp.AffinityGroups[state.ID] = state
+	}
+	c.IndentedJSON(http.StatusOK, resp)
+}
+
+// UpdateAffinityGroupTargets writes leader and voter targets for several affinity groups.
+// A target is written only if the stored group still equals its expected group.
+// The scheduling service uses it to store the targets it decides.
+//
+//	@Tags		affinity-groups
+//	@Summary	Write leader and voter targets for affinity groups whose stored groups are unchanged.
+//	@Param		body	body	affinity.GroupTargetsRequest	true	"Targets with the groups they were decided from"
+//	@Produce	json
+//	@Success	200	{object}	affinity.GroupTargetsResponse	"IDs of the groups whose targets were written"
+//	@Failure	400	{string}	string							"The input is invalid."
+//	@Failure	500	{string}	string							"PD server failed to proceed the request."
+//	@Router		/affinity-groups/targets [post]
+func UpdateAffinityGroupTargets(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager, err := svr.GetAffinityManager()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	req := &affinity.GroupTargetsRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	written, err := manager.UpdateAffinityGroupTargets(c.Request.Context(), req.Targets)
+	if err != nil {
+		c.AbortWithStatusJSON(affinityErrorStatus(err), &affinity.GroupTargetsResponse{WrittenGroupIDs: written, Error: err.Error()})
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, &affinity.GroupTargetsResponse{WrittenGroupIDs: written})
 }
 
 // DeleteAffinityGroup deletes a specific affinity group by group id.
@@ -511,22 +643,26 @@ func handleAffinityError(c *gin.Context, err error) bool {
 	if err == nil {
 		return false
 	}
+	c.AbortWithStatusJSON(affinityErrorStatus(err), err.Error())
+	return true
+}
+
+func affinityErrorStatus(err error) int {
 	switch {
 	case errs.ErrAffinityGroupNotFound.Equal(err):
-		c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		return http.StatusNotFound
 	case errs.ErrAffinityGroupContent.Equal(err),
 		errs.ErrInvalidGroupID.Equal(err),
 		errs.ErrEmptyRequest.Equal(err),
 		errs.ErrAffinityGroupConflict.Equal(err),
 		errs.ErrInvalidKeyFormat.Equal(err):
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return http.StatusBadRequest
 	case errs.ErrAffinityGroupExist.Equal(err):
-		c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+		return http.StatusConflict
 	default:
 		// such as ErrAffinityInternal
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return http.StatusInternalServerError
 	}
-	return true
 }
 
 // validateKeyRange checks if a key range is valid.

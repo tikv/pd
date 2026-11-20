@@ -199,6 +199,22 @@ func TestWatcherLoadExistingData(t *testing.T) {
 	re.Equal(uint64(1), groupState.LeaderStoreID)
 	re.Equal([]uint64{1, 2, 3}, groupState.VoterStoreIDs)
 	re.Equal(1, groupState.RangeCount)
+
+	watcher.Close()
+	affinityManager.RestoreAffinityGroup(testGroup.ID)
+	re.True(affinityManager.GetAffinityGroupState(testGroup.ID).AffinitySchedulingAllowed)
+	_, err = client.Put(ctx, keypath.RegionLabelKeyPath(labelRule.ID), "invalid JSON")
+	re.NoError(err)
+	_, err = NewWatcher(ctx, client, affinityManager)
+	re.Error(err)
+	// A failed label load must end the batch so later changes can reconcile.
+	data, err := json.Marshal(makeTestLabelRule(testGroup.ID, "61", "64", "62", "63"))
+	re.NoError(err)
+	rule, err := labeler.NewLabelRuleFromJSON(data)
+	re.NoError(err)
+	re.NoError(affinityManager.SyncKeyRangesFromEtcd(rule))
+	affinityManager.ReconcileRangeConflicts()
+	re.False(affinityManager.GetAffinityGroupState(testGroup.ID).AffinitySchedulingAllowed)
 }
 
 func TestAffinityLabelWatcherLogRedact(t *testing.T) {

@@ -76,6 +76,7 @@ type Phase string
 const (
 	// PhasePending indicates that the Group is still determining the StoreIDs.
 	// If the Group has no KeyRanges, it remains in PhasePending forever.
+	// Overlapping key ranges also keep a group pending until the conflict is repaired.
 	PhasePending = Phase("pending")
 	// PhasePreparing indicates that the Group is scheduling Regions according to the required Peers.
 	PhasePreparing = Phase("preparing")
@@ -105,6 +106,11 @@ type Group struct {
 	LeaderStoreID uint64 `json:"leader_store_id,omitempty"`
 	// VoterStoreIDs indicates which stores Voters should be on.
 	VoterStoreIDs []uint64 `json:"voter_store_ids,omitempty"`
+	// BalancePolicy controls whether the balance planner may improve this group,
+	// and whether first-win may move the target of the group while it is
+	// degraded, see BalancePolicyFixed.
+	// An empty value is treated as auto for backward compatibility.
+	BalancePolicy BalancePolicy `json:"balance_policy,omitempty"`
 }
 
 func (g *Group) String() string {
@@ -130,10 +136,19 @@ type GroupState struct {
 	AffinityRegionCount int `json:"affinity_region_count"`
 
 	// affinityVer is used to mark the version of the cache.
-	affinityVer uint64
+	affinityVer   uint64
+	rangeConflict bool
+	// targetUnpersisted indicates that the active target only exists in memory
+	// and still needs to be persisted to PD.
+	targetUnpersisted bool
 	// groupInfoPtr is a pointer to the original information.
 	// It is used only for pointer comparison and should not access any internal data.
 	groupInfoPtr *runtimeGroupInfo
+}
+
+// HasUnpersistedTarget reports whether the group holds a local target that has not been persisted yet.
+func (g *GroupState) HasUnpersistedTarget() bool {
+	return g != nil && g.targetUnpersisted
 }
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
@@ -163,12 +178,16 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
+	// targetUnpersisted indicates that LeaderStoreID and VoterStoreIDs were applied
+	// locally while PD did not implement the target endpoint, and etcd still stores
+	// an empty target for CreateTimestamp.
+	targetUnpersisted bool
 	// availability must be used together with degradedExpiredAt. Therefore, GetAvailability and SetAvailability must
 	// always be used to read or modify them, and availability must not be accessed directly.
 	availability groupAvailability
 	// degradedExpiredAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
 	degradedExpiredAt uint64
-	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
+	// AffinityVer tracks changes to Region affinity; policy-only updates preserve it.
 	AffinityVer uint64
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
 	AffinityRegionCount int
@@ -179,6 +198,8 @@ type runtimeGroupInfo struct {
 	LabelRule *labeler.LabelRule
 	// RangeCount counts how many KeyRanges exist in the Label.
 	RangeCount int
+	// rangeConflict disables affinity for the entire group until its ranges no longer overlap.
+	rangeConflict bool
 }
 
 // newGroupState creates a GroupState from the given runtimeGroupInfo.
@@ -200,6 +221,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		CreateTimestamp:           g.CreateTimestamp,
 		LeaderStoreID:             g.LeaderStoreID,
 		VoterStoreIDs:             slices.Clone(g.VoterStoreIDs),
+		BalancePolicy:             g.BalancePolicy,
 		RegularSchedulingAllowed:  g.IsRegularSchedulingAllowed(),
 		AffinitySchedulingAllowed: affinitySchedulingAllowed,
 		Phase:                     phase,
@@ -207,8 +229,23 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		RegionCount:               len(g.Regions),
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
+		targetUnpersisted:         g.targetUnpersisted,
+		rangeConflict:             g.rangeConflict,
 		groupInfoPtr:              g,
 	}
+}
+
+func withoutTarget(g Group) Group {
+	g.LeaderStoreID = 0
+	g.VoterStoreIDs = nil
+	return g
+}
+
+func (g *runtimeGroupInfo) storedGroup() Group {
+	if g.targetUnpersisted {
+		return withoutTarget(g.Group)
+	}
+	return g.Group
 }
 
 // IsAvailable indicates that the Group is currently in the groupAvailable status,
@@ -271,17 +308,33 @@ func newDegradedExpiredAtFromNow() uint64 {
 
 // IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
 func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
-	return g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
+	return !g.rangeConflict && g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
 }
 
 // IsRegularSchedulingAllowed indicates whether balance scheduling is allowed.
 func (g *runtimeGroupInfo) IsRegularSchedulingAllowed() bool {
-	return g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
+	return g.rangeConflict || g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
 }
 
 // AdjustGroup validates the group and sets default values.
 func (m *Manager) AdjustGroup(g *Group) error {
+	if err := validateGroupFormat(g); err != nil {
+		return err
+	}
+	for _, storeID := range g.VoterStoreIDs {
+		if store := m.storeSetInformer.GetStore(storeID); store == nil || store.IsRemoved() {
+			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("store %d does not exist or is removed", storeID))
+		}
+	}
+	return nil
+}
+
+// validateGroupFormat checks request structure independently of store health.
+func validateGroupFormat(g *Group) error {
 	if err := ValidateGroupID(g.ID); err != nil {
+		return err
+	}
+	if err := validateBalancePolicy(g.BalancePolicy); err != nil {
 		return err
 	}
 	// If no distribution is provided, we will use the default distribution.
@@ -301,19 +354,28 @@ func (m *Manager) AdjustGroup(g *Group) error {
 	if !slices.Contains(voterStoreIDs, g.LeaderStoreID) {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("leader must be in voter stores")
 	}
-	for _, storeID := range voterStoreIDs {
-		if m.storeSetInformer.GetStore(storeID) == nil {
-			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("store %d does not exist", storeID))
-		}
+	if voterStoreIDs[0] == 0 {
+		return errs.ErrAffinityGroupContent.FastGenByArgs("voter store ID must be nonzero")
 	}
-
 	return nil
+}
+
+func validateBalancePolicy(policy BalancePolicy) error {
+	switch policy {
+	case "", BalancePolicyAuto, BalancePolicyFixed:
+		return nil
+	default:
+		return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("invalid balance policy %q", policy))
+	}
 }
 
 // GroupKeyRanges represents key ranges with group id.
 type GroupKeyRanges struct {
 	KeyRanges []keyutil.KeyRange
 	GroupID   string
+	// InheritPolicyFrom copies the stored policy on creation, including unknown
+	// values. Missing sources use the default; existing groups keep their policy.
+	InheritPolicyFrom string
 }
 
 // ValidateGroupID checks the ID format and requires keyspace-aware TiDB IDs in NextGen.
@@ -357,8 +419,22 @@ func parseGroupID(id string) (uint32, bool, error) {
 
 func validateGroupKeyRanges(group GroupKeyRanges) error {
 	keyspaceID, scoped, err := parseGroupID(group.GroupID)
-	if err != nil || !scoped {
+	if err != nil {
 		return err
+	}
+	if group.InheritPolicyFrom != "" {
+		sourceKeyspaceID, sourceScoped, err := parseGroupID(group.InheritPolicyFrom)
+		if err != nil {
+			return err
+		}
+		if kerneltype.IsNextGen() {
+			if !scoped || !sourceScoped || keyspaceID != sourceKeyspaceID {
+				return errs.ErrAffinityGroupContent.FastGenByArgs("policy inheritance requires scoped TiDB groups in the same keyspace")
+			}
+		}
+	}
+	if !scoped {
+		return nil
 	}
 	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
 	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID+1)
