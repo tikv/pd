@@ -1702,6 +1702,7 @@ func getBasicCluster(c *gin.Context, svr *scheserver.Server) (*pdcore.BasicClust
 // @Tags     affinity-groups
 // @Summary  List all affinity groups.
 // @Param    ids  query  []string  false  "Optional affinity group IDs. Repeat as ids=a&ids=b."
+// @Param    prefix  query  string  false  "Optional prefix that the IDs of the listed groups start with."
 // @Produce  json
 // @Success  200  {object}  AffinityGroupsResponse
 // @Failure  400  {string}  string  "The input is invalid."
@@ -1713,19 +1714,10 @@ func getAllAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	rawIDs := c.QueryArray("ids")
-	var (
-		groupStates map[string]*affinity.GroupState
-		err         error
-	)
-	if len(rawIDs) == 0 {
-		groupStates = affinity.CollectAllGroupStates(manager)
-	} else {
-		groupStates, err = affinity.CollectGroupStates(manager, rawIDs)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-			return
-		}
+	groupStates, err := affinity.CollectGroupStatesByQuery(manager, c.QueryArray("ids"), c.Query("prefix"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
 	}
 
 	resp := AffinityGroupsResponse{

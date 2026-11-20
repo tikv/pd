@@ -245,7 +245,7 @@ func deleteAffinityGroups(c *gin.Context) {
 
 	// Validate all group IDs
 	for _, id := range req.IDs {
-		if err := affinity.ValidateGroupID(id); err != nil {
+		if err := affinity.ValidateExistingGroupID(id); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -307,11 +307,11 @@ func BatchModifyAffinityGroups(c *gin.Context) {
 
 	// Validate and convert operations in one pass
 	affectedGroups := make(map[string]bool)
-	addOps, err := convertAndValidateRangeOps(req.Add, manager, affectedGroups)
+	addOps, err := convertAndValidateRangeOps(req.Add, manager, affectedGroups, false)
 	if handleAffinityError(c, err) {
 		return
 	}
-	removeOps, err := convertAndValidateRangeOps(req.Remove, manager, affectedGroups)
+	removeOps, err := convertAndValidateRangeOps(req.Remove, manager, affectedGroups, true)
 	if handleAffinityError(c, err) {
 		return
 	}
@@ -394,7 +394,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 //	@Failure		404	{string}	string	"Affinity group not found."
 //	@Failure		500	{string}	string	"PD server failed to proceed the request."
 //	@Router			/affinity-groups/{group_id} [delete]
-//	@Description	force=false: missing group returns 404; force=true: missing group is ignored, existing group is deleted.
+//	@Description	force=false: missing group returns 404; force=true: the group and its label rule are deleted if they exist, so a label rule left without its group is deleted too.
 func DeleteAffinityGroup(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()
@@ -404,7 +404,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
-	if err := affinity.ValidateGroupID(groupID); err != nil {
+	if err := affinity.ValidateExistingGroupID(groupID); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -419,23 +419,18 @@ func DeleteAffinityGroup(c *gin.Context) {
 	}
 	force := queryParams.Force
 
-	if !manager.IsGroupExist(groupID) {
-		if !force {
-			c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID).Error())
-			return
-		}
-		// If force is true and group does not exist, succeed silently
-		c.JSON(http.StatusOK, "Affinity group deleted successfully.")
+	if !force && !manager.IsGroupExist(groupID) {
+		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID).Error())
 		return
 	}
 
-	// Delete the affinity group from manager
+	// A forced delete also runs when the group does not exist, so that it
+	// removes a label rule left without its group, for example by a creation
+	// request that failed after some of its transactions committed.
 	err = manager.DeleteAffinityGroups([]string{groupID}, force)
 	if handleAffinityError(c, err) {
 		return
 	}
-
-	// Note: Label deletion is now handled inside the DeleteAffinityGroup method
 
 	c.JSON(http.StatusOK, "Affinity group deleted successfully.")
 }
@@ -444,7 +439,8 @@ func DeleteAffinityGroup(c *gin.Context) {
 //
 //	@Tags		affinity-groups
 //	@Summary	List all affinity groups.
-//	@Param		ids	query	[]string	false	"Optional affinity group IDs. Repeat as ids=a&ids=b."
+//	@Param		ids		query	[]string	false	"Optional affinity group IDs. Repeat as ids=a&ids=b."
+//	@Param		prefix	query	string		false	"Optional prefix that the IDs of the listed groups start with."
 //	@Produce	json
 //	@Success	200	{object}	AffinityGroupsResponse
 //	@Failure	400	{string}	string	"The input is invalid."
@@ -458,18 +454,10 @@ func GetAllAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	rawIDs := c.QueryArray("ids")
-	var (
-		groupStates map[string]*affinity.GroupState
-	)
-	if len(rawIDs) == 0 {
-		groupStates = affinity.CollectAllGroupStates(manager)
-	} else {
-		groupStates, err = affinity.CollectGroupStates(manager, rawIDs)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-			return
-		}
+	groupStates, err := affinity.CollectGroupStatesByQuery(manager, c.QueryArray("ids"), c.Query("prefix"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
 	}
 
 	response := AffinityGroupsResponse{
@@ -550,11 +538,16 @@ func validateKeyRange(startKey, endKey []byte) error {
 // convertAndValidateRangeOps validates group operations and converts them to GroupKeyRanges format.
 // It updates affectedGroups with all groups encountered.
 // Multiple operations for the same group are automatically merged.
-func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool) ([]affinity.GroupKeyRanges, error) {
+func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool, remove bool) ([]affinity.GroupKeyRanges, error) {
 	grouped := make(map[string][]keyutil.KeyRange)
+	order := make([]string, 0, len(ops))
+	validateID := affinity.ValidateGroupID
+	if remove {
+		validateID = affinity.ValidateExistingGroupID
+	}
 
 	for _, op := range ops {
-		if err := affinity.ValidateGroupID(op.ID); err != nil {
+		if err := validateID(op.ID); err != nil {
 			return nil, err
 		}
 		if !manager.IsGroupExist(op.ID) {
@@ -565,11 +558,16 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("no key ranges provided")
 		}
 
+		if _, ok := grouped[op.ID]; !ok {
+			order = append(order, op.ID)
+		}
 		// Validate and merge ranges for this group
 		for _, kr := range op.Ranges {
-			// Validate key range
-			if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
-				return nil, err
+			// Removal must also match persisted half-unbounded ranges.
+			if !remove || (len(kr.StartKey) > 0 && len(kr.EndKey) > 0) {
+				if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
+					return nil, err
+				}
 			}
 			grouped[op.ID] = append(grouped[op.ID], keyutil.KeyRange{
 				StartKey: kr.StartKey,
@@ -578,12 +576,12 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 		}
 	}
 
-	// Convert to slice (order is not significant as it will be converted to map later)
+	// Preserve the first occurrence of each group in the request.
 	result := make([]affinity.GroupKeyRanges, 0, len(grouped))
-	for groupID, keyRanges := range grouped {
+	for _, groupID := range order {
 		result = append(result, affinity.GroupKeyRanges{
 			GroupID:   groupID,
-			KeyRanges: keyRanges,
+			KeyRanges: grouped[groupID],
 		})
 	}
 

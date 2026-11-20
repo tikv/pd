@@ -57,7 +57,7 @@ func TestAllowSplit(t *testing.T) {
 	re.NoError(err)
 
 	groupID := "g1"
-	keyRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("z")}
+	keyRange := keyutil.KeyRange{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("z"))}
 	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: groupID, KeyRanges: []keyutil.KeyRange{keyRange}}})
 	re.NoError(err)
 	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
@@ -70,7 +70,7 @@ func TestAllowSplit(t *testing.T) {
 	conf.SetMaxAffinityMergeRegionSize(10)
 
 	// Case 1: small affinity region will not be split but admin split will always be allowed
-	smallRegion := generateRegionForTest(1, []uint64{1, 2, 3}, keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("y")})
+	smallRegion := generateRegionForTest(1, []uint64{1, 2, 3}, keyutil.KeyRange{StartKey: keyForTest([]byte("b")), EndKey: keyForTest([]byte("y"))})
 	smallRegion = smallRegion.Clone(
 		core.SetApproximateSize(5),
 		core.SetApproximateKeys(int64(5*config.RegionSizeToKeysRatio)),
