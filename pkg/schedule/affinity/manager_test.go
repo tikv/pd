@@ -1561,7 +1561,7 @@ func TestCreateAffinityGroupsInheritPolicy(t *testing.T) {
 		{GroupID: "_tidb_ks1_t_6", KeyRanges: newRange("_tidb_ks1_t_3"), InheritPolicyFrom: "_tidb_ks1_t_3"},
 		{GroupID: "_tidb_ks1_t_7", KeyRanges: newRange("plain")},
 	}
-	// Label writes cross one transaction boundary before the group writes do.
+	// Group and label writes span multiple transactions.
 	for i := range 130 {
 		id := fmt.Sprintf("_tidb_ks1_t_%d", 100+i)
 		changes = append(changes, GroupKeyRanges{GroupID: id, KeyRanges: newRange(id), InheritPolicyFrom: "_tidb_ks1_t_2"})

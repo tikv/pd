@@ -188,8 +188,12 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	// Step 4: Create the change plan for the Group
 	labelOps := plan.CommitOps()
 	groupOps := make([][]func(kv.Txn) error, 0, len(filteredGroups))
+	sourceKeys := make([]string, len(filteredGroups))
 	for i, group := range filteredGroups {
 		source := filteredChanges[i].InheritPolicyFrom
+		if source != "" {
+			sourceKeys[i] = keypath.AffinityGroupPath(source)
+		}
 		ops := make([]func(kv.Txn) error, 0, 2)
 		if labelRules[i] != nil {
 			ops = append(ops, labelOps[0])
@@ -215,7 +219,7 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	committed, err := m.runGroupOpsInTxn(groupOps)
+	committed, err := m.runGroupOpsInTxn(groupOps, sourceKeys)
 	if err != nil {
 		log.Error("failed to add affinity groups",
 			zap.Int("total-groups", len(filteredChanges)),
@@ -329,7 +333,7 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 	}
 
 	// Step 5: Save the Group and Label information in storage.
-	committed, err := m.runGroupOpsInTxn(groupOps)
+	committed, err := m.runGroupOpsInTxn(groupOps, nil)
 	if err != nil {
 		log.Error("failed to delete affinity groups",
 			zap.Int("total-groups", len(toDelete)),
@@ -355,20 +359,48 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 // runGroupOpsInTxn keeps each group's one or two writes in the same transaction
 // and returns how many groups, from the first, have committed.
 // Count the individual operations so a group without a label rule cannot make
-// the next group's pair straddle the transaction limit.
-func (m *Manager) runGroupOpsInTxn(groupOps [][]func(kv.Txn) error) (int, error) {
+// the next group's pair straddle the transaction limit. Source keys, when
+// present, are aligned with groupOps and prefetched for each transaction.
+func (m *Manager) runGroupOpsInTxn(groupOps [][]func(kv.Txn) error, sourceKeys []string) (int, error) {
 	batch := make([]func(kv.Txn) error, 0, etcdutil.MaxEtcdTxnOps)
 	committed := 0
+	runBatch := func(end int) error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if sourceKeys == nil {
+			return endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
+		}
+		return m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+			keys := make([]string, 0, end-committed)
+			for _, key := range sourceKeys[committed:end] {
+				if key != "" {
+					keys = append(keys, key)
+				}
+			}
+			slices.Sort(keys)
+			keys = slices.Compact(keys)
+			if err := kv.Prefetch(txn, keys); err != nil {
+				return err
+			}
+			for _, op := range batch {
+				if err := op(txn); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
 	for i, ops := range groupOps {
 		if len(batch)+len(ops) > etcdutil.MaxEtcdTxnOps {
-			if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch); err != nil {
+			if err := runBatch(i); err != nil {
 				return committed, err
 			}
 			committed, batch = i, batch[:0]
 		}
 		batch = append(batch, ops...)
 	}
-	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch); err != nil {
+	if err := runBatch(len(groupOps)); err != nil {
 		return committed, err
 	}
 	return len(groupOps), nil
@@ -739,7 +771,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	for i := range planned {
 		ruleOps[i] = []func(kv.Txn) error{labelOps[i]}
 	}
-	committed, err := m.runGroupOpsInTxn(ruleOps)
+	committed, err := m.runGroupOpsInTxn(ruleOps, nil)
 	if err != nil {
 		log.Error("failed to update affinity group ranges",
 			zap.Int("total-groups", len(planned)),
