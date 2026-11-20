@@ -29,13 +29,13 @@ import (
 // sendObservedTarget permits one outstanding first-win write per Manager. Busy
 // observations are discarded. A 404 pauses HTTP attempts but lets groups
 // without an active target use a fresh observation locally. Caller holds metaMutex.
-func (m *Manager) sendObservedTarget(target GroupTarget, affinityVer uint64, persistOnly bool) {
+func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64, persistOnly bool) {
 	m.targetWriteMutex.Lock()
 	now := time.Now()
 	if now.Before(m.targetEndpointUnsupportedUntil) {
 		m.targetWriteMutex.Unlock()
 		if !persistOnly && m.ctx.Err() == nil {
-			m.applyLocalObservedTarget(target, affinityVer)
+			m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
 		}
 		return
 	}
@@ -55,7 +55,7 @@ func (m *Manager) sendObservedTarget(target GroupTarget, affinityVer uint64, per
 		if unsupported && !persistOnly {
 			m.metaMutex.Lock()
 			if m.ctx.Err() == nil {
-				m.applyLocalObservedTarget(target, affinityVer)
+				m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
 			}
 			m.metaMutex.Unlock()
 		}
@@ -81,7 +81,7 @@ func (m *Manager) sendObservedTarget(target GroupTarget, affinityVer uint64, per
 // when PD does not yet implement the conditional target endpoint. Once PD
 // upgrades, later patrol observations persist the target against the empty
 // stored group in Expected. Caller holds metaMutex.
-func (m *Manager) applyLocalObservedTarget(target GroupTarget, affinityVer uint64) {
+func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64) {
 	if target.Expected.LeaderStoreID != 0 || len(target.Expected.VoterStoreIDs) != 0 {
 		return
 	}
@@ -94,7 +94,8 @@ func (m *Manager) applyLocalObservedTarget(target GroupTarget, affinityVer uint6
 	defer m.Unlock()
 
 	groupInfo, ok := m.groups[target.Expected.ID]
-	if !ok || groupInfo.AffinityVer != affinityVer {
+	// A recreated group can have the same creation timestamp and affinity version.
+	if !ok || groupInfo != groupInfoPtr || groupInfo.AffinityVer != affinityVer {
 		return
 	}
 	stored := groupInfo.storedGroup()
