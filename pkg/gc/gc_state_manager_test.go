@@ -1635,7 +1635,7 @@ func (s *gcStateManagerTestSuite) TestQueuedGlobalGCBarrierUsesCurrentTime() {
 	}()
 	select {
 	case reached := <-atLock:
-		s.Assert().False(old.IsExpired(reached), "source barrier already expired when the request reached the lock")
+		s.False(old.IsExpired(reached), "source barrier already expired when the request reached the lock")
 		time.Sleep(time.Until(*old.ExpirationTime.Time) + time.Millisecond)
 	case <-time.After(5 * time.Second):
 		s.T().Error("request did not reach the manager lock")
