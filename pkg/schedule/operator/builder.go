@@ -86,7 +86,8 @@ type Builder struct {
 	peerAddStep                                  map[uint64]int // record at which step a peer is created.
 	// isolationLeader reports whether the final layout with the given leader
 	// preserves configured isolation. It is nil when the check does not apply.
-	isolationLeader func(uint64) bool
+	// reuseTarget requires a successful check of this leader in the same build.
+	isolationLeader func(leaderStoreID uint64, reuseTarget bool) bool
 
 	// comparison function
 	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
@@ -434,8 +435,10 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 		return nil, b.err
 	}
 	// The non-joint plan can keep an intermediate leader when no candidate is
-	// admissible. Validate the leader the steps actually end with.
-	if b.isolationLeader != nil && !b.isolationLeader(b.currentLeaderStoreID) {
+	// admissible. Validate the leader the steps actually end with. A nonzero
+	// target has passed either the explicit check or candidate selection.
+	reuseTarget := b.targetLeaderStoreID != 0 && b.currentLeaderStoreID == b.targetLeaderStoreID
+	if b.isolationLeader != nil && !b.isolationLeader(b.currentLeaderStoreID, reuseTarget) {
 		b.err = ErrTargetIsolation
 		return nil, b.err
 	}
@@ -560,7 +563,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		if !b.allowLeader(targetLeader, b.forceTargetLeader) {
 			return "", errors.New("cannot create operator: target leader is not allowed")
 		}
-		if b.isolationLeader != nil && !b.isolationLeader(b.targetLeaderStoreID) {
+		if b.isolationLeader != nil && !b.isolationLeader(b.targetLeaderStoreID, false) {
 			return "", ErrTargetIsolation
 		}
 	}
@@ -719,7 +722,7 @@ func (b *Builder) setTargetLeaderIfNotExist() (rejectedByIsolation bool) {
 		if role, ok := b.expectedRoles[candidateStoreID]; ok && role == placement.Follower {
 			continue
 		}
-		if b.isolationLeader != nil && !b.isolationLeader(candidateStoreID) {
+		if b.isolationLeader != nil && !b.isolationLeader(candidateStoreID, false) {
 			rejectedByIsolation = true
 			continue
 		}
@@ -968,13 +971,13 @@ func (b *Builder) execBatchSwitchWitnesses() {
 // newIsolationLeaderCheck checks the final layout, including leader-only plans.
 // Force, skip and repairs keep their existing behavior.
 // finalPeers holds the intended final roles, taken before execution planning.
-func (b *Builder) newIsolationLeaderCheck(finalPeers peersMap) func(uint64) bool {
+func (b *Builder) newIsolationLeaderCheck(finalPeers peersMap) func(uint64, bool) bool {
 	if finalPeers == nil {
 		return nil
 	}
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toDemote)+
 		len(b.toWitness)+len(b.toNonWitness)+len(b.toPromoteNonWitness) == 0 {
-		return func(leaderStoreID uint64) bool {
+		return func(leaderStoreID uint64, _ bool) bool {
 			return b.originFit.IsLeaderIsolationPreserved(b.originRegion, leaderStoreID, b.GetSharedConfig().IsWitnessAllowed())
 		}
 	}
@@ -1000,11 +1003,27 @@ func (b *Builder) newIsolationLeaderCheck(finalPeers peersMap) func(uint64) bool
 	}
 	stores, witness := b.GetBasicCluster(), b.GetSharedConfig().IsWitnessAllowed()
 	samePeerCount := len(peers) == len(b.originRegion.GetPeers())
-	return func(leaderStoreID uint64) bool {
+	finalStores := make([]*core.StoreInfo, len(peers))
+	storesRead, storesUnchanged := false, true
+	return func(leaderStoreID uint64, reuseTarget bool) bool {
+		// Store updates replace StoreInfo objects. Keep the pointers used
+		// by each fit and only reuse a result if every read agreed. The
+		// selected leader may have been checked before the last candidate.
+		for i, peer := range peers {
+			store := stores.GetStore(peer.GetStoreId())
+			if storesRead && store != finalStores[i] {
+				storesUnchanged = false
+			}
+			finalStores[i] = store
+		}
+		if reuseTarget && storesRead && storesUnchanged {
+			return true
+		}
+		storesRead = true
 		for _, peer := range peers {
 			if peer.GetStoreId() == leaderStoreID {
 				target := b.originRegion.Clone(core.SetPeers(peers), core.WithLeader(peer))
-				return b.originFit.IsFinalIsolationPreserved(stores, target, witness, samePeerCount)
+				return b.originFit.IsFinalIsolationPreserved(finalStores, target, witness, samePeerCount)
 			}
 		}
 		return false

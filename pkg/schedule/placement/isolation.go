@@ -132,11 +132,12 @@ func (f *RegionFit) hasSamePeers(target *core.RegionInfo) bool {
 // safeguards keep the weighted score check. A rule can lose matched peers in a
 // same-size Region move, so still compare the conflicts among the matched peers.
 // When the Region changes replica count, compare rules with unchanged counts.
-func (f *RegionFit) IsFinalIsolationPreserved(stores StoreSet, target *core.RegionInfo, supportWitness, samePeerCount bool) bool {
+// stores contains the StoreInfo references read for the final layout.
+func (f *RegionFit) IsFinalIsolationPreserved(stores []*core.StoreInfo, target *core.RegionInfo, supportWitness, samePeerCount bool) bool {
 	if !f.IsSatisfied() || !hasIsolationLevel(f.rules) {
 		return true
 	}
-	after := fitRegion(getStoresByRegion(stores, target), target, f.rules, supportWitness)
+	after := fitRegion(stores, target, f.rules, supportWitness)
 	for i, before := range f.RuleFits {
 		labels, configured := before.Rule.isolationPrefix()
 		if !configured {

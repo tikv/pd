@@ -155,3 +155,71 @@ func TestFinalIsolationCheckKeepsRepairs(t *testing.T) {
 	_, err := CreateReplaceLeaderPeerOperator("test", tc, region, OpReplica, 1, newPeer, region.GetStorePeer(2))
 	require.NoError(t, err)
 }
+
+func TestFinalIsolationRechecksAfterStoreChangesBetweenCandidates(t *testing.T) {
+	tc, region := newLeaderVoterIsolationCluster(t, "host")
+	tc.PutStoreWithLabels(4, "host", "b")
+	b := NewBuilder("test", tc, region).
+		RemovePeer(1).
+		AddPeer(&metapb.Peer{StoreId: 4, Role: metapb.PeerRole_Voter})
+	_, err := b.prepareBuild()
+	require.NoError(t, err)
+	require.True(t, b.isolationLeader(2, false))
+
+	store := tc.GetStore(4)
+	tc.PutStoreWithLabels(4, "host", "c")
+	require.True(t, b.isolationLeader(3, false))
+
+	// The first and last candidates see the same stores, but the
+	// selected leader on store 3 passed with a different host on store 4.
+	tc.PutStore(store)
+	require.True(t, b.isolationLeader(4, false))
+	require.False(t, b.isolationLeader(3, true))
+}
+
+func TestFinalIsolationRechecksAfterWitnessCountChange(t *testing.T) {
+	tc := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	tc.SetEnableWitness(true)
+	tc.SetMaxReplicas(7)
+	for i, host := range []string{"a", "x", "x", "y", "b", "c", "d", "e"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+	}
+	for id := uint64(2); id <= 4; id++ {
+		tc.GetBasicCluster().StoresInfo.UpdateStoreStatus(id, 0, 0, int(id), 0, 0, 0, 0)
+	}
+	require.NoError(t, tc.GetRuleManager().SetRules([]*placement.Rule{
+		{GroupID: "pd", ID: "default", Role: placement.Leader, Count: 1},
+		{GroupID: "pd", ID: "first-witness", Role: placement.Voter, IsWitness: true, Count: 1},
+		{GroupID: "pd", ID: "isolated-witnesses", Role: placement.Voter, IsWitness: true, Count: 2, LocationLabels: []string{"host"}, IsolationLevel: "host"},
+		{GroupID: "pd", ID: "voters", Role: placement.Voter, Count: 3},
+	}))
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1},
+		{Id: 2, StoreId: 2, IsWitness: true},
+		{Id: 3, StoreId: 3, IsWitness: true},
+		{Id: 4, StoreId: 4, IsWitness: true},
+		{Id: 6, StoreId: 6},
+		{Id: 7, StoreId: 7},
+		{Id: 8, StoreId: 8},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	tc.PutRegion(region)
+	require.NoError(t, tc.SetBase(10))
+	b := NewBuilder("test", tc, region).
+		RemovePeer(1).
+		AddPeer(&metapb.Peer{StoreId: 5}).
+		SetLeader(5)
+	_, err := b.prepareBuild()
+	require.NoError(t, err)
+	require.NotNil(t, b.isolationLeader)
+	require.True(t, b.isolationLeader(5, true))
+
+	// The first witness rule picks store 4 after this update, leaving stores 2
+	// and 3 on the same host for the isolation rule. Store metadata is shared
+	// by both StoreInfo objects.
+	store := tc.GetStore(4)
+	tc.GetBasicCluster().StoresInfo.UpdateStoreStatus(4, 0, 0, 1, 0, 0, 0, 0)
+	require.Same(t, store.GetMeta(), tc.GetStore(4).GetMeta())
+	require.False(t, b.isolationLeader(5, true))
+}
