@@ -378,6 +378,44 @@ func TestHandoffPreservesAdmissionAndReportedReadBound(t *testing.T) {
 	}
 }
 
+func TestBalanceDefaultIsFreshlyEvacuated(t *testing.T) {
+	x := newRecoveryTest(t)
+	x.drain(1)
+	home := x.evacuate(101, 8, 40)
+	homeStart, sourceStart := x.now-20, x.now-120
+	for i, tc := range []struct {
+		admitted, keys, sourceRate uint64
+		wantReturn                 bool
+	}{
+		{0, 0, 100, true},   // A confirmed idle default, gap 60.
+		{0, 90, 100, false}, // The default could equalize the two Stores.
+		{50, 0, 100, false}, // A rate inside [0,50] beats returning 40.
+		{50, 0, 120, true},  // Returning 40 equalizes the two Stores for every default.
+	} {
+		r := x.report(uint64(i+200), 12, 7, tc.admitted, x.now)
+		ev := transfer(r, "evict", 8, OpLeader)
+		require.True(t, x.AddOperator(ev))
+		end := uint64(x.now)
+		r = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{Region: r.GetMeta(), Leader: r.GetStorePeer(8),
+			Term: 8, KeysRead: tc.keys, Interval: &pdpb.TimeInterval{StartTimestamp: end - 500, EndTimestamp: end}}, 0)
+		x.cluster.CheckAndPutRegion(r)
+		x.Dispatch(r, DispatchFromHeartBeat, func(uint64) {})
+		require.Equal(t, SUCCESS, ev.Status())
+		x.now += 20
+		x.store(1, homeStart, 40)
+		x.store(8, sourceStart, tc.sourceRate)
+		preferred := transfer(home, "balance", 1, OpLeader)
+		got := x.BestReturn(x.tc, x.cluster.GetStore(8), x.cluster.GetStore(1), r, nil, func(*core.RegionInfo) bool {
+			return x.PreferReturn(x.tc, preferred, r.GetID(), nil)
+		})
+		require.Equal(t, tc.wantReturn, got == home, "case %d", i)
+		if tc.wantReturn {
+			x.store(1, homeStart, tc.sourceRate)
+			require.False(t, x.canSendRecovery(preferred, home), "recheck the gap before sending")
+		}
+	}
+}
+
 func TestUnknownTransferOnlyBlocksTheUnsafeDirection(t *testing.T) {
 	x := newRecoveryTest(t)
 	x.drain(1)
@@ -435,13 +473,13 @@ func TestConsecutiveTransfersCarryConfirmedReadCost(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, 100+float64(initial), bounds.high, "keep the reservation until the Store reports")
 
-		require.True(t, math.IsInf(x.recovery.reservationCost(middle.Clone(core.SetReportInterval(end-494, end))), 1))
-		require.True(t, math.IsInf(x.recovery.reservationCost(middle.Clone(core.SetRegionConfVer(2))), 1))
+		require.True(t, math.IsInf(x.recovery.readCostBounds(middle.Clone(core.SetReportInterval(end-494, end))).high, 1))
+		require.True(t, math.IsInf(x.recovery.readCostBounds(middle.Clone(core.SetRegionConfVer(2))).high, 1))
 		require.True(t, math.IsInf(readCost(middle), 1), "a reservation is never a measured candidate rate")
 		next := x.round
 		next.ID++
 		require.NoError(t, x.UpdateRecoveryRound(next, 8, x.now-120))
-		require.True(t, math.IsInf(x.recovery.reservationCost(middle), 1))
+		require.True(t, math.IsInf(x.recovery.readCostBounds(middle).high, 1))
 	}
 }
 

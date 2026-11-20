@@ -216,15 +216,15 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 		s.Unlock()
 		return ordinary
 	}
-	cost := readCost(ordinary)
+	cost := s.readCostBounds(ordinary)
 	loads, ok := oc.compareReads(target, source, &recoveryChoice{extra: batch})
-	if !ok || math.IsInf(cost, 0) {
+	if !ok || math.IsInf(cost.high, 0) {
 		s.Unlock()
 		return ordinary
 	}
 	best := 0.0
 	if d, found := s.history[ordinary.GetID()]; found && d.home == target.GetID() && d.successor == source.GetID() && d.matches(ordinary, target) {
-		best = min(d.rate, cost)
+		best = min(d.rate, cost.high)
 	}
 	index := s.index.Clone()
 	s.Unlock()
@@ -245,7 +245,7 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 		}
 		rate, valid := r.ReadKeysPerSecond()
 		score := min(d.rate, rate)
-		if valid && score > best && loads.allows(cost, rate, nil) {
+		if valid && score > best && loads.allowsReturn(cost, rate) {
 			candidates = append(candidates, candidate{r, score})
 		}
 		return true
@@ -304,18 +304,21 @@ func readCost(r *core.RegionInfo) float64 {
 	return math.Inf(1)
 }
 
-// reservationCost is used for other transfers' possible influence only. A
-// return candidate and its default still require measured current read rates.
-func (s *leaderRecovery) reservationCost(r *core.RegionInfo) float64 {
+// readCostBounds keeps a measured rate distinct from a confirmed handoff's
+// upper bound. Optional return candidates still require a measured rate.
+func (s *leaderRecovery) readCostBounds(r *core.RegionInfo) readBounds {
+	if rate := readCost(r); !math.IsInf(rate, 1) {
+		return readBounds{rate, rate}
+	}
 	if bound, valid := r.LongIntervalReadBound(); valid {
 		if h, ok := s.handoffs.Peek(r.GetID()); ok {
 			previous := h.(handoffCost)
 			if previous.report == identifyHandoff(r) {
-				return max(previous.rate, bound)
+				return readBounds{high: max(previous.rate, bound)}
 			}
 		}
 	}
-	return readCost(r)
+	return readBounds{high: math.Inf(1)}
 }
 
 // A new Leader's first report can include its time as a follower. For a
@@ -375,7 +378,7 @@ func (oc *Controller) loadBounds(st *core.StoreInfo, p *recoveryChoice) (readBou
 		r := oc.cluster.GetRegion(op.RegionID())
 		rate, ok := sample.handoffBound(op, r)
 		if !ok {
-			rate = max(sample.rate, oc.recovery.reservationCost(r))
+			rate = max(sample.rate, oc.recovery.readCostBounds(r).high)
 		}
 		op.leaderReadChanges(rate, 0, func(id uint64, delta float64) {
 			if id == st.GetID() {
@@ -429,8 +432,8 @@ func (oc *Controller) fits(p *recoveryChoice) bool {
 	if home == nil || other == nil || r == nil || a == nil || !home.RestartedFrom(p.home.process) {
 		return false
 	}
-	bRate, aRate := readCost(r), readCost(a)
-	if bRate <= 0 || math.IsInf(bRate, 0) || math.IsInf(aRate, 0) {
+	bRate := readCost(r)
+	if bRate <= 0 || math.IsInf(bRate, 0) {
 		return false
 	}
 	if !p.sent[0] && (!p.home.matches(r, home) || !p.sent[1] && s.history[p.home.id] != p.home) {
@@ -460,7 +463,13 @@ func (oc *Controller) fits(p *recoveryChoice) bool {
 		return false
 	}
 	loads, ok := oc.compareReads(home, other, p)
-	return ok && loads.allows(aRate, bRate, p)
+	if !ok {
+		return false
+	}
+	if p.partner != nil {
+		return loads.allowsExchange(readCost(a), bRate, p)
+	}
+	return loads.allowsReturn(s.readCostBounds(a), bRate)
 }
 
 // The same two Store bounds apply to every candidate for one balance slot.
@@ -486,31 +495,44 @@ func (oc *Controller) compareReads(home, other *core.StoreInfo, p *recoveryChoic
 	}, true
 }
 
-func (c readComparison) allows(aRate, bRate float64, p *recoveryChoice) bool {
-	lo, hi := c.lo, c.hi
-	// Two independently issued Raft commands may finish in either order, and
-	// one may fail. Compare the same completed legs under both allocations.
-	if p != nil && p.partner != nil {
-		if c.homeYielded && bRate > 0 || c.otherYielded && aRate > 0 {
-			return false
-		}
-		bHome, bOther := bRate/c.homeWeight, bRate/c.otherWeight
-		aHome, aOther := aRate/c.homeWeight, aRate/c.otherWeight
-		if p.sent[0] {
-			hi += bHome
-		}
-		if p.sent[1] {
-			lo -= aOther
-		}
-		return noWiderGap(lo, hi, -bOther, bHome) && noWiderGap(lo, hi, aHome, -aOther) &&
-			noWiderGap(lo, hi, aHome-bOther, bHome-aOther)
-	}
-	delta := bRate - aRate
-	if c.homeYielded && delta > 0 || c.otherYielded && delta < 0 {
+// The default rate closest to a balanced split is the hardest to beat.
+// At each endpoint of the possible Store gaps, compare against that rate
+// and leaving the Leader in place. For each fixed default the difference
+// of squared gaps is affine, so these endpoints cover every interior gap.
+func (c readComparison) allowsReturn(ordinary readBounds, rate float64) bool {
+	if c.homeYielded && rate > ordinary.low || c.otherYielded && rate < ordinary.high {
 		return false
 	}
 	scale := 1/c.homeWeight + 1/c.otherWeight
-	return noWiderGap(lo, hi, aRate*scale, bRate*scale) && noWiderGap(lo, hi, 0, bRate*scale)
+	low, high, candidate := ordinary.low*scale, ordinary.high*scale, rate*scale
+	if math.IsInf(high, 1) || !noWiderGap(c.lo, c.hi, 0, candidate) {
+		return false
+	}
+	for _, gap := range [...]float64{c.lo, c.hi} {
+		best := min(max(low, gap), high)
+		if !noWiderGap(gap, gap, best, candidate) {
+			return false
+		}
+	}
+	return true
+}
+
+// Either eviction can complete first or fail independently.
+func (c readComparison) allowsExchange(aRate, bRate float64, p *recoveryChoice) bool {
+	lo, hi := c.lo, c.hi
+	if c.homeYielded && bRate > 0 || c.otherYielded && aRate > 0 {
+		return false
+	}
+	bHome, bOther := bRate/c.homeWeight, bRate/c.otherWeight
+	aHome, aOther := aRate/c.homeWeight, aRate/c.otherWeight
+	if p.sent[0] {
+		hi += bHome
+	}
+	if p.sent[1] {
+		lo -= aOther
+	}
+	return noWiderGap(lo, hi, -bOther, bHome) && noWiderGap(lo, hi, aHome, -aOther) &&
+		noWiderGap(lo, hi, aHome-bOther, bHome-aOther)
 }
 
 func noWiderGap(lo, hi, ordinary, candidate float64) bool {
@@ -667,7 +689,7 @@ func (oc *Controller) PlanEvictions(c sche.SchedulerCluster, ops []*Operator) {
 				continue
 			}
 			p := &recoveryChoice{round: round, cluster: c, home: d, ordinary: other.RegionID(), other: t.ToStore, partner: &other.drain.departure}
-			if !allowed[j] || !base.allows(other.drain.rate, op.drain.rate, p) || !eligibleReturnTarget(c, regions[j], t.ToStore) {
+			if !allowed[j] || !base.allowsExchange(other.drain.rate, op.drain.rate, p) || !eligibleReturnTarget(c, regions[j], t.ToStore) {
 				continue
 			}
 			for k, rest := range ops {
@@ -733,7 +755,7 @@ func (oc *Controller) trackTransfer(op *Operator) {
 		case TransferLeader:
 			if _, ok := s.pending[op]; !ok {
 				r := oc.cluster.GetRegion(op.RegionID())
-				sample := transferSample{rate: s.reservationCost(r)}
+				sample := transferSample{rate: s.readCostBounds(r).high}
 				if r != nil && r.GetLeader().GetStoreId() == t.FromStore {
 					sample.term = r.GetTerm()
 				}
@@ -823,7 +845,7 @@ func (oc *Controller) finishRecovery(op *Operator, r *core.RegionInfo) {
 	if r != nil && op.Status() == SUCCESS && op.steps[len(op.steps)-1].IsFinish(r) {
 		actual = r.GetLeader().GetStoreId()
 	}
-	rate := max(admitted.rate, s.reservationCost(r))
+	rate := max(admitted.rate, s.readCostBounds(r).high)
 	if bound, ok := admitted.handoffBound(op, r); actual != 0 && ok {
 		rate = bound
 		s.handoffs.Put(r.GetID(), handoffCost{identifyHandoff(r), rate})
