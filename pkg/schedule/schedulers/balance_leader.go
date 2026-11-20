@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"sort"
@@ -341,6 +342,12 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
+	recovering := s.GetName() == types.BalanceLeaderScheduler.String() && s.OpController.RecoveryActive()
+	if recovering {
+		// Both passes start from the same in-flight operators.
+		solver.opInfluence = operator.NewOpInfluence()
+		solver.opInfluence.Add(opInfluence)
+	}
 
 	stores := cluster.GetStores()
 	scoreFunc := func(store *core.StoreInfo) float64 {
@@ -354,33 +361,39 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
 		// first choose source
 		if sourceCandidate.hasStore() {
-			op := createTransferLeaderOperator(sourceCandidate, transferOut, s, solver, usedRegions, result, collector)
+			op := createTransferLeaderOperator(sourceCandidate, transferOut, s, solver, usedRegions, collector)
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
-					return result, collector.GetPlans()
+					break
 				}
 				makeInfluence(op, solver, usedRegions, sourceCandidate, targetCandidate)
 			}
 		}
 		// next choose target
 		if targetCandidate.hasStore() {
-			op := createTransferLeaderOperator(targetCandidate, transferIn, s, solver, usedRegions, result, nil)
+			op := createTransferLeaderOperator(targetCandidate, transferIn, s, solver, usedRegions, nil)
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
-					return result, collector.GetPlans()
+					break
 				}
 				makeInfluence(op, solver, usedRegions, sourceCandidate, targetCandidate)
 			}
 		}
 	}
-	s.gc(append(sourceCandidate.stores, targetCandidate.stores...))
+	if len(result) < batch {
+		s.gc(append(sourceCandidate.stores, targetCandidate.stores...))
+	}
+	if recovering && len(result) > 0 {
+		solver.opInfluence = opInfluence
+		s.preferFormerLeaders(solver, result, usedRegions)
+	}
 	return result, collector.GetPlans()
 }
 
 func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLeaderScheduler,
-	ssolver *solver, usedRegions map[uint64]struct{}, batch []*operator.Operator, collector *plan.Collector) *operator.Operator {
+	ssolver *solver, usedRegions map[uint64]struct{}, collector *plan.Collector) *operator.Operator {
 	store := cs.getStore()
 	ssolver.Step++
 	defer func() { ssolver.Step-- }()
@@ -405,7 +418,6 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLea
 	}
 	if op != nil {
 		s.resetLimit(store)
-		op = s.preferFormerLeader(ssolver, op, usedRegions, batch)
 	} else {
 		s.attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", s.GetName()), zap.Uint64(dir, store.GetID()))
@@ -484,36 +496,111 @@ func (s *balanceLeaderScheduler) balanceRanges(solver *solver) []keyutil.KeyRang
 	return rs
 }
 
-// Prefer a former leader only for the store pair already chosen by the balancer.
-func (s *balanceLeaderScheduler) preferFormerLeader(solver *solver, ordinary *operator.Operator, used map[uint64]struct{}, batch []*operator.Operator) *operator.Operator {
-	if s.GetName() != types.BalanceLeaderScheduler.String() {
-		return ordinary
+// Each substitution competes with its ordinary Region while the other slots
+// may or may not finish. Preserve the store pairs and the native batch order.
+func (s *balanceLeaderScheduler) preferFormerLeaders(solver *solver, ops []*operator.Operator, used map[uint64]struct{}) {
+	// makeInfluence reserves all ordinary Regions except the final slot.
+	used[ops[len(ops)-1].RegionID()] = struct{}{}
+	// Each first-send check retains this private slice. By publication it
+	// contains the actual choices, including any later substitutions.
+	batch := slices.Clone(ops)
+	for i, ordinary := range ops {
+		if selectBalanceSlot(solver, ordinary) {
+			s.preferFormerLeader(solver, used, batch, i)
+		}
+		used[batch[i].RegionID()] = struct{}{}
+		operator.AddOpInfluence(batch[i], solver.opInfluence, solver.GetBasicCluster())
 	}
-	source, original := solver.Source, solver.Region
-	best := ordinary
+	copy(ops, batch)
+}
+
+// All operators here were just built by balance-leader. A concurrent Region
+// change can still invalidate a scheduled source before preference runs.
+func selectBalanceSlot(solver *solver, op *operator.Operator) bool {
+	step := op.Step(0).(operator.TransferLeader)
+	solver.Region = solver.GetRegion(op.RegionID())
+	solver.Source, solver.Target = solver.GetStore(step.FromStore), solver.GetStore(step.ToStore)
+	return solver.Region != nil && solver.Region.GetLeader().GetStoreId() == step.FromStore &&
+		solver.Source != nil && solver.Target != nil
+}
+
+func (s *balanceLeaderScheduler) preferFormerLeader(solver *solver, used map[uint64]struct{}, batch []*operator.Operator, slot int) {
+	original := solver.Region
 	var ranges []keyutil.KeyRange
 	var affinity filter.RegionFilter
-	solver.Region = s.OpController.BestReturn(liveCluster(solver.SchedulerCluster), source, solver.Target, original, batch, func(r *core.RegionInfo) bool {
+	s.OpController.SelectReturn(liveCluster(solver.SchedulerCluster), solver.Source, solver.Target, original, batch, slot, func(r *core.RegionInfo) *operator.Operator {
 		if _, exists := used[r.GetID()]; exists || s.OpController.GetOperator(r.GetID()) != nil {
-			return false
+			return nil
 		}
 		if affinity == nil {
 			ranges = s.balanceRanges(solver)
 			affinity = filter.NewAffinityFilter(solver.SchedulerCluster)
 		}
 		if !r.WithinRanges(ranges) || !affinity.Select(r).IsOK() {
-			return false
+			return nil
 		}
 		solver.Region = r
 		op := s.transferLeaderInRegion(solver, nil, true)
-		if op == nil || !s.OpController.PreferReturn(liveCluster(solver.SchedulerCluster), op, ordinary.RegionID(), batch) {
+		if op == nil || !s.preservesSizeBalance(solver, original, op, batch, slot) {
+			return nil
+		}
+		return op
+	})
+}
+
+// A different-sized Region must preserve the ordinary size balance and leave
+// each later ordinary transfer eligible under the balancer's normal scores.
+func (s *balanceLeaderScheduler) preservesSizeBalance(solver *solver, original *core.RegionInfo, op *operator.Operator, batch []*operator.Operator, slot int) bool {
+	nativeSize, size := original.GetApproximateSize(), solver.Region.GetApproximateSize()
+	if solver.kind.Policy != constant.BySize || size == nativeSize {
+		return true
+	}
+	source, target := solver.Source, solver.Target
+	sourceDelta, targetDelta := solver.getOpInfluence(source.GetID()), solver.getOpInfluence(target.GetID())
+	gap := func(size int64) float64 {
+		return math.Abs(source.LeaderScore(constant.BySize, sourceDelta-size) -
+			target.LeaderScore(constant.BySize, targetDelta+size))
+	}
+	// Check the subset most adverse to this substitution. The current
+	// influence includes the prefix, so an unfinished prefix move is modeled
+	// by removing its effect. A tail move can add its effect.
+	influence := operator.NewOpInfluence()
+	influence.Add(solver.opInfluence)
+	projection := newSolver(plan.NewBalanceSchedulerPlan(), solver.kind, solver.SchedulerCluster, influence)
+	operator.AddOpInfluence(op, influence, solver.GetBasicCluster())
+	for i, next := range batch {
+		if i == slot {
+			continue
+		}
+		if !selectBalanceSlot(projection, next) {
 			return false
 		}
-		best = op
-		return true
-	})
-	solver.Source = source
-	return best
+		from, to, n := projection.sourceStoreID(), projection.targetStoreID(), projection.Region.GetApproximateSize()
+		if i < slot {
+			from, to = to, from
+		} else {
+			if projection.sourceStoreScore(s.GetName()) <= projection.targetStoreScore(s.GetName()) {
+				return false
+			}
+			operator.AddOpInfluence(next, influence, solver.GetBasicCluster())
+		}
+		if size > nativeSize {
+			if from == source.GetID() {
+				sourceDelta -= n
+			}
+			if to == target.GetID() {
+				targetDelta += n
+			}
+		} else {
+			if to == source.GetID() {
+				sourceDelta += n
+			}
+			if from == target.GetID() {
+				targetDelta -= n
+			}
+		}
+	}
+	return gap(size) <= gap(nativeSize)
 }
 
 // transferLeaderIn samples a healthy follower on the target store.

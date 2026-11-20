@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -56,61 +57,112 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
+// Control the native sample only. Region eligibility, both planning passes,
+// queue admission and transfer completion use the real scheduler/controller.
+type fixedBalanceSample struct {
+	sche.SchedulerCluster
+	out, in *core.RegionInfo
+}
+
+func (c fixedBalanceSample) RandLeaderRegions(id uint64, _ []keyutil.KeyRange) []*core.RegionInfo {
+	if id == c.out.GetLeader().GetStoreId() {
+		return []*core.RegionInfo{c.out}
+	}
+	return nil
+}
+
+func (c fixedBalanceSample) RandFollowerRegions(id uint64, _ []keyutil.KeyRange) []*core.RegionInfo {
+	if c.in.GetLeader().GetStoreId() != id && c.in.GetStorePeer(id) != nil {
+		return []*core.RegionInfo{c.in}
+	}
+	return nil
+}
+
 func TestBalanceLeaderReturnsPlannedEvacuation(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest(false)
-	defer cancel()
-	now := time.Now().Unix()
-	store := func(id uint64, start int64, rate uint64) {
-		tc.PutStore(tc.GetStore(id), core.SetStoreStartTime(start), core.SetLastHeartbeatTS(time.Now()), core.SetStoreStats(&pdpb.StoreStats{KeysRead: rate * 10, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}}))
+	for _, tt := range []struct {
+		name           string
+		source, home   uint64
+		native, former [2]uint64 // reads/s
+		nativeLast     uint64
+		largeSize      int64 // MiB, nonzero enables size balance
+		nativeSizes    [2]int64
+		want           [2]uint64
+	}{
+		{"both fit", 10000, 1000, [2]uint64{}, [2]uint64{2000, 1900}, 102, 0, [2]int64{}, [2]uint64{11, 12}},
+		{"native slot already returns the busiest", 10000, 1000, [2]uint64{}, [2]uint64{2000, 1900}, 11, 0, [2]int64{}, [2]uint64{12, 11}},
+		{"two native moves balance exactly", 120, 40, [2]uint64{20, 20}, [2]uint64{30, 20}, 102, 0, [2]int64{}, [2]uint64{12, 102}},
+		{"second substitution would cancel first", 106, 45, [2]uint64{15, 8}, [2]uint64{17, 15}, 102, 0, [2]int64{}, [2]uint64{11, 102}},
+		{"size would overshoot", 10000, 1000, [2]uint64{}, [2]uint64{2000, 1900}, 102, 250, [2]int64{}, [2]uint64{12, 13}},
+		{"different size fits", 10000, 1000, [2]uint64{}, [2]uint64{2000, 1900}, 102, 25, [2]int64{}, [2]uint64{11, 12}},
+		{"first size move can fail", 10000, 1000, [2]uint64{}, [2]uint64{2000, 1900}, 102, 30, [2]int64{60, 90}, [2]uint64{101, 102}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest(false)
+			defer cancel()
+			now := time.Now().Unix()
+			store := func(id uint64, start int64, rate uint64) {
+				tc.PutStore(tc.GetStore(id), core.SetStoreStartTime(start), core.SetLastHeartbeatTS(time.Now()), core.SetStoreStats(&pdpb.StoreStats{KeysRead: rate * 10, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}}))
+			}
+			tc.AddLeaderStore(1, 100, 300)
+			tc.AddLeaderStore(2, 1, 100)
+			if tt.largeSize != 0 {
+				tc.SetLeaderSchedulePolicy(constant.BySize.String())
+				tc.SetTolerantSizeRatio(1)
+			}
+			store(1, now-120, tt.source)
+			store(2, now-120, tt.home)
+			report := func(r *core.RegionInfo, leader, term, rate uint64, end int64) *core.RegionInfo {
+				size := uint64(10 << 20)
+				if r.GetID() == 11 && tt.largeSize > 0 {
+					size = uint64(tt.largeSize) << 20
+				}
+				if id := r.GetID(); (id == 101 || id == 102) && tt.nativeSizes[id-101] != 0 {
+					size = uint64(tt.nativeSizes[id-101]) << 20
+				}
+				r = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{Region: r.GetMeta(), Leader: r.GetStorePeer(leader), Term: term, ApproximateSize: size, KeysRead: rate * 10, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(end - 10), EndTimestamp: uint64(end)}}, 0)
+				tc.PutRegion(r)
+				return r
+			}
+			round := oc.CurrentRecoveryRound()
+			round.ID++
+			re.NoError(oc.UpdateRecoveryRound(round, 2, now-120))
+			for id := uint64(11); id < 27; id++ {
+				rate := uint64(4)
+				if id < 13 {
+					rate = tt.former[id-11]
+				}
+				r := report(tc.AddLeaderRegion(id, 2, 1), 2, 7, rate, now-40)
+				ev, err := operator.CreateTransferLeaderOperator(types.EvictLeaderScheduler.String(), tc, r, 1, nil, operator.OpLeader)
+				re.NoError(err)
+				oc.PlanEvictions(tc, []*operator.Operator{ev})
+				re.True(oc.AddOperator(ev))
+				oc.Dispatch(report(r, 1, 8, rate, now-30), operator.DispatchFromHeartBeat, func(uint64) {})
+			}
+			now += 20
+			store(1, now-140, tt.source)
+			store(2, now-40, tt.home)
+			a := report(tc.AddLeaderRegion(101, 1, 2), 1, 1, tt.native[0], now)
+			report(tc.AddLeaderRegion(102, 1, 2), 1, 1, tt.native[1], now)
+			b := tc.GetRegion(tt.nativeLast)
+			lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
+			re.NoError(err)
+			lb.(*balanceLeaderScheduler).conf.Batch = 2
+			ops, _ := lb.Schedule(fixedBalanceSample{tc, a, b}, false)
+			re.Len(ops, 2)
+			re.Equal(2, oc.AddWaitingOperator(ops...))
+			for i, op := range ops {
+				re.Equal(tt.want[i], op.RegionID())
+				re.Same(op, oc.GetOperator(op.RegionID()))
+				operatorutil.CheckTransferLeader(re, op, operator.OpLeader, 1, 2)
+				r := tc.GetRegion(op.RegionID())
+				rate, ok := r.ReadKeysPerSecond()
+				re.True(ok)
+				oc.Dispatch(report(r, 2, r.GetTerm()+1, uint64(rate), now+1), operator.DispatchFromHeartBeat, func(uint64) {})
+				re.Equal(operator.SUCCESS, op.Status())
+			}
+		})
 	}
-	tc.AddLeaderStore(1, 100)
-	tc.AddLeaderStore(2, 1)
-	store(1, now-120, 10000)
-	store(2, now-120, 1000)
-	report := func(r *core.RegionInfo, store, term, keys uint64, end int64) *core.RegionInfo {
-		r = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{Region: r.GetMeta(), Leader: r.GetStorePeer(store), Term: term, KeysRead: keys * 10, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(end - 10), EndTimestamp: uint64(end)}, ApproximateSize: 10 << 20}, 0)
-		tc.PutRegion(r)
-		return r
-	}
-	for id := uint64(100); id < 150; id++ {
-		report(tc.AddLeaderRegion(id, 1, 2), 1, 1, 0, now)
-	}
-	round := oc.CurrentRecoveryRound()
-	round.ID = 1
-	re.NoError(oc.UpdateRecoveryRound(round, 2, now-120))
-	// More than one page departs. The two busiest Regions fit together even
-	// when the second slot accounts for the first transfer still in flight.
-	for id := uint64(11); id < 27; id++ {
-		rate := uint64(4)
-		switch id {
-		case 11:
-			rate = 2000
-		case 12:
-			rate = 1900
-		}
-		r := report(tc.AddLeaderRegion(id, 2, 1), 2, 7, rate, now-40)
-		ev, err := operator.CreateTransferLeaderOperator(types.EvictLeaderScheduler.String(), tc, r, 1, nil, operator.OpLeader)
-		re.NoError(err)
-		oc.PlanEvictions(tc, []*operator.Operator{ev})
-		re.True(oc.AddOperator(ev))
-		r = report(r, 1, 8, rate, now-30)
-		oc.Dispatch(r, operator.DispatchFromHeartBeat, func(uint64) {})
-	}
-	store(2, now-20, 1000)
-	// Both stores have a full interval after the last confirmed transfer.
-	now += 20
-	store(1, now-140, 10000)
-	store(2, now-40, 1000)
-	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, nil))
-	re.NoError(err)
-	ops, _ := lb.Schedule(tc, false)
-	re.GreaterOrEqual(len(ops), 2)
-	re.Equal(uint64(11), ops[0].RegionID())
-	re.Equal(uint64(12), ops[1].RegionID())
-	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
-	re.True(oc.AddOperator(ops[0]))
-	oc.RemoveOperator(ops[0])
 }
 
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {

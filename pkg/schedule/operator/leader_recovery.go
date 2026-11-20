@@ -116,6 +116,9 @@ type roundRecords struct {
 	recent   map[uint64]map[uint64]readBounds // Store -> last reported end -> change still possibly absent
 }
 
+// RecoveryActive reports whether a planned maintenance round is open.
+func (oc *Controller) RecoveryActive() bool { return oc.recovery.active.Load() }
+
 // CurrentRecoveryRound returns the active scheduler incarnation and latest round.
 func (oc *Controller) CurrentRecoveryRound() RecoveryRound {
 	s := &oc.recovery
@@ -215,10 +218,32 @@ func (s *leaderRecovery) returnScore(r *core.RegionInfo, source uint64, home *co
 	return 0
 }
 
-// BestReturn finds the largest reusable read rate for one ordinary balance slot.
-// The default wins ties. The callback checks the scheduler's live placement and
-// admission rules and retains the operator only when it accepts a better Region.
-func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.StoreInfo, ordinary *core.RegionInfo, batch []*Operator, accept func(*core.RegionInfo) bool) *core.RegionInfo {
+// SelectReturn replaces one ordinary balance slot with the highest-value
+// admissible former Region. The caller owns the batch until it is published.
+func (oc *Controller) SelectReturn(c sche.SchedulerCluster, source, target *core.StoreInfo, original *core.RegionInfo, batch []*Operator, slot int, build func(*core.RegionInfo) *Operator) {
+	ordinary := batch[slot]
+	unsafeAt := math.Inf(1)
+	oc.bestReturn(c, source, target, original, batch, func(r *core.RegionInfo, high float64) bool {
+		// For a fixed direction an earlier slot's uncertainty only grows
+		// with reserved reads. Equal or higher costs cannot restore its fit.
+		if high >= unsafeAt {
+			return false
+		}
+		op := build(r)
+		if op == nil {
+			return false
+		}
+		batch[slot] = op
+		accepted, limit := oc.preferReturn(c, op, ordinary.RegionID(), batch)
+		if !accepted {
+			batch[slot] = ordinary
+			unsafeAt = min(unsafeAt, limit)
+		}
+		return accepted
+	})
+}
+
+func (oc *Controller) bestReturn(c sche.SchedulerCluster, source, target *core.StoreInfo, ordinary *core.RegionInfo, batch []*Operator, accept func(*core.RegionInfo, float64) bool) *core.RegionInfo {
 	s := &oc.recovery
 	if !s.active.Load() {
 		return ordinary
@@ -228,7 +253,7 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 		s.Unlock()
 		return ordinary
 	}
-	loads, ok := oc.compareReads(target, source, &recoveryChoice{extra: batch})
+	loads, ok := oc.compareReads(target, source, &recoveryChoice{ordinary: ordinary.GetID(), extra: batch})
 	peers, handoffs := s.reportedPeers(source, loads.otherStats), s.handoffs
 	cost, demand := peers.estimate(ordinary, handoffs)
 	// An unbounded default could perfectly balance any positive gap. Only
@@ -242,8 +267,8 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 	s.Unlock()
 
 	type candidate struct {
-		region *core.RegionInfo
-		score  float64
+		region      *core.RegionInfo
+		score, high float64
 	}
 	var candidates []candidate
 	first := departure{home: target.GetID(), successor: source.GetID(), rate: math.Inf(1)}
@@ -258,7 +283,7 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 		candidateCost, measured := peers.estimate(r, handoffs)
 		score := min(d.rate, measured.low)
 		if score > best && loads.allowsCandidate(cost, candidateCost) {
-			candidates = append(candidates, candidate{r, score})
+			candidates = append(candidates, candidate{r, score, candidateCost.high})
 		}
 		return true
 	})
@@ -271,7 +296,7 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 		regions[i] = candidate.region
 	}
 	for i, allowed := range c.LeaderReturnEligibility(regions, c.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()) {
-		if allowed && accept(regions[i]) {
+		if allowed && accept(regions[i], candidates[i].high) {
 			return regions[i]
 		}
 	}
@@ -460,6 +485,9 @@ func (oc *Controller) loadBounds(st *core.StoreInfo, p *recoveryChoice) (readBou
 		add(op, sample)
 	}
 	for _, op := range p.extra {
+		if p.partner == nil && (op.RegionID() == p.ordinary || op.RegionID() == p.home.id) {
+			continue
+		}
 		if _, tracked := oc.recovery.pending[op]; !tracked && op.Status() == CREATED {
 			add(op, transferSample{})
 		}
@@ -666,27 +694,38 @@ func noWiderGap(lo, hi, ordinary, candidate float64) bool {
 	return residual(lo, -ordinary) >= residual(candidate, -lo)
 }
 
-// PreferReturn checks the actual ordinary candidate and attaches its comparison
-// to the single final operator. Only its Region enters normal admission.
-func (oc *Controller) PreferReturn(c sche.SchedulerCluster, op *Operator, ordinary uint64, extra []*Operator) bool {
+// A failed earlier slot supplies a read-cost ceiling for this pass. Other
+// rejection reasons (placement, history, the default) apply to this Region.
+func (oc *Controller) preferReturn(c sche.SchedulerCluster, op *Operator, ordinary uint64, extra []*Operator) (bool, float64) {
 	step, ok := primary(op)
 	if !ok || !eligibleReturn(c, oc.cluster.GetRegion(op.RegionID()), step.ToStore) {
-		return false
+		return false, math.Inf(1)
 	}
 	s := &oc.recovery
 	s.Lock()
 	defer s.Unlock()
 	d, ok := s.history[op.RegionID()]
 	if !ok || step.ToStore != d.home || step.FromStore != d.successor {
-		return false
+		return false, math.Inf(1)
 	}
-	p := &recoveryChoice{round: s.ID, cluster: c, home: d, ordinary: ordinary, other: d.successor, extra: slices.Clone(extra)}
+	p := &recoveryChoice{round: s.ID, cluster: c, home: d, ordinary: ordinary, other: d.successor, extra: extra}
 	if !oc.fits(p, nil) {
-		return false
+		return false, math.Inf(1)
+	}
+	// A later choice changes the read reservations of earlier returns sharing
+	// either Store. Keep those first-send checks valid with the actual batch.
+	for _, other := range extra {
+		q := other.recovery
+		if q == nil || (q.other != p.other && q.other != d.home && q.home.home != p.other && q.home.home != d.home) {
+			continue
+		}
+		if !oc.fits(q, nil) {
+			return false, oc.observedReadBounds(oc.cluster.GetRegion(op.RegionID())).high
+		}
 	}
 	op.recovery = p
 	op.SetAdditionalInfo("cache-return", "balance")
-	return true
+	return true, math.Inf(1)
 }
 
 func primary(op *Operator) (TransferLeader, bool) {

@@ -44,6 +44,16 @@ type recoveryTest struct {
 	storeInterval int64
 }
 
+// These probes exercise ranking and admission independently of scheduler sampling.
+func (x *recoveryTest) BestReturn(c sche.SchedulerCluster, source, target *core.StoreInfo, ordinary *core.RegionInfo, batch []*Operator, accept func(*core.RegionInfo) bool) *core.RegionInfo {
+	return x.bestReturn(c, source, target, ordinary, batch, func(r *core.RegionInfo, _ float64) bool { return accept(r) })
+}
+
+func (x *recoveryTest) PreferReturn(c sche.SchedulerCluster, op *Operator, ordinary uint64, extra []*Operator) bool {
+	accepted, _ := x.preferReturn(c, op, ordinary, extra)
+	return accepted
+}
+
 func newRecoveryTest(t *testing.T) *recoveryTest {
 	tc := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(t.Context(), tc.GetBasicCluster(), false)
