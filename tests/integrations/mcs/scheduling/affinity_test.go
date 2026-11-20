@@ -103,4 +103,3 @@ func TestAffinityFirstWinPersistence(t *testing.T) {
 		}
 	})
 }
-
