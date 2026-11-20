@@ -1377,13 +1377,12 @@ type GCState struct {
 // Once a global GC barrier is set, it will block the txn safe point from being advanced over the barrierTS,
 // until the global GC barrier is expired (defined by ttl) or manually deleted (by calling DeleteGlobalGCBarrier).
 //
-// When this method is called on an existing global GC barrier, it updates the barrierTS and ttl of the existing global
-// GC barrier and the expiration time will become the current time plus the ttl.
-// This means that calling this method on an existing global GC barrier can extend its lifetime arbitrarily.
+// Updating an existing global GC barrier sets its barrierTS and refreshes its TTL.
 //
-// Passing non-positive value to ttl is not allowed. Passing `time.Duration(math.MaxInt64)` to ttl indicates that the
-// GC barrier should never expire. The ttl might be rounded up, and the actual ttl is guaranteed no less than the
-// specified duration.
+// The TTL must be positive. A TTL of time.Duration(math.MaxInt64) means the barrier never expires.
+// A finite TTL starts at the time PD uses to check existing barriers for expiration in the successful
+// admission attempt. PD adds the TTL to that time and rounds the expiration up to a whole second.
+// The TTL can elapse while PD reads the TSO windows or commits the barrier.
 //
 // The barrierID must be non-empty.
 //
