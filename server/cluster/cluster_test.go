@@ -3569,10 +3569,16 @@ func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
 	re.NoError(rc.setStore(tombstone))
 
 	storeID := store.GetID()
-	rc.storeStateLock.Lock(uint32(storeID))
-
 	beforeRemove := make(chan struct{})
 	releaseRemove := make(chan struct{})
+	resumeRemove := sync.OnceFunc(func() { close(releaseRemove) })
+	rc.storeStateLock.Lock(uint32(storeID))
+	unlockStore := sync.OnceFunc(func() { rc.storeStateLock.Unlock(uint32(storeID)) })
+	t.Cleanup(func() {
+		unlockStore()
+		resumeRemove()
+	})
+
 	const beforeRemoveFP = "github.com/tikv/pd/server/cluster/deleteStoreBeforeRemoveFromMap"
 	re.NoError(failpoint.EnableCall(beforeRemoveFP, func() {
 		close(beforeRemove)
@@ -3623,11 +3629,11 @@ func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
 	// closed yet), so the store is guaranteed to still be tombstoned-but-
 	// present in StoresInfo when SetStoreLimit's guard runs below -- not a
 	// race against when c.DeleteStore(store) happens to execute.
-	rc.storeStateLock.Unlock(uint32(storeID))
-	re.Error(<-setLimitDone)
+	unlockStore()
+	re.Error(waitForStoreTestResult(t, setLimitDone, "SetStoreLimit"))
 
-	close(releaseRemove)
-	re.NoError(<-deleteDone)
+	resumeRemove()
+	re.NoError(waitForStoreTestResult(t, deleteDone, "deleteStore"))
 
 	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
 	re.False(ok)
@@ -3754,7 +3760,7 @@ func TestPutMetaStoreDoesNotRestoreRemovedStoreLimit(t *testing.T) {
 // is the Lock() call itself, so the subsequent "acquiredFP hasn't fired"
 // check only needs a short window, not one sized to cover arbitrary contend
 // setup work. Returns the channel contend's result will arrive on.
-func assertBlockedThenReleased(t *testing.T, re *require.Assertions, beforeLockFP, acquiredFP string, release chan struct{}, contend func() error) <-chan error {
+func assertBlockedThenReleased(t *testing.T, re *require.Assertions, beforeLockFP, acquiredFP string, release func(), contend func() error) <-chan error {
 	t.Helper()
 	beforeLock := make(chan struct{})
 	re.NoError(failpoint.EnableCall(beforeLockFP, func() { close(beforeLock) }))
@@ -3781,7 +3787,7 @@ func assertBlockedThenReleased(t *testing.T, re *require.Assertions, beforeLockF
 	case <-time.After(200 * time.Millisecond):
 	}
 
-	close(release)
+	release()
 
 	select {
 	case <-acquired:
@@ -3790,6 +3796,17 @@ func assertBlockedThenReleased(t *testing.T, re *require.Assertions, beforeLockF
 	}
 
 	return done
+}
+
+func waitForStoreTestResult(t *testing.T, done <-chan error, operation string) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s did not finish", operation)
+		return nil
+	}
 }
 
 // TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury guards against
@@ -3817,6 +3834,8 @@ func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	releasePut := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releasePut)
 	const putFP = "github.com/tikv/pd/server/cluster/putMetaStoreAfterWasKnownRead"
 	re.NoError(failpoint.EnableCall(putFP, func() {
 		close(entered)
@@ -3841,15 +3860,15 @@ func TestPutMetaStoreCannotRaceConcurrentRegistrationAndBury(t *testing.T) {
 	// storeStateLock while PutMetaStore holds it.
 	const buryBeforeLockFP = "github.com/tikv/pd/server/cluster/buryStoreBeforeStateLock"
 	const buryFP = "github.com/tikv/pd/server/cluster/buryStoreAfterStateLock"
-	buryDone := assertBlockedThenReleased(t, re, buryBeforeLockFP, buryFP, release, func() error {
+	buryDone := assertBlockedThenReleased(t, re, buryBeforeLockFP, buryFP, releasePut, func() error {
 		store := core.NewStoreInfo(&metapb.Store{Id: storeID, State: metapb.StoreState_Up})
 		rc.PutStore(store)
 		rc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Offline, true)))
 		return rc.BuryStore(storeID, false)
 	})
 
-	re.NoError(<-putDone)
-	re.NoError(<-buryDone)
+	re.NoError(waitForStoreTestResult(t, putDone, "PutMetaStore"))
+	re.NoError(waitForStoreTestResult(t, buryDone, "BuryStore"))
 
 	re.True(rc.GetStore(storeID).IsRemoved())
 	_, ok := opt.GetScheduleConfig().StoreLimit[storeID]
@@ -3884,6 +3903,8 @@ func TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval(t *testing.T) {
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	releasePut := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releasePut)
 	const putFP = "github.com/tikv/pd/server/cluster/putMetaStoreAfterWasKnownRead"
 	re.NoError(failpoint.EnableCall(putFP, func() {
 		close(entered)
@@ -3908,10 +3929,10 @@ func TestPutMetaStoreCannotRaceConcurrentManualTombstoneRemoval(t *testing.T) {
 	// acquire storeStateLock while PutMetaStore holds it.
 	const removeBeforeLockFP = "github.com/tikv/pd/server/cluster/removeTombStoneRecordsBeforeStateLock"
 	const removeFP = "github.com/tikv/pd/server/cluster/removeTombStoneRecordsAfterStateLock"
-	removeDone := assertBlockedThenReleased(t, re, removeBeforeLockFP, removeFP, release, rc.RemoveTombStoneRecords)
+	removeDone := assertBlockedThenReleased(t, re, removeBeforeLockFP, removeFP, releasePut, rc.RemoveTombStoneRecords)
 
-	re.NoError(<-putDone)
-	re.NoError(<-removeDone)
+	re.NoError(waitForStoreTestResult(t, putDone, "PutMetaStore"))
+	re.NoError(waitForStoreTestResult(t, removeDone, "RemoveTombStoneRecords"))
 
 	// The manual removal that ran after PutMetaStore released the lock must
 	// be the final word: the store is gone for good, not resurrected.
