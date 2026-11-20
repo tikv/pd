@@ -883,3 +883,91 @@ func TestMergeSameDegradedPlacement(t *testing.T) {
 	require.False(t, tc.GetRuleManager().FitRegionWithoutCache(tc, target).RuleFits[1].IsIsolationSatisfied())
 	require.False(t, AllowMerge(tc, source, target))
 }
+
+func TestMergeUsesCurrentRuleGroupOrder(t *testing.T) {
+	ctx := t.Context()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	tc.SetPlacementRulesCacheEnabled(true)
+	tc.SetKeyType("raw")
+	tc.SetSplitMergeInterval(0)
+	tc.SetMaxMergeRegionSize(2)
+	tc.SetMaxMergeRegionKeys(2)
+	tc.SetMergeScheduleLimit(0)
+	for i, zone := range []string{"A", "B", "A", "A", "A"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone})
+	}
+
+	rm := tc.GetRuleManager()
+	require.NoError(t, rm.SetRules([]*placement.Rule{
+		{GroupID: "pd", ID: "default", Role: placement.Leader, Count: 1},
+		{GroupID: "zone-score", ID: "voters", Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"}},
+		{
+			GroupID: "isolated", ID: "voters", Role: placement.Voter, Count: 2,
+			LocationLabels: []string{"zone"}, IsolationLevel: "zone",
+		},
+	}))
+	require.NoError(t, rm.SetRuleGroup(&placement.RuleGroup{ID: "zone-score", Index: 1}))
+	require.NoError(t, rm.SetRuleGroup(&placement.RuleGroup{ID: "isolated", Index: 2}))
+
+	source := newRegionInfo(1, "a", "m", 1, 1, []uint64{11, 1},
+		[]uint64{11, 1}, []uint64{12, 2}, []uint64{13, 3}, []uint64{14, 4}, []uint64{15, 5}).
+		Clone(core.WithIncVersion(), core.WithIncConfVer())
+	target := newRegionInfo(2, "m", "z", 1, 1, []uint64{22, 2},
+		[]uint64{21, 1}, []uint64{22, 2}, []uint64{23, 3}, []uint64{24, 4}, []uint64{25, 5}).
+		Clone(core.WithIncVersion(), core.WithIncConfVer())
+	tc.PutRegion(source)
+	tc.PutRegion(target)
+	controller := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), nil)
+	checker := NewController(ctx, tc, tc.GetCheckerConfig(), controller)
+	t.Cleanup(checker.splitScatter.clearPendingSplitScatter)
+
+	for _, region := range []*core.RegionInfo{source, target} {
+		for range 12 {
+			require.Empty(t, checker.CheckRegion(region))
+			// The schedulers revisit the cached region and promote the fit
+			// stored by RuleChecker on its first pass.
+			rm.FitRegion(tc, region)
+		}
+		fit := rm.FitRegion(tc, region)
+		require.Same(t, fit, rm.FitRegion(tc, region))
+		require.True(t, fit.IsSatisfied())
+		require.Equal(t, "isolated", fit.RuleFits[2].Rule.GroupID)
+		require.False(t, fit.RuleFits[2].IsIsolationSatisfied())
+	}
+
+	// Give the isolation rule first pick after the leader rule. Only the
+	// source can assign store 2, the sole zone B peer, to that rule.
+	scoringRule := rm.GetRule("zone-score", "voters")
+	require.NoError(t, rm.SetRuleGroup(&placement.RuleGroup{ID: "zone-score", Index: 3}))
+	require.Equal(t, scoringRule.Version, rm.GetRule("zone-score", "voters").Version)
+	require.False(t, rm.IsRegionFitCached(tc, source))
+	require.False(t, rm.IsRegionFitCached(tc, target))
+	sourceFit := rm.FitRegionWithoutCache(tc, source)
+	targetFit := rm.FitRegionWithoutCache(tc, target)
+	require.True(t, sourceFit.IsSatisfied())
+	require.True(t, targetFit.IsSatisfied())
+	require.Equal(t, "isolated", sourceFit.RuleFits[1].Rule.GroupID)
+	require.Equal(t, "isolated", targetFit.RuleFits[1].Rule.GroupID)
+	require.True(t, sourceFit.RuleFits[1].IsIsolationSatisfied())
+	require.False(t, targetFit.RuleFits[1].IsIsolationSatisfied())
+
+	tc.SetMergeScheduleLimit(8)
+	require.Empty(t, checker.CheckRegion(source), "old fits must not allow a direct merge that now increases conflicts")
+
+	// Revisit both Regions until fits under the new rule order are cached.
+	tc.SetMergeScheduleLimit(0)
+	for _, region := range []*core.RegionInfo{source, target} {
+		for range 12 {
+			require.Empty(t, checker.CheckRegion(region))
+			rm.FitRegion(tc, region)
+		}
+		fit := rm.FitRegion(tc, region)
+		require.Same(t, fit, rm.FitRegion(tc, region))
+		require.Equal(t, "isolated", fit.RuleFits[1].Rule.GroupID)
+	}
+	tc.SetMergeScheduleLimit(8)
+	require.Empty(t, checker.CheckRegion(source), "a warm cache with the current order must reject the merge")
+	tc.SetPlacementRulesCacheEnabled(false)
+	require.Empty(t, checker.CheckRegion(source), "the uncached result must agree")
+}
