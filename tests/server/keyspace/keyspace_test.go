@@ -296,7 +296,7 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 	}
 
 	for _, tc := range spanTestCases {
-		spans, err := keyspace.RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, manager)
+		spans, err := keyspace.RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, coreconstant.Txn, manager)
 		re.NoError(err)
 		re.Equal(tc.shouldSpan, spans, "test case: %s", tc.name)
 	}

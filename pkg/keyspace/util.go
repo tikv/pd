@@ -450,19 +450,16 @@ type Checker interface {
 	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error)
 }
 
-// RegionSpansMultipleKeyspaces reports whether a live raw or txn keyspace has a
-// boundary strictly inside [startKey, endKey). Empty endpoints represent negative
-// and positive infinity, respectively, not keyspace IDs. An error means the
-// boundaries could not be verified; callers must not allow a merge in that case.
-func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) (bool, error) {
+// RegionSpansMultipleKeyspaces reports whether a live keyspace in the cluster's
+// keyType has a boundary strictly inside [startKey, endKey). Empty endpoints
+// represent negative and positive infinity, respectively, not keyspace IDs.
+// An error means the boundaries could not be verified; callers must not allow
+// a merge in that case.
+func RegionSpansMultipleKeyspaces(startKey, endKey []byte, keyType coreconstant.KeyType, checker Checker) (bool, error) {
 	if checker == nil {
 		return false, errors.New("keyspace checker is unavailable")
 	}
-	keys, err := findKeyspaceBoundaryKeys(startKey, endKey, rawRegionBound, checker)
-	if err != nil || len(keys) > 0 {
-		return len(keys) > 0, err
-	}
-	keys, err = findKeyspaceBoundaryKeys(startKey, endKey, txnRegionBound, checker)
+	keys, err := findKeyspaceBoundaryKeys(startKey, endKey, keyTypeToRegionBoundType(keyType), checker)
 	return len(keys) > 0, err
 }
 

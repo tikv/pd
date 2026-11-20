@@ -509,9 +509,9 @@ func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32, limit int)
 	return ret, nil
 }
 
-func mustSpanKeyspaces(t *testing.T, start, end []byte, checker Checker) bool {
+func mustSpanKeyspaces(t *testing.T, start, end []byte, keyType coreconstant.KeyType, checker Checker) bool {
 	t.Helper()
-	spans, err := RegionSpansMultipleKeyspaces(start, end, checker)
+	spans, err := RegionSpansMultipleKeyspaces(start, end, keyType, checker)
 	require.NoError(t, err)
 	return spans
 }
@@ -539,7 +539,7 @@ func TestKeyspaceBoundaryChecksPropagateLookupErrors(t *testing.T) {
 		{nil, deeperTxnKey(0, 'a')},
 		{deeperTxnKey(constant.MaxValidKeyspaceID, 'a'), nil},
 	} {
-		spans, err := RegionSpansMultipleKeyspaces(bounds[0], bounds[1], checker)
+		spans, err := RegionSpansMultipleKeyspaces(bounds[0], bounds[1], coreconstant.Txn, checker)
 		require.ErrorIs(t, err, checker.err)
 		require.False(t, spans)
 		keys, err := GetKeyspaceSplitKeys(bounds[0], bounds[1], coreconstant.Txn, checker)
@@ -548,7 +548,7 @@ func TestKeyspaceBoundaryChecksPropagateLookupErrors(t *testing.T) {
 	}
 	// No lookup is necessary to prove a region already lies within one keyspace.
 	bound := MakeRegionBound(100)
-	spans, err := RegionSpansMultipleKeyspaces(bound.TxnLeftBound, bound.TxnRightBound, checker)
+	spans, err := RegionSpansMultipleKeyspaces(bound.TxnLeftBound, bound.TxnRightBound, coreconstant.Txn, checker)
 	require.NoError(t, err)
 	require.False(t, spans)
 }
@@ -573,6 +573,7 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 		startKey       []byte
 		endKey         []byte
 		checker        *mockKeyspaceChecker
+		keyType        coreconstant.KeyType
 		expectedResult bool
 	}{
 		{
@@ -692,6 +693,7 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			// Even without a keyspace-prefixed endpoint, this range encloses
 			// live raw keyspaces before the classical ('t') key.
 			name:           "empty start key paired with a non-keyspace end key encloses raw keyspaces",
+			keyType:        coreconstant.Raw,
 			startKey:       []byte{},
 			endKey:         codec.EncodeBytes([]byte{'t', 1, 2, 4}),
 			checker:        allExistChecker,
@@ -707,7 +709,7 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
-			result := mustSpanKeyspaces(t, tc.startKey, tc.endKey, tc.checker)
+			result := mustSpanKeyspaces(t, tc.startKey, tc.endKey, tc.keyType, tc.checker)
 			re.Equal(tc.expectedResult, result, "test case: %s", tc.name)
 		})
 	}
@@ -723,7 +725,7 @@ func TestRegionSpansMultipleKeyspacesWithMissingEndpoints(t *testing.T) {
 	}
 	start := MakeRegionBound(100).TxnLeftBound
 	end := MakeRegionBound(102).TxnRightBound // encoded endpoint ID is 103
-	require.True(t, mustSpanKeyspaces(t, start, end, checker))
+	require.True(t, mustSpanKeyspaces(t, start, end, coreconstant.Txn, checker))
 }
 
 func TestKeyspaceBoundaryChecksMatchMetadata(t *testing.T) {
@@ -744,8 +746,7 @@ func TestKeyspaceBoundaryChecksMatchMetadata(t *testing.T) {
 			if len(end) > 0 && bytes.Compare(start, end) >= 0 {
 				continue
 			}
-			expectedSpan := false
-			for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn} {
+			for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn, coreconstant.Table} {
 				var expected [][]byte
 				for _, id := range ids {
 					left, right := keyTypeToRegionBoundType(keyType).bounds(MakeRegionBound(id))
@@ -759,9 +760,9 @@ func TestKeyspaceBoundaryChecksMatchMetadata(t *testing.T) {
 				expected = slices.CompactFunc(expected, bytes.Equal)
 				require.Equal(t, expected, mustKeyspaceSplitKeys(t, start, end, keyType, cache),
 					"start=%x end=%x mode=%s", start, end, keyType)
-				expectedSpan = expectedSpan || len(expected) > 0
+				require.Equal(t, len(expected) > 0, mustSpanKeyspaces(t, start, end, keyType, cache),
+					"start=%x end=%x mode=%s", start, end, keyType)
 			}
-			require.Equal(t, expectedSpan, mustSpanKeyspaces(t, start, end, cache), "start=%x end=%x", start, end)
 		}
 	}
 }
@@ -783,7 +784,7 @@ func TestKeyspaceSplitPartialPrefixes(t *testing.T) {
 			start := codec.EncodeBytes([]byte{prefix, 1})
 			end := codec.EncodeBytes([]byte{prefix, 2})
 			left, right := keyTypeToRegionBoundType(keyType).bounds(MakeRegionBound(1 << 16))
-			require.True(t, mustSpanKeyspaces(t, start, end, cache))
+			require.True(t, mustSpanKeyspaces(t, start, end, keyType, cache))
 			require.Equal(t, [][]byte{left, right}, mustKeyspaceSplitKeys(t, start, end, keyType, cache))
 		})
 	}

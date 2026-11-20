@@ -683,6 +683,9 @@ func TestNotMergeAfterSplit(t *testing.T) {
 }
 
 func testNoMerge(re *require.Assertions, cluster *mockClusterWithKeyspaceManager, keyType coreconstant.KeyType, startKey []byte, endKey []byte) {
+	cfg := cluster.GetPDServerConfig().Clone()
+	cfg.KeyType = keyType.String()
+	cluster.SetPDServerConfig(cfg)
 	keys, err := keyspace.GetKeyspaceSplitKeys(startKey, endKey, keyType, cluster)
 	re.NoError(err)
 	re.NotEmpty(keys)
@@ -777,6 +780,19 @@ func TestKeyspaceMerge(t *testing.T) {
 	re.False(AllowMerge(cluster, region101, region100), "merging should be blocked when all spanned keyspaces exist")
 	re.False(AllowMerge(cluster, region101, region200), "merging should be blocked when all spanned keyspaces exist")
 	re.False(AllowMerge(cluster, region200, region101), "merging should be blocked when all spanned keyspaces exist")
+
+	// The empty range before the txn block must not inherit unused raw boundaries.
+	cluster.manager.existing[0] = true
+	cluster.SetEnableCrossTableMerge(true)
+	first := newRegionInfoWithBytes(1, nil, codec.EncodeBytes([]byte("a")))
+	second := newRegionInfoWithBytes(2, first.GetEndKey(), keyspace.MakeRegionBound(0).TxnLeftBound)
+	for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn, coreconstant.Table} {
+		config := cluster.GetPDServerConfig().Clone()
+		config.KeyType = keyType.String()
+		cluster.SetPDServerConfig(config)
+		re.Equal(keyType != coreconstant.Raw, AllowMerge(cluster, first, second), "mode=%s", keyType)
+		re.Equal(keyType != coreconstant.Raw, AllowMerge(cluster, second, first), "mode=%s", keyType)
+	}
 }
 
 func TestAllowMergeCrossTable(t *testing.T) {

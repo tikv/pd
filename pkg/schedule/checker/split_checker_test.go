@@ -142,7 +142,7 @@ func TestKeyspaceSplitMixRange(t *testing.T) {
 	// GetKeyspaceSplitKeys to find a split boundary in [402, MaxValidKeyspaceID).
 	cluster.AddKeyspace(402)
 
-	spans, err := keyspace.RegionSpansMultipleKeyspaces(startkey, endKey, sc.cluster)
+	spans, err := keyspace.RegionSpansMultipleKeyspaces(startkey, endKey, coreconstant.Raw, sc.cluster)
 	re.NoError(err)
 	re.True(spans)
 	keys, err := keyspace.GetKeyspaceSplitKeys(startkey, endKey, coreconstant.Raw, sc.cluster)
@@ -205,7 +205,7 @@ func TestKeyspaceSplitExtremeBounds(t *testing.T) {
 					re.Empty(cluster.GetAllLabelRules())
 					re.Nil(sc.Check(region))
 					cluster.AddKeyspace(tc.id)
-					spans, err := keyspace.RegionSpansMultipleKeyspaces(tc.start, tc.end, cluster)
+					spans, err := keyspace.RegionSpansMultipleKeyspaces(tc.start, tc.end, keyType, cluster)
 					re.NoError(err)
 					re.True(spans)
 					op := sc.Check(region)
