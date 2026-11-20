@@ -1614,25 +1614,32 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierRechecksFloorOnRevisionConf
 func (s *gcStateManagerTestSuite) TestQueuedGlobalGCBarrierUsesCurrentTime() {
 	re := s.Require()
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Second)
-	old, err := s.manager.SetGlobalGCBarrier(ctx, "backup", 0, 2*time.Second, now)
+	old, err := s.manager.SetGlobalGCBarrier(ctx, "backup", 0, 2*time.Second, time.Now())
 	re.NoError(err)
 	setTestTSOWindow(s.T(), s.storage, 2)
+
+	const hook = "github.com/tikv/pd/pkg/gc/beforeSetGlobalGCBarrierLock"
+	atLock := make(chan time.Time, 1)
+	re.NoError(failpoint.EnableCall(hook, func() { atLock <- time.Now() }))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
+
 	s.manager.mu.Lock()
-	started := make(chan struct{})
 	type result struct {
 		barrier *endpoint.GlobalGCBarrier
 		err     error
 	}
 	done := make(chan result, 1)
 	go func() {
-		close(started)
 		b, err := s.manager.SetGlobalGCBarrier(ctx, "backup", 0, time.Hour, time.Time{})
 		done <- result{b, err}
 	}()
-	<-started
-	// Keep the request queued until the source expires, without advancing any safe point.
-	time.Sleep(time.Until(*old.ExpirationTime.Time) + time.Millisecond)
+	select {
+	case reached := <-atLock:
+		s.Assert().False(old.IsExpired(reached), "source barrier already expired when the request reached the lock")
+		time.Sleep(time.Until(*old.ExpirationTime.Time) + time.Millisecond)
+	case <-time.After(5 * time.Second):
+		s.T().Error("request did not reach the manager lock")
+	}
 	s.manager.mu.Unlock()
 	got := <-done
 	re.NoError(got.err)

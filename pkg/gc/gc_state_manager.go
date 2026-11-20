@@ -1403,6 +1403,7 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 		return nil, err
 	}
 
+	failpoint.InjectCall("beforeSetGlobalGCBarrierLock")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
