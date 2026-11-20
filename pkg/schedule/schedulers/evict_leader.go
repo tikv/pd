@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -337,7 +338,8 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf), nil
+	reads := evictionReadBatch{incoming: make(map[uint64]float64), selected: make(map[uint64]struct{})}
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf, &reads), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -361,11 +363,11 @@ type evictLeaderStoresConf interface {
 	getBatch() int
 }
 
-func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, reads *evictionReadBatch) []*operator.Operator {
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for range batchSize {
-		once := scheduleEvictLeaderOnce(name, cluster, conf)
+		once := scheduleEvictLeaderOnce(name, cluster, conf, reads)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -379,7 +381,7 @@ func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf e
 	return ops
 }
 
-func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, reads *evictionReadBatch) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -412,6 +414,13 @@ func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf ev
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
 		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
+		if reads != nil {
+			// Witnesses and demoting voters cannot serve a leader's reads.
+			candidates.Stores = slices.DeleteFunc(candidates.Stores, func(store *core.StoreInfo) bool {
+				p := region.GetStorePeer(store.GetID())
+				return p.GetIsWitness() || !core.IsVoterOrIncomingVoter(p)
+			})
+		}
 		// Compatible with old TiKV transfer leader logic.
 		target := candidates.RandomPick()
 		targets := candidates.PickAll()
@@ -424,16 +433,61 @@ func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf ev
 		for _, t := range targets {
 			targetIDs = append(targetIDs, t.GetID())
 		}
+		target, rate := reads.pick(cluster, region, targets, target)
 		op, err := operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), targetIDs, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
+		}
+		if rate > 0 {
+			reads.selected[region.GetID()] = struct{}{}
+			reads.incoming[target.GetID()] += rate
+			if len(targets) > 1 {
+				op.PreferLeaderTargetOnCreate()
+			}
 		}
 		op.SetPriorityLevel(constant.Urgent)
 		op.Counters = append(op.Counters, evictLeaderNewOperatorCounter)
 		ops = append(ops, op)
 	}
 	return ops
+}
+
+// evictionReadBatch accounts for unique hot leaders already assigned in this scheduling pass.
+type evictionReadBatch struct {
+	incoming map[uint64]float64 // read bytes/s assigned to each receiver
+	selected map[uint64]struct{}
+}
+
+func (b *evictionReadBatch) pick(cluster sche.SchedulerCluster, region *core.RegionInfo, targets []*core.StoreInfo, fallback *core.StoreInfo) (*core.StoreInfo, float64) {
+	if b == nil {
+		return fallback, 0
+	}
+	if _, duplicate := b.selected[region.GetID()]; duplicate {
+		return fallback, 0
+	}
+	peer := cluster.GetHotPeerStat(utils.Read, region.GetID(), region.GetLeader().GetStoreId())
+	if peer == nil || !peer.IsLeader() || peer.HotDegree < cluster.GetSchedulerConfig().GetHotRegionCacheHitsThreshold() || len(peer.Loads) <= utils.ByteDim {
+		return fallback, 0
+	}
+	rate := peer.Loads[utils.ByteDim]
+	if rate <= 0 || len(targets) == 1 {
+		return fallback, rate
+	}
+	best, lowest := fallback, math.Inf(1)
+	for _, store := range targets {
+		stats := store.GetStoreStats()
+		interval := stats.GetInterval()
+		if interval.GetEndTimestamp() <= interval.GetStartTimestamp() || store.IsDisconnected() {
+			// Unknown load must not make a Store look idle.
+			return fallback, 0
+		}
+		load := float64(stats.GetBytesRead())/float64(interval.GetEndTimestamp()-interval.GetStartTimestamp()) + b.incoming[store.GetID()]
+		if load < lowest || (load == lowest && store.GetID() == fallback.GetID()) {
+			best, lowest = store, load
+		}
+	}
+	return best, rate
 }
 
 type evictLeaderHandler struct {

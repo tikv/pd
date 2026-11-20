@@ -95,6 +95,13 @@ type Operator struct {
 	// not set at creation time; callers opt in after the operator is built
 	// (see SetStoreHealthCheck), similar to additionalInfos.
 	needStoreHealthCheck atomic.Bool
+	leaderTargetTried    *atomic.Bool
+}
+
+// PreferLeaderTargetOnCreate asks TiKV to try the primary target on the initial
+// transfer. Set it before submitting the operator. Retries retain all alternatives.
+func (o *Operator) PreferLeaderTargetOnCreate() {
+	o.leaderTargetTried = new(atomic.Bool)
 }
 
 // SetStoreHealthCheck marks whether the operator's in-progress steps should
