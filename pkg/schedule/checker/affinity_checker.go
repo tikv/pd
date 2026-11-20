@@ -61,7 +61,8 @@ type AffinityChecker struct {
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
 	splitMu          syncutil.Mutex
-	splitAttempts    cache.Cache
+	splitAttempts    map[uint64]affinitySplitAttempt
+	maxSplitAttempts int
 	startTime        time.Time
 	balancer         *affinityBalancer
 }
@@ -74,7 +75,8 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		affinityManager:  cluster.GetAffinityManager(),
 		conf:             conf,
 		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
-		splitAttempts:    cache.NewCache(affinitySplitCacheSize, cache.LRUCache),
+		splitAttempts:    make(map[uint64]affinitySplitAttempt),
+		maxSplitAttempts: affinitySplitMaxAttempts,
 		startTime:        time.Now(),
 	}
 	if c.affinityManager != nil {
@@ -198,7 +200,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if isAffinity {
 		// The move is done, so a later move of the Region tries to split it again.
 		c.splitMu.Lock()
-		c.splitAttempts.Remove(region.GetID())
+		delete(c.splitAttempts, region.GetID())
 		c.splitMu.Unlock()
 		return c.mergeCheck(region, group)
 	}

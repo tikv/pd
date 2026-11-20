@@ -31,16 +31,19 @@ import (
 )
 
 const (
-	// Cap each split operator by the remaining wait budget so an unsuccessful
-	// split cannot hold the move beyond the fallback window.
-	defaultAffinitySplitWaitTimeout = 5 * time.Minute
-	affinitySplitCacheSize          = 10000
-	// Expire idle attempts on access. Active retries refresh this TTL without
-	// resetting the first attempt; the LRU also bounds memory for idle entries.
-	affinitySplitCacheTTL = time.Hour
+	// A SCAN split has 30s (about three Region heartbeats) from its first start.
+	defaultAffinitySplitTimeout = 30 * time.Second
+	// Waiting for size statistics is passive and does not use an operator slot.
+	defaultAffinityUnknownSizeWait = 5 * time.Minute
+	affinitySplitMaxAttempts       = 100_000
+	// Expire idle attempts on access or under capacity pressure.
+	affinitySplitAttemptTTL = time.Hour
 )
 
-var affinitySplitWaitTimeout = defaultAffinitySplitWaitTimeout
+var (
+	affinitySplitTimeout    = defaultAffinitySplitTimeout
+	affinityUnknownSizeWait = defaultAffinityUnknownSizeWait
+)
 
 type affinitySplitAttempt struct {
 	version       uint64
@@ -53,6 +56,24 @@ type affinitySplitAttempt struct {
 	// waiting for a non-positive size. It is zero until either wait starts.
 	split            *operator.Operator
 	fallbackRecorded bool
+}
+
+// pruneSplitAttempts reclaims idle attempts and operators that never started.
+// The caller holds splitMu.
+func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
+	for id, attempt := range c.splitAttempts {
+		if !now.Before(attempt.expiresAt) {
+			delete(c.splitAttempts, id)
+			continue
+		}
+		if split := attempt.split; attempt.startedAt.IsZero() && split != nil {
+			status := split.Status()
+			// Even a finished split can have started between checker passes.
+			if (operator.IsEndStatus(status) || (status == operator.CREATED && split.CheckExpired())) && !split.HasStarted() {
+				delete(c.splitAttempts, id)
+			}
+		}
+	}
 }
 
 // prepareAffinityPeerMove requests a SCAN split before the move to roles adds a
@@ -78,13 +99,18 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	c.splitMu.Lock()
 	defer c.splitMu.Unlock()
 
+	regionID := region.GetID()
 	wait := func(reason string) (*operator.Operator, bool) {
 		checkerCounter.WithLabelValues(affinityChecker, "wait-"+reason).Inc()
-		log.Debug("wait before affinity peer move", zap.Uint64("region-id", region.GetID()),
+		log.Debug("wait before affinity peer move", zap.Uint64("region-id", regionID),
 			zap.String("group-id", group.ID), zap.String("reason", reason))
 		return nil, false
 	}
 	sizeUnknown := region.GetApproximateSize() <= 0
+	waitTimeout := affinitySplitTimeout
+	if sizeUnknown {
+		waitTimeout = affinityUnknownSizeWait
+	}
 	storeConfig := c.cluster.GetStoreConfig()
 	var (
 		attempt   affinitySplitAttempt
@@ -97,76 +123,85 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			version:       region.GetRegionEpoch().GetVersion(),
 			voterStoreIDs: group.VoterStoreIDs,
 		}
-		if value, ok := c.splitAttempts.Get(region.GetID()); ok {
-			previous := value.(affinitySplitAttempt)
-			// Both lists are sorted.
-			if previous.version == attempt.version && slices.Equal(previous.voterStoreIDs, attempt.voterStoreIDs) &&
-				now.Before(previous.expiresAt) {
+		previous, tracked := c.splitAttempts[regionID]
+		if tracked {
+			if !now.Before(previous.expiresAt) {
+				delete(c.splitAttempts, regionID)
+			} else if previous.version == attempt.version && slices.Equal(previous.voterStoreIDs, attempt.voterStoreIDs) {
 				attempt = previous
 			}
+		} else if len(c.splitAttempts) >= c.maxSplitAttempts {
+			// Backpressure new attempts rather than resetting existing wait budgets.
+			c.pruneSplitAttempts(now)
+			if len(c.splitAttempts) >= c.maxSplitAttempts {
+				return wait("split-attempt-limit")
+			}
 		}
-		// A positive size must not reuse the wait for a non-positive size.
-		if !sizeUnknown && attempt.split == nil {
-			attempt.startedAt = time.Time{}
-		}
+		attempt.expiresAt = now.Add(affinitySplitAttemptTTL)
 		// A split that the controller rejects or cancels before it starts, for
 		// example because the waiting queue is full, sends no request, so the
 		// wait does not start and the next patrol requests the split again.
-		if attempt.split != nil {
+		if split := attempt.split; split != nil {
 			// Keep a split that can still start between preparation and admission.
 			// Expire unsubmitted operators so they cannot block later patrols.
-			if attempt.split.Status() == operator.CREATED && !attempt.split.CheckExpired() {
+			if split.Status() == operator.CREATED && !split.CheckExpired() {
+				return nil, false
+			}
+			finished := split.IsEnd()
+			if attempt.startedAt.IsZero() {
+				attempt.startedAt = split.GetStartTime()
+			}
+			if !finished {
+				c.splitAttempts[regionID] = attempt
 				return nil, false
 			}
 			if attempt.startedAt.IsZero() {
-				attempt.startedAt = attempt.split.GetStartTime()
+				attempt.split = nil
 			}
-			if !attempt.split.IsEnd() {
-				attempt.expiresAt = now.Add(affinitySplitCacheTTL)
-				c.splitAttempts.Put(region.GetID(), attempt)
-				return nil, false
-			}
+		}
+		if !sizeUnknown && attempt.split == nil {
+			// Start fresh when a positive size arrives after a passive wait.
+			attempt.startedAt = time.Time{}
 		}
 		if sizeUnknown && attempt.startedAt.IsZero() {
 			attempt.startedAt = now
 		}
-		attempt.expiresAt = now.Add(affinitySplitCacheTTL)
 		if !attempt.startedAt.IsZero() {
-			splitWait = now.Sub(attempt.startedAt)
+			splitWait = time.Since(attempt.startedAt)
 		}
-		if splitWait < affinitySplitWaitTimeout {
+		if splitWait < waitTimeout {
 			if sizeUnknown {
-				c.splitAttempts.Put(region.GetID(), attempt)
+				c.splitAttempts[regionID] = attempt
 				return wait("unknown-size")
 			}
 			op, err := operator.CreateSplitRegionOperator("affinity-split-region", region,
 				operator.OpAffinity|operator.OpSplit, pdpb.CheckPolicy_SCAN, nil)
 			if err != nil {
 				affinityCheckerCreateOpFailedCounter.Inc()
-				log.Debug("create affinity split region operator failed", zap.Uint64("region-id", region.GetID()),
+				log.Debug("create affinity split region operator failed", zap.Uint64("region-id", regionID),
 					zap.String("group-id", group.ID), errs.ZapError(err))
 				return nil, false
 			}
-			op.LimitTimeout(affinitySplitWaitTimeout - splitWait)
+			op.LimitTimeout(affinitySplitTimeout - splitWait)
 			attempt.split = op
-			c.splitAttempts.Put(region.GetID(), attempt)
+			c.splitAttempts[regionID] = attempt
 			return op, false
 		}
-		c.splitAttempts.Put(region.GetID(), attempt)
+		c.splitAttempts[regionID] = attempt
 	} else {
-		c.splitAttempts.Remove(region.GetID())
+		delete(c.splitAttempts, regionID)
 	}
 	// Merges can leave a positive but stale size. Reuse the merge cooldown;
 	// after a restart its cache is gone, so allow the same time for statistics.
-	if time.Since(c.startTime) < recentMergeTTL || c.recentMergeCache.Exists(region.GetID()) {
+	if time.Since(c.startTime) < recentMergeTTL || c.recentMergeCache.Exists(regionID) {
 		return wait("recent-merge-or-startup")
 	}
 	// The engine may have no split key or no positive size, so a timed-out attempt
 	// moves without a preliminary split and accepts a potentially large snapshot.
-	if splitWait >= affinitySplitWaitTimeout && !attempt.fallbackRecorded {
+	if splitWait >= waitTimeout && !attempt.fallbackRecorded {
 		attempt.fallbackRecorded = true
-		c.splitAttempts.Put(region.GetID(), attempt)
-		log.Info("allow affinity peer move after split wait timeout", zap.Uint64("region-id", region.GetID()),
+		c.splitAttempts[regionID] = attempt
+		log.Info("allow affinity peer move after split wait timeout", zap.Uint64("region-id", regionID),
 			zap.String("group-id", group.ID), zap.Int64("size", region.GetApproximateSize()),
 			zap.Int64("keys", region.GetApproximateKeys()), zap.Duration("wait-duration", splitWait))
 		affinityCheckerSplitTimeoutCounter.Inc()
