@@ -3469,6 +3469,41 @@ func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
+func TestRemoveTombstoneRecordsKeepsReRegisteredStore(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	backend := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, backend)
+	store := newTestStores(1, "2.0.0")[0]
+	storeID := store.GetID()
+	tombstone := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	re.NoError(rc.setStore(tombstone))
+
+	const fp = "github.com/tikv/pd/server/cluster/removeTombStoneRecordsBeforeStateLock"
+	entered := false
+	re.NoError(failpoint.EnableCall(fp, func() {
+		// The manual sweep already saw the tombstone but has not locked
+		// the store. Let automatic GC and a registration complete first.
+		entered = true
+		rc.checkStore(storeID, regionSizeCache{})
+		re.Nil(rc.GetStore(storeID))
+		re.NoError(rc.PutMetaStore(store.GetMeta()))
+		re.Contains(opt.GetScheduleConfig().StoreLimit, storeID)
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(fp)) })
+
+	re.NoError(rc.RemoveTombStoneRecords())
+	re.True(entered, "manual cleanup did not reach the pre-lock failpoint")
+	loaded := &metapb.Store{}
+	ok, err := backend.LoadStoreMeta(storeID, loaded)
+	re.NoError(err)
+	re.True(ok, "manual cleanup deleted the re-registered store from storage")
+	re.Equal(store.GetMeta(), loaded)
+	re.Equal(store.GetMeta(), rc.GetStore(storeID).GetMeta())
+	re.Contains(opt.GetScheduleConfig().StoreLimit, storeID)
+}
+
 func TestRemoveTombstoneRecordsKeepsStoreWhenLimitRemovalFails(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

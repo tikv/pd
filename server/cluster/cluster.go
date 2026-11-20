@@ -2332,42 +2332,36 @@ func encodePreparingProgressKey(storeID uint64) string {
 // RemoveTombStoneRecords removes the tombStone Records.
 func (c *RaftCluster) RemoveTombStoneRecords() error {
 	var failedStores []uint64
-	for _, store := range c.GetStores() {
-		if store.IsRemoved() {
-			if c.GetStoreRegionCount(store.GetID()) > 0 {
+	for _, candidate := range c.GetStores() {
+		if !candidate.IsRemoved() {
+			continue
+		}
+		storeID := candidate.GetID()
+		store, err := func() (*core.StoreInfo, error) {
+			failpoint.InjectCall("removeTombStoneRecordsBeforeStateLock")
+			c.storeStateLock.Lock(uint32(storeID))
+			defer c.storeStateLock.Unlock(uint32(storeID))
+			failpoint.InjectCall("removeTombStoneRecordsAfterStateLock")
+			// GC and registration share this lock. The candidate may have
+			// been deleted or replaced since the sweep took its snapshot.
+			store := c.GetStore(storeID)
+			if store == nil || !store.IsRemoved() {
+				return nil, nil
+			}
+			if c.GetStoreRegionCount(storeID) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
-				failedStores = append(failedStores, store.GetID())
-				continue
+				failedStores = append(failedStores, storeID)
+				return nil, nil
 			}
-			// the store has already been tombstone
-			//
-			// deleteStore's other caller (checkStore) already holds
-			// storeStateLock for this ID; PutMetaStore holds it for its
-			// whole wasKnown-read-through-addStoreLimitInternal sequence
-			// (see its comment). Without this lock here too, this call could
-			// still run concurrently inside that window: PutMetaStore would
-			// correctly read wasKnown=true (the store is still tombstoned at
-			// that instant), but if this delete then completes before
-			// PutMetaStore reaches putStoreImpl, putStoreImpl observes nil
-			// and takes the brand-new-store path, durably recreating both
-			// the store and its limit despite wasKnown having been read
-			// correctly. This closes that overlap; it does not close the
-			// separate case where this call (and any prior bury) completes
-			// entirely before PutMetaStore's gRPC preflight-to-execution
-			// sequence even begins -- see the PR's Known limitations.
-			err := func() error {
-				failpoint.InjectCall("removeTombStoneRecordsBeforeStateLock")
-				c.storeStateLock.Lock(uint32(store.GetID()))
-				defer c.storeStateLock.Unlock(uint32(store.GetID()))
-				failpoint.InjectCall("removeTombStoneRecordsAfterStateLock")
-				return c.deleteStore(store)
-			}()
-			if err != nil {
-				log.Error("delete store failed",
-					zap.Stringer("store", store.GetMeta()),
-					errs.ZapError(err))
-				return err
-			}
+			return store, c.deleteStore(store)
+		}()
+		if err != nil {
+			log.Error("delete store failed",
+				zap.Stringer("store", store.GetMeta()),
+				errs.ZapError(err))
+			return err
+		}
+		if store != nil {
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}

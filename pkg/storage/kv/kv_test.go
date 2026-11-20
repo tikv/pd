@@ -38,6 +38,16 @@ func TestEtcd(t *testing.T) {
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
 	testRawTxn(re, kv)
+	t.Run("canceled load", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		// Check the read's error, not just the commit's error.
+		require.ErrorIs(t, kv.RunInTxn(ctx, func(txn Txn) error {
+			_, err := txn.Load("testKey")
+			require.ErrorIs(t, err, context.Canceled)
+			return err
+		}), context.Canceled)
+	})
 }
 
 func TestLevelDB(t *testing.T) {
