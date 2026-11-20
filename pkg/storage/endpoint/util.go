@@ -90,8 +90,11 @@ func RunBatchOpInTxn(ctx context.Context, storage TxnStorage, batch []func(kv.Tx
 	return err
 }
 
-// RunBatchOpInTxnWithCount returns how many operations committed from the start
-// of the batch, even if a later transaction fails.
+// RunBatchOpInTxnWithCount returns how many operations from the start of the
+// batch belong to transactions whose commit was acknowledged before an error.
+// An ambiguous commit error on the failing slice is not reconciled here;
+// callers that mirror committed prefixes in memory treat the failing slice as
+// uncommitted until storage is reloaded.
 func RunBatchOpInTxnWithCount(ctx context.Context, storage TxnStorage, batch []func(kv.Txn) error) (int, error) {
 	for start := 0; start < len(batch); start += etcdutil.MaxEtcdTxnOps {
 		end := min(start+etcdutil.MaxEtcdTxnOps, len(batch))

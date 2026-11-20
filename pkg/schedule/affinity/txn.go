@@ -375,7 +375,8 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
 // It validates the full request before writing the adds followed by the removes.
 // A batch may span multiple transactions. If a later transaction fails, only the
-// operations from committed transactions are published in memory.
+// operations from acknowledged transactions are published in memory; an ambiguous
+// commit error on the failing slice reconciles when storage is reloaded.
 // Currently migration (removing a range from group A and adding the same range to group B in one request)
 // is not supported because add validation checks overlaps against existing ranges before removals are applied.
 func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRanges) error {
