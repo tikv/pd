@@ -18,10 +18,12 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -180,6 +182,40 @@ func TestCheckSplitWhenAffinityDisabled(t *testing.T) {
 	}
 }
 
+func TestSplitPolicyLookupDoesNotHoldSplitMutex(t *testing.T) {
+	const lookupHook = "github.com/tikv/pd/pkg/schedule/affinity/afterRegionLabelLookup"
+	for _, path := range []string{"split request", "heartbeat"} {
+		t.Run(path, func(t *testing.T) {
+			re := require.New(t)
+			m, _, region, streams := newSplitRecoveryTestManager(t)
+			re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
+			re.NotNil(streams.PopMsg())
+			m.GetAndCacheRegionAffinityGroupState(region)
+
+			lookedUp := false
+			re.NoError(failpoint.EnableCall(lookupHook, func() {
+				lookedUp = true
+				re.True(m.splitMutex.TryLock(), "a slow label lookup must not hold splitMutex")
+				m.splitMutex.Unlock()
+				// Record a new denial using the cached policy before the lookup returns.
+				re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
+			}))
+			defer func() { re.NoError(failpoint.Disable(lookupHook)) }()
+
+			// This version spans the group boundary, so its policy requires a fresh lookup.
+			changed := region.Clone(core.WithEndKey([]byte("zz")), core.WithIncVersion())
+			if path == "split request" {
+				re.True(m.CheckSplit(changed, pdpb.SplitReason_SIZE, streams))
+			} else {
+				m.MaybeEnableSplit(changed, streams)
+			}
+			re.True(lookedUp)
+			re.Equal(1, streams.MsgLength(), "the old lookup must not send recovery for the new denial")
+			re.Equal(1, m.splitDeniedRegions.Len())
+		})
+	}
+}
+
 // TestEnableSplitAfterAffinityChanges requires one recovery notification across
 // concurrent heartbeats, including when the previous policy was already cached.
 func TestEnableSplitAfterAffinityChanges(t *testing.T) {
@@ -226,6 +262,8 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			re.Zero(streams.MsgLength(), "still denied")
 
 			region = tc.change(t, m, conf, region)
+			m.MaybeEnableSplit(region.Clone(core.WithLeader(nil)), streams)
+			re.Zero(streams.MsgLength(), "wait for a leader before sending recovery")
 			var wg sync.WaitGroup
 			for range 8 {
 				wg.Go(func() { m.MaybeEnableSplit(region, streams) })
@@ -240,73 +278,47 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 	}
 }
 
-// TestSplitTracking covers renewal, expiry and recovery using the same denial.
-func TestSplitTracking(t *testing.T) {
-	re := require.New(t)
-	m, conf, region, streams := newSplitRecoveryTestManager(t)
-	admin, expired := region.Clone(core.WithNewRegionID(2)), region.Clone(core.WithNewRegionID(3))
-	// Allowed requests, including administrative splits of affinity Regions, are not tracked.
-	re.True(m.CheckSplit(nil, pdpb.SplitReason_SIZE, streams))
-	re.True(m.CheckSplit(admin, pdpb.SplitReason_ADMIN, streams))
-	re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
-	re.False(m.CheckSplit(expired, pdpb.SplitReason_SIZE, streams))
-	re.Equal(2, streams.MsgLength())
-	re.NoError(streams.Drain(2))
-	deadline, ok := m.splitDeniedRegions.Peek(region.GetID())
-	re.True(ok)
-	// Expiration retains the target, so heartbeats must keep split suppression.
-	m.ExpireAffinityGroup("g1")
-	group, _ := m.GetRegionAffinityGroupState(region)
-	re.NotNil(group)
-	re.True(group.RegularSchedulingAllowed)
-	re.Equal(uint64(1), group.LeaderStoreID)
-	re.Equal([]uint64{1, 2, 3}, group.VoterStoreIDs)
-	m.MaybeEnableSplit(region, streams)
-	unchanged, _ := m.splitDeniedRegions.Peek(region.GetID())
-	re.Equal(deadline, unchanged, "heartbeats far from the deadline do not extend the TTL")
-	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
-	m.MaybeEnableSplit(region.Clone(core.WithLeader(nil)), streams)
-	re.Zero(streams.MsgLength())
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Go(func() { m.MaybeEnableSplit(region, streams) })
-	}
-	wg.Wait()
-	re.Equal(1, streams.MsgLength(), "concurrent heartbeats renew once")
-	msg, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
-	re.True(ok)
-	re.NotNil(msg.GetChangeSplit())
-	re.False(msg.GetChangeSplit().GetAutoSplitEnabled())
-	deadline, ok = m.splitDeniedRegions.Peek(region.GetID())
-	re.True(ok)
-	re.Greater(time.Until(deadline.(time.Time)), splitDeniedRegionTTL-time.Minute)
-	m.MaybeEnableSplit(region, streams)
-	re.Zero(streams.MsgLength(), "renewal restarts the deadline")
-	m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
-	m.splitDeniedRegions.Put(expired.GetID(), time.Now().Add(-time.Second))
+func TestSplitDenialExpiresWithUnchangedHeartbeats(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		m, _, region, streams := newSplitRecoveryTestManager(t)
+		re.True(m.CheckSplit(nil, pdpb.SplitReason_SIZE, streams))
+		re.True(m.CheckSplit(region, pdpb.SplitReason_ADMIN, streams))
+		re.Zero(m.splitDeniedRegions.Len())
+		re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
+		msg, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+		re.True(ok)
+		re.NotNil(msg.GetChangeSplit())
+		re.False(msg.GetChangeSplit().GetAutoSplitEnabled())
 
-	conf.SetAffinityScheduleLimit(0)
-	// Expired tracking falls back to the storage-side TTL. A heartbeat without
-	// a leader keeps the entry for the next leader heartbeat.
-	for _, r := range []*core.RegionInfo{nil, admin, expired, region.Clone(core.WithLeader(nil))} {
-		m.MaybeEnableSplit(r, streams)
-	}
-	re.Zero(streams.MsgLength())
-	m.MaybeEnableSplit(region, streams)
-	re.Equal(1, streams.MsgLength())
-	re.Zero(m.splitDeniedRegions.Len())
+		// The expired group keeps its target. Disabled split checks continue
+		// to report a low estimate during the entire validator TTL.
+		m.ExpireAffinityGroup("g1")
+		re.False(m.AllowSplit(region, pdpb.SplitReason_SIZE))
+		for range splitDeniedRegionTTL / time.Minute {
+			time.Sleep(time.Minute)
+			m.MaybeEnableSplit(region.Clone(), streams)
+			re.Zero(streams.MsgLength(), "a heartbeat must not reset TiKV's validator TTL")
+		}
+		re.Zero(m.splitDeniedRegions.Len())
+
+		// A normal split check can now report the oversized Region.
+		probed := region.Clone(core.SetApproximateSize(80))
+		m.MaybeEnableSplit(probed, streams)
+		re.True(m.CheckSplit(probed, pdpb.SplitReason_SIZE, streams))
+		re.Zero(streams.MsgLength(), "the validator has already expired")
+	})
 }
 
 // TestSplitQueueFull leaves dropped notifications to the storage TTL fallback.
 func TestSplitQueueFull(t *testing.T) {
-	for _, path := range []string{"denial", "renewal", "recovery"} {
+	for _, path := range []string{"denial", "recovery"} {
 		t.Run(path, func(t *testing.T) {
 			re := require.New(t)
 			m, _, region, streams := newSplitRecoveryTestManager(t)
 			if path != "denial" {
 				re.False(m.CheckSplit(region, pdpb.SplitReason_SIZE, streams))
 				re.NoError(streams.Drain(1))
-				m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
 			}
 			if path == "recovery" {
 				region = region.Clone(core.SetApproximateSize(80))
@@ -328,9 +340,7 @@ func TestSplitQueueFull(t *testing.T) {
 			if path == "recovery" {
 				re.Zero(m.splitDeniedRegions.Len())
 			} else {
-				renewed, ok := m.splitDeniedRegions.Peek(region.GetID())
-				re.True(ok)
-				re.Greater(time.Until(renewed.(time.Time)), splitDeniedRegionTTL-time.Minute)
+				re.Equal(1, m.splitDeniedRegions.Len())
 			}
 			m.MaybeEnableSplit(region, streams)
 			re.Zero(streams.MsgLength(), "delivery loss relies on the storage TTL")

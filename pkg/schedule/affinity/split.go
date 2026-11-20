@@ -17,7 +17,6 @@ package affinity
 import (
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -37,9 +36,11 @@ const (
 	// back to that TTL, as do entries lost on a PD leader or scheduling primary change.
 	splitDeniedRegionTTL   = 600 * time.Second
 	splitDeniedRegionLimit = 100_000
-	// Renew halfway through storage's TTL to tolerate missed heartbeats.
-	splitDeniedRenewMargin = splitDeniedRegionTTL / 2
 )
+
+type splitDenial struct {
+	expiresAt time.Time
+}
 
 // AllowSplit returns true if the region can be auto split
 func (m *Manager) AllowSplit(region *core.RegionInfo, reason pdpb.SplitReason) bool {
@@ -50,8 +51,7 @@ func (m *Manager) AllowSplit(region *core.RegionInfo, reason pdpb.SplitReason) b
 	return allowed
 }
 
-// isSplitAllowed also serves heartbeat renewal checks, which must not count a
-// new denied split request each time they evaluate the current policy.
+// isSplitAllowed checks the policy without counting a denied split request.
 func (m *Manager) isSplitAllowed(region *core.RegionInfo, reason pdpb.SplitReason) bool {
 	if region == nil {
 		// The default behavior is to allow it.
@@ -89,65 +89,45 @@ func (m *Manager) isSplitAllowed(region *core.RegionInfo, reason pdpb.SplitReaso
 // CheckSplit checks a split request and, if denied, notifies the Region leader
 // and remembers to restore auto-splitting when a later heartbeat allows it.
 func (m *Manager) CheckSplit(region *core.RegionInfo, reason pdpb.SplitReason, streams *hbstream.HeartbeatStreams) bool {
-	if reason == pdpb.SplitReason_ADMIN ||
-		m.conf.GetAffinityScheduleLimit() == 0 ||
-		m.conf.GetMaxAffinityMergeRegionSize() == 0 {
-		return true
-	}
-	m.splitMutex.Lock()
-	defer m.splitMutex.Unlock()
 	if m.AllowSplit(region, reason) {
 		return true
 	}
-	if m.sendSplitLocked(region, streams, false) {
-		// Tests track a new denial as if its renewal were due.
-		failpoint.Inject("shortenSplitDenialTracking", func() {
-			m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRenewMargin/2))
-		})
+	if region.GetLeader() != nil {
+		m.splitMutex.Lock()
+		defer m.splitMutex.Unlock()
+		streams.SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+		m.splitDeniedRegions.Put(region.GetID(), &splitDenial{expiresAt: time.Now().Add(splitDeniedRegionTTL)})
 	}
 	return false
 }
 
-// sendSplitLocked updates best-effort tracking. The caller holds splitMutex.
-func (m *Manager) sendSplitLocked(region *core.RegionInfo, streams *hbstream.HeartbeatStreams, enabled bool) bool {
-	if region.GetLeader() == nil {
-		return false
-	}
-	streams.SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: enabled}})
-	if enabled {
-		m.splitDeniedRegions.Remove(region.GetID())
-	} else {
-		m.splitDeniedRegions.Put(region.GetID(), time.Now().Add(splitDeniedRegionTTL))
-	}
-	return true
-}
-
 // MaybeEnableSplit sends one recovery notification for a previously denied Region.
-// While the Region is still denied, it renews ChangeSplit(false) instead when the
-// deadline is near. Call it for accepted heartbeats, including those that do not
-// change Region metadata.
+// Call it for accepted heartbeats, including those that do not change Region metadata.
+// Heartbeats leave the TiKV validator's TTL alone so it can run a normal split
+// check at expiry even if the disabled checker's estimates stay below PD's limits.
 func (m *Manager) MaybeEnableSplit(region *core.RegionInfo, streams *hbstream.HeartbeatStreams) {
 	if region == nil || region.GetLeader() == nil {
 		return
 	}
-	if _, ok := m.splitDeniedRegions.Peek(region.GetID()); !ok {
-		return
-	}
-
-	// Serialize notification attempts; untracked heartbeats skip the lock.
-	m.splitMutex.Lock()
-	defer m.splitMutex.Unlock()
-	deadline, ok := m.splitDeniedRegions.Peek(region.GetID())
+	regionID := region.GetID()
+	tracked, ok := m.splitDeniedRegions.Peek(regionID)
 	if !ok {
 		return
 	}
-	remaining := time.Until(deadline.(time.Time))
-	if remaining <= 0 {
-		m.splitDeniedRegions.Remove(region.GetID())
+	denial := tracked.(*splitDenial)
+	if time.Now().Before(denial.expiresAt) && !m.isSplitAllowed(region, pdpb.SplitReason_SIZE) {
 		return
 	}
-	enabled := m.isSplitAllowed(region, pdpb.SplitReason_SIZE)
-	if enabled || remaining < splitDeniedRenewMargin {
-		m.sendSplitLocked(region, streams, enabled)
+
+	m.splitMutex.Lock()
+	defer m.splitMutex.Unlock()
+	// Another heartbeat may have recovered this Region, or a new split
+	// request may have been denied while this heartbeat was checking policy.
+	if current, ok := m.splitDeniedRegions.Peek(regionID); !ok || current != denial {
+		return
 	}
+	if time.Now().Before(denial.expiresAt) {
+		streams.SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: true}})
+	}
+	m.splitDeniedRegions.Remove(regionID)
 }

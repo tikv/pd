@@ -871,7 +871,9 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 	tracer.OnAllStageFinished()
-	if affinityManager := c.GetAffinityManager(); affinityManager != nil {
+	// PD drops scheduling heartbeat responses during a halt. Keep pending split
+	// recoveries for heartbeats after scheduling resumes.
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !c.IsSchedulingHalted() {
 		// Unlike GetHeartbeatStreams, the coordinator's streams stay set after the cluster stops.
 		affinityManager.MaybeEnableSplit(region, c.coordinator.GetHeartbeatStreams())
 	}
