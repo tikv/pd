@@ -373,7 +373,9 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
-// Note: Validates add and remove operations separately, then applies both atomically in a single transaction.
+// It validates the full request before writing the adds followed by the removes.
+// A batch may span multiple transactions. If a later transaction fails, only the
+// operations from committed transactions are published in memory.
 // Currently migration (removing a range from group A and adding the same range to group B in one request)
 // is not supported because add validation checks overlaps against existing ranges before removals are applied.
 func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRanges) error {
@@ -481,13 +483,11 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		newAddedLabelRules[op.GroupID] = labelRule
 		orderedAdd = append(orderedAdd, updated)
 	}
+	// Leave untouched legacy ranges in place so they can be removed incrementally.
 	for _, op := range removeOps {
 		ranges, ok := toRemove[op.GroupID]
 		if !ok {
 			continue
-		}
-		if err := validateExistingGroupKeyRanges(ranges); err != nil {
-			return err
 		}
 		var labelRule *labeler.LabelRule
 
@@ -517,15 +517,20 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	}
 
 	// Step 4: Save the Label information in storage.
-	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, plan.CommitOps()); err != nil {
+	committed, err := endpoint.RunBatchOpInTxnWithCount(m.ctx, m.storage, plan.CommitOps())
+	if err != nil {
 		log.Error("failed to update affinity group ranges",
 			zap.Int("total-groups", len(addOps)+len(removeOps)),
+			zap.Int("committed-groups", committed),
 			zap.Error(err))
-		return err
+		// The plan contains one operation per nonempty update, with all adds first.
+		committedAdds := min(committed, len(orderedAdd))
+		orderedAdd = orderedAdd[:committedAdds]
+		orderedRemove = orderedRemove[:committed-committedAdds]
 	}
 
 	// Step 5: Save the Group and Label information in memory.
-	plan.Apply()
+	plan.ApplyPrefix(committed)
 
 	for _, ops := range [][]GroupKeyRanges{orderedAdd, orderedRemove} {
 		for _, op := range ops {
@@ -546,7 +551,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 
 	m.updateGroupLabelRules(orderedAdd, toAdd, newAddedLabelRules, false)
 	m.updateGroupLabelRules(orderedRemove, toRemove, newRemovedLabelRules, true)
-	return nil
+	return err
 }
 
 // getCurrentRanges retrieves the current key ranges for a group.

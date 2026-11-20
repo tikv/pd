@@ -15,6 +15,7 @@
 package affinity
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -30,18 +31,19 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type rangeOrderStorage struct {
 	storage.Storage
 	operations []string
-	fail       bool
+	failSaveID string
 }
 
 func (s *rangeOrderStorage) SaveRegionRule(txn kv.Txn, id string, rule any) error {
 	s.operations = append(s.operations, id)
-	if s.fail {
+	if id == s.failSaveID {
 		return errors.New("injected range storage failure")
 	}
 	return s.Storage.SaveRegionRule(txn, id, rule)
@@ -85,8 +87,8 @@ func TestUpdateAffinityGroupKeyRangesRequestOrder(t *testing.T) {
 			re.Zero(manager.GetAffinityGroupState(op.GroupID).RangeCount)
 		}
 		// A failed transaction must leave both caches and the label index intact.
-		store.fail = true
 		op := GroupKeyRanges{GroupID: add[1].GroupID, KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 100)}}
+		store.failSaveID = GetLabelRuleID(op.GroupID)
 		re.ErrorContains(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{op}, nil), "injected range storage failure")
 		re.Equal(add[1], manager.keyRanges[op.GroupID])
 		re.Equal(1, manager.GetAffinityGroupState(op.GroupID).RangeCount)
@@ -94,6 +96,98 @@ func TestUpdateAffinityGroupKeyRangesRequestOrder(t *testing.T) {
 		re.NoError(err)
 		re.Equal(add[1], ranges)
 	}
+}
+
+func TestUpdateAffinityGroupKeyRangesPartialCommit(t *testing.T) {
+	re := require.New(t)
+	store := &rangeOrderStorage{Storage: storage.NewStorageWithMemoryBackend()}
+	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(t.Context(), store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	// Empty operations consume no transaction slots. The first transaction
+	// commits every nonempty add and the first two nonempty removes.
+	const addCount = etcdutil.MaxEtcdTxnOps - 2
+	add := make([]GroupKeyRanges, 1, addCount+1)
+	add[0].GroupID = "empty-add"
+	initial := make([]GroupKeyRanges, 0, addCount+4)
+	expected := make(map[string]GroupKeyRanges, addCount+3)
+	for i := range addCount {
+		id := fmt.Sprintf("add-%03d", addCount-i)
+		op := GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, int64(i+1))}}
+		initial = append(initial, GroupKeyRanges{GroupID: id})
+		add = append(add, op)
+		expected[id] = op
+	}
+	remove := []GroupKeyRanges{{GroupID: "empty-remove"}}
+	for i, tc := range []struct {
+		id        string
+		removeAll bool
+		committed bool
+	}{
+		{id: "z-remove", committed: true},
+		{id: "a-remove", removeAll: true, committed: true},
+		{id: "m-remove", removeAll: true},
+		{id: "b-remove"},
+	} {
+		tableID := int64(1000 + 2*i)
+		ranges := []keyutil.KeyRange{transactionRangeForTest(1, tableID)}
+		if !tc.removeAll {
+			ranges = append(ranges, transactionRangeForTest(1, tableID+1))
+		}
+		initial = append(initial, GroupKeyRanges{GroupID: tc.id, KeyRanges: ranges})
+		remove = append(remove, GroupKeyRanges{GroupID: tc.id, KeyRanges: ranges[:1]})
+		if tc.committed {
+			ranges = ranges[1:]
+		}
+		if len(ranges) > 0 {
+			expected[tc.id] = GroupKeyRanges{GroupID: tc.id, KeyRanges: ranges}
+		}
+	}
+	re.NoError(manager.CreateAffinityGroups(initial))
+	// Fail the second transaction after it has staged its first removal.
+	store.failSaveID = GetLabelRuleID("b-remove")
+	re.ErrorContains(manager.UpdateAffinityGroupKeyRanges(add, remove), "injected range storage failure")
+
+	reloadedLabeler, err := labeler.NewRegionLabeler(t.Context(), store, 5*time.Second)
+	re.NoError(err)
+	reloaded, err := NewManager(t.Context(), store, core.NewStoresInfo(), mockconfig.NewTestOptions(), reloadedLabeler)
+	re.NoError(err)
+	re.Equal(expected, reloaded.keyRanges, "storage should contain only the committed updates")
+	re.Equal(expected, manager.keyRanges, "cached key ranges should match storage")
+	for _, group := range initial {
+		id := group.GroupID
+		re.Equal(len(expected[id].KeyRanges), manager.GetAffinityGroupState(id).RangeCount, id)
+		ruleID := GetLabelRuleID(id)
+		re.Equal(reloadedLabeler.GetLabelRule(ruleID), regionLabeler.GetLabelRule(ruleID), id)
+	}
+}
+
+func TestNextGenRemoveOneLegacyRange(t *testing.T) {
+	re := require.New(t)
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
+	manager := newRangeTestManager(t)
+	classicRange := func(tableID int64) keyutil.KeyRange {
+		return keyutil.KeyRange{
+			StartKey: codec.EncodeBytes(codec.GenerateTableKey(tableID)),
+			EndKey:   codec.EncodeBytes(codec.GenerateTableKey(tableID + 1)),
+		}
+	}
+	legacy := GroupKeyRanges{GroupID: "legacy", KeyRanges: []keyutil.KeyRange{classicRange(1), classicRange(3)}}
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{legacy}))
+
+	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+	remaining := GroupKeyRanges{GroupID: legacy.GroupID, KeyRanges: legacy.KeyRanges[1:]}
+	re.ErrorIs(validateGroupKeyRanges(remaining), errs.ErrAffinityGroupContent)
+	re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: legacy.GroupID, KeyRanges: legacy.KeyRanges[:1]}}))
+	re.Equal(remaining, manager.keyRanges[legacy.GroupID])
+	re.Equal(1, manager.GetAffinityGroupState(legacy.GroupID).RangeCount)
+	ranges, err := extractKeyRangesFromLabelRule(manager.regionLabeler.GetLabelRule(GetLabelRuleID(legacy.GroupID)))
+	re.NoError(err)
+	re.Equal(remaining, ranges)
 }
 
 func TestNextGenLegacyGroupCleanup(t *testing.T) {

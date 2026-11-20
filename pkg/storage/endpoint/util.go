@@ -83,9 +83,16 @@ type TxnStorage interface {
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
-// RunBatchOpInTxn runs a batch of operations in transaction.
+// RunBatchOpInTxn runs a batch of operations in storage.
 // The batch is split into multiple transactions if it exceeds the maximum number of operations per transaction.
 func RunBatchOpInTxn(ctx context.Context, storage TxnStorage, batch []func(kv.Txn) error) error {
+	_, err := RunBatchOpInTxnWithCount(ctx, storage, batch)
+	return err
+}
+
+// RunBatchOpInTxnWithCount returns how many operations committed from the start
+// of the batch, even if a later transaction fails.
+func RunBatchOpInTxnWithCount(ctx context.Context, storage TxnStorage, batch []func(kv.Txn) error) (int, error) {
 	for start := 0; start < len(batch); start += etcdutil.MaxEtcdTxnOps {
 		end := min(start+etcdutil.MaxEtcdTxnOps, len(batch))
 		err := storage.RunInTxn(ctx, func(txn kv.Txn) (err error) {
@@ -97,8 +104,8 @@ func RunBatchOpInTxn(ctx context.Context, storage TxnStorage, batch []func(kv.Tx
 			return nil
 		})
 		if err != nil {
-			return err
+			return start, err
 		}
 	}
-	return nil
+	return len(batch), nil
 }

@@ -373,16 +373,6 @@ func validateGroupKeyRanges(group GroupKeyRanges) error {
 	return validateKeyspaceRanges(group, keyspaceID, scoped)
 }
 
-func validateExistingGroupKeyRanges(group GroupKeyRanges) error {
-	if err := ValidateExistingGroupID(group.GroupID); err != nil {
-		return err
-	}
-	// Stored IDs may predate creation rules. If no valid scope is encoded,
-	// infer the keyspace from the remaining ranges, as for a custom group.
-	keyspaceID, scoped, _ := parseGroupID(group.GroupID)
-	return validateKeyspaceRanges(group, keyspaceID, scoped)
-}
-
 func validateKeyspaceRanges(group GroupKeyRanges, keyspaceID uint32, scoped bool) error {
 	if !kerneltype.IsNextGen() || len(group.KeyRanges) == 0 {
 		return nil
