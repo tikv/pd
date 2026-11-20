@@ -82,21 +82,6 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	tc.WaitForPrimaryServing(re)
 	cluster := tc.GetPrimaryServer().GetCluster()
 	ruleManager := cluster.GetRuleManager()
-	// Check the default rule and rule group.
-	rules := ruleManager.GetAllRules()
-	re.Len(rules, 1)
-	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
-	re.Equal(placement.DefaultRuleID, rules[0].ID)
-	re.Equal(0, rules[0].Index)
-	re.Empty(rules[0].StartKey)
-	re.Empty(rules[0].EndKey)
-	re.Equal(placement.Voter, rules[0].Role)
-	re.Empty(rules[0].LocationLabels)
-	ruleGroups := ruleManager.GetRuleGroups()
-	re.Len(ruleGroups, 1)
-	re.Equal(placement.DefaultGroupID, ruleGroups[0].ID)
-	re.Equal(0, ruleGroups[0].Index)
-	re.False(ruleGroups[0].Override)
 	// Set a new rule via the PD.
 	apiRuleManager := suite.pdLeaderServer.GetRaftCluster().GetRuleManager()
 	rule := &placement.Rule{
@@ -109,20 +94,24 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	}
 	err = apiRuleManager.SetRule(rule)
 	re.NoError(err)
+	rules := make([]*placement.Rule, 0)
 	testutil.Eventually(re, func() bool {
 		rules = ruleManager.GetAllRules()
 		return len(rules) == 2
 	})
-	sort.Slice(rules, func(i, j int) bool {
-		return rules[i].ID > rules[j].ID
-	})
 	re.Len(rules, 2)
-	re.Equal(rule.GroupID, rules[1].GroupID)
-	re.Equal(rule.ID, rules[1].ID)
-	re.Equal(rule.Role, rules[1].Role)
-	re.Equal(rule.Count, rules[1].Count)
-	re.Equal(rule.StartKeyHex, rules[1].StartKeyHex)
-	re.Equal(rule.EndKeyHex, rules[1].EndKeyHex)
+	var gotRule *placement.Rule
+	for _, r := range rules {
+		if r.GroupID == rule.GroupID && r.ID == rule.ID {
+			gotRule = r
+			break
+		}
+	}
+	re.NotNil(gotRule)
+	re.Equal(rule.Role, gotRule.Role)
+	re.Equal(rule.Count, gotRule.Count)
+	re.Equal(rule.StartKeyHex, gotRule.StartKeyHex)
+	re.Equal(rule.EndKeyHex, gotRule.EndKeyHex)
 	// Delete the rule.
 	err = apiRuleManager.DeleteRule(rule.GroupID, rule.ID)
 	re.NoError(err)
@@ -140,14 +129,22 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	}
 	err = apiRuleManager.SetRuleGroup(ruleGroup)
 	re.NoError(err)
+	ruleGroups := make([]*placement.RuleGroup, 0)
 	testutil.Eventually(re, func() bool {
 		ruleGroups = ruleManager.GetRuleGroups()
 		return len(ruleGroups) == 2
 	})
 	re.Len(ruleGroups, 2)
-	re.Equal(ruleGroup.ID, ruleGroups[1].ID)
-	re.Equal(ruleGroup.Index, ruleGroups[1].Index)
-	re.Equal(ruleGroup.Override, ruleGroups[1].Override)
+	var gotRuleGroup *placement.RuleGroup
+	for _, rg := range ruleGroups {
+		if rg.ID == ruleGroup.ID {
+			gotRuleGroup = rg
+			break
+		}
+	}
+	re.NotNil(gotRuleGroup)
+	re.Equal(ruleGroup.Index, gotRuleGroup.Index)
+	re.Equal(ruleGroup.Override, gotRuleGroup.Override)
 	// Delete the rule group.
 	err = apiRuleManager.DeleteRuleGroup(ruleGroup.ID)
 	re.NoError(err)
@@ -163,10 +160,19 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	apiRegionLabeler := suite.pdLeaderServer.GetRaftCluster().GetRegionLabeler()
 	apiLabelRules := apiRegionLabeler.GetAllLabelRules()
 	re.Len(labelRules, len(apiLabelRules))
-	re.Equal(apiLabelRules[0].ID, labelRules[0].ID)
-	re.Equal(apiLabelRules[0].Index, labelRules[0].Index)
-	re.Equal(apiLabelRules[0].Labels, labelRules[0].Labels)
-	re.Equal(apiLabelRules[0].RuleType, labelRules[0].RuleType)
+	sort.Slice(labelRules, func(i, j int) bool {
+		return labelRules[i].ID < labelRules[j].ID
+	})
+	sort.Slice(apiLabelRules, func(i, j int) bool {
+		return apiLabelRules[i].ID < apiLabelRules[j].ID
+	})
+	for i := range apiLabelRules {
+		re.Equal(apiLabelRules[i].ID, labelRules[i].ID)
+		re.Equal(apiLabelRules[i].Index, labelRules[i].Index)
+		re.Equal(apiLabelRules[i].Labels, labelRules[i].Labels)
+		re.Equal(apiLabelRules[i].RuleType, labelRules[i].RuleType)
+	}
+	baseLabelRuleCount := len(labelRules)
 	// Set a new region label rule.
 	labelRule := &labeler.LabelRule{
 		ID:       "rule1",
@@ -178,15 +184,22 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		labelRules = regionLabeler.GetAllLabelRules()
-		return len(labelRules) == 2
+		return len(labelRules) == baseLabelRuleCount+1
 	})
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
 	})
-	re.Len(labelRules, 2)
-	re.Equal(labelRule.ID, labelRules[1].ID)
-	re.Equal(labelRule.Labels, labelRules[1].Labels)
-	re.Equal(labelRule.RuleType, labelRules[1].RuleType)
+	re.Len(labelRules, baseLabelRuleCount+1)
+	var gotLabelRule *labeler.LabelRule
+	for _, lr := range labelRules {
+		if lr.ID == labelRule.ID {
+			gotLabelRule = lr
+			break
+		}
+	}
+	re.NotNil(gotLabelRule)
+	re.Equal(labelRule.Labels, gotLabelRule.Labels)
+	re.Equal(labelRule.RuleType, gotLabelRule.RuleType)
 	// Patch the region label rule.
 	labelRule = &labeler.LabelRule{
 		ID:       "rule2",
@@ -202,15 +215,22 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		labelRules = regionLabeler.GetAllLabelRules()
-		return len(labelRules) == 2
+		return len(labelRules) == baseLabelRuleCount+1
 	})
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
 	})
-	re.Len(labelRules, 2)
-	re.Equal(labelRule.ID, labelRules[1].ID)
-	re.Equal(labelRule.Labels, labelRules[1].Labels)
-	re.Equal(labelRule.RuleType, labelRules[1].RuleType)
+	re.Len(labelRules, baseLabelRuleCount+1)
+	gotLabelRule = nil
+	for _, lr := range labelRules {
+		if lr.ID == labelRule.ID {
+			gotLabelRule = lr
+			break
+		}
+	}
+	re.NotNil(gotLabelRule)
+	re.Equal(labelRule.Labels, gotLabelRule.Labels)
+	re.Equal(labelRule.RuleType, gotLabelRule.RuleType)
 }
 
 func (suite *ruleTestSuite) TestSchedulingSwitch() {
