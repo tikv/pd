@@ -633,9 +633,9 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 		kind |= OpRegion
 	}
 
-	b.setTargetLeaderIfNotExist()
+	rejectedByIsolation := b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
-		if b.isolationLeader != nil {
+		if rejectedByIsolation {
 			return kind, errors.Wrap(ErrTargetIsolation, "no valid leader")
 		}
 		return kind, errors.New("no valid leader")
@@ -695,9 +695,11 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	return kind, nil
 }
 
-func (b *Builder) setTargetLeaderIfNotExist() {
+// setTargetLeaderIfNotExist reports whether isolation rejected an otherwise
+// eligible candidate while picking a leader.
+func (b *Builder) setTargetLeaderIfNotExist() (rejectedByIsolation bool) {
 	if b.targetLeaderStoreID != 0 {
-		return
+		return false
 	}
 
 	leaderPreferFuncs := []func(uint64) int{
@@ -718,6 +720,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 			continue
 		}
 		if b.isolationLeader != nil && !b.isolationLeader(candidateStoreID) {
+			rejectedByIsolation = true
 			continue
 		}
 		if b.targetLeaderStoreID == 0 {
@@ -757,6 +760,7 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 			}
 		}
 	}
+	return rejectedByIsolation
 }
 
 func (b *Builder) preferLeaderRoleAsLeader(targetLeaderStoreID uint64) int {
@@ -995,11 +999,12 @@ func (b *Builder) newIsolationLeaderCheck(finalPeers peersMap) func(uint64) bool
 		peers = append(peers, &metapb.Peer{Id: id, StoreId: storeID, Role: peer.GetRole(), IsWitness: peer.GetIsWitness()})
 	}
 	stores, witness := b.GetBasicCluster(), b.GetSharedConfig().IsWitnessAllowed()
+	samePeerCount := len(peers) == len(b.originRegion.GetPeers())
 	return func(leaderStoreID uint64) bool {
 		for _, peer := range peers {
 			if peer.GetStoreId() == leaderStoreID {
 				target := b.originRegion.Clone(core.SetPeers(peers), core.WithLeader(peer))
-				return b.originFit.IsFinalIsolationPreserved(stores, target, witness)
+				return b.originFit.IsFinalIsolationPreserved(stores, target, witness, samePeerCount)
 			}
 		}
 		return false

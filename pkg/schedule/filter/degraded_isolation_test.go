@@ -19,6 +19,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -73,4 +75,29 @@ func TestLeaderTransferPreservesOtherRuleIsolation(t *testing.T) {
 		require.False(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(2)).IsOK())
 		require.True(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(3)).IsOK())
 	}
+}
+
+func TestLeaderIsolationSafeguardRejectsLearner(t *testing.T) {
+	tc := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	for i, host := range []string{"a", "b", "c"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+	}
+	rm := tc.GetRuleManager()
+	voter := rm.GetRule("pd", "default").Clone()
+	voter.Count, voter.LocationLabels, voter.IsolationLevel = 2, []string{"host"}, "host"
+	voter.LabelConstraints = []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"a", "b"}}}
+	learner := voter.Clone()
+	learner.ID, learner.Role, learner.Count = "learner", placement.Learner, 1
+	learner.IsolationLevel = ""
+	learner.LabelConstraints = nil
+	require.NoError(t, rm.SetRules([]*placement.Rule{voter, learner}))
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+	region = region.Clone(core.WithRole(region.GetStorePeer(3).GetId(), metapb.PeerRole_Learner))
+	require.True(t, rm.FitRegionWithoutCache(tc, region).IsSatisfied())
+
+	guard := NewPlacementLeaderSafeguard("test", tc.GetSharedConfig(), tc.GetBasicCluster(),
+		rm, region, tc.GetStore(1), true)
+	require.True(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(2)).IsOK())
+	require.False(t, guard.Target(tc.GetSharedConfig(), tc.GetStore(3)).IsOK())
 }

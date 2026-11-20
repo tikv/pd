@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestBalanceRegionRetriesAfterFinalIsolationFailure(t *testing.T) {
@@ -122,4 +123,106 @@ func TestBalanceRegionRetriesAfterFinalIsolationFailure(t *testing.T) {
 			require.Equal(t, 2, solve.Step)
 		})
 	}
+}
+
+func TestBalanceRegionRetriesUnderfilledIsolation(t *testing.T) {
+	cleanup, _, cluster, controller := prepareSchedulersTest()
+	defer cleanup()
+	cluster.SetEnablePlacementRules(true)
+	cluster.SetMaxReplicas(5)
+	cluster.SetEnableUseJointConsensus(false)
+	cluster.SetTolerantSizeRatio(1)
+	cluster.SetRegionScoreFormulaVersion("v1")
+	for i, labels := range [][3]string{
+		{"", "a", "isolated"}, {"", "e", "other"}, {"", "a", "isolated"},
+		{"", "b", "isolated"}, {"A", "c", "isolated"}, {"B", "d", "isolated"},
+	} {
+		count := 10
+		switch i {
+		case 3:
+			count = 1000
+		case 4:
+			count = 100
+		case 5:
+			count = 0
+		}
+		cluster.AddLabelsStore(uint64(i+1), count, map[string]string{"zone": labels[0], "host": labels[1], "group": labels[2]})
+	}
+	manager := cluster.GetRuleManager()
+	require.NoError(t, manager.SetRules([]*placement.Rule{
+		{GroupID: "pd", ID: "default", Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"}},
+		{
+			GroupID: "pd", ID: "isolated", Role: placement.Voter, Count: 3,
+			LocationLabels: []string{"host"}, IsolationLevel: "host",
+			LabelConstraints: []placement.LabelConstraint{{Key: "group", Op: placement.In, Values: []string{"isolated"}}},
+		},
+	}))
+	source := cluster.AddLeaderRegion(1, 1, 2, 3, 4, 5)
+	fit := manager.FitRegionWithoutCache(cluster, source)
+	require.True(t, fit.IsSatisfied())
+	require.Len(t, fit.RuleFits[1].Stores, 3)
+	for i, store := range fit.RuleFits[1].Stores {
+		for _, other := range fit.RuleFits[1].Stores[i+1:] {
+			require.GreaterOrEqual(t, store.CompareLocation(other, []string{"host"}), 0)
+		}
+	}
+
+	scheduler := newBalanceRegionScheduler(controller, &balanceRegionSchedulerConfig{
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("", "")},
+	})
+	ops, _ := scheduler.Schedule(cluster, false)
+	require.Len(t, ops, 1)
+	result := source
+	for range ops[0].Len() {
+		result = operator.ApplyOperatorStep(result, ops[0])
+	}
+	require.Len(t, result.GetPeers(), 5)
+	require.NotNil(t, result.GetStorePeer(4))
+	require.Nil(t, result.GetStorePeer(5))
+	require.NotNil(t, result.GetStorePeer(6))
+	after := manager.FitRegionWithoutCache(cluster, result)
+	require.True(t, after.IsSatisfied())
+	require.True(t, after.RuleFits[1].IsIsolationSatisfied())
+}
+
+func TestBalanceLeaderSchedulesIsolationPreservingTransfer(t *testing.T) {
+	cleanup, _, cluster, controller := prepareSchedulersTest()
+	defer cleanup()
+	cluster.SetEnablePlacementRules(true)
+	cluster.SetMaxReplicas(5)
+	cluster.SetLeaderSchedulePolicy("count")
+	for i, location := range [][2]string{{"A", "a"}, {"B", "d"}, {"A", "b"}, {"A", "c"}, {"B", "d"}} {
+		cluster.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": location[0], "host": location[1]})
+	}
+	cluster.UpdateLeaderCount(1, 100)
+	for id := uint64(3); id <= 5; id++ {
+		cluster.SetStoreEvictLeader(id, true)
+	}
+	manager := cluster.GetRuleManager()
+	require.NoError(t, manager.SetRules([]*placement.Rule{
+		{
+			GroupID: "pd", ID: "default", Role: placement.Follower, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "host", Op: placement.In, Values: []string{"d"}}},
+		},
+		{
+			GroupID: "pd", ID: "voters", Role: placement.Voter, Count: 4,
+			LocationLabels: []string{"zone", "host"}, IsolationLevel: "host",
+		},
+	}))
+	source := cluster.AddLeaderRegion(1, 1, 2, 3, 4, 5)
+	target := source.Clone(core.WithLeader(source.GetStorePeer(2)))
+	before, after := manager.FitRegionWithoutCache(cluster, source), manager.FitRegionWithoutCache(cluster, target)
+	require.True(t, before.IsSatisfied())
+	require.True(t, after.IsSatisfied())
+	require.Equal(t, before.RuleFits[1].IsolationScore, after.RuleFits[1].IsolationScore)
+
+	config := &balanceLeaderSchedulerConfig{}
+	config.Ranges = []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
+	config.Batch = 1
+	scheduler := newBalanceLeaderScheduler(controller, config)
+	ops, _ := scheduler.Schedule(cluster, false)
+	require.Len(t, ops, 1, "balance-leader should schedule the legal transfer to its only available target")
+	step, ok := ops[0].Step(0).(operator.TransferLeader)
+	require.True(t, ok)
+	require.Equal(t, uint64(2), step.ToStore)
 }

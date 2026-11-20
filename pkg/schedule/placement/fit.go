@@ -221,11 +221,13 @@ func (f *RuleFit) IsIsolationPreserved(target *RuleFit) bool {
 	if !ok {
 		return true
 	}
-	if target == nil || len(f.Stores) != len(target.Stores) {
-		return false
-	}
-	beforePairs, beforeMax, beforeOK := isolationConflicts(f.Stores, labels)
-	afterPairs, afterMax, afterOK := isolationConflicts(target.Stores, labels)
+	return target != nil && len(f.Stores) == len(target.Stores) &&
+		isolationConflictsDoNotIncrease(f.Stores, target.Stores, labels)
+}
+
+func isolationConflictsDoNotIncrease(before, after []*core.StoreInfo, labels []string) bool {
+	beforePairs, beforeMax, beforeOK := isolationConflicts(before, labels)
+	afterPairs, afterMax, afterOK := isolationConflicts(after, labels)
 	return beforeOK && afterOK && afterPairs <= beforePairs && afterMax <= beforeMax
 }
 

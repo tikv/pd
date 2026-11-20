@@ -763,8 +763,16 @@ func (f *ruleLeaderFitFilter) Target(conf config.SharedConfigProvider, store *co
 	if targetPeer != nil && targetPeer.IsWitness {
 		return statusStoreNotMatchRule
 	}
-	if f.oldFit.Replace(f.srcLeaderStoreID, store) &&
-		(targetPeer == nil || f.oldFit.IsLeaderIsolationPreserved(f.region, targetStoreID, conf.IsWitnessAllowed())) {
+	// For an existing peer, changing the leader can reassign several peers
+	// across rules. Check configured isolation on that fit.
+	if targetPeer != nil && f.oldFit.IsSatisfied() && f.oldFit.HasIsolationLevel() {
+		if !core.IsLearnerOrDemotingVoter(targetPeer) &&
+			f.oldFit.IsLeaderIsolationPreserved(f.region, targetStoreID, conf.IsWitnessAllowed()) {
+			return statusOK
+		}
+		return statusStoreNotMatchRule
+	}
+	if f.oldFit.Replace(f.srcLeaderStoreID, store) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule

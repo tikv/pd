@@ -207,7 +207,7 @@ func CreateMergeRegionOperator(desc string, ci sche.SharedCluster, source *core.
 	}
 
 	var steps []OpStep
-	if !isRegionMatch(source, target) {
+	if !HasSameMergePeerLayout(source, target) {
 		peers := make(map[uint64]*metapb.Peer)
 		for _, p := range target.GetPeers() {
 			peers[p.GetStoreId()] = &metapb.Peer{
@@ -245,7 +245,9 @@ func CreateMergeRegionOperator(desc string, ci sche.SharedCluster, source *core.
 	return []*Operator{op1, op2}, nil
 }
 
-func isRegionMatch(a, b *core.RegionInfo) bool {
+// HasSameMergePeerLayout reports whether a merge needs no peer changes.
+// The caller must check that both Regions can merge, including joint state.
+func HasSameMergePeerLayout(a, b *core.RegionInfo) bool {
 	if len(a.GetPeers()) != len(b.GetPeers()) {
 		return false
 	}

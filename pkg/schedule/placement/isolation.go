@@ -129,22 +129,24 @@ func (f *RegionFit) hasSamePeers(target *core.RegionInfo) bool {
 // IsFinalIsolationPreserved checks the complete layout of an operator built
 // from this fit, including its final leader, which can change rule assignment.
 // Only configured isolation levels are compared, by conflicts; candidate
-// safeguards keep the weighted score check. Incomplete source fits and rules
-// whose peer count changes keep their existing repair behavior.
-func (f *RegionFit) IsFinalIsolationPreserved(stores StoreSet, target *core.RegionInfo, supportWitness bool) bool {
+// safeguards keep the weighted score check. A rule can lose matched peers in a
+// same-size Region move, so still compare the conflicts among the matched peers.
+// When the Region changes replica count, compare rules with unchanged counts.
+func (f *RegionFit) IsFinalIsolationPreserved(stores StoreSet, target *core.RegionInfo, supportWitness, samePeerCount bool) bool {
 	if !f.IsSatisfied() || !hasIsolationLevel(f.rules) {
 		return true
 	}
 	after := fitRegion(getStoresByRegion(stores, target), target, f.rules, supportWitness)
 	for i, before := range f.RuleFits {
-		if i >= len(after.RuleFits) {
-			return true
-		}
-		rf := after.RuleFits[i]
-		if rf == nil || before.Rule != rf.Rule || len(before.Peers) != len(rf.Peers) {
+		labels, configured := before.Rule.isolationPrefix()
+		if !configured {
 			continue
 		}
-		if !before.IsIsolationPreserved(rf) {
+		rf := after.RuleFits[i]
+		if rf == nil || (!samePeerCount && len(before.Peers) != len(rf.Peers)) {
+			continue
+		}
+		if !isolationConflictsDoNotIncrease(before.Stores, rf.Stores, labels) {
 			return false
 		}
 	}
