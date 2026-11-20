@@ -140,6 +140,9 @@ type GCStatesClient interface {
 	// persisted TSO windows. An explicit timestamp must be at least as large as the selected bound.
 	// On rejection the existing timestamp and expiration are preserved.
 	//
+	// During a rolling upgrade, older PD leaders may treat zero as an explicit timestamp.
+	// Callers can rely on automatic selection once all eligible PD leaders support it.
+	//
 	// The returned BarrierTS is the timestamp stored. Pass it explicitly to renew at that point.
 	// It may be ahead of timestamps already issued. Obtain a read or backup timestamp separately
 	// and ensure it is at least BarrierTS before relying on this protection.
