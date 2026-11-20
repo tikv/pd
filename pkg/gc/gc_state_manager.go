@@ -440,6 +440,8 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 }
 
 // AdvanceTxnSafePoint tries to advance the txn safe point to the given target.
+// The caller must ensure that target does not exceed a timestamp already issued
+// by the TSO for this GC scope.
 //
 // Returns a struct AdvanceTxnSafePointResult, which contains the old txn safe point, the target, and the new
 // txn safe point it finally made it to advance to. If there's something blocking the txn safe point from being
