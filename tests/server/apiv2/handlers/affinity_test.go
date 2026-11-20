@@ -1448,3 +1448,33 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 		re.Contains(result.AffinityGroups, "header-check")
 	})
 }
+
+func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"targets": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+			},
+		})
+		for id := uint64(1); id <= 3; id++ {
+			mustPutHealthyStore(re, cluster, &metapb.Store{Id: id, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
+		}
+		expected := mustGetAffinityGroup(re, serverAddr, "targets").Group
+
+		data, err := json.Marshal(affinity.GroupTargetsRequest{Targets: []affinity.GroupTarget{
+			{Expected: expected, LeaderStoreID: 2, VoterStoreIDs: []uint64{3, 2, 1}},
+		}})
+		re.NoError(err)
+		var result affinity.GroupTargetsResponse
+		endpoint := getAffinityGroupURL(serverAddr, "targets")
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, endpoint, data, testutil.StatusOK(re), testutil.ExtractJSON(re, &result)))
+		re.Equal([]string{"targets"}, result.WrittenGroupIDs)
+		state := mustGetAffinityGroup(re, serverAddr, "targets")
+		re.Equal(uint64(2), state.LeaderStoreID)
+		re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
+
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, endpoint, []byte(`{}`), testutil.Status(re, http.StatusBadRequest)))
+	})
+}

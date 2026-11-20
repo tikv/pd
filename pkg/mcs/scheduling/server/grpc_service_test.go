@@ -155,7 +155,7 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re := require.New(t)
 
 	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
-	cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000})
+	cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000}, "http://pd-leader")
 
 	region := newAffinitySplitTestRegion()
 	cluster.PutRegion(region)

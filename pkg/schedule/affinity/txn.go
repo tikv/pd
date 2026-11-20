@@ -298,14 +298,13 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	return m.updateAffinityGroupPeersWithAffinityVer(groupID, 0, leaderStoreID, voterStoreIDs)
+	return m.updateAffinityGroupPeersWithState(groupID, nil, leaderStoreID, voterStoreIDs)
 }
 
-// updateAffinityGroupPeersWithAffinityVer updates the leader and voter stores of an affinity group and marks it available.
-// If affinityVer is non-zero (0 indicates an admin operation and is enforced)
-//   - Its equality will be checked.
-//   - Group must not change voterStoreIDs while it is not in the expired status.
-func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+// updateAffinityGroupPeersWithState updates the leader and voter stores and marks the group available.
+// An observation must still match the runtime group and its version. Only an
+// expired group can change voters. A nil observation indicates an admin update.
+func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *GroupState, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
 		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
@@ -331,11 +330,9 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 
 	voterStoreIDs = slices.Clone(voterStoreIDs)
 	slices.Sort(voterStoreIDs)
-	// When affinityVer is non-zero, it indicates a non-admin operation and triggers additional checks.
 	// Note: if the check fails, no changes are applied. The existing Group is returned as-is without error.
-	if affinityVer != 0 {
-		// If affinityVer is not equal, the update may come from stale statistics and will be ignored.
-		if group.affinityVer != affinityVer {
+	if observed != nil {
+		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer {
 			return group, nil
 		}
 		// Group must not change voterStoreIDs while it is not in the expired status. Changing only leaderStoreID is allowed.
@@ -343,6 +340,36 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		// The VoterStoreIDs are already sorted, so they can be compared directly
 		if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
+		}
+		if group.AffinitySchedulingAllowed && leaderStoreID != group.LeaderStoreID {
+			return group, nil
+		}
+		if m.targetWriter != nil {
+			m.RLock()
+			conditionsKnown := m.storeConditionsKnown
+			m.RUnlock()
+			if !conditionsKnown && !group.targetUnpersisted && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
+				return group, nil
+			}
+			expected := group.Group
+			if group.targetUnpersisted {
+				expected.LeaderStoreID = 0
+				expected.VoterStoreIDs = nil
+			}
+			target := GroupTarget{Expected: expected, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
+			persistOnly := group.AffinitySchedulingAllowed && group.targetUnpersisted
+			if !group.AffinitySchedulingAllowed && sameStoredGroup(&group.Group, target.result()) {
+				m.Lock()
+				if groupInfo, ok := m.groups[groupID]; ok && groupInfo.AffinityVer == observed.affinityVer && !groupInfo.IsAvailable() {
+					m.setTargetAvailabilityLocked(groupInfo)
+					m.resetCountLocked(groupInfo)
+				}
+				m.Unlock()
+			}
+			if !sameStoredGroup(&target.Expected, target.result()) {
+				m.sendObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, persistOnly)
+			}
+			return m.GetAffinityGroupState(groupID), nil
 		}
 	}
 
