@@ -80,7 +80,9 @@ type RPCClient interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	//
-	// Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
+	// Deprecated: Callers that used the "native_br" service ID for cluster-wide protection
+	// should use SetGlobalGCBarrier and DeleteGlobalGCBarrier. To protect a single GC scope,
+	// use SetGCBarrier and DeleteGCBarrier.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
@@ -1180,7 +1182,9 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 // determine the safepoint for multiple services, it does not trigger a GC
 // job. Use UpdateGCSafePoint to trigger the GC job if needed.
 //
-// Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
+// Deprecated: Callers that used the "native_br" service ID for cluster-wide protection
+// should use SetGlobalGCBarrier and DeleteGlobalGCBarrier. To protect a single GC scope,
+// use SetGCBarrier and DeleteGCBarrier.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if c.inner.keyspaceID != constants.NullKeyspaceID {
 		return c.updateServiceSafePointV2(ctx, c.inner.keyspaceID, serviceID, ttl, safePoint)
