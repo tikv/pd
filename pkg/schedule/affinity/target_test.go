@@ -464,6 +464,48 @@ func TestFirstWinLateUnsupportedReplyKeepsGroupExpired(t *testing.T) {
 	}
 }
 
+func TestFirstWinLateUnsupportedReplyAfterRecreation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		m, _ := newTargetTestManager(t)
+		created := Group{ID: "g", CreateTimestamp: uint64(time.Now().Unix())}
+		m.SyncGroupFromEtcd(&created)
+		observed := m.GetAffinityGroupState(created.ID)
+
+		started := make(chan struct{}, 1)
+		release := make(chan struct{}, 1)
+		defer close(release)
+		m.SetTargetWriter(targetWriterFunc(func(context.Context, []GroupTarget) ([]string, error) {
+			started <- struct{}{}
+			<-release
+			return nil, ErrTargetWriterUnsupported
+		}))
+		region := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
+		m.ObserveAvailableRegion(region, observed)
+		<-started
+
+		m.SyncGroupDeleteFromEtcd(created.ID)
+		m.SyncGroupFromEtcd(&created)
+		recreated := m.GetAffinityGroupState(created.ID)
+		re.NotSame(observed.groupInfoPtr, recreated.groupInfoPtr)
+		re.Equal(observed.CreateTimestamp, recreated.CreateTimestamp)
+		re.Equal(observed.affinityVer, recreated.affinityVer)
+
+		release <- struct{}{}
+		synctest.Wait()
+		after := m.GetAffinityGroupState(created.ID)
+		re.Equal(recreated.Group, after.Group, "the late 404 must leave the recreated group unset")
+		re.False(after.HasUnpersistedTarget())
+
+		m.ObserveAvailableRegion(region, observed)
+		re.Equal(recreated.Group, m.GetAffinityGroupState(created.ID).Group)
+		m.ObserveAvailableRegion(generateRegionForTest(20, []uint64{2, 3}, nonOverlappingRange), recreated)
+		after = m.GetAffinityGroupState(created.ID)
+		re.Equal(uint64(2), after.LeaderStoreID)
+		re.True(after.HasUnpersistedTarget())
+	})
+}
+
 func TestFirstWinUnsupportedTargetWriter(t *testing.T) {
 	t.Run("self heal after pd upgrade", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
