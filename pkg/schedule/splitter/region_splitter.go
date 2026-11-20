@@ -81,12 +81,20 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 	unprocessedKeys := splitKeys
 	newRegions := make(map[uint64]struct{}, len(splitKeys))
 	for i := 0; i <= retryLimit; i++ {
+		if ctx.Err() != nil {
+			break
+		}
 		unprocessedKeys = r.splitRegionsByKeys(ctx, unprocessedKeys, newRegions)
-		if len(unprocessedKeys) < 1 {
+		if len(unprocessedKeys) < 1 || i == retryLimit || ctx.Err() != nil {
 			break
 		}
 		// sleep for a while between each retry
-		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(i)))*initialSleepDuration))
+		timer := time.NewTimer(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(i)))*initialSleepDuration))
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
 	returned := make([]uint64, 0, len(newRegions))
 	for regionID := range newRegions {
@@ -96,8 +104,11 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 }
 
 func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
-	validGroups := r.groupKeysByRegion(splitKeys)
+	validGroups, pendingKeys := r.groupKeysByRegion(splitKeys)
 	for key, group := range validGroups {
+		if parCtx.Err() != nil {
+			break
+		}
 		err := r.handler.SplitRegionByKeys(group.region, group.keys)
 		if err != nil {
 			delete(validGroups, key)
@@ -112,7 +123,7 @@ func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys []
 		cancel()
 	}()
 outerLoop:
-	for {
+	for len(validGroups) > 0 {
 		select {
 		case <-ticker.C:
 			for _, groupKeys := range validGroups {
@@ -137,14 +148,35 @@ outerLoop:
 	for newID := range results.getSplitRegions() {
 		newRegions[newID] = struct{}{}
 	}
-	return results.getUnProcessedKeys(splitKeys)
+	// Recheck unresolved keys for boundaries created after grouping without
+	// adding their Region IDs to the split results.
+	unprocessedKeys := results.getUnProcessedKeys(pendingKeys)
+	remainingKeys := unprocessedKeys[:0]
+	for _, key := range unprocessedKeys {
+		region := r.cluster.GetRegionByKey(key)
+		if region == nil || !bytes.Equal(region.GetStartKey(), key) {
+			remainingKeys = append(remainingKeys, key)
+		}
+	}
+	return remainingKeys
 }
 
-// groupKeysByRegion separates keys into groups by their belonging Regions.
-func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) map[uint64]*regionGroupKeys {
+// groupKeysByRegion groups split keys and returns keys without an observed boundary.
+func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64]*regionGroupKeys, [][]byte) {
 	groups := make(map[uint64]*regionGroupKeys, len(keys))
-	for _, key := range keys {
+	var pendingKeys [][]byte
+	for i, key := range keys {
 		region := r.cluster.GetRegionByKey(key)
+		existingBoundary := region != nil && bytes.Equal(region.GetStartKey(), key)
+		if existingBoundary {
+			// Preserve the caller's keys and avoid a copy for all-new requests.
+			if pendingKeys == nil {
+				pendingKeys = make([][]byte, 0, len(keys)-1)
+				pendingKeys = append(pendingKeys, keys[:i]...)
+			}
+		} else if pendingKeys != nil {
+			pendingKeys = append(pendingKeys, key)
+		}
 		if region == nil {
 			log.Error("region hollow", logutil.ZapRedactByteString("key", key))
 			continue
@@ -153,7 +185,7 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) map[uint64]*regionGrou
 		if !r.checkRegionValid(region) {
 			continue
 		}
-		if bytes.Equal(region.GetStartKey(), key) {
+		if existingBoundary {
 			continue
 		}
 		log.Debug("found region",
@@ -171,7 +203,10 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) map[uint64]*regionGrou
 			groups[region.GetID()].keys = append(groups[region.GetID()].keys, key)
 		}
 	}
-	return groups
+	if pendingKeys == nil {
+		pendingKeys = keys
+	}
+	return groups, pendingKeys
 }
 
 func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
