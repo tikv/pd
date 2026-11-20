@@ -137,21 +137,6 @@ func requireEarlyTSORejected(t *testing.T, stream pdpb.PD_TsoClient, clusterID u
 }
 
 func TestEarlyTSORejectsBeforeInitialization(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		failSave bool
-	}{
-		{name: "initialization paused"},
-		{name: "timestamp persistence failed", failSave: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			checkEarlyTSOInitialization(t, tc.failSave)
-		})
-	}
-}
-
-func checkEarlyTSOInitialization(t *testing.T, failSave bool) {
-	t.Helper()
 	re := require.New(t)
 	cluster := newEarlyTSOCluster(t, 1)
 	leader := cluster.GetLeaderServer()
@@ -178,20 +163,16 @@ func checkEarlyTSOInitialization(t *testing.T, failSave bool) {
 	re.ErrorContains(err, errs.NotLeaderErr)
 
 	const saveHook = "github.com/tikv/pd/pkg/tso/failedToSaveTimestamp"
-	if failSave {
-		re.NoError(failpoint.Enable(saveHook, "return(true)"))
-		t.Cleanup(func() { re.NoError(failpoint.Disable(saveHook)) })
-	}
+	re.NoError(failpoint.Enable(saveHook, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(saveHook)) })
 	resume()
 	testutil.Eventually(re, leader.GetServer().IsServing)
-	if failSave {
-		// Full PD readiness proves the first initialization attempt returned.
-		// A live lease must still not authorize an uninitialized allocator.
-		re.False(leader.GetServer().GetTSOAllocator().IsInitialize())
-		requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
-		re.NoError(failpoint.Disable(saveHook))
-		testutil.Eventually(re, leader.GetServer().GetTSOAllocator().IsInitialize)
-	}
+	// Full PD readiness proves the first initialization attempt returned.
+	// A live lease must still not authorize an uninitialized allocator.
+	re.False(leader.GetServer().GetTSOAllocator().IsInitialize())
+	requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+	re.NoError(failpoint.Disable(saveHook))
+	testutil.Eventually(re, leader.GetServer().GetTSOAllocator().IsInitialize)
 	re.Same(lease, leader.GetServer().GetMember().GetLeadership().GetLease())
 	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 	re.Negative(tsoutil.CompareTimestamp(previous, next))

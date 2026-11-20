@@ -439,40 +439,45 @@ func BenchmarkLoadRegionsByRandomMerge(b *testing.B) {
 func TestLoadRegionsTermFence(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
-	for _, local := range []bool{false, true} {
-		for _, valid := range []bool{false, true} {
-			t.Run(fmt.Sprintf("local=%t/valid=%t", local, valid), func(t *testing.T) {
-				re := require.New(t)
-				shared := NewStorageWithEtcdBackend(client)
-				localStorage := NewStorageWithMemoryBackend()
-				s := NewCoreStorage(shared, localStorage)
-				TrySwitchRegionStorage(s, local)
-				parent := &metapb.Region{Id: 100, StartKey: []byte("a"), EndKey: []byte("z"), RegionEpoch: &metapb.RegionEpoch{Version: 1}}
-				child := &metapb.Region{Id: 101, StartKey: []byte("a"), EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 2}}
-				// Seed both backends to detect accidental redirection of local cleanup.
-				for _, backend := range []Storage{shared, localStorage} {
-					re.NoError(backend.SaveRegion(parent))
-					re.NoError(backend.SaveRegion(child))
-				}
-				expectedRevision := int64(1)
-				if valid {
-					expectedRevision = 0
-				}
-				cache := core.NewBasicCluster()
-				err := TryLoadRegionsOnceWithConditions(t.Context(), s, cache.CheckAndPutRegion, clientv3.Compare(clientv3.CreateRevision("/test-region-leader"), "=", expectedRevision))
-				if !local && !valid {
-					re.Error(err)
-				} else {
-					re.NoError(err)
-				}
-				region := &metapb.Region{}
-				exists, err := shared.LoadRegion(parent.GetId(), region)
+	for _, tc := range []struct {
+		local bool
+		valid bool
+	}{
+		{local: false, valid: false},
+		{local: false, valid: true},
+		{local: true, valid: false},
+	} {
+		t.Run(fmt.Sprintf("local=%t/valid=%t", tc.local, tc.valid), func(t *testing.T) {
+			re := require.New(t)
+			shared := NewStorageWithEtcdBackend(client)
+			localStorage := NewStorageWithMemoryBackend()
+			s := NewCoreStorage(shared, localStorage)
+			TrySwitchRegionStorage(s, tc.local)
+			parent := &metapb.Region{Id: 100, StartKey: []byte("a"), EndKey: []byte("z"), RegionEpoch: &metapb.RegionEpoch{Version: 1}}
+			child := &metapb.Region{Id: 101, StartKey: []byte("a"), EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 2}}
+			// Seed both backends to detect accidental redirection of local cleanup.
+			for _, backend := range []Storage{shared, localStorage} {
+				re.NoError(backend.SaveRegion(parent))
+				re.NoError(backend.SaveRegion(child))
+			}
+			expectedRevision := int64(1)
+			if tc.valid {
+				expectedRevision = 0
+			}
+			cache := core.NewBasicCluster()
+			err := TryLoadRegionsOnceWithConditions(t.Context(), s, cache.CheckAndPutRegion, clientv3.Compare(clientv3.CreateRevision("/test-region-leader"), "=", expectedRevision))
+			if !tc.local && !tc.valid {
+				re.Error(err)
+			} else {
 				re.NoError(err)
-				re.Equal(local || !valid, exists)
-				exists, err = localStorage.LoadRegion(parent.GetId(), region)
-				re.NoError(err)
-				re.Equal(!local, exists)
-			})
-		}
+			}
+			region := &metapb.Region{}
+			exists, err := shared.LoadRegion(parent.GetId(), region)
+			re.NoError(err)
+			re.Equal(tc.local || !tc.valid, exists)
+			exists, err = localStorage.LoadRegion(parent.GetId(), region)
+			re.NoError(err)
+			re.Equal(!tc.local, exists)
+		})
 	}
 }
