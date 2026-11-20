@@ -728,3 +728,246 @@ func newRegionInfoWithBytes(id uint64, startKey, endKey []byte) *core.RegionInfo
 		peer,
 	)
 }
+
+func TestMergePreservesConfiguredIsolation(t *testing.T) {
+	ctx := t.Context()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	tc.SetKeyType("raw")
+	tc.SetSplitMergeInterval(0)
+	tc.SetMaxMergeRegionSize(2)
+	tc.SetMaxMergeRegionKeys(2)
+	for i, host := range []string{"a", "b", "c", "d", "d", "d"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+	}
+	source := tc.AddLeaderRegion(1, 1, 2, 3).Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("m")), core.SetApproximateSize(1), core.SetApproximateKeys(1))
+	target := tc.AddLeaderRegion(2, 4, 5, 6).Clone(core.WithStartKey([]byte("m")), core.WithEndKey([]byte("z")), core.SetApproximateSize(1), core.SetApproximateKeys(1))
+	tc.PutRegion(source)
+	tc.PutRegion(target)
+	rm := tc.GetRuleManager()
+	rule := rm.GetRule("pd", "default").Clone()
+	rule.LocationLabels = []string{"host"}
+	for _, level := range []string{"", "host"} {
+		rule.IsolationLevel = level
+		require.NoError(t, rm.SetRule(rule))
+		require.True(t, rm.FitRegionWithoutCache(tc, target).IsSatisfied())
+		require.Equal(t, level == "", AllowMerge(tc, source, target))
+		mc := NewMergeChecker(ctx, tc, tc.GetCheckerConfig())
+		if level == "" {
+			require.Len(t, mc.Check(source), 2)
+		} else {
+			require.Empty(t, mc.Check(source))
+		}
+	}
+	// A degraded source can merge into an isolated target.
+	require.True(t, AllowMerge(tc, target, source))
+}
+
+func TestMergeRetriesIsolationRejectedTarget(t *testing.T) {
+	for _, joint := range []bool{false, true} {
+		t.Run(map[bool]string{false: "non-joint", true: "joint"}[joint], func(t *testing.T) {
+			tc := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+			tc.SetEnablePlacementRules(true)
+			tc.SetEnableUseJointConsensus(joint)
+			tc.SetEnableOneWayMerge(false)
+			tc.SetKeyType("raw")
+			tc.SetSplitMergeInterval(0)
+			tc.SetMaxMergeRegionSize(10)
+			tc.SetMaxMergeRegionKeys(10)
+			for i, host := range []string{"a", "b", "a", "a", "c"} {
+				tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+			}
+			tc.SetStoreEvictLeader(3, true)
+			tc.SetStoreEvictLeader(4, true)
+			rm := tc.GetRuleManager()
+			leader := rm.GetRule("pd", "default").Clone()
+			leader.Role, leader.Count = placement.Leader, 1
+			require.NoError(t, rm.SetRule(leader))
+			voters := leader.Clone()
+			voters.ID, voters.Role, voters.Count = "voters", placement.Voter, 2
+			voters.LocationLabels, voters.IsolationLevel = []string{"host"}, "host"
+			require.NoError(t, rm.SetRule(voters))
+
+			// Previous is a legal alternative; next is smaller and is tried first.
+			prev := newRegionInfo(1, "a", "m", 2, 2, []uint64{11, 2}, []uint64{11, 2}, []uint64{12, 3}, []uint64{13, 5})
+			source := newRegionInfo(2, "m", "s", 1, 1, []uint64{21, 1}, []uint64{21, 1}, []uint64{22, 2}, []uint64{23, 3})
+			next := newRegionInfo(3, "s", "z", 1, 1, []uint64{32, 3}, []uint64{31, 2}, []uint64{32, 3}, []uint64{33, 4})
+			tc.PutRegion(prev)
+			tc.PutRegion(source)
+			tc.PutRegion(next)
+			for _, region := range []*core.RegionInfo{prev, source, next} {
+				fit := rm.FitRegionWithoutCache(tc, region)
+				require.True(t, fit.IsSatisfied())
+				require.True(t, fit.RuleFits[1].IsIsolationSatisfied())
+			}
+			mc := NewMergeChecker(t.Context(), tc, tc.GetCheckerConfig())
+			require.True(t, mc.checkTarget(source, prev))
+			require.True(t, mc.checkTarget(source, next))
+			_, err := operator.CreateMergeRegionOperator("bad", tc, source, next, operator.OpMerge)
+			require.ErrorIs(t, err, operator.ErrTargetIsolation)
+			ops := mc.Check(source)
+			require.Len(t, ops, 2)
+			step, ok := ops[0].Step(ops[0].Len() - 1).(operator.MergeRegion)
+			require.True(t, ok)
+			require.Equal(t, prev.GetID(), step.ToRegion.GetId())
+
+			tc.SetEnableOneWayMerge(true)
+			require.Empty(t, mc.Check(source))
+
+			// If all candidates are blocked by store state, there is no
+			// isolation rejection to retry.
+			tc.SetEnableOneWayMerge(false)
+			tc.SetStoreEvictLeader(2, true)
+			_, err = operator.CreateMergeRegionOperator("blocked", tc, source, next, operator.OpMerge)
+			require.Error(t, err)
+			require.NotErrorIs(t, err, operator.ErrTargetIsolation)
+			_, err = operator.CreateMergeRegionOperator("alternative", tc, source, prev, operator.OpMerge)
+			require.NoError(t, err)
+			require.Empty(t, mc.Check(source))
+		})
+	}
+}
+
+func TestMergeSameDegradedPlacement(t *testing.T) {
+	tc := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	tc.SetKeyType("raw")
+	tc.SetSplitMergeInterval(0)
+	tc.SetMaxMergeRegionSize(2)
+	tc.SetMaxMergeRegionKeys(2)
+	for i, host := range []string{"a", "a", "b"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"host": host})
+	}
+	source := newRegionInfo(1, "a", "m", 1, 1, []uint64{11, 1}, []uint64{11, 1}, []uint64{12, 2}, []uint64{13, 3}).Clone(core.WithIncVersion(), core.WithIncConfVer())
+	target := newRegionInfo(2, "m", "z", 1, 1, []uint64{21, 1}, []uint64{21, 1}, []uint64{22, 2}, []uint64{23, 3})
+	tc.PutRegion(source)
+	tc.PutRegion(target)
+	rule := tc.GetRuleManager().GetRule("pd", "default").Clone()
+	rule.LocationLabels = []string{"host"}
+	rule.IsolationLevel = "host"
+	require.NoError(t, tc.GetRuleManager().SetRule(rule))
+	require.True(t, AllowMerge(tc, source, target))
+	require.True(t, AllowMerge(tc, target, source))
+	mc := NewMergeChecker(t.Context(), tc, tc.GetCheckerConfig())
+	ops := mc.Check(source)
+	require.Len(t, ops, 2)
+	for _, op := range ops {
+		require.Equal(t, 1, op.Len())
+		_, ok := op.Step(0).(operator.MergeRegion)
+		require.True(t, ok)
+	}
+
+	// A no-op rule update can leave a cached source fit with the old rule object.
+	tc.SetPlacementRulesCacheEnabled(true)
+	rm := tc.GetRuleManager()
+	cachedFit := rm.FitRegionWithoutCache(tc, source)
+	for range 12 {
+		rm.SetRegionFitCache(tc, source, cachedFit)
+	}
+	require.Same(t, cachedFit, rm.FitRegion(tc, source))
+	require.NoError(t, rm.SetRule(rule.Clone()))
+	require.Same(t, cachedFit, rm.FitRegion(tc, source))
+	require.NotSame(t, cachedFit.RuleFits[0].Rule, rm.FitRegion(tc, target).RuleFits[0].Rule)
+	require.True(t, AllowMerge(tc, source, target))
+
+	// Same stores and Raft roles can give different rule fits after a leader
+	// change. The target's new same-host pair prevents this direct merge.
+	leader := rule.Clone()
+	leader.Role, leader.Count = placement.Leader, 1
+	leader.LocationLabels, leader.IsolationLevel = nil, ""
+	rule.ID, rule.Count = "voters", 2
+	require.NoError(t, tc.GetRuleManager().SetRules([]*placement.Rule{leader, rule}))
+	target = target.Clone(core.WithLeader(target.GetStorePeer(3)))
+	require.True(t, operator.HasSameMergePeerLayout(source, target))
+	require.True(t, tc.GetRuleManager().FitRegionWithoutCache(tc, source).RuleFits[1].IsIsolationSatisfied())
+	require.False(t, tc.GetRuleManager().FitRegionWithoutCache(tc, target).RuleFits[1].IsIsolationSatisfied())
+	require.False(t, AllowMerge(tc, source, target))
+}
+
+func TestMergeUsesCurrentRuleGroupOrder(t *testing.T) {
+	ctx := t.Context()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	tc.SetPlacementRulesCacheEnabled(true)
+	tc.SetKeyType("raw")
+	tc.SetSplitMergeInterval(0)
+	tc.SetMaxMergeRegionSize(2)
+	tc.SetMaxMergeRegionKeys(2)
+	tc.SetMergeScheduleLimit(0)
+	for i, zone := range []string{"A", "B", "A", "A", "A"} {
+		tc.AddLabelsStore(uint64(i+1), 0, map[string]string{"zone": zone})
+	}
+
+	rm := tc.GetRuleManager()
+	require.NoError(t, rm.SetRules([]*placement.Rule{
+		{GroupID: "pd", ID: "default", Role: placement.Leader, Count: 1},
+		{GroupID: "zone-score", ID: "voters", Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"}},
+		{
+			GroupID: "isolated", ID: "voters", Role: placement.Voter, Count: 2,
+			LocationLabels: []string{"zone"}, IsolationLevel: "zone",
+		},
+	}))
+	require.NoError(t, rm.SetRuleGroup(&placement.RuleGroup{ID: "zone-score", Index: 1}))
+	require.NoError(t, rm.SetRuleGroup(&placement.RuleGroup{ID: "isolated", Index: 2}))
+
+	source := newRegionInfo(1, "a", "m", 1, 1, []uint64{11, 1},
+		[]uint64{11, 1}, []uint64{12, 2}, []uint64{13, 3}, []uint64{14, 4}, []uint64{15, 5}).
+		Clone(core.WithIncVersion(), core.WithIncConfVer())
+	target := newRegionInfo(2, "m", "z", 1, 1, []uint64{22, 2},
+		[]uint64{21, 1}, []uint64{22, 2}, []uint64{23, 3}, []uint64{24, 4}, []uint64{25, 5}).
+		Clone(core.WithIncVersion(), core.WithIncConfVer())
+	tc.PutRegion(source)
+	tc.PutRegion(target)
+	controller := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), nil)
+	checker := NewController(ctx, tc, tc.GetCheckerConfig(), controller)
+	t.Cleanup(checker.splitScatter.clearPendingSplitScatter)
+
+	for _, region := range []*core.RegionInfo{source, target} {
+		for range 12 {
+			require.Empty(t, checker.CheckRegion(region))
+			// The schedulers revisit the cached region and promote the fit
+			// stored by RuleChecker on its first pass.
+			rm.FitRegion(tc, region)
+		}
+		fit := rm.FitRegion(tc, region)
+		require.Same(t, fit, rm.FitRegion(tc, region))
+		require.True(t, fit.IsSatisfied())
+		require.Equal(t, "isolated", fit.RuleFits[2].Rule.GroupID)
+		require.False(t, fit.RuleFits[2].IsIsolationSatisfied())
+	}
+
+	// Give the isolation rule first pick after the leader rule. Only the
+	// source can assign store 2, the sole zone B peer, to that rule.
+	scoringRule := rm.GetRule("zone-score", "voters")
+	require.NoError(t, rm.SetRuleGroup(&placement.RuleGroup{ID: "zone-score", Index: 3}))
+	require.Equal(t, scoringRule.Version, rm.GetRule("zone-score", "voters").Version)
+	require.False(t, rm.IsRegionFitCached(tc, source))
+	require.False(t, rm.IsRegionFitCached(tc, target))
+	sourceFit := rm.FitRegionWithoutCache(tc, source)
+	targetFit := rm.FitRegionWithoutCache(tc, target)
+	require.True(t, sourceFit.IsSatisfied())
+	require.True(t, targetFit.IsSatisfied())
+	require.Equal(t, "isolated", sourceFit.RuleFits[1].Rule.GroupID)
+	require.Equal(t, "isolated", targetFit.RuleFits[1].Rule.GroupID)
+	require.True(t, sourceFit.RuleFits[1].IsIsolationSatisfied())
+	require.False(t, targetFit.RuleFits[1].IsIsolationSatisfied())
+
+	tc.SetMergeScheduleLimit(8)
+	require.Empty(t, checker.CheckRegion(source), "old fits must not allow a direct merge that now increases conflicts")
+
+	// Revisit both Regions until fits under the new rule order are cached.
+	tc.SetMergeScheduleLimit(0)
+	for _, region := range []*core.RegionInfo{source, target} {
+		for range 12 {
+			require.Empty(t, checker.CheckRegion(region))
+			rm.FitRegion(tc, region)
+		}
+		fit := rm.FitRegion(tc, region)
+		require.Same(t, fit, rm.FitRegion(tc, region))
+		require.Equal(t, "isolated", fit.RuleFits[1].Rule.GroupID)
+	}
+	tc.SetMergeScheduleLimit(8)
+	require.Empty(t, checker.CheckRegion(source), "a warm cache with the current order must reject the merge")
+	tc.SetPlacementRulesCacheEnabled(false)
+	require.Empty(t, checker.CheckRegion(source), "the uncached result must agree")
+}

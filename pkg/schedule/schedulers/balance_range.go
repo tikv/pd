@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -608,10 +609,18 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 		excludeTargets[store.GetID()] = struct{}{}
 	}
 	conf := solver.GetSchedulerConfig()
+	var placementSafeguard filter.Filter
+	if s.job.Rule == core.LeaderScatter {
+		// Leader scatter can also move the leader peer to a new store.
+		placementSafeguard = filter.NewPlacementLeaderSafeguardWithFit(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit, true)
+	}
+	if placementSafeguard == nil {
+		placementSafeguard = filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit)
+	}
 	filters := s.filters
 	filters = append(filters,
 		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
-		filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit),
+		placementSafeguard,
 	)
 
 	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
@@ -655,6 +664,9 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 
 		if err != nil {
 			balanceRangeCreateOpFailCounter.Inc()
+			if stderrors.Is(err, operator.ErrTargetIsolation) {
+				continue
+			}
 			return nil
 		}
 		op.FinishedCounters = append(op.FinishedCounters,

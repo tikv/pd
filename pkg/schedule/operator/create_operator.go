@@ -81,10 +81,33 @@ func CreateRemovePeerOperator(desc string, ci sche.SharedCluster, kind OpKind, r
 
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
 func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
-	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck).
-		SetLeader(targetStoreID).
-		SetLeaders(targetStoreIDs).
-		Build(kind)
+	builder := NewBuilder(desc, ci, region, SkipOriginJointStateCheck)
+	// Some producers, including eviction, do not use a leader safeguard.
+	// Check every advertised target, not only the old-TiKV fallback target.
+	if fit := builder.originFit; builder.err == nil && fit != nil {
+		witness := ci.GetSharedConfig().IsWitnessAllowed()
+		// The preferred target can also appear in the list. Reuse its check.
+		targetAllowed := fit.IsLeaderIsolationPreserved(region, targetStoreID, witness)
+		targets := make([]uint64, 0, len(targetStoreIDs))
+		for _, id := range targetStoreIDs {
+			allowed := targetAllowed
+			if id != targetStoreID {
+				allowed = fit.IsLeaderIsolationPreserved(region, id, witness)
+			}
+			if allowed {
+				targets = append(targets, id)
+			}
+		}
+		if !targetAllowed {
+			if len(targets) == 0 {
+				return nil, errors.Wrap(ErrTargetIsolation, "cannot transfer leader")
+			}
+			targetStoreID = targets[0]
+		}
+		targetStoreIDs = targets
+		builder.skipFinalIsolationCheck = true
+	}
+	return builder.SetLeader(targetStoreID).SetLeaders(targetStoreIDs).Build(kind)
 }
 
 // CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.
@@ -184,7 +207,7 @@ func CreateMergeRegionOperator(desc string, ci sche.SharedCluster, source *core.
 	}
 
 	var steps []OpStep
-	if !isRegionMatch(source, target) {
+	if !HasSameMergePeerLayout(source, target) {
 		peers := make(map[uint64]*metapb.Peer)
 		for _, p := range target.GetPeers() {
 			peers[p.GetStoreId()] = &metapb.Peer{
@@ -222,7 +245,9 @@ func CreateMergeRegionOperator(desc string, ci sche.SharedCluster, source *core.
 	return []*Operator{op1, op2}, nil
 }
 
-func isRegionMatch(a, b *core.RegionInfo) bool {
+// HasSameMergePeerLayout reports whether a merge needs no peer changes.
+// The caller must check that both Regions can merge, including joint state.
+func HasSameMergePeerLayout(a, b *core.RegionInfo) bool {
 	if len(a.GetPeers()) != len(b.GetPeers()) {
 		return false
 	}
@@ -354,4 +379,12 @@ func CreateNonWitnessPeerOperator(desc string, ci sche.SharedCluster, region *co
 	return NewBuilder(desc, ci, region).
 		BecomeNonWitness(peer.GetStoreId()).
 		Build(OpWitness)
+}
+
+// CreatePromoteWitnessForDownOperator restores a data replica while its down
+// peer is still present. The temporary witness deficit is part of the repair.
+func CreatePromoteWitnessForDownOperator(ci sche.SharedCluster, region *core.RegionInfo, witness *metapb.Peer) (*Operator, error) {
+	builder := NewBuilder("promote-witness-for-down", ci, region)
+	builder.skipFinalIsolationCheck = true
+	return builder.BecomeNonWitness(witness.GetStoreId()).Build(OpWitness)
 }

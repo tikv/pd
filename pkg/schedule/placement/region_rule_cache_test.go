@@ -266,6 +266,35 @@ func TestToStoreCacheListReturnsUncacheableForRemovedStore(t *testing.T) {
 	re.False(cacheable)
 }
 
+func TestRegionRuleFitCacheUsesOrderedRules(t *testing.T) {
+	manager := NewRegionRuleFitCacheManager()
+	storeSet := core.NewStoresInfo()
+	for _, store := range mockStores(3) {
+		storeSet.PutStore(store)
+	}
+	region := mockRegion(3, 0)
+	leader := &Rule{GroupID: "leader", ID: "leader", Role: Leader, Count: 1}
+	voters := &Rule{GroupID: "voters", ID: "voters", Role: Voter, Count: 2}
+	earlier := []*Rule{leader, voters}
+	current := []*Rule{voters, leader}
+	earlierFit := FitRegionWithRules(storeSet, region, earlier, false)
+	currentFit := FitRegionWithRules(storeSet, region, current, false)
+	require.True(t, ValidateFit(earlierFit))
+	require.True(t, ValidateFit(currentFit))
+
+	for range minHitCountToCacheHit + 1 {
+		manager.SetCache(storeSet, region, currentFit)
+	}
+	hit, cached := manager.CheckAndGetCache(region, earlier, currentFit.regionStores)
+	require.False(t, hit)
+	require.Nil(t, cached)
+
+	manager.SetCache(storeSet, region, earlierFit)
+	hit, cached = manager.CheckAndGetCache(region, current, currentFit.regionStores)
+	require.True(t, hit)
+	require.Same(t, currentFit, cached)
+}
+
 func TestSetCacheDoesNotPromoteStaleFitAfterStoreRemoval(t *testing.T) {
 	re := require.New(t)
 	manager := NewRegionRuleFitCacheManager()
