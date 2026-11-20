@@ -20,8 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -366,7 +364,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
+	validSchedulers := append(sc.SchedulerConfigs(nil), scheduleCfg.Schedulers...)
+	c.cluster.GetSchedulerConfig().SetSchedulers(validSchedulers)
 	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
@@ -565,15 +564,14 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 
 		// stores is a snapshot taken before this loop; if s was buried or fully
 		// removed concurrently, the writes above can recreate a series
-		// store removal already deleted for it. DeletePartialMatch performs a
-		// full-vector scan, so only pay for it when this
+		// DeleteStoreMetrics already deleted for it. DeleteStoreMetrics is a
+		// DeletePartialMatch full-vector scan, so only pay for it when this
 		// iteration's own s was still live: once a snapshot correctly shows
 		// IsRemoved(), a tombstoned store sitting in GetStores() for up to 30
 		// days doesn't cost a scan on every tick.
 		if !removed {
 			if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
-				hotSpotStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeLabel})
-				schedulers.HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": storeLabel})
+				DeleteStoreMetrics(storeLabel)
 			}
 		}
 	}

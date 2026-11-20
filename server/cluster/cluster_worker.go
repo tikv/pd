@@ -274,10 +274,11 @@ func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest
 
 // HandleReportBuckets processes buckets reports from client
 func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
-	if err := c.processReportBuckets(b); err != nil {
+	processFlow, err := c.processReportBuckets(b)
+	if err != nil {
 		return err
 	}
-	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+	if processFlow && !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
 	}
 	return nil

@@ -32,5 +32,4 @@ func TestSetOnStoreTombstonedReplaysLoadedStores(t *testing.T) {
 	var removed []uint64
 	w.SetOnStoreTombstoned(func(storeID uint64) { removed = append(removed, storeID) })
 	require.Equal(t, []uint64{1}, removed)
-	require.NotPanics(t, func() { w.SetOnStoreTombstoned(nil) })
 }

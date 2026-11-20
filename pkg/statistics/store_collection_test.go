@@ -91,7 +91,7 @@ func TestResetStoreStatisticsClearsPlacementStatusGauge(t *testing.T) {
 	metric.Set(1)
 	re.NotZero(promtestutil.ToFloat64(metric))
 
-	ResetStoreStatistics("", "1")
+	ResetStoreStatistics("1")
 	// DeletePartialMatch returns how many series it found and removed, so a
 	// zero return here proves ResetStoreStatistics already deleted it --
 	// unlike checking WithLabelValues' value, which would recreate a fresh

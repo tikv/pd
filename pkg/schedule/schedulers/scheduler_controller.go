@@ -136,6 +136,16 @@ func (c *Controller) CollectSchedulerMetrics() {
 func ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
 	ruleStatusGauge.Reset()
+	opInfluenceStatus.Reset()
+	hotSchedulerResultCounter.Reset()
+	balanceWitnessCounter.Reset()
+	balanceDirectionCounter.Reset()
+	hotDirectionCounter.Reset()
+	evictedSlowStoreStatusGauge.Reset()
+	evictedStoppingStoreStatusGauge.Reset()
+	slowStoreTriggerLimitGauge.Reset()
+	storeSlowTrendEvictedStatusGauge.Reset()
+	balanceRangeGauge.Reset()
 }
 
 // AddSchedulerHandler adds the HTTP handler for a scheduler.

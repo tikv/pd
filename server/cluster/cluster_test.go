@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"strconv"
 	"sync"
 	"testing"
@@ -60,6 +61,8 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -120,6 +123,10 @@ func TestStoreHeartbeat(t *testing.T) {
 
 	re.Equal(int(n), cluster.GetStoreCount())
 
+	// An older heartbeat completing after a newer one must not roll back
+	// the persisted heartbeat or cause the cache to persist again early.
+	cluster.persistStoreHeartbeat(1, cluster.GetStore(1).GetLastHeartbeatTS().Add(-time.Hour))
+	re.False(cluster.GetStore(1).NeedPersist())
 	for i, store := range stores {
 		tmp := &metapb.Store{}
 		ok, err := cluster.storage.LoadStoreMeta(store.GetID(), tmp)
@@ -206,6 +213,64 @@ func TestStoreHeartbeat(t *testing.T) {
 	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
+}
+
+func TestStoreHeartbeatDoesNotRestoreRemovedStoreMeta(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	for _, tc := range []struct {
+		name        string
+		deleteStore bool
+	}{
+		{name: "tombstone"},
+		{name: "deleted", deleteStore: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			root := path.Join("/heartbeat-test", tc.name)
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithEtcdBackend(client, root))
+			store := newTestStores(1, "2.0.0")[0]
+			storeID := store.GetID()
+			re.NoError(cluster.PutMetaStore(store.GetMeta()))
+
+			const fp = "github.com/tikv/pd/server/cluster/beforePersistStoreHeartbeat"
+			entered := false
+			re.NoError(failpoint.EnableCall(fp, func() {
+				// The heartbeat already loaded live metadata and queued its
+				// write. Change the record before that transaction commits.
+				entered = true
+				re.NoError(cluster.RemoveStore(storeID, true))
+				re.NoError(cluster.BuryStore(storeID, false))
+				if tc.deleteStore {
+					re.NoError(cluster.RemoveTombStoneRecords())
+				}
+			}))
+			defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+			re.NoError(cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+				Stats: &pdpb.StoreStats{StoreId: storeID, Capacity: 100, Available: 50},
+			}, &pdpb.StoreHeartbeatResponse{}))
+			re.True(entered, "heartbeat did not reach the pre-commit failpoint")
+
+			resp, err := etcdutil.EtcdKVGet(client, path.Join(root, keypath.StorePath(storeID)))
+			re.NoError(err)
+			current := cluster.GetStore(storeID)
+			if tc.deleteStore {
+				re.Nil(current)
+				re.Empty(resp.Kvs)
+				return
+			}
+			re.NotNil(current)
+			re.True(current.IsRemoved())
+			re.Len(resp.Kvs, 1)
+			persisted := &metapb.Store{}
+			re.NoError(persisted.Unmarshal(resp.Kvs[0].Value))
+			re.Equal(metapb.StoreState_Tombstone, persisted.GetState())
+			re.Equal(current.GetMeta(), persisted)
+		})
+	}
 }
 
 func TestStoreMutationsRejectTombstoneStore(t *testing.T) {
@@ -709,7 +774,9 @@ func TestBucketHeartbeat(t *testing.T) {
 		Version:  1,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.Error(cluster.processReportBuckets(buckets))
+	processFlow, err := cluster.processReportBuckets(buckets)
+	re.Error(err)
+	re.False(processFlow)
 
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
@@ -722,18 +789,29 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0]))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[1]))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
-	re.NoError(cluster.processReportBuckets(buckets))
+	processFlow, err = cluster.processReportBuckets(buckets)
+	re.NoError(err)
+	re.True(processFlow)
 	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
-	// case3: the bucket version is same.
-	re.NoError(cluster.processReportBuckets(buckets))
+	// case3: a same-version report still carries flow statistics.
+	processFlow, err = cluster.processReportBuckets(buckets)
+	re.NoError(err)
+	re.True(processFlow)
 	// case4: the bucket version is changed.
 	newBuckets := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.NoError(cluster.processReportBuckets(newBuckets))
+	processFlow, err = cluster.processReportBuckets(newBuckets)
+	re.NoError(err)
+	re.True(processFlow)
+	re.Equal(newBuckets, cluster.GetRegion(uint64(1)).GetBuckets())
+	// As on master, an older version can also carry flow without replacing metadata.
+	processFlow, err = cluster.processReportBuckets(buckets)
+	re.NoError(err)
+	re.True(processFlow)
 	re.Equal(newBuckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case5: region update should inherit buckets.
@@ -748,6 +826,63 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newRegion2))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
 	re.Empty(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys())
+
+	// A report from a tombstoned leader must not update buckets or enqueue hot-bucket work.
+	leaderID := cluster.GetRegion(1).GetLeader().GetStoreId()
+	cluster.PutStore(cluster.GetStore(leaderID).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	processFlow, err = cluster.processReportBuckets(newBuckets)
+	re.NoError(err)
+	re.False(processFlow)
+	re.NoError(cluster.HandleReportBuckets(newBuckets))
+	re.Nil(cluster.GetRegion(1).GetBuckets())
+}
+
+func TestReportBucketsSameVersionUpdatesHotStats(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	store := newTestStores(1, "2.0.0")[0]
+	cluster.PutStore(store)
+	region := core.NewTestRegionInfo(1, store.GetID(), []byte("a"), []byte("b"))
+	cluster.PutRegion(region)
+
+	report := func(flow uint64) *metapb.Buckets {
+		loads := []uint64{flow}
+		return &metapb.Buckets{
+			RegionId:   region.GetID(),
+			Version:    1,
+			Keys:       [][]byte{{'a'}, {'b'}},
+			PeriodInMs: 1000,
+			Stats: &metapb.BucketStats{
+				ReadBytes: loads, ReadKeys: loads, ReadQps: loads,
+				WriteBytes: loads, WriteKeys: loads, WriteQps: loads,
+			},
+		}
+	}
+
+	first := report(1 << 30)
+	re.NoError(cluster.HandleReportBuckets(first))
+	metadata := region.GetBuckets()
+	re.NotNil(metadata)
+	stats := cluster.BucketsStats(0, region.GetID())[region.GetID()]
+	re.Len(stats, 1)
+	re.Equal(1, stats[0].HotDegree)
+
+	second := report(1 << 31)
+	re.NoError(cluster.HandleReportBuckets(second))
+	stats = cluster.BucketsStats(0, region.GetID())[region.GetID()]
+	re.Len(stats, 1)
+	re.Equal(2, stats[0].HotDegree)
+	re.Equal(second.Stats.ReadBytes[0], stats[0].Loads[0])
+	re.Equal(metadata, region.GetBuckets())
+
+	cluster.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+	re.NoError(cluster.HandleReportBuckets(report(1 << 32)))
+	stats = cluster.BucketsStats(0, region.GetID())[region.GetID()]
+	re.Len(stats, 1)
+	re.Equal(2, stats[0].HotDegree)
+	re.Equal(second.Stats.ReadBytes[0], stats[0].Loads[0])
 }
 
 func TestRegionHeartbeat(t *testing.T) {
@@ -1092,14 +1227,17 @@ func TestConcurrentReportBucket(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
+	var reportErr error
 	go func() {
 		defer wg.Done()
-		cluster.processReportBuckets(bucket1)
+		_, reportErr = cluster.processReportBuckets(bucket1)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
-	re.NoError(cluster.processReportBuckets(bucket2))
+	_, err = cluster.processReportBuckets(bucket2)
+	re.NoError(err)
 	wg.Wait()
+	re.NoError(reportErr)
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }
 
@@ -3104,6 +3242,233 @@ func TestStoreLimitChangeRefreshLimiter(t *testing.T) {
 	re.True(store.IsAvailable(storelimit.AddPeer, constant.Low))
 }
 
+func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	opt.SetAllStoresLimit(storelimit.AddPeer, 60)
+
+	// Simulate a restarted process whose package-level default goes back to the built-in value.
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	rc.AddStoreLimit(&metapb.Store{Id: 1})
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, opt.GetScheduleConfig().StoreLimit[1])
+
+	opt.SetStoreLimit(2, storelimit.RemovePeer, 80)
+	rc.AddStoreLimit(&metapb.Store{Id: 2})
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 80}, opt.GetScheduleConfig().StoreLimit[2])
+
+	rc.AddStoreLimit(&metapb.Store{
+		Id:     3,
+		Labels: []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
+	})
+	re.Equal(sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30}, opt.GetScheduleConfig().StoreLimit[3])
+}
+
+func TestAddStoreLimitRetryPreservesTiFlashDefault(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cfg := opt.GetScheduleConfig().Clone()
+	cfg.DefaultStoreLimit = sc.StoreLimitConfig{AddPeer: 15, RemovePeer: 15}
+	opt.SetScheduleConfig(cfg)
+	store := &metapb.Store{
+		Id:     1,
+		Labels: []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
+	}
+	storage := storage.NewStorageWithMemoryBackend()
+	rc := newTestRaftCluster(t.Context(), mockid.NewIDAllocator(), opt, storage)
+	rc.PutStore(core.NewStoreInfo(store))
+
+	const persistFail = "github.com/tikv/pd/server/config/persistFail"
+	re.NoError(failpoint.Enable(persistFail, "1*return"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(persistFail)) })
+	const beforeRetry = "github.com/tikv/pd/server/cluster/beforeAddStoreLimitRetry"
+	retries := 0
+	re.NoError(failpoint.EnableCall(beforeRetry, func() {
+		retries++
+		re.NotContains(opt.GetScheduleConfig().StoreLimit, store.GetId())
+		rc.refreshStoreRateLimit(store.GetId(), storelimit.AddPeer)
+		re.NotContains(opt.GetScheduleConfig().StoreLimit, store.GetId(), "refresh must not install a default before retry")
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(beforeRetry)) })
+
+	rc.AddStoreLimit(store)
+	re.Equal(1, retries)
+	expected := sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30}
+	re.Equal(expected, opt.GetScheduleConfig().StoreLimit[store.GetId()])
+	_, reloaded, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(storage))
+	re.Equal(expected, reloaded.GetScheduleConfig().StoreLimit[store.GetId()])
+}
+
+type blockingSaveConfigStorage struct {
+	storage.Storage
+	saveStarted chan struct{}
+	releaseSave chan struct{}
+	mu          sync.Mutex
+	saveCount   int
+}
+
+type blockingSaveSchedulerConfigStorage struct {
+	storage.Storage
+	saveStarted chan struct{}
+	releaseSave chan struct{}
+	mu          sync.Mutex
+	saveCount   int
+}
+
+func (s *blockingSaveSchedulerConfigStorage) SaveSchedulerConfig(name string, data []byte) error {
+	s.mu.Lock()
+	s.saveCount++
+	isFirstSave := s.saveCount == 1
+	s.mu.Unlock()
+	if isFirstSave {
+		close(s.saveStarted)
+		<-s.releaseSave
+	}
+	return s.Storage.SaveSchedulerConfig(name, data)
+}
+
+func (s *blockingSaveConfigStorage) SaveConfig(cfg any) error {
+	s.mu.Lock()
+	s.saveCount++
+	isFirstSave := s.saveCount == 1
+	s.mu.Unlock()
+	if isFirstSave {
+		close(s.saveStarted)
+		<-s.releaseSave
+	}
+	return s.Storage.SaveConfig(cfg)
+}
+
+func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	storage := &blockingSaveConfigStorage{
+		Storage:     storage.NewStorageWithMemoryBackend(),
+		saveStarted: make(chan struct{}),
+		releaseSave: make(chan struct{}),
+	}
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage)
+
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() { close(storage.releaseSave) })
+	}
+	t.Cleanup(release)
+
+	persistDone := make(chan error, 1)
+	go func() {
+		persistDone <- opt.Persist(storage)
+	}()
+
+	select {
+	case <-storage.saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("the initial config persistence did not start")
+	}
+
+	setAllDone := make(chan error, 1)
+	go func() {
+		setAllDone <- rc.SetAllStoresLimit(storelimit.AddPeer, 60)
+	}()
+
+	select {
+	case err := <-setAllDone:
+		re.NoError(err)
+		t.Fatal("SetAllStoresLimit was not serialized with an in-flight full-config persistence")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+	select {
+	case err := <-persistDone:
+		re.NoError(err)
+	case <-time.After(time.Second):
+		t.Fatal("the initial config persistence did not finish")
+	}
+	select {
+	case err := <-setAllDone:
+		re.NoError(err)
+	case <-time.After(time.Second):
+		t.Fatal("SetAllStoresLimit did not finish")
+	}
+
+	cfg := opt.GetScheduleConfig()
+	re.Equal(float64(60), cfg.DefaultStoreLimit.AddPeer)
+
+	_, reloadedOpt, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloadedOpt.Reload(storage))
+	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
+}
+
+func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	defer sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+
+	blockingStorage := &blockingSaveSchedulerConfigStorage{
+		saveStarted: make(chan struct{}),
+		releaseSave: make(chan struct{}),
+	}
+	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
+		blockingStorage.Storage = tc.storage
+		tc.storage = blockingStorage
+	}, nil, re)
+	defer cleanup()
+
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() { close(blockingStorage.releaseSave) })
+	}
+	defer release()
+
+	initDone := make(chan struct{})
+	go func() {
+		co.InitSchedulers(false)
+		close(initDone)
+	}()
+
+	select {
+	case <-blockingStorage.saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("InitSchedulers did not start saving scheduler config")
+	}
+
+	re.NoError(tc.SetAllStoresLimit(storelimit.AddPeer, 60))
+	release()
+	select {
+	case <-initDone:
+	case <-time.After(time.Second):
+		t.Fatal("InitSchedulers did not finish")
+	}
+
+	re.Equal(float64(60), tc.GetScheduleConfig().DefaultStoreLimit.AddPeer)
+	_, reloadedOpt, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloadedOpt.Reload(tc.GetStorage()))
+	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
+}
+
 func TestRemoveTombstoneRecordsKeepsStoreWhenLimitRemovalFails(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -3235,67 +3600,6 @@ func TestSetStoreLimitCannotRaceStoreDeletion(t *testing.T) {
 
 type failingSaveConfigStorage struct {
 	storage.Storage
-}
-
-type blockingSaveConfigStorage struct {
-	storage.Storage
-	saveStarted chan struct{}
-	releaseSave chan struct{}
-	mu          sync.Mutex
-	saveCount   int
-}
-
-func (s *blockingSaveConfigStorage) SaveConfig(cfg any) error {
-	s.mu.Lock()
-	s.saveCount++
-	first := s.saveCount == 1
-	s.mu.Unlock()
-	if first {
-		close(s.saveStarted)
-		<-s.releaseSave
-	}
-	return s.Storage.SaveConfig(cfg)
-}
-
-func TestStoreLimitPersistenceIsSerialized(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	backend := &blockingSaveConfigStorage{
-		Storage:     storage.NewStorageWithMemoryBackend(),
-		saveStarted: make(chan struct{}),
-		releaseSave: make(chan struct{}),
-	}
-	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, backend)
-	opt.SetStoreLimit(1, storelimit.AddPeer, 30)
-	oldDefault := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
-	t.Cleanup(func() { sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldDefault) })
-	var releaseOnce sync.Once
-	release := func() { releaseOnce.Do(func() { close(backend.releaseSave) }) }
-	t.Cleanup(release)
-	persistDone := make(chan error, 1)
-	go func() { persistDone <- opt.Persist(backend) }()
-	select {
-	case <-backend.saveStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("config persistence did not start")
-	}
-	setAllDone := make(chan error, 1)
-	go func() { setAllDone <- rc.SetAllStoresLimit(storelimit.AddPeer, 60) }()
-	select {
-	case <-setAllDone:
-		t.Fatal("store limit update was not serialized with config persistence")
-	case <-time.After(100 * time.Millisecond):
-	}
-	release()
-	re.NoError(<-persistDone)
-	re.NoError(<-setAllDone)
-	_, reloaded, err := newTestScheduleConfig()
-	re.NoError(err)
-	re.NoError(reloaded.Reload(backend))
-	re.Equal(float64(60), reloaded.GetScheduleConfig().StoreLimit[1].AddPeer)
 }
 
 func (*failingSaveConfigStorage) SaveConfig(any) error {

@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -49,6 +50,7 @@ import (
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -56,10 +58,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/scatter"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/unsaferecovery"
@@ -198,6 +203,19 @@ type RaftCluster struct {
 	logRunner ratelimit.Runner
 	// syncRegionRunner is used to sync region asynchronously.
 	syncRegionRunner ratelimit.Runner
+
+	// onStoreBuried is an optional callback invoked (at least once) with a store's
+	// ID right after it's buried, for cleanup that only the owning package can do
+	// without an import cycle -- e.g. the server package's own heartbeat/bucket
+	// metrics, which server/cluster cannot import directly. Set via
+	// SetOnStoreBuried; read through an atomic pointer since BuryStoreLocked can run
+	// before the owner has had a chance to install it.
+	onStoreBuried atomic.Pointer[func(storeID string)]
+}
+
+// SetOnStoreBuried sets the callback invoked when a store is buried.
+func (c *RaftCluster) SetOnStoreBuried(fn func(storeID string)) {
+	c.onStoreBuried.Store(&fn)
 }
 
 // Status saves some state information.
@@ -1049,19 +1067,9 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
 	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
-	// storeStateLock only needs to cover this initial read: it makes the
-	// IsRemoved() check atomic with checkStore/BuryStore's own state
-	// transitions for this store, and putStoreLocked (below, via PutStore)
-	// tolerates a store that's since been fully removed by skipping the
-	// write instead of dereferencing a missing entry -- so there's no need
-	// to hold the lock through the rest of this handler (in particular,
-	// SaveStoreMeta's etcd round trip, which would otherwise make
-	// checkStore/BuryStore for this store wait out a write this path
-	// already paid for before the lock existed). The tradeoff: a
-	// concurrent full removal landing after this unlock and before
-	// SaveStoreMeta runs can still let a stale heartbeat re-persist this
-	// store's metadata, with nothing left to clean it up afterward -- a
-	// narrow, known residual of the same shape as SetStoreLimit's.
+	// Serialize the removed-store check and cache update with state changes.
+	// Release the lock before etcd I/O: the heartbeat transaction protects
+	// the persisted record against concurrent burial or deletion.
 	c.storeStateLock.Lock(uint32(storeID))
 	store := c.GetStore(storeID)
 	if store == nil {
@@ -1083,8 +1091,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		}
 		return nil
 	}
-	c.storeStateLock.Unlock(uint32(storeID))
-
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
 	opts := make([]core.StoreCreateOption, 0)
@@ -1112,6 +1118,13 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	statistics.UpdateStoreHeartbeatMetrics(store)
 	opts = append(opts, core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
 	newStore := store.Clone(opts...)
+	persist := newStore.NeedPersist() && c.storage != nil
+	// Supply NodeState in the response to help the store handle special cases
+	// more conveniently, such as avoiding calling `remove_peer` redundantly under
+	// NodeState_Removing.
+	resp.State = store.GetNodeState()
+	c.PutStore(newStore, opts...)
+	c.storeStateLock.Unlock(uint32(storeID))
 
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
@@ -1119,18 +1132,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
-	if newStore.NeedPersist() && c.storage != nil {
-		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
-			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
-		} else {
-			opts = append(opts, core.SetLastPersistTime(nowTime))
-		}
+	if persist {
+		c.persistStoreHeartbeat(storeID, nowTime)
 	}
-	// Supply NodeState in the response to help the store handle special cases
-	// more conveniently, such as avoiding calling `remove_peer` redundantly under
-	// NodeState_Removing.
-	resp.State = store.GetNodeState()
-	c.PutStore(newStore, opts...)
 	var (
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
@@ -1213,12 +1217,65 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	return nil
 }
 
-// processReportBuckets update the bucket information.
-func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
+func (c *RaftCluster) persistStoreHeartbeat(storeID uint64, heartbeatTime time.Time) {
+	ctx, cancel := context.WithTimeout(c.ctx, etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	persisted := false
+	err := c.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		key := keypath.StorePath(storeID)
+		value, err := txn.Load(key)
+		if err != nil || value == "" {
+			return err
+		}
+		store := &metapb.Store{}
+		if err := store.Unmarshal([]byte(value)); err != nil {
+			return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+		}
+		if store.GetState() == metapb.StoreState_Tombstone || store.GetNodeState() == metapb.NodeState_Removed {
+			return nil
+		}
+		// Patch only the stored heartbeat timestamp. In etcd, txn.Load adds
+		// a value comparison so a concurrent metadata change rejects the write.
+		store.LastHeartbeat = max(store.GetLastHeartbeat(), heartbeatTime.UnixNano())
+		data, err := store.Marshal()
+		if err != nil {
+			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
+		}
+		if err := txn.Save(key, string(data)); err != nil {
+			return err
+		}
+		persisted = true
+		failpoint.InjectCall("beforePersistStoreHeartbeat")
+		return nil
+	})
+	if err != nil {
+		if !errorspkg.Is(err, errs.ErrEtcdTxnConflict) {
+			log.Error("failed to persist store heartbeat", zap.Uint64("store-id", storeID), errs.ZapError(err))
+		}
+		return
+	}
+	if !persisted {
+		return
+	}
+
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+	if store := c.GetStore(storeID); store != nil && !store.IsRemoved() {
+		c.PutStore(store, core.SetLastPersistTime(heartbeatTime))
+	}
+}
+
+// processReportBuckets updates the bucket metadata and reports whether to
+// process the report's flow statistics. Reports whose version has not increased
+// still carry flow statistics, even though they do not update the metadata.
+func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) (bool, error) {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
 		regionCacheMissCounter.Inc()
-		return errors.Errorf("region %v not found", buckets.GetRegionId())
+		return false, errors.Errorf("region %v not found", buckets.GetRegionId())
+	}
+	if store := c.GetStore(region.GetLeader().GetStoreId()); store != nil && store.IsRemoved() {
+		return false, nil
 	}
 	// use CAS to update the bucket information.
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
@@ -1229,17 +1286,17 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && buckets.GetVersion() <= old.GetVersion() {
 			versionNotMatchCounter.Inc()
-			return nil
+			return true, nil
 		}
 		failpoint.Inject("concurrentBucketHeartbeat", func() {
 			time.Sleep(500 * time.Millisecond)
 		})
 		if ok := region.UpdateBuckets(buckets, old); ok {
-			return nil
+			return true, nil
 		}
 	}
 	updateFailedCounter.Inc()
-	return nil
+	return false, nil
 }
 
 var regionGuide = core.GenerateRegionGuideFunc(true)
@@ -1738,9 +1795,16 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 		}
 		c.ruleManager.RemoveStoreCache(storeID)
 		storeIDStr := strconv.FormatUint(storeID, 10)
-		statistics.ResetStoreStatistics(addr, storeIDStr)
+		statistics.ResetStoreStatistics(storeIDStr)
+		filter.DeleteStoreMetrics(storeIDStr)
+		hbstream.DeleteStoreMetrics(storeIDStr)
+		schedule.DeleteStoreMetrics(storeIDStr)
+		storeTriggerNetworkSlowEvict.DeleteLabelValues(storeIDStr)
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			c.removeStoreStatistics(storeID)
+		}
+		if fn := c.onStoreBuried.Load(); fn != nil {
+			(*fn)(storeIDStr)
 		}
 	}
 	return err
@@ -2341,7 +2405,16 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	c.ruleManager.RemoveStoreCache(store.GetID())
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)
 	statistics.DeleteClusterStatusMetrics(store)
-	statistics.ResetStoreStatistics(store.GetAddress(), storeIDStr)
+	statistics.ResetStoreStatistics(storeIDStr)
+	filter.DeleteStoreMetrics(storeIDStr)
+	hbstream.DeleteStoreMetrics(storeIDStr)
+	schedule.DeleteStoreMetrics(storeIDStr)
+	schedulers.DeleteStoreMetrics(storeIDStr)
+	scatter.DeleteStoreMetrics(storeIDStr)
+	storeTriggerNetworkSlowEvict.DeleteLabelValues(storeIDStr)
+	if fn := c.onStoreBuried.Load(); fn != nil {
+		(*fn)(storeIDStr)
+	}
 	return nil
 }
 
@@ -2595,10 +2668,7 @@ func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved b
 				return false, nil
 			}
 
-			slc := sc.StoreLimitConfig{
-				AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-				RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-			}
+			slc := cfg.GetDefaultStoreLimit()
 			if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 				slc = sc.StoreLimitConfig{
 					AddPeer:    sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
@@ -2615,6 +2685,7 @@ func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved b
 			}
 			return
 		}
+		failpoint.InjectCall("beforeAddStoreLimitRetry")
 		time.Sleep(persistLimitWaitTime)
 	}
 	log.Error("persist store limit meet error", errs.ZapError(err))
@@ -2824,10 +2895,7 @@ func (c *RaftCluster) setStoreLimitLocked(storeID uint64, typ storelimit.Type, r
 	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 		slc, ok := cfg.StoreLimit[storeID]
 		if !ok {
-			slc = sc.StoreLimitConfig{
-				AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-				RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-			}
+			slc = cfg.GetDefaultStoreLimit()
 		}
 		switch typ {
 		case storelimit.AddPeer:
@@ -2849,10 +2917,28 @@ func (c *RaftCluster) setStoreLimitLocked(storeID uint64, typ storelimit.Type, r
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
-	if err := c.opt.PersistAllStoresLimit(c.storage, typ, ratePerMin); err != nil {
+	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+		switch typ {
+		case storelimit.AddPeer:
+			cfg.DefaultStoreLimit.AddPeer = ratePerMin
+			for storeID, limit := range cfg.StoreLimit {
+				limit.AddPeer = ratePerMin
+				cfg.StoreLimit[storeID] = limit
+			}
+		case storelimit.RemovePeer:
+			cfg.DefaultStoreLimit.RemovePeer = ratePerMin
+			for storeID, limit := range cfg.StoreLimit {
+				limit.RemovePeer = ratePerMin
+				cfg.StoreLimit[storeID] = limit
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(typ, ratePerMin)
 	for _, storeID := range c.GetStoreIDs() {
 		c.refreshStoreRateLimit(storeID, typ)
 	}
@@ -2872,11 +2958,6 @@ func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit
 	}
 	// Schedule config stores the unit in rate-per-minute, but limiter uses rate-per-second.
 	const storeBalanceBaseTime = float64(60)
-	// Peek, not Get: this runs for every currently-known store (SetAllStoresLimit
-	// loops all of them), including one whose config entry RemoveStoreLimit just
-	// deleted but that hasn't been finally removed from StoresInfo yet (tombstone
-	// is not deletion). Get's create-on-miss side effect would resurrect that
-	// entry here.
 	ratePerSec := c.opt.PeekStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
 	if limit.Rate(limitType) != ratePerSec {
 		c.ResetStoreLimit(storeID, limitType, ratePerSec)
