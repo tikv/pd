@@ -459,6 +459,73 @@ func TestBalanceDefaultIsFreshlyEvacuated(t *testing.T) {
 	}
 }
 
+// The Store total can stay flat when a different Region becomes busy. A newer
+// peer breakdown from the same TiKV should guide selection and the first send.
+func TestBalanceReturnUsesReportedPeerDemand(t *testing.T) {
+	x := newRecoveryTest(t)
+	x.drain(1)
+	first := x.evacuate(11, 8, 40)
+	second := x.evacuate(12, 8, 30)
+	start := x.now - 120
+	x.now += 20
+	x.store(1, x.now-20, 80)
+	x.store(8, start, 140)
+	ordinary := x.report(13, 8, 7, 10, x.now-30)
+	choose := func() *Operator {
+		var op *Operator
+		x.BestReturn(x.tc, x.cluster.GetStore(8), x.cluster.GetStore(1), ordinary, nil, func(r *core.RegionInfo) bool {
+			candidate := transfer(r, "balance", 1, OpLeader)
+			if !x.PreferReturn(x.tc, candidate, ordinary.GetID(), nil) {
+				return false
+			}
+			op = candidate
+			return true
+		})
+		return op
+	}
+	original := choose()
+	require.Equal(t, first.GetID(), original.RegionID())
+	report := func(end int64, rates map[uint64]uint64) {
+		stats := &pdpb.StoreStats{StoreId: 8, KeysRead: 1400, Interval: &pdpb.TimeInterval{StartTimestamp: uint64(end - 10), EndTimestamp: uint64(end)}}
+		for id, rate := range rates {
+			stats.PeerStats = append(stats.PeerStats, &pdpb.PeerStat{RegionId: id, ReadKeys: 10 * rate})
+		}
+		s := x.cluster.GetStore(8)
+		x.cluster.PutStore(s.Clone(core.SetStoreStats(stats)))
+	}
+	// Reject the first Region when it would overload the target or its reads moved away.
+	for _, rate := range []uint64{100, 0} {
+		report(x.now, map[uint64]uint64{11: rate, 12: 30, 13: 10})
+		require.False(t, x.canSendRecovery(original, first))
+		next := choose()
+		require.NotNil(t, next)
+		require.Equal(t, second.GetID(), next.RegionID())
+	}
+	report(x.now, map[uint64]uint64{12: 30})
+	require.Equal(t, first.GetID(), choose().RegionID(), "omission from TiKV's hot peer list is not a zero sample")
+	report(x.now-55, map[uint64]uint64{11: 100})
+	require.Equal(t, first.GetID(), choose().RegionID(), "older Store sample")
+
+	// The ordinary choice is also an original. Its newly reported zero
+	// must count the same way as a zero for a replacement candidate.
+	ordinary = first
+	report(x.now, map[uint64]uint64{11: 0, 12: 30})
+	require.Equal(t, second.GetID(), choose().RegionID())
+
+	// The receiving Store has started serving the original workload. Its
+	// previous Region heartbeat still showed zero reads after taking leadership.
+	x.report(11, 8, 8, 0, x.now-30)
+	ordinary = x.report(13, 8, 7, 0, x.now-30)
+	require.Equal(t, second.GetID(), choose().RegionID())
+	report(x.now, map[uint64]uint64{11: 40, 12: 30, 13: 0})
+	recovered := choose()
+	require.NotNil(t, recovered)
+	require.Equal(t, first.GetID(), recovered.RegionID())
+	require.Equal(t, 1, x.AddWaitingOperator(recovered))
+	require.Same(t, recovered, x.GetOperator(first.GetID()))
+	require.Equal(t, float64(40), x.recovery.pending[recovered].rate)
+}
+
 func TestUnknownTransferOnlyBlocksTheUnsafeDirection(t *testing.T) {
 	x := newRecoveryTest(t)
 	x.drain(1)
@@ -497,8 +564,8 @@ func TestConsecutiveTransfersCarryConfirmedReadCost(t *testing.T) {
 			Interval: &pdpb.TimeInterval{StartTimestamp: end - 493, EndTimestamp: end},
 		}, 0)
 		x.cluster.CheckAndPutRegion(middle)
-		bounds, ok := x.loadBounds(x.cluster.GetStore(8), &recoveryChoice{})
-		require.True(t, ok)
+		bounds, sample := x.loadBounds(x.cluster.GetStore(8), &recoveryChoice{})
+		require.NotNil(t, sample)
 		require.Equal(t, 100+float64(initial), bounds.high, "confirmation already visible before dispatch")
 		require.Nil(t, first.Check(middle))
 		x.finishRecovery(first, middle)
@@ -506,23 +573,23 @@ func TestConsecutiveTransfersCarryConfirmedReadCost(t *testing.T) {
 		second := transfer(middle, "balance", 1, OpLeader)
 		x.observeRecovery(second)
 		require.True(t, second.Start())
-		bounds, ok = x.loadBounds(x.cluster.GetStore(1), &recoveryChoice{})
-		require.True(t, ok)
+		bounds, sample = x.loadBounds(x.cluster.GetStore(1), &recoveryChoice{})
+		require.NotNil(t, sample)
 		require.Equal(t, 100+float64(initial), bounds.high, "second receiver reserves the first sender's rate")
 		last := x.report(1863, 1, 9, 0, x.now)
 		require.Nil(t, second.Check(last))
 		x.finishRecovery(second, last)
-		bounds, ok = x.loadBounds(x.cluster.GetStore(1), &recoveryChoice{})
-		require.True(t, ok)
+		bounds, sample = x.loadBounds(x.cluster.GetStore(1), &recoveryChoice{})
+		require.NotNil(t, sample)
 		require.Equal(t, 100+float64(initial), bounds.high, "keep the reservation until the Store reports")
 
-		require.True(t, math.IsInf(x.recovery.readCostBounds(middle.Clone(core.SetReportInterval(end-494, end))).high, 1))
-		require.True(t, math.IsInf(x.recovery.readCostBounds(middle.Clone(core.SetRegionConfVer(2))).high, 1))
+		require.True(t, math.IsInf(readCostBounds(middle.Clone(core.SetReportInterval(end-494, end)), x.recovery.handoffs).high, 1))
+		require.True(t, math.IsInf(readCostBounds(middle.Clone(core.SetRegionConfVer(2)), x.recovery.handoffs).high, 1))
 		require.True(t, math.IsInf(readCost(middle), 1), "a reservation is never a measured candidate rate")
 		next := x.round
 		next.ID++
 		require.NoError(t, x.UpdateRecoveryRound(next, 8, x.now-120))
-		require.True(t, math.IsInf(x.recovery.readCostBounds(middle).high, 1))
+		require.True(t, math.IsInf(readCostBounds(middle, x.recovery.handoffs).high, 1))
 	}
 }
 

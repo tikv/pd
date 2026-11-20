@@ -24,6 +24,7 @@ import (
 	"github.com/google/btree"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
@@ -104,7 +105,8 @@ type handoffCost struct {
 }
 
 type roundRecords struct {
-	handoffs cache.Cache // Region ID -> cost on its last confirmed long heartbeat
+	peers    map[uint64]peerReadWindow // newest Store heartbeat indexed per queried Store for this roll
+	handoffs cache.Cache               // Region ID -> cost on its last confirmed long heartbeat
 	pending  map[*Operator]transferSample
 	draining map[uint64]int64
 	yielded  map[uint64]bool
@@ -157,6 +159,7 @@ func (oc *Controller) UpdateRecoveryRound(round RecoveryRound, store uint64, pro
 			return nil
 		}
 		s.roundRecords = roundRecords{
+			peers:    make(map[uint64]peerReadWindow),
 			handoffs: cache.NewCache(maxRecoveryRegions, cache.LRUCache),
 			draining: make(map[uint64]int64), yielded: make(map[uint64]bool),
 			history: make(map[uint64]departure),
@@ -225,15 +228,16 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 		s.Unlock()
 		return ordinary
 	}
-	cost := s.readCostBounds(ordinary)
 	loads, ok := oc.compareReads(target, source, &recoveryChoice{extra: batch})
+	peers, handoffs := s.reportedPeers(source, loads.otherStats), s.handoffs
+	cost, demand := peers.estimate(ordinary, handoffs)
 	// An unbounded default could perfectly balance any positive gap. Only
 	// one known gap can be matched for every possible default.
 	if !ok || loads.lo <= 0 || math.IsInf(cost.high, 1) && loads.lo != loads.hi {
 		s.Unlock()
 		return ordinary
 	}
-	best := s.returnScore(ordinary, source.GetID(), target, cost.high)
+	best := s.returnScore(ordinary, source.GetID(), target, demand.high)
 	index := s.index.Clone()
 	s.Unlock()
 
@@ -251,9 +255,9 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 		if !d.matches(r, target) {
 			return true
 		}
-		rate, valid := r.ReadKeysPerSecond()
-		score := min(d.rate, rate)
-		if valid && score > best && loads.allowsReturn(cost, rate) {
+		candidateCost, measured := peers.estimate(r, handoffs)
+		score := min(d.rate, measured.low)
+		if score > best && loads.allowsCandidate(cost, candidateCost) {
 			candidates = append(candidates, candidate{r, score})
 		}
 		return true
@@ -275,6 +279,64 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 }
 
 type readBounds struct{ low, high float64 }
+
+// Store and Region heartbeats take independent deltas of TiKV's per-peer
+// read-key counter. A full, later Store interval can expose a demand shift
+// before the next Region heartbeat, even if the Store total did not change.
+type peerReadWindow struct {
+	stats   *pdpb.StoreStats
+	process uint64
+	rates   map[uint64]float64
+}
+
+// Called under the recovery lock. Published indexes are immutable so one
+// scheduling pass can use the same observation for all its candidates.
+func (s *leaderRecovery) reportedPeers(st *core.StoreInfo, stats *pdpb.StoreStats) peerReadWindow {
+	if stats == nil || len(stats.GetPeerStats()) == 0 || stats.GetStoreId() != st.GetID() {
+		return peerReadWindow{}
+	}
+	process := uint64(st.GetMeta().GetStartTimestamp())
+	if previous := s.peers[st.GetID()]; previous.stats == stats && previous.process == process {
+		return previous
+	}
+	span := float64(stats.GetInterval().GetEndTimestamp() - stats.GetInterval().GetStartTimestamp())
+	view := peerReadWindow{stats: stats, process: process, rates: make(map[uint64]float64, len(stats.GetPeerStats()))}
+	for _, peer := range stats.GetPeerStats() {
+		view.rates[peer.GetRegionId()] = float64(peer.GetReadKeys()) / span
+	}
+	s.peers[st.GetID()] = view
+	return view
+}
+
+// Rank by the latest measured peer demand. Charge the entire range between
+// observations so a change of source cannot itself make a move look safer.
+func (v peerReadWindow) estimate(r *core.RegionInfo, handoffs cache.Cache) (cost, demand readBounds) {
+	bounds := readCostBounds(r, handoffs)
+	if v.stats == nil || r == nil || r.GetLeader().GetStoreId() != v.stats.GetStoreId() {
+		return bounds, bounds
+	}
+	end := r.GetInterval().GetEndTimestamp()
+	if end < v.process || end > v.stats.GetInterval().GetStartTimestamp() {
+		return bounds, bounds
+	}
+	if rate, ok := v.rates[r.GetID()]; ok {
+		return readBounds{min(bounds.low, rate), max(bounds.high, rate)}, readBounds{rate, rate}
+	}
+	return bounds, bounds
+}
+
+func (oc *Controller) observedReadBounds(r *core.RegionInfo) readBounds {
+	view := peerReadWindow{}
+	if r != nil {
+		// Index only Stores from which a return has actually been considered.
+		if id := r.GetLeader().GetStoreId(); oc.recovery.peers[id].stats != nil {
+			st := oc.cluster.GetStore(id)
+			view = oc.recovery.reportedPeers(st, st.ReadStats())
+		}
+	}
+	b, _ := view.estimate(r, oc.recovery.handoffs)
+	return b
+}
 
 func (b *readBounds) add(delta float64) {
 	b.low += min(0, delta)
@@ -314,12 +376,12 @@ func readCost(r *core.RegionInfo) float64 {
 
 // readCostBounds keeps a measured rate distinct from a confirmed handoff's
 // upper bound. Optional return candidates still require a measured rate.
-func (s *leaderRecovery) readCostBounds(r *core.RegionInfo) readBounds {
+func readCostBounds(r *core.RegionInfo, handoffs cache.Cache) readBounds {
 	if rate := readCost(r); !math.IsInf(rate, 1) {
 		return readBounds{rate, rate}
 	}
 	if bound, valid := r.LongIntervalReadBound(); valid {
-		if h, ok := s.handoffs.Peek(r.GetID()); ok {
+		if h, ok := handoffs.Peek(r.GetID()); ok {
 			previous := h.(handoffCost)
 			if previous.report == identifyHandoff(r) {
 				return readBounds{high: max(previous.rate, bound)}
@@ -362,11 +424,11 @@ type recoveryChoice struct {
 
 // loadBounds includes live operators, even when they predate this round, plus
 // the signed ranges from transfers a Store's measurement may not yet include.
-func (oc *Controller) loadBounds(st *core.StoreInfo, p *recoveryChoice) (readBounds, bool) {
+func (oc *Controller) loadBounds(st *core.StoreInfo, p *recoveryChoice) (readBounds, *pdpb.StoreStats) {
 	stats := st.ReadStats()
 	w := st.GetLeaderWeight()
 	if stats == nil || !(w > 0 && w <= math.MaxFloat64) {
-		return readBounds{}, false
+		return readBounds{}, nil
 	}
 	i := stats.GetInterval()
 	rate := float64(stats.GetKeysRead()) / float64(i.GetEndTimestamp()-i.GetStartTimestamp())
@@ -386,7 +448,7 @@ func (oc *Controller) loadBounds(st *core.StoreInfo, p *recoveryChoice) (readBou
 		r := oc.cluster.GetRegion(op.RegionID())
 		rate, ok := sample.handoffBound(op, r)
 		if !ok {
-			rate = max(sample.rate, oc.recovery.readCostBounds(r).high)
+			rate = max(sample.rate, oc.observedReadBounds(r).high)
 		}
 		op.leaderReadChanges(rate, 0, func(id uint64, delta float64) {
 			if id == st.GetID() {
@@ -405,7 +467,10 @@ func (oc *Controller) loadBounds(st *core.StoreInfo, p *recoveryChoice) (readBou
 	// Unmeasured outgoing work can reduce the load to zero. Unmeasured
 	// incoming work leaves the upper bound open, but the lower bound survives.
 	b = readBounds{max(0, b.low) / w, b.high / w}
-	return b, b.low <= math.MaxFloat64 && b.low <= b.high
+	if !(b.low <= math.MaxFloat64 && b.low <= b.high) {
+		return readBounds{}, nil
+	}
+	return b, stats
 }
 
 func eligibleReturnTarget(c sche.SchedulerCluster, r *core.RegionInfo, to uint64) bool {
@@ -471,15 +536,14 @@ func (oc *Controller) fits(p *recoveryChoice, heartbeat *core.RegionInfo) bool {
 		return false
 	}
 	allowed := func(r, a *core.RegionInfo) bool {
-		bRate := readCost(r)
-		if bRate <= 0 || math.IsInf(bRate, 0) {
-			return false
-		}
 		if p.partner != nil {
-			return loads.allowsExchange(readCost(a), bRate, p)
+			rate := readCost(r)
+			return rate > 0 && !math.IsInf(rate, 1) && loads.allowsExchange(readCost(a), rate, p)
 		}
-		ordinary := s.readCostBounds(a)
-		return min(p.home.rate, bRate) > s.returnScore(a, other.GetID(), home, ordinary.high) && loads.allowsReturn(ordinary, bRate)
+		peers := s.reportedPeers(other, loads.otherStats)
+		ordinary, nativeDemand := peers.estimate(a, s.handoffs)
+		candidate, measured := peers.estimate(r, s.handoffs)
+		return min(p.home.rate, measured.low) > s.returnScore(a, other.GetID(), home, nativeDemand.high) && loads.allowsCandidate(ordinary, candidate)
 	}
 	if heartbeat != nil && heartbeat != r && heartbeat != a {
 		// Dispatch can see key counts which did not change rounded bytes in
@@ -502,21 +566,22 @@ func (oc *Controller) fits(p *recoveryChoice, heartbeat *core.RegionInfo) bool {
 // The same two Store bounds apply to every candidate for one balance slot.
 // They are taken again against live operators before first dispatch.
 type readComparison struct {
+	otherStats                      *pdpb.StoreStats // the same source interval used to calculate the gap
 	lo, hi, homeWeight, otherWeight float64
 	homeYielded, otherYielded       bool
 }
 
 func (oc *Controller) compareReads(home, other *core.StoreInfo, p *recoveryChoice) (readComparison, bool) {
-	h, ok := oc.loadBounds(home, p)
-	if !ok {
+	h, homeStats := oc.loadBounds(home, p)
+	if homeStats == nil {
 		return readComparison{}, false
 	}
-	o, ok := oc.loadBounds(other, p)
-	if !ok {
+	o, otherStats := oc.loadBounds(other, p)
+	if otherStats == nil {
 		return readComparison{}, false
 	}
 	return readComparison{
-		lo: o.low - h.high, hi: o.high - h.low,
+		lo: o.low - h.high, hi: o.high - h.low, otherStats: otherStats,
 		homeWeight: home.GetLeaderWeight(), otherWeight: other.GetLeaderWeight(),
 		homeYielded: oc.recovery.yielded[home.GetID()], otherYielded: oc.recovery.yielded[other.GetID()],
 	}, true
@@ -542,6 +607,12 @@ func (c readComparison) allowsReturn(ordinary readBounds, rate float64) bool {
 		}
 	}
 	return true
+}
+
+// For fixed starting loads and ordinary cost, the final absolute gap is
+// convex in the candidate rate. Its worst value is at one of the endpoints.
+func (c readComparison) allowsCandidate(ordinary, candidate readBounds) bool {
+	return c.allowsReturn(ordinary, candidate.low) && (candidate.low == candidate.high || c.allowsReturn(ordinary, candidate.high))
 }
 
 // Either eviction can complete first or fail independently.
@@ -782,7 +853,7 @@ func (oc *Controller) trackTransfer(op *Operator) {
 		case TransferLeader:
 			if _, ok := s.pending[op]; !ok {
 				r := oc.cluster.GetRegion(op.RegionID())
-				sample := transferSample{rate: s.readCostBounds(r).high}
+				sample := transferSample{rate: oc.observedReadBounds(r).high}
 				if r != nil && r.GetLeader().GetStoreId() == t.FromStore {
 					sample.term = r.GetTerm()
 				}
@@ -853,8 +924,8 @@ func (oc *Controller) canSendRecovery(op *Operator, region *core.RegionInfo) boo
 	if sample, ok := s.pending[op]; ok {
 		// Carry measured reads into the reservation even when the cache
 		// retained its older sample. An unrateable, older report was ignored.
-		if rate, measured := region.ReadKeysPerSecond(); measured && rate > sample.rate {
-			sample.rate = rate
+		if rate := oc.observedReadBounds(region).high; !math.IsInf(rate, 1) {
+			sample.rate = max(sample.rate, rate)
 			s.pending[op] = sample
 		}
 	}
@@ -893,7 +964,7 @@ func (oc *Controller) finishRecovery(op *Operator, r *core.RegionInfo) {
 			return
 		}
 	}
-	rate := max(admitted.rate, s.readCostBounds(r).high)
+	rate := max(admitted.rate, oc.observedReadBounds(r).high)
 	if bound, ok := admitted.handoffBound(op, r); actual != 0 && ok {
 		rate = bound
 		s.handoffs.Put(r.GetID(), handoffCost{identifyHandoff(r), rate})
