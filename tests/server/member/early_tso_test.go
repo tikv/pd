@@ -646,6 +646,12 @@ func TestEarlyTSORegionCleanupAfterLeadershipLoss(t *testing.T) {
 	re.NoError(failpoint.Disable(updateHook))
 	resumeNext()
 	testutil.Eventually(re, svr.IsServing)
+	region := svr.DirectlyGetRaftCluster().GetRegion(parent.GetId())
+	re.NotNil(region, "recovered leader skipped the successor's replacement region")
+	re.Equal(parent, region.GetMeta())
+	region = svr.DirectlyGetRaftCluster().GetRegion(child.GetId())
+	re.NotNil(region)
+	re.Equal(child, region.GetMeta())
 	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 	re.Negative(tsoutil.CompareTimestamp(previous, next))
 }

@@ -18,7 +18,6 @@ import (
 	"context"
 
 	"github.com/gogo/protobuf/proto"
-	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
@@ -49,8 +48,8 @@ func (s *RegionStorage) LoadRegion(regionID uint64, region *metapb.Region) (bool
 }
 
 // LoadRegions implements the `endpoint.RegionStorage` interface.
-func (s *RegionStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error {
-	return s.backend.LoadRegions(ctx, f, conditions...)
+func (s *RegionStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+	return s.backend.LoadRegions(ctx, f)
 }
 
 // SaveRegion implements the `endpoint.RegionStorage` interface.

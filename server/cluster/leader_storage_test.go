@@ -97,3 +97,30 @@ func TestLeaderKVTermFence(t *testing.T) {
 		}
 	}
 }
+
+func TestLeaderContextCanceledBeforeLeaseReset(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	m := member.NewMember(nil, client, 1)
+	m.InitMemberInfo("", "", "leader")
+	re.NoError(m.Campaign(t.Context(), 30))
+	defer m.Resign()
+	lease := m.GetLeadership().GetLease()
+	previous, cancelPrevious := context.WithCancel(t.Context())
+	re.True(m.SetLeadershipCancel(lease, cancelPrevious))
+	current, cancelCurrent := context.WithCancel(t.Context())
+	re.True(m.SetLeadershipCancel(lease, cancelCurrent))
+	re.ErrorIs(previous.Err(), context.Canceled)
+	re.NoError(current.Err())
+	const hook = "github.com/tikv/pd/pkg/member/afterMemberLeaderWithdrawn"
+	re.NoError(failpoint.EnableCall(hook, func(uint64) {
+		re.Same(lease, m.GetLeadership().GetLease())
+		re.ErrorIs(current.Err(), context.Canceled)
+		late, cancelLate := context.WithCancel(t.Context())
+		re.False(m.SetLeadershipCancel(lease, cancelLate))
+		re.ErrorIs(late.Err(), context.Canceled)
+	}))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
+	m.Resign()
+}

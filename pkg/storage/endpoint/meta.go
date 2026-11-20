@@ -48,7 +48,7 @@ type MetaStorage interface {
 // RegionStorage defines the storage operations on the Region meta info.
 type RegionStorage interface {
 	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
-	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error
+	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
 	SaveRegion(region *metapb.Region) error
 	DeleteRegion(region *metapb.Region) error
 	Flush() error
@@ -173,8 +173,17 @@ func (se *StorageEndpoint) LoadRegion(regionID uint64, region *metapb.Region) (o
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-// Optional conditions fence overlap deletion in the backing transaction.
-func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error {
+func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+	return se.LoadRegionsWithConditions(ctx, f)
+}
+
+// LoadRegionsWithConditions fences overlap deletion to the initializing term.
+// A fenced load starts from the beginning so a failed previous term cannot skip
+// records that its callback removed from the cache before deletion failed.
+func (se *StorageEndpoint) LoadRegionsWithConditions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error {
+	if len(conditions) > 0 {
+		se.nextRegionID = 0
+	}
 	endKey := keypath.RegionPath(math.MaxUint64)
 
 	// Since the region key may be very long, using a larger rangeLimit will cause

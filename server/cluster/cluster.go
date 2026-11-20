@@ -408,6 +408,9 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return err
 	}
 	initClusterDuration := time.Since(initClusterStart)
+	if !c.member.SetLeadershipCancel(lease, c.cancel) {
+		return errs.ErrNotLeader
+	}
 	log.Info("initialize cluster completed", zap.Duration("cost", initClusterDuration))
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
@@ -644,6 +647,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 	for {
 		select {
 		case <-c.ctx.Done():
+			failpoint.InjectCall("afterServiceCheckJobCanceled", c.member.ID())
 			log.Info("service check job is stopped")
 			return
 		case <-schedulingTicker.C:
@@ -966,7 +970,12 @@ func (c *RaftCluster) loadClusterInfoWithConditions(conditions []clientv3.Cmp) (
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.CheckAndPutRegion, conditions...); err != nil {
+	if len(conditions) > 0 && !c.opt.IsUseRegionStorage() {
+		// Followers do not synchronize this backend. Rebuild from storage on
+		// each term, including cache mutations left by an interrupted load.
+		c.ResetRegionCache()
+	}
+	if err = storage.TryLoadRegionsOnceWithConditions(c.ctx, c.storage, c.CheckAndPutRegion, conditions...); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",

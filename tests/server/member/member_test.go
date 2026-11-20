@@ -940,6 +940,17 @@ func TestPDLeaderRejectsPromotionAfterWithdrawal(t *testing.T) {
 		}
 	}))
 	t.Cleanup(func() { re.NoError(failpoint.Disable(withdrawalHook)) })
+	// Withdrawal must cancel cluster work even while lease revocation and
+	// final PD promotion are blocked independently.
+	const serviceCheckHook = "github.com/tikv/pd/server/cluster/afterServiceCheckJobCanceled"
+	serviceCanceled := make(chan struct{})
+	var serviceCanceledOnce sync.Once
+	re.NoError(failpoint.EnableCall(serviceCheckHook, func(id uint64) {
+		if id == leader.GetServerID() {
+			serviceCanceledOnce.Do(func() { close(serviceCanceled) })
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(serviceCheckHook)) })
 	const updateHook = "github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"
 	re.NoError(failpoint.Enable(updateHook, "return(true)"))
 	t.Cleanup(func() { re.NoError(failpoint.Disable(updateHook)) })
@@ -953,21 +964,10 @@ func TestPDLeaderRejectsPromotionAfterWithdrawal(t *testing.T) {
 	re.Same(oldLease, m.GetLeadership().GetLease())
 	re.True(m.GetLeadership().Check())
 
-	// Run a periodic service check while the withdrawn lease is still live.
-	// It must not make the old TSO term ready again.
-	const serviceCheckHook = "github.com/tikv/pd/server/cluster/afterTSOServiceCheck"
-	serviceChecked := make(chan struct{})
-	var serviceCheckedOnce sync.Once
-	re.NoError(failpoint.EnableCall(serviceCheckHook, func(id uint64) {
-		if id == leader.GetServerID() {
-			serviceCheckedOnce.Do(func() { close(serviceChecked) })
-		}
-	}))
-	t.Cleanup(func() { re.NoError(failpoint.Disable(serviceCheckHook)) })
 	select {
-	case <-serviceChecked:
+	case <-serviceCanceled:
 	case <-time.After(30 * time.Second):
-		t.Fatal("service check did not run during leadership withdrawal")
+		t.Fatal("service check job was not canceled during leadership withdrawal")
 	}
 	re.Same(oldLease, m.GetLeadership().GetLease())
 	re.True(m.GetLeadership().Check())

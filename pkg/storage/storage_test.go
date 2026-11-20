@@ -459,7 +459,7 @@ func TestLoadRegionsTermFence(t *testing.T) {
 					expectedRevision = 0
 				}
 				cache := core.NewBasicCluster()
-				err := TryLoadRegionsOnce(t.Context(), s, cache.CheckAndPutRegion, clientv3.Compare(clientv3.CreateRevision("/test-region-leader"), "=", expectedRevision))
+				err := TryLoadRegionsOnceWithConditions(t.Context(), s, cache.CheckAndPutRegion, clientv3.Compare(clientv3.CreateRevision("/test-region-leader"), "=", expectedRevision))
 				if !local && !valid {
 					re.Error(err)
 				} else {

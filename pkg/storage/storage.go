@@ -156,19 +156,24 @@ func TrySwitchRegionStorage(s Storage, useLocalRegionStorage bool) endpoint.Regi
 
 // TryLoadRegionsOnce loads all regions from storage to RegionsInfo.
 // If the underlying storage is the local region storage, it will only load once.
+func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+	return TryLoadRegionsOnceWithConditions(ctx, s, f)
+}
+
+// TryLoadRegionsOnceWithConditions loads regions with a fence for shared cleanup.
 // Conditions fence overlap deletion only in the shared default storage; local
 // region cleanup does not affect another member and needs no leadership fence.
-func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error {
+func TryLoadRegionsOnceWithConditions(ctx context.Context, s Storage, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error {
 	ps, ok := s.(*coreStorage)
 	if !ok {
-		return s.LoadRegions(ctx, f, conditions...)
+		return loadRegionsWithConditions(ctx, s, f, conditions)
 	}
 
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
 	if !ps.useRegionStorage.Load() {
-		err := ps.Storage.LoadRegions(ctx, f, conditions...)
+		err := loadRegionsWithConditions(ctx, ps.Storage, f, conditions)
 		if err == nil {
 			ps.regionLoaded = fromEtcd
 		}
@@ -193,11 +198,24 @@ func (ps *coreStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bo
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error {
+func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	if ps.useRegionStorage.Load() {
 		return ps.regionStorage.LoadRegions(ctx, f)
 	}
-	return ps.Storage.LoadRegions(ctx, f, conditions...)
+	return ps.Storage.LoadRegions(ctx, f)
+}
+
+func loadRegionsWithConditions(ctx context.Context, s endpoint.RegionStorage, f func(region *core.RegionInfo) []*core.RegionInfo, conditions []clientv3.Cmp) error {
+	if len(conditions) == 0 {
+		return s.LoadRegions(ctx, f)
+	}
+	loader, ok := s.(interface {
+		LoadRegionsWithConditions(context.Context, func(*core.RegionInfo) []*core.RegionInfo, ...clientv3.Cmp) error
+	})
+	if !ok {
+		return errors.New("region storage backend does not support conditional loading")
+	}
+	return loader.LoadRegionsWithConditions(ctx, f, conditions...)
 }
 
 // SaveRegion saves one region to storage.
