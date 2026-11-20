@@ -572,8 +572,8 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 			failingStore := &failingAffinityStorage{AffinityStorage: store}
 			manager, err := NewManager(ctx, failingStore, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
 			re.NoError(err)
-			// Each request needs two transactions. To create or delete, the first
-			// group has no label rule, so cutting the operations every
+			// Each request needs two transactions. The first group has no label
+			// rule for create and delete. On create, cutting the operations every
 			// MaxEtcdTxnOps would separate a later group from its rule. An update
 			// writes one label rule per group.
 			count := etcdutil.MaxEtcdTxnOps/2 + 2
@@ -642,6 +642,14 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 			re.ErrorContains(err, "injected affinity transaction failure")
 			re.Equal(2, failingStore.txnCount)
 
+			// Only the first transaction committed. A create uses one operation
+			// for the empty first group and two for each remaining group. A
+			// delete uses two for every group, even if its rule is absent.
+			committedGroups := etcdutil.MaxEtcdTxnOps / 2
+			if op == "create" {
+				committedGroups = 1 + (etcdutil.MaxEtcdTxnOps-1)/2
+			}
+
 			// Rebuild the labeler and the manager from storage as a restart does.
 			reloadedLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 			re.NoError(err)
@@ -651,8 +659,12 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 				ruleID := GetLabelRuleID(change.GroupID)
 				stored, hasRule := reloaded.GetAffinityGroupState(change.GroupID), reloadedLabeler.GetLabelRule(ruleID) != nil
 				if op != "update" {
-					re.Equal(stored != nil && len(change.KeyRanges) > 0, hasRule,
-						"group %s and its label rule must persist together", change.GroupID)
+					expectedGroup := i < committedGroups
+					if op == "delete" {
+						expectedGroup = i >= committedGroups
+					}
+					re.Equal(expectedGroup, stored != nil, "stored group %s", change.GroupID)
+					re.Equal(expectedGroup && len(change.KeyRanges) > 0, hasRule, "stored rule for group %s", change.GroupID)
 				}
 				// The memory holds the committed changes and only them.
 				state := manager.GetAffinityGroupState(change.GroupID)
@@ -687,10 +699,6 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 				re.Equal(1, manager.GetAffinityGroupState(ids[count-1]).RegionCount)
 			}
 			re.Equal(reloaded.keyRanges, manager.keyRanges)
-			// Only the first transaction committed.
-			if op != "update" {
-				re.NotEqual(reloadedLabeler.GetLabelRule(GetLabelRuleID(ids[1])) != nil, reloadedLabeler.GetLabelRule(GetLabelRuleID(ids[count-1])) != nil)
-			}
 
 			// New groups are checked against a range created, deleted or added
 			// by the first transaction.
