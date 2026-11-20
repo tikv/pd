@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	mrand "math/rand/v2"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1304,6 +1305,458 @@ func TestCheckAndPutSubTree(t *testing.T) {
 	regions.CheckAndPutSubTree(region)
 	// should failed to put because the root tree is missing
 	re.Equal(0, regions.tree.length())
+}
+
+func TestRegionPreparationTracksOutOfOrderTopology(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	original := NewRegionInfo(&metapb.Region{
+		Id: 1, StartKey: []byte("a"), EndKey: []byte("b"), Peers: peers,
+	}, peers[0], SetSource(Heartbeat))
+	regions.PutRegion(original)
+	re.True(regions.IsRegionLeaderPrepared())
+
+	latest := original.Clone(WithLeader(peers[1]), SetSource(Heartbeat))
+	_, err := regions.CheckAndPutRootTree(ContextTODO(), latest)
+	re.NoError(err)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.CheckAndPutSubTree(latest)
+	re.True(regions.IsRegionLeaderPrepared())
+	// A delayed same-epoch update can restore an obsolete subtree leader.
+	regions.UpdateSubTreeOrderInsensitive(original)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.CheckAndPutSubTree(original)
+	re.True(regions.IsRegionLeaderPrepared())
+
+	// Flow statistics can lag without changing membership or leader readiness.
+	flow := latest.Clone(SetApproximateSize(100), SetSource(Heartbeat))
+	_, err = regions.CheckAndPutRootTree(ContextTODO(), flow)
+	re.NoError(err)
+	re.True(regions.IsRegionLeaderPrepared())
+	regions.CheckAndPutSubTree(flow)
+	re.True(regions.IsRegionLeaderPrepared())
+
+	regions.RemoveRegion(flow)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.RemoveRegionFromSubTree(flow)
+	re.True(regions.IsRegionLeaderPrepared())
+	regions.PutRegion(flow)
+	regions.RemoveRegionFromSubTree(flow)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.CheckAndPutSubTree(flow)
+	re.True(regions.IsRegionLeaderPrepared())
+	regions.SetRegion(original)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.ResetRegionCache()
+	re.True(regions.IsRegionLeaderPrepared())
+}
+
+func TestRegionPreparationWithSharedRegionInfo(t *testing.T) {
+	re := require.New(t)
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	left, right := NewRegionsInfo(), NewRegionsInfo()
+	left.PutRegion(region)
+	right.SetRegion(region)
+	re.True(left.IsRegionLeaderPrepared())
+	re.False(right.IsRegionLeaderPrepared())
+	right.CheckAndPutSubTree(region)
+	re.True(right.IsRegionLeaderPrepared())
+}
+
+func TestUpdateSubTreeWithStaleRootOrigin(t *testing.T) {
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	for _, tc := range []struct {
+		name string
+		opts []RegionCreateOption
+	}{
+		{name: "leader", opts: []RegionCreateOption{WithLeader(peers[1])}},
+		{name: "range", opts: []RegionCreateOption{WithStartKey([]byte("a")), WithEndKey([]byte("b"))}},
+		{name: "peers", opts: []RegionCreateOption{WithReplacePeerStore(2, 3)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			regions := NewRegionsInfo()
+			original := NewRegionInfo(&metapb.Region{
+				Id: 1, StartKey: []byte("d"), EndKey: []byte("e"), Peers: peers,
+			}, peers[0], SetApproximateSize(10), SetSource(Heartbeat))
+			neighbor := NewRegionInfo(&metapb.Region{
+				Id: 2, StartKey: []byte("b"), EndKey: []byte("c"), Peers: peers,
+			}, peers[0], SetApproximateSize(10), SetSource(Heartbeat))
+			regions.PutRegion(original)
+			regions.PutRegion(neighbor)
+
+			b := original.Clone(tc.opts...)
+			c := original.Clone()
+			d := c.Clone(SetApproximateSize(30))
+			b.source, c.source, d.source = Heartbeat, Heartbeat, Heartbeat
+			bOrigin, bOverlaps, bRangeChanged := regions.SetRegion(b)
+			cOrigin, cOverlaps, cRangeChanged := regions.SetRegion(c)
+			dOrigin, dOverlaps, dRangeChanged := regions.SetRegion(d)
+			// D only changes statistics relative to its root origin C, but the
+			// C, B, D completion order leaves B in the subtree when D arrives.
+			regions.UpdateSubTree(c, cOrigin, cOverlaps, cRangeChanged)
+			regions.UpdateSubTree(b, bOrigin, bOverlaps, bRangeChanged)
+			re.False(regions.IsRegionLeaderPrepared())
+			regions.UpdateSubTree(d, dOrigin, dOverlaps, dRangeChanged)
+
+			checkRegions(re, regions)
+			re.Equal(2, regions.GetStoreLeaderCount(1))
+			re.Equal(0, regions.GetStoreLeaderCount(2))
+			re.Equal(2, regions.GetStoreFollowerCount(2))
+			re.Equal(0, regions.GetStoreRegionCount(3))
+			re.Equal(int64(40), regions.GetStoreLeaderRegionSize(1))
+			re.Equal(int64(40), regions.GetStoreFollowerRegionSize(2))
+			leaders, err := regions.GetStoreRegionsByTypeInSubTree(1, LeaderInSubTree)
+			re.NoError(err)
+			re.Equal([]*RegionInfo{neighbor, d}, leaders)
+			re.True(regions.IsRegionLeaderPrepared())
+			re.Equal(int32(2), d.GetRef())
+
+			flow := d.Clone(SetApproximateSize(40), SetSource(Heartbeat))
+			regions.PutRegion(flow)
+			checkRegions(re, regions)
+			re.Equal(int64(50), regions.GetStoreLeaderRegionSize(1))
+			re.Equal(int64(50), regions.GetStoreFollowerRegionSize(2))
+			re.True(regions.IsRegionLeaderPrepared())
+			re.Equal(int32(2), flow.GetRef())
+		})
+	}
+}
+
+func TestUpdateSubTreeWithMissingCurrentRegion(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	original := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), SetSource(Heartbeat))
+	regions.PutRegion(original)
+	latest := original.Clone(SetApproximateSize(30), SetSource(Heartbeat))
+	origin, overlaps, rangeChanged := regions.SetRegion(latest)
+	regions.RemoveRegionFromSubTree(original)
+	re.False(regions.IsRegionLeaderPrepared())
+	regions.UpdateSubTree(latest, origin, overlaps, rangeChanged)
+	re.Equal(1, regions.GetStoreLeaderCount(1))
+	re.Equal(int64(30), regions.GetStoreLeaderRegionSize(1))
+	re.True(regions.IsRegionLeaderPrepared())
+	re.Equal(int32(2), latest.GetRef())
+}
+
+func TestRegionPreparationWithPendingBatch(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	batch := make([]*RegionInfo, 1024)
+	for i := range batch {
+		peer := &metapb.Peer{Id: uint64(i + 1), StoreId: 1}
+		batch[i] = NewRegionInfo(&metapb.Region{
+			Id: uint64(i + 1), StartKey: fmt.Appendf(nil, "%04d", i),
+			EndKey: fmt.Appendf(nil, "%04d", i+1), Peers: []*metapb.Peer{peer},
+		}, peer, SetSource(Heartbeat))
+		regions.SetRegion(batch[i])
+	}
+	re.False(regions.IsRegionLeaderPrepared())
+	for i, region := range slices.Backward(batch) {
+		regions.CheckAndPutSubTree(region)
+		re.Equal(i == 0, regions.IsRegionLeaderPrepared())
+	}
+}
+
+func TestRegionPreparationDuringScan(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{name: "root leader"},
+		{name: "subtree leader"},
+		{name: "root peers"},
+		{name: "root range"},
+		{name: "root source"},
+		{name: "subtree source"},
+		{name: "root replacement"},
+		{name: "matched replacement", want: true},
+		{name: "statistics", want: true},
+		{name: "statistics both", want: true},
+		{name: "reset matched"},
+		{name: "reset mismatched"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			regions := NewRegionsInfo()
+			const regionCount = regionPreparationSnapshotBatchSize*2 + 1
+			for i := range regionCount {
+				id := uint64(i + 1)
+				peers := []*metapb.Peer{{Id: id*10 + 1, StoreId: 1}, {Id: id*10 + 2, StoreId: 2}}
+				region := NewRegionInfo(&metapb.Region{
+					Id: id, StartKey: fmt.Appendf(nil, "%04d", i), EndKey: fmt.Appendf(nil, "%04d", i+1),
+					Peers: peers, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+				}, peers[0], SetSource(Heartbeat), SetApproximateSize(10))
+				regions.PutRegion(region)
+			}
+			paused := make(chan uint64, 1)
+			resume := make(chan struct{})
+			var firstBatch, release sync.Once
+			point := "github.com/tikv/pd/pkg/core/regionPreparationScanBatch"
+			re.NoError(failpoint.EnableCall(point, func(id uint64) {
+				firstBatch.Do(func() { paused <- id; <-resume })
+			}))
+			t.Cleanup(func() {
+				release.Do(func() { close(resume) })
+				re.NoError(failpoint.Disable(point))
+			})
+			result := make(chan bool, 1)
+			go func() { result <- regions.IsRegionLeaderPrepared() }()
+			var id uint64
+			select {
+			case id = <-paused:
+			case got := <-result:
+				t.Fatalf("scan returned %v before reaching its first batch boundary", got)
+			case <-time.After(10 * time.Second):
+				t.Fatal("scan did not reach its first batch boundary")
+			}
+			// Mutate a Region already examined by the scan. Equal total counts
+			// cannot detect a changed leader, range, source, or replacement ID.
+			original := regions.GetRegion(id)
+			latest := original.Clone(WithLeader(original.GetPeers()[1]), SetSource(Heartbeat))
+			switch tc.name {
+			case "root leader":
+				regions.SetRegion(latest)
+			case "subtree leader":
+				regions.UpdateSubTreeOrderInsensitive(latest)
+			case "root peers":
+				regions.SetRegion(original.Clone(WithReplacePeerStore(2, 3), SetRegionConfVer(2), SetSource(Heartbeat)))
+			case "root range":
+				regions.SetRegion(original.Clone(WithEndKey(append(slices.Clone(original.GetStartKey()), 0)), SetRegionVersion(2), SetSource(Heartbeat)))
+			case "root source":
+				regions.SetRegion(original.Clone(SetSource(Storage)))
+			case "subtree source":
+				regions.UpdateSubTreeOrderInsensitive(original.Clone(SetSource(Storage)))
+			case "root replacement":
+				regions.SetRegion(latest.Clone(WithNewRegionID(id+10000), SetSource(Heartbeat)))
+			case "matched replacement":
+				regions.SetRegion(latest)
+				regions.UpdateSubTreeOrderInsensitive(latest)
+			case "statistics", "statistics both":
+				flow := original.Clone(SetApproximateSize(20), SetSource(Heartbeat))
+				regions.SetRegion(flow)
+				if tc.name == "statistics both" {
+					regions.UpdateSubTreeOrderInsensitive(flow)
+				}
+			case "reset matched":
+				regions.ResetRegionCache()
+				regions.PutRegion(latest.Clone(WithNewRegionID(id+10000), SetSource(Heartbeat)))
+			case "reset mismatched":
+				regions.ResetRegionCache()
+				regions.SetRegion(latest.Clone(WithNewRegionID(id+10000), SetSource(Heartbeat)))
+				regions.UpdateSubTreeOrderInsensitive(latest.Clone(WithNewRegionID(id+20000), SetSource(Heartbeat)))
+			}
+			release.Do(func() { close(resume) })
+			select {
+			case got := <-result:
+				re.Equal(tc.want, got)
+			case <-time.After(10 * time.Second):
+				t.Fatal("scan did not finish after the concurrent update")
+			}
+			if tc.name == "statistics" || tc.name == "statistics both" {
+				re.Equal(int64(regionCount*10+10), regions.GetRegionSizeByRange(nil, nil))
+				if tc.name == "statistics both" {
+					re.Equal(regions.GetRegionSizeByRange(nil, nil), regions.GetStoreLeaderRegionSize(1))
+				}
+			}
+			re.False(regions.preparationChecking)
+			re.Nil(regions.preparationRootChanges)
+			re.Nil(regions.preparationSubChanges)
+			re.False(regions.preparationRootInvalid.Load())
+			re.False(regions.preparationSubInvalid.Load())
+			for _, region := range regions.GetRegions() {
+				regions.CheckAndPutSubTree(region)
+			}
+			re.True(regions.IsRegionLeaderPrepared())
+		})
+	}
+}
+
+func TestRegionPreparationPublishedValues(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	makeRegion := func(id uint64, start, end string) *RegionInfo {
+		peers := []*metapb.Peer{{Id: id*10 + 1, StoreId: 1}, {Id: id*10 + 2, StoreId: 2}}
+		return NewRegionInfo(&metapb.Region{
+			Id: id, StartKey: []byte(start), EndKey: []byte(end), Peers: peers,
+			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		}, peers[0], SetSource(Heartbeat))
+	}
+	original, neighbor := makeRegion(1, "a", "b"), makeRegion(2, "b", "c")
+	regions.PutRegion(original)
+	regions.PutRegion(neighbor)
+	root, subtree := regions.regions[1], regions.subRegions[1]
+	neighborRoot, neighborSubtree := regions.regions[2], regions.subRegions[2]
+	flow := original.Clone(SetApproximateSize(20), SetSource(Heartbeat))
+	regions.PutRegion(flow)
+	re.Same(flow, root.loadRegionInfo())
+	re.Same(flow, subtree.loadRegionInfo())
+	flow = flow.Clone(SetApproximateSize(21), SetSource(Heartbeat))
+	regions.SetRegion(flow)
+	regions.UpdateSubTreeOrderInsensitive(flow)
+	re.Same(flow, root.loadRegionInfo())
+	re.Same(flow, subtree.loadRegionInfo())
+	leader := flow.Clone(WithLeader(flow.GetPeers()[1]), SetSource(Heartbeat))
+	regions.PutRegion(leader)
+	re.Same(flow, subtree.loadRegionInfo())
+	re.Same(leader, root.loadRegionInfo())
+	subtree = regions.subRegions[1]
+	re.Same(leader, subtree.loadRegionInfo())
+	merged := leader.Clone(WithEndKey([]byte("c")), SetRegionVersion(2), SetSource(Heartbeat))
+	regions.PutRegion(merged)
+	re.Same(leader, subtree.loadRegionInfo())
+	re.Same(neighbor, neighborRoot.loadRegionInfo())
+	re.Same(neighbor, neighborSubtree.loadRegionInfo())
+	re.NotContains(regions.regions, uint64(2))
+	re.NotContains(regions.subRegions, uint64(2))
+	re.Same(merged, root.loadRegionInfo())
+	subtree = regions.subRegions[1]
+	re.Same(merged, subtree.loadRegionInfo())
+	re.True(regions.IsRegionLeaderPrepared())
+	regions.RemoveRegion(merged)
+	regions.RemoveRegionFromSubTree(merged)
+	re.Same(merged, root.loadRegionInfo())
+	re.Same(merged, subtree.loadRegionInfo())
+	re.NotContains(regions.regions, uint64(1))
+	re.NotContains(regions.subRegions, uint64(1))
+	re.Zero(merged.GetRef())
+	re.True(regions.IsRegionLeaderPrepared())
+}
+
+func TestRegionPreparationWithContinuousChanges(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	region := NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0], SetSource(Heartbeat))
+	regions.PutRegion(region)
+	calls := 0
+	point := "github.com/tikv/pd/pkg/core/regionPreparationScanBatch"
+	re.NoError(failpoint.EnableCall(point, func(uint64) {
+		calls++
+		regions.PutRegion(region.Clone(WithLeader(peers[calls%2]), SetSource(Heartbeat)))
+	}))
+	var disable sync.Once
+	cleanup := func() { disable.Do(func() { re.NoError(failpoint.Disable(point)) }) }
+	t.Cleanup(cleanup)
+	re.True(regions.IsRegionLeaderPrepared())
+	re.Equal(2, calls)
+	cleanup()
+	re.True(regions.IsRegionLeaderPrepared())
+}
+
+func TestRegionPreparationWithLateMismatch(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	original := NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0], SetSource(Heartbeat))
+	latest := original.Clone(WithLeader(peers[1]), SetSource(Heartbeat))
+	regions.PutRegion(original)
+	calls := 0
+	point := "github.com/tikv/pd/pkg/core/regionPreparationScanBatch"
+	re.NoError(failpoint.EnableCall(point, func(uint64) {
+		calls++
+		if calls == 1 {
+			regions.PutRegion(latest)
+		} else {
+			regions.SetRegion(original)
+		}
+	}))
+	var disable sync.Once
+	cleanup := func() { disable.Do(func() { re.NoError(failpoint.Disable(point)) }) }
+	t.Cleanup(cleanup)
+	re.False(regions.IsRegionLeaderPrepared())
+	re.Equal(2, calls)
+	cleanup()
+	regions.CheckAndPutSubTree(original)
+	re.True(regions.IsRegionLeaderPrepared())
+}
+
+func TestRegionPreparationBoundsRepeatedChanges(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	var originals, changed []*RegionInfo
+	for i := range regionPreparationScanBatchSize*2 + 1 {
+		id := uint64(i + 1)
+		peers := []*metapb.Peer{{Id: id*10 + 1, StoreId: 1}, {Id: id*10 + 2, StoreId: 2}}
+		region := NewRegionInfo(&metapb.Region{
+			Id: id, StartKey: fmt.Appendf(nil, "%04d", i), EndKey: fmt.Appendf(nil, "%04d", i+1), Peers: peers,
+		}, peers[0], SetSource(Heartbeat))
+		regions.PutRegion(region)
+		originals = append(originals, region)
+		changed = append(changed, region.Clone(WithLeader(peers[1]), SetSource(Heartbeat)))
+	}
+	calls := 0
+	point := "github.com/tikv/pd/pkg/core/regionPreparationScanBatch"
+	re.NoError(failpoint.EnableCall(point, func(uint64) {
+		calls++
+		updates := originals
+		if calls%2 != 0 {
+			updates = changed
+		}
+		for _, region := range updates {
+			regions.PutRegion(region)
+		}
+	}))
+	var disable sync.Once
+	cleanup := func() { disable.Do(func() { re.NoError(failpoint.Disable(point)) }) }
+	t.Cleanup(cleanup)
+	re.False(regions.IsRegionLeaderPrepared())
+	cleanup()
+	re.True(regions.IsRegionLeaderPrepared())
+	re.False(regions.preparationChecking)
+	re.Nil(regions.preparationRootChanges)
+	re.Nil(regions.preparationSubChanges)
+}
+
+func TestRegionPreparationJournalLimit(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	for i := range regionPreparationScanBatchSize*2 + 1 {
+		id := uint64(i + 1)
+		peers := []*metapb.Peer{{Id: id*10 + 1, StoreId: 1}, {Id: id*10 + 2, StoreId: 2}}
+		regions.PutRegion(NewRegionInfo(&metapb.Region{
+			Id: id, StartKey: fmt.Appendf(nil, "%04d", i), EndKey: fmt.Appendf(nil, "%04d", i+1), Peers: peers,
+		}, peers[0], SetSource(Heartbeat)))
+	}
+	paused := make(chan uint64, 1)
+	resume := make(chan struct{})
+	var pause, release sync.Once
+	point := "github.com/tikv/pd/pkg/core/regionPreparationScanBatch"
+	re.NoError(failpoint.EnableCall(point, func(id uint64) { pause.Do(func() { paused <- id; <-resume }) }))
+	t.Cleanup(func() {
+		release.Do(func() { close(resume) })
+		re.NoError(failpoint.Disable(point))
+	})
+	result := make(chan bool, 1)
+	go func() { result <- regions.IsRegionLeaderPrepared() }()
+	var id uint64
+	select {
+	case id = <-paused:
+	case <-time.After(10 * time.Second):
+		t.Fatal("scan did not reach its first batch boundary")
+	}
+	original := regions.GetRegion(id)
+	changed := original.Clone(WithLeader(original.GetPeers()[1]), SetSource(Heartbeat))
+	for i := range regionPreparationMaxChanges + 2 {
+		if i%2 == 0 {
+			regions.SetRegion(changed)
+		} else {
+			regions.SetRegion(original)
+		}
+	}
+	re.True(regions.preparationRootInvalid.Load())
+	re.Len(regions.preparationRootChanges, regionPreparationMaxChanges)
+	release.Do(func() { close(resume) })
+	select {
+	case ready := <-result:
+		re.False(ready)
+	case <-time.After(10 * time.Second):
+		t.Fatal("scan did not stop after its journal filled")
+	}
+	re.Nil(regions.preparationRootChanges)
+	re.False(regions.preparationRootInvalid.Load())
+	re.True(regions.IsRegionLeaderPrepared())
 }
 
 func TestCntRefAfterResetRegionCache(t *testing.T) {

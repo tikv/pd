@@ -760,6 +760,10 @@ func MergeLabels(origin []*metapb.StoreLabel, labels []*metapb.StoreLabel) []*me
 type StoresInfo struct {
 	syncutil.RWMutex
 	stores map[uint64]*StoreInfo
+	// Serialize reading Region statistics and updating StoreInfo so an older
+	// refresh cannot overwrite newer statistics. Keep the lock here so all
+	// BasicCluster wrappers sharing these stores use the same lock.
+	storeStatsMu syncutil.Mutex
 }
 
 // NewStoresInfo create a StoresInfo with map of storeID to StoreInfo

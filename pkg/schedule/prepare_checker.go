@@ -47,6 +47,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		return true
 	}
 	if time.Since(checker.start) > CollectTimeout {
+		c.UpdateAllStoreStatus()
 		checker.prepared = true
 		return true
 	}
@@ -55,25 +56,40 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	if err != nil {
 		return false
 	}
-	// The number of active regions should be more than total region of all stores * core.CollectFactor
-	if float64(totalRegionCount)*core.CollectFactor > float64(notLoadedFromRegionsCnt) {
+	// Wait for all regions so incomplete leader counts do not trigger premature balancing.
+	if notLoadedFromRegionsCnt < totalRegionCount {
 		return false
 	}
+	if !areStoreRegionsCollected(c) {
+		return false
+	}
+	// Scan for missing leaders and stale subtrees only after the cheaper count
+	// checks pass. Synced metadata can be complete without all leaders known.
+	if !c.IsRegionLeaderPrepared() {
+		return false
+	}
+	// Store heartbeats can reveal more Regions while the snapshot is scanned.
+	if !areStoreRegionsCollected(c) {
+		return false
+	}
+	// Schedulers score StoreInfo snapshots rather than the Region subtrees.
+	c.UpdateAllStoreStatus()
+	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionCount))
+	checker.prepared = true
+	return true
+}
+
+func areStoreRegionsCollected(c *core.BasicCluster) bool {
 	for _, store := range c.GetStores() {
 		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		storeID := store.GetID()
-		// It is used to avoid sudden scheduling when scheduling service is just started.
-		if float64(store.GetStoreStats().GetRegionCount())*core.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
-			return false
-		}
-		if !c.IsStorePrepared(storeID) {
+		collected := c.GetNotFromStorageRegionsCntByStore(storeID)
+		if collected < int(store.GetStoreStats().GetRegionCount()) || collected < c.GetStoreRegionCount(storeID) {
 			return false
 		}
 	}
-	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionCount))
-	checker.prepared = true
 	return true
 }
 

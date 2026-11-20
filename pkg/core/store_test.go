@@ -17,17 +17,66 @@ package core
 import (
 	"math"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+func TestUpdateStoreStatusSerializesSnapshotAndPublication(t *testing.T) {
+	for _, mode := range []string{"single", "all"} {
+		t.Run(mode, func(t *testing.T) {
+			re := require.New(t)
+			cluster := NewBasicCluster()
+			shared := *cluster
+			cluster.PutStore(NewStoreInfo(&metapb.Store{Id: 1}))
+			region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+			cluster.PutRegion(region)
+			paused, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var first atomic.Bool
+			var releaseOnce sync.Once
+			const point = "github.com/tikv/pd/pkg/core/beforePublishStoreStatus"
+			re.NoError(failpoint.EnableCall(point, func() {
+				if first.CompareAndSwap(false, true) {
+					close(paused)
+					<-release
+				}
+			}))
+			t.Cleanup(func() {
+				releaseOnce.Do(func() { close(release) })
+				<-done
+				re.NoError(failpoint.Disable(point))
+			})
+			refresh := cluster.UpdateAllStoreStatus
+			if mode == "single" {
+				refresh = func() { cluster.UpdateStoreStatus(1) }
+			}
+			go func() {
+				refresh()
+				close(done)
+			}()
+			<-paused
+			locked := shared.storeStatsMu.TryLock()
+			if locked {
+				shared.storeStatsMu.Unlock()
+			}
+			re.False(locked, "a refresh must hold the publication lock while its snapshot is in flight")
+			cluster.PutRegion(region.Clone(SetApproximateSize(100)))
+			releaseOnce.Do(func() { close(release) })
+			<-done
+			refresh()
+			re.Equal(int64(100), cluster.GetStore(1).GetLeaderSize())
+		})
+	}
+}
 
 func TestDistinctScore(t *testing.T) {
 	re := require.New(t)
