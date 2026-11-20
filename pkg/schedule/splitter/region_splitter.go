@@ -80,12 +80,20 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 	unprocessedKeys := splitKeys
 	newRegions := make(map[uint64]struct{}, len(splitKeys))
 	for i := 0; i <= retryLimit; i++ {
+		if ctx.Err() != nil {
+			break
+		}
 		unprocessedKeys = r.splitRegionsByKeys(ctx, unprocessedKeys, newRegions)
-		if len(unprocessedKeys) < 1 {
+		if len(unprocessedKeys) < 1 || i == retryLimit || ctx.Err() != nil {
 			break
 		}
 		// sleep for a while between each retry
-		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(i)))*initialSleepDuration))
+		timer := time.NewTimer(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(i)))*initialSleepDuration))
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
 	returned := make([]uint64, 0, len(newRegions))
 	for regionID := range newRegions {
@@ -97,6 +105,9 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
 	validGroups := r.groupKeysByRegion(splitKeys)
 	for key, group := range validGroups {
+		if parCtx.Err() != nil {
+			break
+		}
 		err := r.handler.SplitRegionByKeys(group.region, group.keys)
 		if err != nil {
 			delete(validGroups, key)
@@ -111,7 +122,7 @@ func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys []
 		cancel()
 	}()
 outerLoop:
-	for {
+	for len(validGroups) > 0 {
 		select {
 		case <-ticker.C:
 			for _, groupKeys := range validGroups {
@@ -136,7 +147,17 @@ outerLoop:
 	for newID := range results.getSplitRegions() {
 		newRegions[newID] = struct{}{}
 	}
-	return results.getUnProcessedKeys(splitKeys)
+	// A boundary may predate this request or have been created concurrently.
+	// Count it as complete without adding its Region ID to the split results.
+	unprocessedKeys := results.getUnProcessedKeys(splitKeys)
+	remainingKeys := unprocessedKeys[:0]
+	for _, key := range unprocessedKeys {
+		region := r.cluster.GetRegionByKey(key)
+		if region == nil || !bytes.Equal(region.GetStartKey(), key) {
+			remainingKeys = append(remainingKeys, key)
+		}
+	}
+	return remainingKeys
 }
 
 // groupKeysByRegion separates keys into groups by their belonging Regions.
