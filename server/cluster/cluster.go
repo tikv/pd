@@ -64,6 +64,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/unsaferecovery"
@@ -105,8 +106,8 @@ const (
 	gcTombstoneInterval            = 30 * 24 * time.Hour
 	schedulingServiceCheckInterval = 10 * time.Second
 	tsoServiceCheckInterval        = 100 * time.Millisecond
-	// persistLimitRetryTimes is used to reduce the probability of the persistent error
-	// since the once the store is added or removed, we shouldn't return an error even if the store limit is failed to persist.
+	// persistLimitRetryTimes reduces the probability of a transient persistence
+	// error when a store is added or removed.
 	persistLimitRetryTimes  = 5
 	persistLimitWaitTime    = 100 * time.Millisecond
 	removingAction          = "removing"
@@ -1066,11 +1067,30 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
 	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
+	// Serialize the removed-store check and cache update with state changes.
+	// Release the lock before etcd I/O: the heartbeat transaction protects
+	// the persisted record against concurrent burial or deletion.
+	c.storeStateLock.Lock(uint32(storeID))
 	store := c.GetStore(storeID)
 	if store == nil {
+		c.storeStateLock.Unlock(uint32(storeID))
 		return errors.Errorf("store %v not found", storeID)
 	}
-
+	if store.IsRemoved() {
+		c.storeStateLock.Unlock(uint32(storeID))
+		// A tombstoned store's heartbeat is routine, not a rejected request:
+		// master has no IsRemoved() check here at all, and this contract is
+		// relied on elsewhere (TestFilterUnhealthyStore expects NoError).
+		// Still run FilterUnhealthyStore so this store's own now-stale rolling
+		// stats entry gets swept here -- skipping the rest (limiter refresh,
+		// PutStore, hotStat.Observe, hot-peer processing,
+		// adjustNetworkSlowStore) closes the republish gap at the source
+		// instead of relying on each of those to guard itself.
+		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+			c.hotStat.FilterUnhealthyStore(c)
+		}
+		return nil
+	}
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
 	opts := make([]core.StoreCreateOption, 0)
@@ -1098,6 +1118,13 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	statistics.UpdateStoreHeartbeatMetrics(store)
 	opts = append(opts, core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
 	newStore := store.Clone(opts...)
+	persist := newStore.NeedPersist() && c.storage != nil
+	// Supply NodeState in the response to help the store handle special cases
+	// more conveniently, such as avoiding calling `remove_peer` redundantly under
+	// NodeState_Removing.
+	resp.State = store.GetNodeState()
+	c.PutStore(newStore, opts...)
+	c.storeStateLock.Unlock(uint32(storeID))
 
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
@@ -1105,18 +1132,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
-	if newStore.NeedPersist() && c.storage != nil {
-		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
-			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
-		} else {
-			opts = append(opts, core.SetLastPersistTime(nowTime))
-		}
+	if persist {
+		c.persistStoreHeartbeat(storeID, nowTime)
 	}
-	// Supply NodeState in the response to help the store handle special cases
-	// more conveniently, such as avoiding calling `remove_peer` redundantly under
-	// NodeState_Removing.
-	resp.State = store.GetNodeState()
-	c.PutStore(newStore, opts...)
 	var (
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
@@ -1197,6 +1215,54 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	c.adjustNetworkSlowStore(storeID)
 	return nil
+}
+
+func (c *RaftCluster) persistStoreHeartbeat(storeID uint64, heartbeatTime time.Time) {
+	ctx, cancel := context.WithTimeout(c.ctx, etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	persisted := false
+	err := c.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		key := keypath.StorePath(storeID)
+		value, err := txn.Load(key)
+		if err != nil || value == "" {
+			return err
+		}
+		store := &metapb.Store{}
+		if err := store.Unmarshal([]byte(value)); err != nil {
+			return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+		}
+		if store.GetState() == metapb.StoreState_Tombstone || store.GetNodeState() == metapb.NodeState_Removed {
+			return nil
+		}
+		// Patch only the stored heartbeat timestamp. In etcd, txn.Load adds
+		// a value comparison so a concurrent metadata change rejects the write.
+		store.LastHeartbeat = max(store.GetLastHeartbeat(), heartbeatTime.UnixNano())
+		data, err := store.Marshal()
+		if err != nil {
+			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
+		}
+		if err := txn.Save(key, string(data)); err != nil {
+			return err
+		}
+		persisted = true
+		failpoint.InjectCall("beforePersistStoreHeartbeat")
+		return nil
+	})
+	if err != nil {
+		if !errorspkg.Is(err, errs.ErrEtcdTxnConflict) {
+			log.Error("failed to persist store heartbeat", zap.Uint64("store-id", storeID), errs.ZapError(err))
+		}
+		return
+	}
+	if !persisted {
+		return
+	}
+
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+	if store := c.GetStore(storeID); store != nil && !store.IsRemoved() {
+		c.PutStore(store, core.SetLastPersistTime(heartbeatTime))
+	}
 }
 
 // processReportBuckets updates the bucket metadata and reports whether to
@@ -1401,9 +1467,15 @@ func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
 // UpdateStoreLabels updates a store's location labels
 // If 'force' is true, the origin labels will be overwritten with the new one forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
+	}
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 	newStore := typeutil.DeepClone(store.GetMeta(), core.StoreFactory)
 	newStore.Labels = labels
@@ -1412,9 +1484,15 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 
 // DeleteStoreLabel updates a store's location labels
 func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
+	}
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 	if len(store.GetLabels()) == 0 {
 		return errors.Errorf("the label key %s does not exist", labelKey)
@@ -1436,11 +1514,44 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 
 // PutMetaStore puts a store.
 func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
+	storeID := store.GetId()
+	// wasKnown alone isn't enough to decide whether to guard
+	// addStoreLimitInternal against resurrecting a removed entry: a plain
+	// pre-putStoreImpl snapshot can't distinguish a genuine first
+	// registration from one that raced a full concurrent register-then-bury
+	// (or manual tombstone removal, see RemoveTombStoneRecords) of the same
+	// ID landing in between the snapshot and putStoreImpl actually running --
+	// wasKnown would read false either way, incorrectly skipping the guard
+	// for the second case. storeStateLock (the same per-store lock
+	// RemoveStore/BuryStore/UpStore/checkStore/RemoveTombStoneRecords hold)
+	// makes the whole snapshot-then-act sequence below atomic with respect to
+	// any of those for this store ID, closing that window. This is a plain
+	// top-level entry point (only called from the gRPC PutStore handler),
+	// never invoked while already holding storeStateLock, so acquiring it
+	// here can't deadlock against them.
+	//
+	// This does NOT close the gRPC preflight gap: the PutStore handler's
+	// checkStore runs before this call, so a store fully removed (by bury +
+	// RemoveTombStoneRecords) between that check and here reads as absent,
+	// not tombstoned, and is indistinguishable from a genuine new
+	// registration -- see the PR's Known limitations.
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
+	// A tombstoned store's config entry is only ever cleared once, at bury time
+	// (RemoveStoreLimit); nothing sweeps it again afterward. putStoreImpl won't
+	// resurrect the tombstone state for an existing store, but AddStoreLimit
+	// would recreate the entry unless guarded. Only guard the "already known"
+	// case: a store that was never registered before must still get a limit
+	// even if it's already tombstoned at first sight (e.g. state replayed from
+	// storage), since there's no prior entry to protect from resurrection.
+	wasKnown := c.GetStore(storeID) != nil
+	failpoint.InjectCall("putMetaStoreAfterWasKnownRead")
 	if err := c.putStoreImpl(store, false); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
-	c.AddStoreLimit(store)
+	c.addStoreLimitInternal(store, wasKnown)
 	return nil
 }
 
@@ -1581,7 +1692,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	}
 	// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 	// And considering the store state has changed, RemoveStore is actually successful.
-	_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+	_ = c.setStoreLimitLocked(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	return nil
 }
 
@@ -1633,8 +1744,10 @@ func (c *RaftCluster) getUpStores() []uint64 {
 // BuryStore marks a store as tombstone in cluster.
 // It is used by unsafe recovery or other special cases.
 func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
+	failpoint.InjectCall("buryStoreBeforeStateLock")
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
+	failpoint.InjectCall("buryStoreAfterStateLock")
 	return c.BuryStoreLocked(storeID, forceBury)
 }
 
@@ -1673,9 +1786,14 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 	if err == nil {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
-		c.RemoveStoreLimit(storeID)
 		addr := store.GetAddress()
 		c.resetProgress(storeID, addr)
+		if err := c.RemoveStoreLimit(storeID); err != nil {
+			log.Error("remove store limit failed",
+				zap.Uint64("store-id", storeID),
+				errs.ZapError(err))
+		}
+		c.ruleManager.RemoveStoreCache(storeID)
 		storeIDStr := strconv.FormatUint(storeID, 10)
 		statistics.ResetStoreStatistics(storeIDStr)
 		filter.DeleteStoreMetrics(storeIDStr)
@@ -1759,8 +1877,8 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	if err == nil {
 		if exist {
 			// persist the store limit
-			_ = c.SetStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
-			_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
+			_ = c.setStoreLimitLocked(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
+			_ = c.setStoreLimitLocked(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
 		}
 		c.resetProgress(storeID, store.GetAddress())
 	}
@@ -1799,9 +1917,15 @@ func (c *RaftCluster) ReadyToServeLocked(storeID uint64) error {
 
 // SetStoreWeight sets up a store's leader/region balance weight.
 func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight float64) error {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 
 	if err := c.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
@@ -2208,22 +2332,36 @@ func encodePreparingProgressKey(storeID uint64) string {
 // RemoveTombStoneRecords removes the tombStone Records.
 func (c *RaftCluster) RemoveTombStoneRecords() error {
 	var failedStores []uint64
-	for _, store := range c.GetStores() {
-		if store.IsRemoved() {
-			if c.GetStoreRegionCount(store.GetID()) > 0 {
+	for _, candidate := range c.GetStores() {
+		if !candidate.IsRemoved() {
+			continue
+		}
+		storeID := candidate.GetID()
+		store, err := func() (*core.StoreInfo, error) {
+			failpoint.InjectCall("removeTombStoneRecordsBeforeStateLock")
+			c.storeStateLock.Lock(uint32(storeID))
+			defer c.storeStateLock.Unlock(uint32(storeID))
+			failpoint.InjectCall("removeTombStoneRecordsAfterStateLock")
+			// GC and registration share this lock. The candidate may have
+			// been deleted or replaced since the sweep took its snapshot.
+			store := c.GetStore(storeID)
+			if store == nil || !store.IsRemoved() {
+				return nil, nil
+			}
+			if c.GetStoreRegionCount(storeID) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
-				failedStores = append(failedStores, store.GetID())
-				continue
+				failedStores = append(failedStores, storeID)
+				return nil, nil
 			}
-			// the store has already been tombstone
-			err := c.deleteStore(store)
-			if err != nil {
-				log.Error("delete store failed",
-					zap.Stringer("store", store.GetMeta()),
-					errs.ZapError(err))
-				return err
-			}
-			c.RemoveStoreLimit(store.GetID())
+			return store, c.deleteStore(store)
+		}()
+		if err != nil {
+			log.Error("delete store failed",
+				zap.Stringer("store", store.GetMeta()),
+				errs.ZapError(err))
+			return err
+		}
+		if store != nil {
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
@@ -2238,8 +2376,12 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	return nil
 }
 
-// deleteStore deletes the store from the cluster. it's concurrent safe.
+// deleteStore deletes the store from the cluster. Callers must hold
+// storeStateLock for the store ID.
 func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
+	if err := c.RemoveStoreLimit(store.GetID()); err != nil {
+		return err
+	}
 	if c.storage != nil {
 		if err := c.storage.DeleteStoreMeta(store.GetMeta()); err != nil {
 			return err
@@ -2252,7 +2394,9 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	// (already fully cleaned) tombstone entry and skip its own cleanup,
 	// leaving a series this cleanup just deleted with no later event able to
 	// find and remove it again.
+	failpoint.InjectCall("deleteStoreBeforeRemoveFromMap")
 	c.DeleteStore(store)
+	c.ruleManager.RemoveStoreCache(store.GetID())
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)
 	statistics.DeleteClusterStatusMetrics(store)
 	statistics.ResetStoreStatistics(storeIDStr)
@@ -2478,13 +2622,42 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 	return c.opt.GetAllStoresLimit()
 }
 
-// AddStoreLimit add a store limit for a given store ID.
+// AddStoreLimit add a store limit for a given store ID if it doesn't already
+// have one. It unconditionally (re)creates a default entry for a store that's
+// genuinely new here, even if already tombstoned at first sight (e.g. state
+// replayed from storage) -- there's no prior entry to protect from
+// resurrection in that case. Callers that must guard an already-known store
+// against resurrecting a deliberately-removed entry should use
+// addStoreLimitInternal(store, true) instead (see PutMetaStore).
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
+	c.addStoreLimitInternal(store, false)
+}
+
+// addStoreLimitInternal is AddStoreLimit's implementation. When skipIfRemoved is
+// true, it re-checks the store's current tombstone state on every retry
+// attempt, from inside the same UpdateScheduleConfig closure that
+// RemoveStoreLimit's own deletion runs under -- not just once before the
+// loop. That closes the race completely, not just narrows it: persistMu
+// serializes the two closures, and RemoveStoreLimit always runs as part of
+// any bury, so whichever of the two closures runs first, the outcome is
+// still correct -- an entry this call adds just before a bury still gets
+// deleted by that same bury's (unconditional) RemoveStoreLimit call, and an
+// entry it would add after a bury already completed is skipped by the
+// recheck instead. A check done only once before entering the retry loop (as
+// PutMetaStore's guard originally did) doesn't have this property: a bury
+// landing during persistLimitWaitTime's sleep between failed attempts can
+// still race a later retry that never re-reads store state.
+func (c *RaftCluster) addStoreLimitInternal(store *metapb.Store, skipIfRemoved bool) {
 	storeID := store.GetId()
 	var err error
 	for range persistLimitRetryTimes {
 		added := false
 		err = c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+			if skipIfRemoved {
+				if existing := c.GetStore(storeID); existing == nil || existing.IsRemoved() {
+					return false, nil
+				}
+			}
 			if _, ok := cfg.StoreLimit[storeID]; ok {
 				return false, nil
 			}
@@ -2512,34 +2685,44 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	log.Error("persist store limit meet error", errs.ZapError(err))
 }
 
-// RemoveStoreLimit remove a store limit for a given store ID.
-func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
-	for _, limitType := range storelimit.TypeNameValue {
-		c.ResetStoreLimit(storeID, limitType)
-	}
+// RemoveStoreLimit removes a store limit for a given store ID.
+func (c *RaftCluster) RemoveStoreLimit(storeID uint64) error {
 	var err error
 	for range persistLimitRetryTimes {
 		err = c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
+			if _, ok := cfg.StoreLimit[storeID]; !ok {
+				return false, nil
+			}
 			delete(cfg.StoreLimit, storeID)
 			return true, nil
 		})
 		if err == nil {
+			for _, limitType := range storelimit.TypeNameValue {
+				c.ResetStoreLimit(storeID, limitType)
+			}
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			id := strconv.FormatUint(storeID, 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
-			return
+			return nil
 		}
 		time.Sleep(persistLimitWaitTime)
 	}
 	log.Error("persist store limit meet error", errs.ZapError(err))
+	return err
 }
 
 // SetMinResolvedTS sets up a store with min resolved ts.
 func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 
 	c.PutStore(store, core.SetMinResolvedTS(minResolvedTS))
@@ -2676,6 +2859,33 @@ func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+	failpoint.InjectCall("setStoreLimitBeforeStateLock")
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
+	// A tombstoned store's config entry is only ever cleared once, at bury time
+	// (RemoveStoreLimit); nothing sweeps it again afterward. Without this check,
+	// setting a limit for an already-tombstoned store re-adds it, and
+	// StoreLimitGauge stays republished for it until final removal. storeStateLock
+	// makes this check atomic with BuryStoreLocked (the same per-store lock
+	// RemoveStore/BuryStore/UpStore/checkStore/RemoveTombStoneRecords/PutMetaStore
+	// hold), closing that race for any concurrent overlap; it does not close the
+	// separate, sequential case where the store is already fully deleted by the
+	// time this runs -- see the PR's Known limitations.
+	//
+	// GetStore returning nil is deliberately NOT treated the same as removed
+	// here: callers legitimately set a store's limit before the store itself
+	// is registered (see testCluster.addRegionStore), so nil just means
+	// "not created yet," not "already gone."
+	if store := c.GetStore(storeID); store != nil && store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
+	}
+	return c.setStoreLimitLocked(storeID, typ, ratePerMin)
+}
+
+// setStoreLimitLocked is SetStoreLimit's unlocked implementation, for callers
+// that already hold storeStateLock for this store ID (RemoveStore, UpStore).
+func (c *RaftCluster) setStoreLimitLocked(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
 	err := c.opt.UpdateScheduleConfig(c.storage, func(_ *sc.ScheduleConfig, cfg *sc.ScheduleConfig) (bool, error) {
 		slc, ok := cfg.StoreLimit[storeID]
 		if !ok {
@@ -2915,9 +3125,38 @@ func (c *RaftCluster) GetGlobalTSOAllocator() tso.Allocator {
 const networkSlowStoreEvictThreshold = 99
 
 func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
+	// The gRPC handler's own IsRemoved() check isn't atomic with this call, so an
+	// in-flight StoreHeartbeat that already passed it can still reach here after
+	// bury. BuryStoreLocked only clears storeTriggerNetworkSlowEvict once, so a
+	// re-check here (unlike the metric write below, which has no such guard) is
+	// the only thing that can stop it from staying republished until final
+	// removal.
+	if store := c.GetStore(storeID); store == nil || store.IsRemoved() {
+		return
+	}
 	if c.GetAvgNetworkSlowScore(storeID) >= networkSlowStoreEvictThreshold {
+		// TriggerNetworkSlowEvict is already a no-op for a gone store (it
+		// guards on the store still being present internally), but the
+		// metric write below has no such guard. The check above isn't
+		// atomic with it: if bury and final deletion both complete in
+		// between, deleteStore's own DeleteLabelValues call -- the backstop
+		// this whole function's opening comment relies on -- has already
+		// run, and nothing else will ever call this function again for a
+		// store with no more heartbeats coming. Re-check right after the
+		// write instead of trusting that backstop to still be in the
+		// future: deleteStore always removes the store from StoresInfo
+		// before it calls DeleteLabelValues, so any read here that observes
+		// the store as gone is guaranteed (by that same ordering, and
+		// StoresInfo's shared lock) to also mean deleteStore's cleanup has
+		// either already run or is guaranteed to run and find nothing left
+		// to do -- either way this closes the window completely, not just
+		// narrows it.
+		failpoint.InjectCall("adjustNetworkSlowStoreBeforeWrite")
 		c.TriggerNetworkSlowEvict(storeID)
 		storeTriggerNetworkSlowEvict.WithLabelValues(strconv.FormatUint(storeID, 10)).Inc()
+		if store := c.GetStore(storeID); store == nil || store.IsRemoved() {
+			storeTriggerNetworkSlowEvict.DeleteLabelValues(strconv.FormatUint(storeID, 10))
+		}
 	}
 	// Note: Currently, only one network slow store needs to be considered.
 	// If multiple network slow stores need to be considered, the scores

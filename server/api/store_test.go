@@ -118,6 +118,25 @@ func (suite *storeTestSuite) TearDownSuite() {
 	suite.cleanup()
 }
 
+func (suite *storeTestSuite) TestSetLabelStoresLimitSkipsRemovedStore() {
+	re := suite.Require()
+	rc := suite.svr.GetRaftCluster()
+	re.NoError(rc.RemoveStoreLimit(7))
+	body, err := json.Marshal(map[string]any{
+		"rate":   60,
+		"type":   "add-peer",
+		"labels": map[string]string{"engine": "tikv"},
+	})
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/stores/limit", body, tu.StatusOK(re)))
+	limits := rc.GetAllStoresLimit()
+	liveLimit, ok := limits[1]
+	re.True(ok)
+	re.Equal(float64(60), liveLimit.AddPeer)
+	_, ok = limits[7]
+	re.False(ok)
+}
+
 func checkStoresInfo(re *require.Assertions, ss []*response.StoreInfo, want []*metapb.Store) {
 	re.Len(ss, len(want))
 	mapWant := make(map[uint64]*metapb.Store)
