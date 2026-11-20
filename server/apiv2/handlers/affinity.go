@@ -267,7 +267,7 @@ func deleteAffinityGroups(c *gin.Context) {
 // BatchModifyAffinityGroups batch modifies key ranges for multiple affinity groups.
 //
 //	@Tags		affinity-groups
-//	@Summary	Batch modify key ranges for affinity groups. Remove operations are executed before add operations.
+//	@Summary	Batch modify key ranges for affinity groups. Add operations are persisted before remove operations; a partial failure keeps the committed prefix in this order.
 //	@Param		body	body	BatchModifyAffinityGroupsRequest	true	"Batch modify request with add and remove operations"
 //	@Produce	json
 //	@Success	200	{object}	AffinityGroupsResponse	"Updated affinity groups"

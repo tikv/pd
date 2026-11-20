@@ -80,6 +80,14 @@ type Manager struct {
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
+	// Validated PD writes cannot introduce conflicts, so they only need to
+	// recompute when existing conflicts may have been resolved.
+	hasRangeConflicts bool
+	// rangeConflictsStale is set when the etcd sync methods change groups or key
+	// ranges without recomputing range conflicts.
+	rangeConflictsStale bool
+	// The label watcher has not finished applying this batch. Protected by metaMutex.
+	labelRuleBatchInProgress bool
 	// keyRanges cached in memory to reduce labeler lock contention
 	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges
 	// labelRuleBuffer is a buffer used during etcd synchronization. It holds the
@@ -115,7 +123,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 
 // initialize loads affinity groups from storage and rebuilds the group-label mapping.
 func (m *Manager) initialize() error {
-	// metaMutex must be locked, because loadRegionLabel will acquire RWMutex to protect keyRanges
+	// Hold both locks while rebuilding ranges and their runtime conflict state.
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	m.Lock()
@@ -137,10 +145,7 @@ func (m *Manager) initialize() error {
 	}
 
 	// load region labels
-	if err = m.loadRegionLabel(); err != nil {
-		log.Error("failed to rebuild group-label mapping", zap.Error(err))
-		return err
-	}
+	m.loadRegionLabel()
 
 	m.startAvailabilityCheckLoop()
 	log.Info("affinity manager initialized", zap.Int("group-count", len(m.groups)))
@@ -285,14 +290,6 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	groupInfo.RangeCount = rangeCount
 }
 
-func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
-	m.Lock()
-	defer m.Unlock()
-	for groupID, labelRule := range labels {
-		m.updateGroupLabelRuleLocked(groupID, labelRule, needClear)
-	}
-}
-
 func (m *Manager) clearGroupCacheLocked(groupID string) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
@@ -312,11 +309,23 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	delete(m.groups, groupID)
 }
 
+// deleteGroups requires metaMutex so range conflicts can be scanned before
+// taking the manager write lock.
 func (m *Manager) deleteGroups(groupIDs []string) {
+	if len(groupIDs) == 0 {
+		return
+	}
+	var conflicts map[string]struct{}
+	if m.hasRangeConflicts {
+		conflicts = m.collectRangeConflictsLocked()
+	}
 	m.Lock()
 	defer m.Unlock()
 	for _, groupID := range groupIDs {
 		m.deleteGroupLocked(groupID)
+	}
+	if m.hasRangeConflicts {
+		m.reconcileRangeConflictsLocked(conflicts)
 	}
 }
 
@@ -403,7 +412,7 @@ func (m *Manager) calcRegionAffinityGroupState(region *core.RegionInfo, saveCach
 		groupID := m.regionLabeler.GetRegionLabel(region, AffinityLabelKey)
 		failpoint.InjectCall("afterRegionLabelLookup")
 		group = m.GetAffinityGroupState(groupID)
-		if group == nil {
+		if group == nil || group.rangeConflict {
 			return nil, false
 		}
 		cache = &regionCache{
@@ -474,6 +483,31 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // These methods are called by the watcher in microservice.
 // They are called by the watcher when it receives events from etcd.
+// The Sync methods do not recompute range conflicts, because each recompute
+// sorts all key ranges. The watcher calls ReconcileRangeConflicts once after
+// each batch of events instead.
+
+// SetLabelRuleBatchInProgress marks the label watcher batch under metaMutex.
+func (m *Manager) SetLabelRuleBatchInProgress(inProgress bool) {
+	m.metaMutex.Lock()
+	m.labelRuleBatchInProgress = inProgress
+	m.metaMutex.Unlock()
+}
+
+// ReconcileRangeConflicts recomputes range conflicts after the Sync methods
+// change groups or key ranges. It returns immediately if there is nothing to
+// recompute.
+func (m *Manager) ReconcileRangeConflicts() {
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	if m.labelRuleBatchInProgress || !m.rangeConflictsStale {
+		return
+	}
+	conflicts := m.collectRangeConflictsLocked()
+	m.Lock()
+	defer m.Unlock()
+	m.reconcileRangeConflictsLocked(conflicts)
+}
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
@@ -534,6 +568,7 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		}
 		// Once group created, the buffer must be deleted.
 		delete(m.labelRuleBuffer, group.ID)
+		m.rangeConflictsStale = true
 	} else {
 		changed := false
 		if groupInfo.LeaderStoreID != group.LeaderStoreID {
@@ -574,6 +609,7 @@ func (m *Manager) SyncGroupDeleteFromEtcd(groupID string) {
 		m.labelRuleBuffer[groupID] = groupInfo.LabelRule
 	}
 	m.deleteGroupLocked(groupID)
+	m.rangeConflictsStale = true
 }
 
 // SyncKeyRangesFromEtcd synchronizes key ranges from a label rule.
@@ -620,6 +656,7 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 	// Pass the rangeCount directly instead of letting updateGroupLabelRuleLocked calculate it
 	// because labelRule.Data might be []any (from watcher) instead of []*labeler.KeyRangeRule
 	m.updateGroupLabelRuleLockedWithCount(groupID, labelRule, len(gkr.KeyRanges), false)
+	m.rangeConflictsStale = true
 
 	return nil
 }
@@ -644,6 +681,7 @@ func (m *Manager) SyncKeyRangesDeleteFromEtcd(ruleID string) {
 	if _, exists := m.groups[groupID]; exists {
 		m.updateGroupLabelRuleLocked(groupID, nil, true)
 	}
+	m.rangeConflictsStale = true
 }
 
 // InvalidCacheByLabelRules clears the Region cache of the groups whose label rules have changed in the region labeler.
