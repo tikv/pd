@@ -1,0 +1,30 @@
+{
+  "pools": {
+    "unit": [{"module": ".", "prefix": "", "exclude": ["tests"]}],
+    "tests": [{"module": ".", "prefix": "tests"}],
+    "tools": [{"module": "tools", "prefix": ""}],
+    "client": [{"module": "client", "prefix": ""}, {"module": "tests/integrations", "prefix": "client"}],
+    "tso": [{"module": "tests/integrations", "prefix": "tso"}],
+    "microservice": [{"module": "tests/integrations", "prefix": "mcs", "exclude": ["mcs/tso"]}],
+    "microservice-tso": [{"module": "tests/integrations", "prefix": "mcs/tso"}]
+  },
+  "layouts": {
+    "standard": [
+      {"id": 1, "name": "Unit Test(1)", "pools": ["unit"]},
+      {"id": 2, "name": "Unit Test(2)", "pools": ["unit"]},
+      {"id": 3, "name": "Unit Test(3)", "pools": ["unit"]},
+      {"id": 4, "name": "Tests(1)", "pools": ["tests"]},
+      {"id": 5, "name": "Tests(2)", "pools": ["tests"]},
+      {"id": 6, "name": "Tools Test", "pools": ["tools"]},
+      {"id": 7, "name": "Client Integration Test", "pools": ["client"]},
+      {"id": 8, "name": "TSO Integration Test", "pools": ["tso"]},
+      {"id": 9, "name": "Microservice Integration(!TSO)", "pools": ["microservice"]},
+      {"id": 10, "name": "Microservice Integration(TSO)", "pools": ["microservice-tso"]}
+    ],
+    "nextgen": [
+      {"id": 1, "name": "pull-unit-test-next-gen-1", "pools": ["unit"]},
+      {"id": 2, "name": "pull-unit-test-next-gen-2", "pools": ["tests", "tools"]},
+      {"id": 3, "name": "pull-unit-test-next-gen-3", "pools": ["client", "tso", "microservice", "microservice-tso"]}
+    ]
+  }
+}

@@ -22,7 +22,78 @@ concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 jobs:
+  prepare-test-history:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.profile.outputs.artifact-id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Find previous successful duration history
+        id: history
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const scopes = pr ? [
+              {branch: pr.head.ref, repository: pr.head.repo.id, event: 'pull_request'},
+              {branch: pr.base.ref, repository: pr.base.repo.id, event: 'push'},
+            ] : [
+              {branch: context.ref.replace('refs/heads/', ''), repository: context.payload.repository.id, event: 'push'},
+            ];
+            try {
+              for (const scope of scopes) {
+                const {data} = await github.rest.actions.listWorkflowRuns({
+                  ...context.repo, workflow_id: 'pd-tests.yaml', branch: scope.branch,
+                  event: scope.event, status: 'success', per_page: 100,
+                });
+                const run = data.workflow_runs.find(run =>
+                  run.id < context.runId && run.head_repository.id === scope.repository);
+                if (!run) continue;
+                const {data: results} = await github.rest.actions.listWorkflowRunArtifacts({
+                  ...context.repo, run_id: run.id, per_page: 100,
+                });
+                const artifact = results.artifacts.find(artifact =>
+                  artifact.name === 'test-duration-history' && !artifact.expired);
+                if (artifact) {
+                  core.setOutput('artifact-id', artifact.id);
+                  core.setOutput('run-id', run.id);
+                  core.info(`Using duration history from ${run.html_url}`);
+                  return;
+                }
+              }
+              core.info('No successful duration history found; using default estimates.');
+            } catch (error) {
+              core.warning(`Duration history unavailable; using default estimates: ${error.message}`);
+            }
+      - name: Download previous duration history
+        if: steps.history.outputs.artifact-id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.history.outputs.artifact-id }}
+          run-id: ${{ steps.history.outputs.run-id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/pd-test-history/previous
+      - name: Prepare shared test durations
+        run: |
+          python3 scripts/ci-shard.py prepare \
+            --history "$RUNNER_TEMP/pd-test-history/previous/ci-test-durations.json" \
+            --output "$RUNNER_TEMP/pd-test-history/ci-test-durations.json"
+      - name: Share test durations with all runners
+        id: profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-duration-input-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pd-test-history/ci-test-durations.json
+          if-no-files-found: error
   chunks:
+    needs: prepare-test-history
+    name: chunks (${{ matrix.worker_id }}, ${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -30,14 +101,19 @@ jobs:
         include:
           - worker_id: 1
             name: 'Unit Test(1)'
+            parallel: 8
           - worker_id: 2
             name: 'Unit Test(2)'
+            parallel: 8
           - worker_id: 3
             name: 'Unit Test(3)'
+            parallel: 8
           - worker_id: 4
             name: 'Tests(1)'
+            parallel: 8
           - worker_id: 5
             name: 'Tests(2)'
+            parallel: 8
           - worker_id: 6
             name: 'Tools Test'
           - worker_id: 7
@@ -53,19 +129,31 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
+      - name: Download shared test durations
+        uses: actions/download-artifact@v4
         with:
-          go-version: '1.27'
-          check-latest: true
+          artifact-ids: ${{ needs.prepare-test-history.outputs.artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/pd-test-history
+      - uses: ./.github/actions/setup-go
+        with:
+          cache-scope: pd-test-${{ matrix.worker_id }}
       - name: ${{ matrix.name }}
         env:
           WORKER_ID: ${{ matrix.worker_id }}
+          JOB_PARALLEL: ${{ matrix.parallel }}
+          JOB_DURATIONS: ${{ runner.temp }}/pd-test-history/ci-test-durations.json
         run: |
-          make ci-test-job JOB_INDEX=$WORKER_ID
+          make ci-test-job JOB_INDEX=$WORKER_ID JOB_COUNT=10
           mv covprofile covprofile_$WORKER_ID
-          if [ -f junitfile ]; then
-            cat junitfile
-          fi
+      - name: Upload test durations ${{ matrix.worker_id }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.worker_id }}
+          path: junitfile
+          if-no-files-found: ignore
+          overwrite: true
       - name: Upload coverage result ${{ matrix.worker_id }}
         uses: actions/upload-artifact@v4
         with:
@@ -73,7 +161,7 @@ jobs:
           path: covprofile_${{ matrix.worker_id }}
           overwrite: true
   report-coverage:
-    needs: chunks
+    needs: [chunks, prepare-test-history]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -99,3 +187,31 @@ jobs:
           file: ./covprofile
           flags: unittests
           name: codecov-umbrella
+      - name: Download duration input
+        if: needs.chunks.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.prepare-test-history.outputs.artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/pd-test-history
+      - name: Download test results
+        if: needs.chunks.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-*
+          path: ${{ runner.temp }}/pd-test-history/results
+      - name: Refresh duration history
+        if: needs.chunks.result == 'success'
+        run: |
+          python3 scripts/ci-shard.py update \
+            "$RUNNER_TEMP"/pd-test-history/results/test-results-*/junitfile \
+            --durations "$RUNNER_TEMP/pd-test-history/ci-test-durations.json" \
+            --source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: Save duration history for future runs
+        if: needs.chunks.result == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-duration-history
+          path: ${{ runner.temp }}/pd-test-history/ci-test-durations.json
+          if-no-files-found: error
+          overwrite: true
