@@ -1934,27 +1934,27 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNonNullK
 	s.testServiceGCSafePointCompatibilityImpl(2)
 }
 
-func (s *gcStateManagerTestSuite) TestLegacyGCWorkerUsesWallClockForGlobalBarrier() {
+func (s *gcStateManagerTestSuite) TestLegacyGCWorkerBarrierExpiry() {
 	re := s.Require()
-	wallNow := time.Now()
-	ttl := 10 * time.Minute
-	global, err := s.manager.SetGlobalGCBarrier(context.Background(), "backup", 0, ttl, wallNow)
+	const keyspaceID = uint32(2)
+	now := time.Unix(2_000_000_000, 0)
+	global, err := s.manager.SetGlobalGCBarrier(context.Background(), "backup", 0, 2*time.Minute, now)
 	re.NoError(err)
-	// After a TSO failover the allocator may run ahead of the PD wall clock.
-	// Legacy service safe points expire against TSO time, while native global barriers use wall time.
-	tsoNow := wallNow.Add(time.Hour)
-	for _, id := range []uint32{constant.NullKeyspaceID, 2} {
-		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(id, "local", global.BarrierTS-1, int64(ttl/time.Second), wallNow)
+	localTS := global.BarrierTS - 1
+	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "local", localTS, 60, now)
+	re.NoError(err)
+
+	advance := func(at time.Time) uint64 {
+		s.T().Helper()
+		minimum, _, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, keypath.GCWorkerServiceSafePointID, global.BarrierTS+1, math.MaxInt64, at)
 		re.NoError(err)
-		re.True(updated)
-		minimum, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(id, keypath.GCWorkerServiceSafePointID, global.BarrierTS+1, math.MaxInt64, tsoNow)
-		re.NoError(err)
-		re.True(updated)
-		re.Equal(global.BarrierID, minimum.ServiceID)
-		re.Equal(global.BarrierTS, minimum.SafePoint)
-		re.Nil(s.getGCBarrier(id, "local"))
-		re.Equal(global, s.getGlobalGCBarrier(global.BarrierID))
+		return minimum.SafePoint
 	}
+	re.Equal(localTS, advance(now.Add(time.Minute)))
+	re.Equal(global.BarrierTS, advance(now.Add(2*time.Minute)))
+	re.Nil(s.getGCBarrier(keyspaceID, "local"))
+	re.Equal(global.BarrierTS+1, advance(now.Add(2*time.Minute+time.Nanosecond)))
+	re.Nil(s.getGlobalGCBarrier("backup"))
 }
 
 func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNativeBR() {

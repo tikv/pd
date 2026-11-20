@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -324,6 +325,91 @@ func prometheusMetricValue(t *testing.T, name string, labels map[string]string) 
 	}
 	require.FailNow(t, "metric not found", name)
 	return 0
+}
+
+//nolint:staticcheck // Exercises the deprecated service safe point RPCs.
+func TestLegacyServiceSafePointBarrierTTL(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster := newWatchGCStatesCluster(t, 1, true)
+	leader := cluster.GetLeaderServer()
+	client := newWatchGCStatesClient(t, leader.GetAddr())
+	header := testutil.NewRequestHeader(leader.GetClusterID())
+	ks, err := leader.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "independent",
+		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	global, err := client.SetGlobalGCBarrier(ctx, &pdpb.SetGlobalGCBarrierRequest{
+		Header: header, BarrierId: "global", TtlSeconds: 600,
+	})
+	re.NoError(err)
+	re.Nil(global.GetHeader().GetError())
+	globalTS := global.GetNewBarrierInfo().GetBarrierTs()
+	re.NotZero(globalTS)
+
+	// After a TSO leader change, its physical time can be ahead of the PD host clock.
+	futureTS := tsoutil.ComposeTS(time.Now().Add(time.Hour).UnixMilli(), 0)
+	testutil.Eventually(re, func() bool {
+		return leader.GetServer().GetHandler().ResetTS(futureTS, false, false, constant.DefaultKeyspaceGroupID) == nil
+	})
+
+	for _, tc := range []struct {
+		name       string
+		keyspaceID uint32
+	}{
+		{"v1", constant.NullKeyspaceID},
+		{"v2", ks.GetId()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			update := func(serviceID string, ts uint64, ttl int64) uint64 {
+				t.Helper()
+				if tc.keyspaceID == constant.NullKeyspaceID {
+					resp, err := client.UpdateServiceGCSafePoint(ctx, &pdpb.UpdateServiceGCSafePointRequest{
+						Header: header, ServiceId: []byte(serviceID), SafePoint: ts, TTL: ttl,
+					})
+					re.NoError(err)
+					re.Nil(resp.GetHeader().GetError())
+					return resp.GetMinSafePoint()
+				}
+				resp, err := client.UpdateServiceSafePointV2(ctx, &pdpb.UpdateServiceSafePointV2Request{
+					Header: header, Keyspace: &pdpb.UpdateServiceSafePointV2Request_KeyspaceId{KeyspaceId: tc.keyspaceID},
+					ServiceId: []byte(serviceID), SafePoint: ts, Ttl: ttl,
+				})
+				re.NoError(err)
+				re.Nil(resp.GetHeader().GetError())
+				return resp.GetMinSafePoint()
+			}
+
+			// Legacy GC must honor both kinds of native barriers even when TSO is past their deadlines.
+			local, err := client.SetGCBarrier(ctx, &pdpb.SetGCBarrierRequest{
+				Header: header, KeyspaceScope: makeKeyspaceScope(tc.keyspaceID),
+				BarrierId: "local", BarrierTs: globalTS - 1, TtlSeconds: 600,
+			})
+			re.NoError(err)
+			re.Nil(local.GetHeader().GetError())
+			re.Equal(globalTS-1, update("gc_worker", globalTS+1, math.MaxInt64))
+			update("local", 0, 0)
+			re.Equal(globalTS, update("gc_worker", globalTS+1, math.MaxInt64))
+
+			// A legacy create or renewal must store the deadline a native GC worker expects.
+			for _, ttl := range []int64{600, 1200} {
+				duration := time.Duration(ttl) * time.Second
+				earliestExpiry := time.Now().Add(duration)
+				update("cdc", globalTS, ttl)
+				state, err := leader.GetServer().GetGCStateManager().GetGCState(tc.keyspaceID, false)
+				re.NoError(err)
+				re.Len(state.GCBarriers, 1)
+				barrier := state.GCBarriers[0]
+				re.Equal("cdc", barrier.BarrierID)
+				re.NotNil(barrier.ExpirationTime)
+				// Deadlines round up to the next whole second.
+				re.WithinRange(*barrier.ExpirationTime, earliestExpiry, time.Now().Add(duration+time.Second))
+			}
+		})
+	}
 }
 
 func TestGCOperations(t *testing.T) {

@@ -464,12 +464,12 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, n
 	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
-	return m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, target, now, now)
+	return m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, target, now)
 }
 
 // advanceTxnSafePointImpl prepares external reports before acquiring the GC mutex, then advances the checked keyspace.
 // Local reports are read inside the transaction so queued requests use the latest local state.
-func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, keyspaceMeta txnSafePointKeyspace, target uint64, now, globalBarrierNow time.Time) (AdvanceTxnSafePointResult, error) {
+func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, keyspaceMeta txnSafePointKeyspace, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	failpoint.InjectCall("txnSafePointKeyspaceLoaded")
 	var externalMinStartTS *minStartTSInfo
 	groupID := keyspaceMeta.meta.GetConfig()[keyspace.MetaServiceGroupIDKey]
@@ -593,7 +593,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		}
 		observedGlobals = globals
 		for _, barrier := range globals {
-			if barrier.IsExpired(globalBarrierNow) {
+			if barrier.IsExpired(now) {
 				err1 = wb.DeleteGlobalGCBarrier(barrier.BarrierID)
 				if err1 != nil {
 					return err1
@@ -630,7 +630,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	}
 
 	if observation, ok := ctx.Value(barrierObservationKey{}).(*barrierObservation); ok {
-		observation.warnings = m.barrierMetrics.observeMetrics(observation.generation, keyspaceID, getKeyspaceNameFromCtx(ctx), observedBarriers, observedGlobals, now, globalBarrierNow)
+		observation.warnings = m.barrierMetrics.observeMetrics(observation.generation, keyspaceID, getKeyspaceNameFromCtx(ctx), observedBarriers, observedGlobals, now)
 	}
 
 	// Update cache.
@@ -1296,9 +1296,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 		if ttl != math.MaxInt64 {
 			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
 		}
-		// Legacy service safe points use the TSO clock. After an allocator restart it can be ahead
-		// of the wall clock used when creating a native global barrier.
-		res, err := m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, newServiceSafePoint, now, time.Now())
+		res, err := m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, newServiceSafePoint, now)
 		if err != nil {
 			return nil, false, err
 		}

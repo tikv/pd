@@ -228,14 +228,14 @@ func (*barrierMetrics) entryMetrics(scope barrierMetricScope, keyspaceName strin
 	return entry, true
 }
 
-func (m *barrierMetrics) observeMetrics(generation uint64, keyspaceID uint32, keyspaceName string, barriers []*endpoint.GCBarrier, globals []*endpoint.GlobalGCBarrier, keyspaceNow, globalNow time.Time) []barrierWarning {
+func (m *barrierMetrics) observeMetrics(generation uint64, keyspaceID uint32, keyspaceName string, barriers []*endpoint.GCBarrier, globals []*endpoint.GlobalGCBarrier, now time.Time) []barrierWarning {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if generation != m.epoch {
 		return nil
 	}
 	var warnings []barrierWarning
-	observe := func(scope barrierMetricScope, now time.Time, visit func(func(*endpoint.GCBarrier))) {
+	observe := func(scope barrierMetricScope, visit func(func(*endpoint.GCBarrier))) {
 		previous := m.entries[scope]
 		var next map[string]barrierMetricEntry
 		visit(func(barrier *endpoint.GCBarrier) {
@@ -258,12 +258,12 @@ func (m *barrierMetrics) observeMetrics(generation uint64, keyspaceID uint32, ke
 			m.entries[scope] = next
 		}
 	}
-	observe(barrierMetricScope{keyspaceID: keyspaceID}, keyspaceNow, func(accept func(*endpoint.GCBarrier)) {
+	observe(barrierMetricScope{keyspaceID: keyspaceID}, func(accept func(*endpoint.GCBarrier)) {
 		for _, barrier := range barriers {
 			accept(barrier)
 		}
 	})
-	observe(barrierMetricScope{global: true}, globalNow, func(accept func(*endpoint.GCBarrier)) {
+	observe(barrierMetricScope{global: true}, func(accept func(*endpoint.GCBarrier)) {
 		for _, barrier := range globals {
 			accept(&endpoint.GCBarrier{BarrierID: barrier.BarrierID, BarrierTS: barrier.BarrierTS, ExpirationTime: barrier.ExpirationTime.Time})
 		}

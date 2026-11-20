@@ -35,7 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -204,11 +203,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	if rc == nil {
 		return &pdpb.UpdateServiceGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
-	nowTSO, err := s.getGlobalTSO(ctx)
-	if err != nil {
-		return nil, err
-	}
-	now, _ := tsoutil.ParseTimestamp(nowTSO)
+	now := time.Now()
 	serviceID := string(request.ServiceId)
 	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTTL(), now)
 	if err != nil {
@@ -390,15 +385,9 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 		return &pdpb.UpdateServiceSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	nowTSO, err := s.getGlobalTSO(ctx)
-	if err != nil {
-		return nil, err
-	}
-	now, _ := tsoutil.ParseTimestamp(nowTSO)
-
+	now := time.Now()
 	serviceID := string(request.ServiceId)
 	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(request.GetKeyspaceId(), serviceID, request.GetSafePoint(), request.GetTtl(), now)
-
 	if err != nil {
 		return nil, err
 	}
