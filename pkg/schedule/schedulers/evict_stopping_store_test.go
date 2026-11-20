@@ -180,3 +180,72 @@ func (suite *evictStoppingStoreTestSuite) TestEvictedStoreMetricsCleanup() {
 		})
 	}
 }
+
+func (suite *evictStoppingStoreTestSuite) TestEvictionCleanupDoesNotRepublishAfterBury() {
+	es := suite.es.(*evictStoppingStoreScheduler)
+	gauge := evictedStoppingStoreStatusGauge
+	for _, state := range []string{"tombstone", "deleted"} {
+		suite.Run(state, func() {
+			re := suite.Require()
+			const storeID = 5
+			gauge.Reset()
+			suite.T().Cleanup(gauge.Reset)
+			suite.tc.AddLeaderStore(storeID, 0)
+			store := suite.tc.GetStore(storeID)
+			suite.tc.PutStore(store.Clone(func(store *core.StoreInfo) {
+				store.GetStoreStats().IsStopping = true
+			}))
+			ops, _ := es.Schedule(suite.tc, false)
+			re.Empty(ops)
+			re.Equal(uint64(storeID), es.conf.evictStore())
+			re.Equal(1, promtestutil.CollectAndCount(gauge))
+			racingCluster := &buryAfterEvictionStoreLookupCluster{
+				SchedulerCluster: suite.tc,
+				storeID:          storeID,
+				deleteRecord:     state == "deleted",
+			}
+
+			es.cleanupEvictLeader(racingCluster)
+
+			re.True(racingCluster.buried)
+			re.Zero(promtestutil.CollectAndCount(gauge))
+			re.Zero(es.conf.evictStore())
+		})
+	}
+}
+
+func (suite *evictStoppingStoreTestSuite) TestEvictionDoesNotPublishMetricsForRemovedStore() {
+	for _, state := range []string{"tombstone_before_lookup", "deleted_before_lookup", "tombstone_after_lookup", "deleted_after_lookup"} {
+		suite.Run(state, func() {
+			re := suite.Require()
+			const storeID = 5
+			gauge := evictedStoppingStoreStatusGauge
+			gauge.Reset()
+			suite.T().Cleanup(gauge.Reset)
+			suite.tc.AddLeaderStore(storeID, 0)
+			store := suite.tc.GetStore(storeID)
+			suite.tc.PutStore(store.Clone(func(store *core.StoreInfo) {
+				store.GetStoreStats().IsStopping = true
+			}))
+			backend := &evictionConfigSaveHook{ConfigStorage: storage.NewStorageWithMemoryBackend()}
+			scheduler, err := CreateScheduler(types.EvictStoppingStoreScheduler, suite.oc, backend, ConfigSliceDecoder(types.EvictStoppingStoreScheduler, nil), nil)
+			re.NoError(err)
+			cluster := &buryAfterEvictionStoreLookupCluster{
+				SchedulerCluster: suite.tc,
+				storeID:          storeID,
+				deleteRecord:     state == "deleted_before_lookup" || state == "deleted_after_lookup",
+			}
+			if state == "tombstone_before_lookup" || state == "deleted_before_lookup" {
+				backend.afterSave = func() {
+					cluster.GetStore(storeID)
+				}
+			}
+
+			ops, _ := scheduler.Schedule(cluster, false)
+
+			re.Empty(ops)
+			re.True(cluster.buried)
+			re.Zero(promtestutil.CollectAndCount(gauge))
+		})
+	}
+}

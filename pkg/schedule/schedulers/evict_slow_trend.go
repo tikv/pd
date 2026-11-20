@@ -211,10 +211,15 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 		return
 	}
 	storeIDStr := strconv.FormatUint(oldID, 10)
-	if store := cluster.GetStore(oldID); store == nil || store.IsRemoved() {
-		storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeIDStr})
-	} else {
-		storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), storeIDStr).Set(0)
+	// The store's address may have changed since we reported its eviction.
+	storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeIDStr})
+	if store := cluster.GetStore(oldID); store != nil && !store.IsRemoved() {
+		address := store.GetAddress()
+		storeSlowTrendEvictedStatusGauge.WithLabelValues(address, storeIDStr).Set(0)
+		// Burial may have cleared the metrics after we read the live snapshot.
+		if current := cluster.GetStore(oldID); current == nil || current.IsRemoved() {
+			storeSlowTrendEvictedStatusGauge.DeleteLabelValues(address, storeIDStr)
+		}
 	}
 	conf.Lock()
 	defer conf.Unlock()
@@ -356,11 +361,18 @@ func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 }
 
 func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	store := cluster.GetStore(s.conf.evictedStore())
-	if store == nil {
+	storeID := s.conf.evictedStore()
+	store := cluster.GetStore(storeID)
+	if store == nil || store.IsRemoved() {
 		return nil
 	}
-	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
+	address, storeIDStr := store.GetAddress(), strconv.FormatUint(storeID, 10)
+	storeSlowTrendEvictedStatusGauge.WithLabelValues(address, storeIDStr).Set(1)
+	// Burial may have cleared the metrics after we read the live snapshot.
+	if current := cluster.GetStore(storeID); current == nil || current.IsRemoved() {
+		storeSlowTrendEvictedStatusGauge.DeleteLabelValues(address, storeIDStr)
+		return nil
+	}
 	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
@@ -419,6 +431,12 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 	}
 
 	slowStore := cluster.GetStore(slowStoreID)
+	if slowStore == nil || slowStore.IsRemoved() {
+		s.conf.popCandidate(false)
+		log.Info("slow store candidate by trend has been removed", zap.Uint64("store-id", slowStoreID))
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "canceled_removed").Inc()
+		return ops, nil
+	}
 	if !candFreshCaptured && checkStoreFasterThanOthers(cluster, slowStore) {
 		s.conf.popCandidate(false)
 		log.Info("slow store candidate by trend has been cancel", zap.Uint64("store-id", slowStoreID))
