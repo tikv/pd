@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -137,12 +138,14 @@ func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
 	tc.AddLeaderRegionWithRange(2, "ccc", "eee", 2, 3, 4)
 	tc.AddLeaderRegionWithRange(3, "fff", "ggg", 2, 3, 4)
 	splitter := NewRegionSplitter(tc, handler, tc.AddPendingProcessedRegions)
-	groupKeys := splitter.groupKeysByRegion([][]byte{
+	keys := [][]byte{
 		[]byte("bbb"),
 		[]byte("ddd"),
 		[]byte("fff"),
 		[]byte("zzz"),
-	})
+	}
+	groupKeys, pendingKeys := splitter.groupKeysByRegion(keys)
+	re.Equal([][]byte{[]byte("bbb"), []byte("ddd"), []byte("zzz")}, pendingKeys)
 	re.Len(groupKeys, 2)
 	for k, v := range groupKeys {
 		switch k {
@@ -162,42 +165,100 @@ func (suite *regionSplitterTestSuite) TestExistingBoundaries() {
 		keys       [][]byte
 		percentage int
 		newIDs     []uint64
+		lookups    map[string]int
+		leaderless bool
 	}{
 		{
 			name:       "existing only",
 			keys:       [][]byte{[]byte("eee"), []byte("hhh")},
 			percentage: 100,
+			lookups:    map[string]int{"eee": 1, "hhh": 1},
+		},
+		{
+			name:       "single existing boundary",
+			keys:       [][]byte{[]byte("eee")},
+			percentage: 100,
+			lookups:    map[string]int{"eee": 1},
+		},
+		{
+			name:       "duplicate existing boundaries",
+			keys:       [][]byte{[]byte("eee"), []byte("eee"), []byte("hhh")},
+			percentage: 100,
+			lookups:    map[string]int{"eee": 2, "hhh": 1},
+		},
+		{
+			name:       "existing boundary without leader",
+			keys:       [][]byte{[]byte("eee")},
+			percentage: 100,
+			lookups:    map[string]int{"eee": 1},
+			leaderless: true,
 		},
 		{
 			name:       "existing and new",
 			keys:       [][]byte{[]byte("eee"), []byte("fff")},
 			percentage: 100,
 			newIDs:     []uint64{1001},
+			lookups:    map[string]int{"eee": 1, "fff": 1},
+		},
+		{
+			name:       "existing between new keys",
+			keys:       [][]byte{[]byte("fff"), []byte("eee"), []byte("ggg")},
+			percentage: 100,
+			newIDs:     []uint64{1001, 1002},
+			lookups:    map[string]int{"eee": 1, "fff": 1, "ggg": 1},
+		},
+		{
+			name:       "new only",
+			keys:       [][]byte{[]byte("fff"), []byte("ggg")},
+			percentage: 100,
+			newIDs:     []uint64{1001, 1002},
+			lookups:    map[string]int{"fff": 1, "ggg": 1},
 		},
 		{
 			name:       "existing and missing region",
 			keys:       [][]byte{[]byte("eee"), []byte("aaa")},
 			percentage: 50,
+			lookups:    map[string]int{"eee": 1, "aaa": 2},
 		},
 		{
-			name: "missing region",
-			keys: [][]byte{[]byte("aaa")},
+			name:    "missing region",
+			keys:    [][]byte{[]byte("aaa")},
+			lookups: map[string]int{"aaa": 2},
 		},
 	} {
 		suite.Run(test.name, func() {
 			re := suite.Require()
-			tc := newSplitterTestCluster(suite.ctx)
+			tc := &regionLookupCountingCluster{
+				Cluster: newSplitterTestCluster(suite.ctx),
+				lookups: make(map[string]int),
+			}
+			if test.leaderless {
+				tc.PutRegion(tc.GetRegion(1).Clone(core.WithLeader(nil)))
+			}
 			handler := newMockSplitRegionsHandler()
 			splitter := NewRegionSplitter(tc, handler, tc.AddPendingProcessedRegions)
+			originalKeys := slices.Clone(test.keys)
 
 			percentage, newIDs := splitter.SplitRegions(suite.ctx, test.keys, 0)
 			re.Equal(test.percentage, percentage)
 			re.ElementsMatch(test.newIDs, newIDs)
+			re.Equal(test.lookups, tc.lookups)
+			re.Equal(originalKeys, test.keys, "completion filtering must preserve the request keys")
 			if len(test.newIDs) == 0 {
 				re.Empty(handler.regions, "existing boundaries must not schedule splits")
 			}
 		})
 	}
+}
+
+type regionLookupCountingCluster struct {
+	*mockcluster.Cluster
+	lookups map[string]int
+}
+
+func (c *regionLookupCountingCluster) GetRegionByKey(key []byte) *core.RegionInfo {
+	c.lookups[string(key)]++
+	return c.Cluster.GetRegionByKey(key)
 }
 
 func newSplitterTestCluster(ctx context.Context) *mockcluster.Cluster {
