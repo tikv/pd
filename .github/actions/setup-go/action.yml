@@ -33,12 +33,16 @@ runs:
       with:
         path: ${{ steps.paths.outputs.modules }}
         key: go-modules-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-${{ github.workflow }}-${{ hashFiles('**/go.mod', '**/go.sum', 'Makefile', 'tools.go') }}
+        restore-keys: |
+          go-modules-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-${{ github.workflow }}-
     - name: Restore Go modules
       if: github.event_name != 'push'
       uses: actions/cache/restore@v4
       with:
         path: ${{ steps.paths.outputs.modules }}
         key: go-modules-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-${{ github.workflow }}-${{ hashFiles('**/go.mod', '**/go.sum', 'Makefile', 'tools.go') }}
+        restore-keys: |
+          go-modules-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.image }}-${{ steps.go.outputs.go-version }}-${{ github.workflow }}-
     - name: Cache Go builds on push
       if: github.event_name == 'push'
       uses: actions/cache@v4
