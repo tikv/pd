@@ -107,9 +107,9 @@ type Manager struct {
 	// before its group, or before the deletion of the group that it replaces.
 	labelRuleBuffer map[string]*labeler.LabelRule // {group_id} -> labelRule
 
-	// splitMutex orders denial and recovery notifications independently of metadata updates.
+	// splitMutex orders denial and recovery notifications. Policy lookups run outside it.
 	splitMutex         syncutil.Mutex
-	splitDeniedRegions cache.Cache // {region_id} -> expiration time
+	splitDeniedRegions cache.Cache // region ID -> *splitDenial
 }
 
 // NewManager creates a new affinity Manager.

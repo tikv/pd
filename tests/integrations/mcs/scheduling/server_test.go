@@ -1469,18 +1469,12 @@ func (suite *serverTestSuite) TestBatchSplit() {
 	suite.SetupSuite()
 }
 
-// TestAffinitySplitNotifications delivers denial, renewal and recovery through PD.
+// TestAffinitySplitNotifications delivers denial and recovery through PD.
 func (suite *serverTestSuite) TestAffinitySplitNotifications() {
 	re := suite.Require()
 	defer func() {
 		suite.TearDownSuite()
 		suite.SetupSuite()
-	}()
-	// Track the denial as if its renewal were due.
-	fname := "github.com/tikv/pd/pkg/schedule/affinity/shortenSplitDenialTracking"
-	re.NoError(failpoint.Enable(fname, "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable(fname))
 	}()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
@@ -1500,10 +1494,11 @@ func (suite *serverTestSuite) TestAffinitySplitNotifications() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 	manager := suite.pdLeader.GetRaftCluster().GetAffinityManager()
+	const groupID = "split-notifications"
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-		GroupID: "split-renewal", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}},
+		GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}},
 	}}))
-	_, err = manager.UpdateAffinityGroupPeers("split-renewal", 1, []uint64{1, 2, 3})
+	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
 	re.NoError(err)
 
 	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetAddr())
@@ -1543,7 +1538,7 @@ func (suite *serverTestSuite) TestAffinitySplitNotifications() {
 	})
 	re.NoError(err)
 	re.Contains(splitResp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
-	// Resend unchanged metadata: neither renewal nor recovery may depend on a cache update.
+	// Resend unchanged metadata so recovery is exercised without a cache update.
 	expectSplit := func(enabled bool) {
 		testutil.Eventually(re, func() bool {
 			re.NoError(stream.Send(regionReq))
@@ -1559,8 +1554,7 @@ func (suite *serverTestSuite) TestAffinitySplitNotifications() {
 		})
 	}
 	expectSplit(false)
-	expectSplit(false)
-	re.NoError(manager.DeleteAffinityGroups([]string{"split-renewal"}, true))
+	re.NoError(manager.DeleteAffinityGroups([]string{groupID}, true))
 	expectSplit(true)
 }
 

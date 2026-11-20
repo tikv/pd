@@ -102,7 +102,7 @@ func waitHeartbeatStreamBound(t *testing.T, hbStreams *hbstream.HeartbeatStreams
 func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	re := require.New(t)
 
-	svc, cluster, stream := newTestSchedulingServiceForSplit(t)
+	svc, cluster, stream := newTestSchedulingServiceForSplit(t, true)
 
 	region := putAffinitySplitTestGroup(t, cluster)
 	hbStreams := cluster.GetCoordinator().GetHeartbeatStreams()
@@ -139,10 +139,41 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
 }
 
+func TestRegionHeartbeatRecoversAffinitySplitAfterSchedulingResumes(t *testing.T) {
+	re := require.New(t)
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
+	region := putAffinitySplitTestGroup(t, cluster)
+	streams := cluster.GetCoordinator().GetHeartbeatStreams()
+	resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
+		Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_SIZE,
+	})
+	re.NoError(err)
+	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
+	denial, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+	re.True(ok)
+	re.NotNil(denial.GetChangeSplit())
+	re.False(denial.GetChangeSplit().GetAutoSplitEnabled())
+
+	cluster.persistConfig.SetHaltScheduling(true, "test")
+	re.NoError(cluster.GetAffinityManager().DeleteAffinityGroups([]string{"g1"}, true))
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	re.Zero(streams.MsgLength(), "PD would drop a recovery during a halt")
+
+	cluster.persistConfig.SetHaltScheduling(false, "test")
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	recovery, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+	re.True(ok)
+	re.Equal(region.GetID(), recovery.GetRegionId())
+	re.NotNil(recovery.GetChangeSplit())
+	re.True(recovery.GetChangeSplit().GetAutoSplitEnabled())
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	re.Zero(streams.MsgLength(), "recovery is sent once")
+}
+
 func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re := require.New(t)
 
-	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t, true)
 	cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000}, "http://pd-leader")
 
 	region := newAffinitySplitTestRegion()
@@ -163,7 +194,7 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 // before primary cleanup cleared its heartbeat streams.
 func TestSplitNotificationsAfterClusterStop(t *testing.T) {
 	re := require.New(t)
-	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t, true)
 	region := putAffinitySplitTestGroup(t, cluster)
 	request := &schedulingpb.AskBatchSplitRequest{Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_LOAD}
 	_, err := svc.AskBatchSplit(t.Context(), request)
@@ -180,6 +211,7 @@ func TestSplitNotificationsAfterClusterStop(t *testing.T) {
 
 func newTestSchedulingServiceForSplit(
 	t *testing.T,
+	runHeartbeatStreams bool,
 ) (*Service, *Cluster, *captureHeartbeatStream) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -209,7 +241,12 @@ func newTestSchedulingServiceForSplit(
 	}
 
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	var hbStreams *hbstream.HeartbeatStreams
+	if runHeartbeatStreams {
+		hbStreams = hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	} else {
+		hbStreams = hbstream.NewTestHeartbeatStreams(ctx, basicCluster, false)
+	}
 	persistConfig := config.NewPersistConfig(
 		cfg,
 		cache.NewStringTTL(ctx, sc.DefaultGCInterval, sc.DefaultTTL),
