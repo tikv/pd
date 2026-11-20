@@ -172,6 +172,45 @@ func TestReturnRechecksSamplesAndIncomingHotOperator(t *testing.T) {
 	require.Same(t, ordinary, x.BestReturn(x.tc, x.cluster.GetStore(8), x.cluster.GetStore(1), ordinary, nil, func(*core.RegionInfo) bool { return true }))
 }
 
+// Both Regions came from the restarting Store. Read demand can switch between
+// scheduling and sending the first command.
+func TestBalanceReturnRechecksChangedDemandBeforeSending(t *testing.T) {
+	x := newRecoveryTest(t)
+	x.drain(1)
+	preferred := x.evacuate(11, 8, 40)
+	ordinary := x.evacuate(12, 8, 60)
+	x.now += 20
+	x.store(1, x.now-20, 40)
+	x.store(8, x.now-140, 100)
+	x.report(12, 8, 8, 10, x.now)
+	op := transfer(preferred, "balance", 1, OpLeader)
+	require.True(t, x.PreferReturn(x.tc, op, ordinary.GetID(), nil))
+	sent := x.GetHBStreams().MsgLength()
+	// A heartbeat with unchanged rounded bytes can reach Dispatch without
+	// replacing the scheduling cache. The new key rate would overload home.
+	fresh := preferred.Clone(core.SetReadKeys(900), core.SetReportInterval(uint64(x.now-10), uint64(x.now)))
+	require.False(t, x.canSendRecovery(op, fresh))
+	require.False(t, op.recovery.sent[0])
+
+	// The native choice now returns more useful reads. Both moves pass the
+	// read-imbalance guard, so that guard alone cannot detect the reversal.
+	x.report(11, 8, 8, 10, x.now)
+	x.report(12, 8, 8, 60, x.now)
+	require.False(t, x.AddOperator(op))
+	require.Equal(t, sent, x.GetHBStreams().MsgLength())
+
+	// The next slot can issue immediately, without waiting for a Store report.
+	fallback := x.report(13, 8, 8, 0, x.now)
+	x.report(12, 8, 8, 50, x.now)
+	next := transfer(ordinary, "balance", 1, OpLeader)
+	require.True(t, x.PreferReturn(x.tc, next, fallback.GetID(), nil))
+	require.True(t, x.AddOperator(next))
+	require.Equal(t, sent+1, x.GetHBStreams().MsgLength())
+	require.True(t, x.RemoveOperator(next))
+	retry := transfer(preferred, "balance", 1, OpLeader)
+	require.False(t, x.PreferReturn(x.tc, retry, fallback.GetID(), nil), "a sent command may still take effect after cancellation")
+}
+
 func TestReturnAfterConsecutivePlannedDrains(t *testing.T) {
 	for _, tc := range []struct {
 		name                                                         string
@@ -384,20 +423,24 @@ func TestBalanceDefaultIsFreshlyEvacuated(t *testing.T) {
 	home := x.evacuate(101, 8, 40)
 	homeStart, sourceStart := x.now-20, x.now-120
 	for i, tc := range []struct {
-		admitted, keys, sourceRate uint64
-		wantReturn                 bool
+		admitted, keys, span, sourceRate uint64
+		wantReturn                       bool
 	}{
-		{0, 0, 100, true},   // A confirmed idle default, gap 60.
-		{0, 90, 100, false}, // The default could equalize the two Stores.
-		{50, 0, 100, false}, // A rate inside [0,50] beats returning 40.
-		{50, 0, 120, true},  // Returning 40 equalizes the two Stores for every default.
+		{0, 0, 500, 100, true},   // A confirmed idle default, gap 60.
+		{0, 90, 500, 100, false}, // The default could equalize the two Stores.
+		{50, 0, 500, 100, false}, // A rate inside [0,50] beats returning 40.
+		{50, 0, 500, 120, true},  // Returning 40 equalizes the two Stores for every default.
+		// An unrateable short report leaves every native read rate possible.
+		{0, 0, 1, 119, false},
+		{0, 0, 1, 120, true},
+		{0, 0, 1, 121, false},
 	} {
 		r := x.report(uint64(i+200), 12, 7, tc.admitted, x.now)
 		ev := transfer(r, "evict", 8, OpLeader)
 		require.True(t, x.AddOperator(ev))
 		end := uint64(x.now)
 		r = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{Region: r.GetMeta(), Leader: r.GetStorePeer(8),
-			Term: 8, KeysRead: tc.keys, Interval: &pdpb.TimeInterval{StartTimestamp: end - 500, EndTimestamp: end}}, 0)
+			Term: 8, KeysRead: tc.keys, Interval: &pdpb.TimeInterval{StartTimestamp: end - tc.span, EndTimestamp: end}}, 0)
 		x.cluster.CheckAndPutRegion(r)
 		x.Dispatch(r, DispatchFromHeartBeat, func(uint64) {})
 		require.Equal(t, SUCCESS, ev.Status())

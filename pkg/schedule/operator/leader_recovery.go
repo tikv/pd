@@ -203,6 +203,15 @@ func (s *leaderRecovery) remember(d departure) {
 	s.index.ReplaceOrInsert(d)
 }
 
+// A default that already returns to its former Store is worth keeping on ties.
+func (s *leaderRecovery) returnScore(r *core.RegionInfo, source uint64, home *core.StoreInfo, current float64) float64 {
+	d := s.history[r.GetID()]
+	if d.home == home.GetID() && d.successor == source && d.matches(r, home) {
+		return min(d.rate, current)
+	}
+	return 0
+}
+
 // BestReturn finds the largest reusable read rate for one ordinary balance slot.
 // The default wins ties. The callback checks the scheduler's live placement and
 // admission rules and retains the operator only when it accepts a better Region.
@@ -218,14 +227,13 @@ func (oc *Controller) BestReturn(c sche.SchedulerCluster, source, target *core.S
 	}
 	cost := s.readCostBounds(ordinary)
 	loads, ok := oc.compareReads(target, source, &recoveryChoice{extra: batch})
-	if !ok || math.IsInf(cost.high, 0) {
+	// An unbounded default could perfectly balance any positive gap. Only
+	// one known gap can be matched for every possible default.
+	if !ok || loads.lo <= 0 || math.IsInf(cost.high, 1) && loads.lo != loads.hi {
 		s.Unlock()
 		return ordinary
 	}
-	best := 0.0
-	if d, found := s.history[ordinary.GetID()]; found && d.home == target.GetID() && d.successor == source.GetID() && d.matches(ordinary, target) {
-		best = min(d.rate, cost.high)
-	}
+	best := s.returnScore(ordinary, source.GetID(), target, cost.high)
 	index := s.index.Clone()
 	s.Unlock()
 
@@ -422,7 +430,7 @@ func eligibleReturn(c sche.SchedulerCluster, r *core.RegionInfo, to uint64) bool
 // fits compares the same source/target pair under the default and proposed
 // allocations. Differences of squared gaps are linear in the starting gap,
 // so checking both endpoints covers any completion order of pending moves.
-func (oc *Controller) fits(p *recoveryChoice) bool {
+func (oc *Controller) fits(p *recoveryChoice, heartbeat *core.RegionInfo) bool {
 	s := &oc.recovery
 	if !s.active.Load() || p.round != s.ID {
 		return false
@@ -430,10 +438,6 @@ func (oc *Controller) fits(p *recoveryChoice) bool {
 	home, other := oc.cluster.GetStore(p.home.home), oc.cluster.GetStore(p.other)
 	r, a := oc.cluster.GetRegion(p.home.id), oc.cluster.GetRegion(p.ordinary)
 	if home == nil || other == nil || r == nil || a == nil || !home.RestartedFrom(p.home.process) {
-		return false
-	}
-	bRate := readCost(r)
-	if bRate <= 0 || math.IsInf(bRate, 0) {
 		return false
 	}
 	if !p.sent[0] && (!p.home.matches(r, home) || !p.sent[1] && s.history[p.home.id] != p.home) {
@@ -466,10 +470,33 @@ func (oc *Controller) fits(p *recoveryChoice) bool {
 	if !ok {
 		return false
 	}
-	if p.partner != nil {
-		return loads.allowsExchange(readCost(a), bRate, p)
+	allowed := func(r, a *core.RegionInfo) bool {
+		bRate := readCost(r)
+		if bRate <= 0 || math.IsInf(bRate, 0) {
+			return false
+		}
+		if p.partner != nil {
+			return loads.allowsExchange(readCost(a), bRate, p)
+		}
+		ordinary := s.readCostBounds(a)
+		return min(p.home.rate, bRate) > s.returnScore(a, other.GetID(), home, ordinary.high) && loads.allowsReturn(ordinary, bRate)
 	}
-	return loads.allowsReturn(s.readCostBounds(a), bRate)
+	if heartbeat != nil && heartbeat != r && heartbeat != a {
+		// Dispatch can see key counts which did not change rounded bytes in
+		// the cache. Use the newest interval. Check both views on a tied end.
+		current := &r
+		if heartbeat.GetID() == p.ordinary {
+			current = &a
+		}
+		seen, cached := heartbeat.GetInterval().GetEndTimestamp(), (*current).GetInterval().GetEndTimestamp()
+		if seen == cached && !allowed(r, a) {
+			return false
+		}
+		if seen >= cached {
+			*current = heartbeat
+		}
+	}
+	return allowed(r, a)
 }
 
 // The same two Store bounds apply to every candidate for one balance slot.
@@ -505,7 +532,7 @@ func (c readComparison) allowsReturn(ordinary readBounds, rate float64) bool {
 	}
 	scale := 1/c.homeWeight + 1/c.otherWeight
 	low, high, candidate := ordinary.low*scale, ordinary.high*scale, rate*scale
-	if math.IsInf(high, 1) || !noWiderGap(c.lo, c.hi, 0, candidate) {
+	if !noWiderGap(c.lo, c.hi, 0, candidate) {
 		return false
 	}
 	for _, gap := range [...]float64{c.lo, c.hi} {
@@ -583,7 +610,7 @@ func (oc *Controller) PreferReturn(c sche.SchedulerCluster, op *Operator, ordina
 		return false
 	}
 	p := &recoveryChoice{round: s.ID, cluster: c, home: d, ordinary: ordinary, other: d.successor, extra: slices.Clone(extra)}
-	if !oc.fits(p) {
+	if !oc.fits(p, nil) {
 		return false
 	}
 	op.recovery = p
@@ -625,7 +652,7 @@ func (oc *Controller) PlanEvictions(c sche.SchedulerCluster, ops []*Operator) {
 			continue
 		}
 		op.drain = &plannedDeparture{
-			departure: departure{round: s.ID, id: r.GetID(), home: t.FromStore, peer: r.GetLeader().GetId(), process: s.draining[t.FromStore], term: r.GetTerm(), version: r.GetRegionEpoch().GetVersion(), rate: rate},
+			round: s.ID, id: r.GetID(), home: t.FromStore, peer: r.GetLeader().GetId(), process: s.draining[t.FromStore], term: r.GetTerm(), version: r.GetRegionEpoch().GetVersion(), rate: rate,
 			hadOrigin: known,
 		}
 		if known && !math.IsInf(rate, 1) && origin.matches(r, oc.cluster.GetStore(origin.home)) {
@@ -698,7 +725,7 @@ func (oc *Controller) PlanEvictions(c sche.SchedulerCluster, ops []*Operator) {
 				}
 			}
 			s.Lock()
-			fits := oc.fits(p)
+			fits := oc.fits(p, nil)
 			s.Unlock()
 			if !fits {
 				continue
@@ -772,16 +799,20 @@ func (oc *Controller) trackTransfer(op *Operator) {
 	}
 }
 
+func (p *recoveryChoice) leg(op *Operator) (int, uint64) {
+	if p.partner != nil && op.RegionID() == p.ordinary {
+		return 1, p.other
+	}
+	return 0, p.home.home
+}
+
 func (oc *Controller) canSendRecovery(op *Operator, region *core.RegionInfo) bool {
 	p := op.recovery
 	if p == nil {
 		return true
 	}
 	s := &oc.recovery
-	slot, to := 0, p.home.home
-	if p.partner != nil && op.RegionID() == p.ordinary {
-		slot, to = 1, p.other
-	}
+	slot, to := p.leg(op)
 	// Dispatch can receive a newer Region heartbeat than the scheduling cache.
 	// Never resend a cache choice across an intervening election or split.
 	if slot == 0 && !p.home.matches(region, oc.cluster.GetStore(to)) || slot == 1 && !p.partner.stillLeads(region) {
@@ -811,13 +842,21 @@ func (oc *Controller) canSendRecovery(op *Operator, region *core.RegionInfo) boo
 			return false
 		}
 	}
-	if !eligible || !oc.fits(p) || op.IsEnd() {
+	if !eligible || !oc.fits(p, region) || op.IsEnd() {
 		return false
 	}
 	if !p.sent[0] && !p.sent[1] {
 		// The first leg claims the origin for both commands, whichever sends
 		// first. Its spent ID stays in the same bounded history until finish.
 		s.consume(p.home.id)
+	}
+	if sample, ok := s.pending[op]; ok {
+		// Carry measured reads into the reservation even when the cache
+		// retained its older sample. An unrateable, older report was ignored.
+		if rate, measured := region.ReadKeysPerSecond(); measured && rate > sample.rate {
+			sample.rate = rate
+			s.pending[op] = sample
+		}
 	}
 	p.sent[slot] = true
 	return true
@@ -844,6 +883,15 @@ func (oc *Controller) finishRecovery(op *Operator, r *core.RegionInfo) {
 	actual := uint64(0)
 	if r != nil && op.Status() == SUCCESS && op.steps[len(op.steps)-1].IsFinish(r) {
 		actual = r.GetLeader().GetStoreId()
+	}
+	if p := op.recovery; p != nil && actual == 0 {
+		// Canceling before the first send cannot create a future transfer.
+		// Keep accounting if an independent election was already observed.
+		slot, _ := p.leg(op)
+		step, _ := primary(op)
+		if !p.sent[slot] && r != nil && r.GetTerm() == admitted.term && r.GetLeader().GetStoreId() == step.FromStore {
+			return
+		}
 	}
 	rate := max(admitted.rate, s.readCostBounds(r).high)
 	if bound, ok := admitted.handoffBound(op, r); actual != 0 && ok {
