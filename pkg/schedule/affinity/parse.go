@@ -43,7 +43,7 @@ func ParseGroupIDs(rawIDs []string) ([]string, error) {
 		if _, ok := seen[id]; ok {
 			continue
 		}
-		if err := ValidateGroupID(id); err != nil {
+		if err := ValidateExistingGroupID(id); err != nil {
 			return nil, err
 		}
 		seen[id] = struct{}{}

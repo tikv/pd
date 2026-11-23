@@ -16,6 +16,7 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -89,7 +90,6 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 				{http.MethodPost, "?skip_exist_check=true", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
 				{http.MethodPatch, "", fmt.Sprintf(`{"add":[{"id":"%s","ranges":[]}]}`, id)},
 				{http.MethodPut, "/" + id, `{"leader_store_id":1,"voter_store_ids":[1]}`},
-				{http.MethodGet, "?ids=" + id, ""},
 			} {
 				httpReq, err := http.NewRequest(req.method, url+req.path, strings.NewReader(req.body))
 				re.NoError(err)
@@ -107,6 +107,9 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 		}
 		for i, id := range legacy {
 			re.Equal(id, mustGetAffinityGroup(re, leader.GetAddr(), id).ID)
+			filtered, _, ok := tryGetAffinityGroups(url + "?ids=" + id)
+			re.True(ok)
+			re.Contains(filtered.AffinityGroups, id)
 			switch i {
 			case 0:
 				mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
@@ -838,6 +841,80 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() 
 		re.NotEmpty(errorMsg, "Error message should not be empty")
 		re.Contains(errorMsg, "test-group", "Error message should contain the group ID")
 		re.Contains(errorMsg, "already exists", "Error message should indicate the group already exists")
+	})
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateDuplicateRequestIDs() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		input := func(start, end string) []byte {
+			data, err := json.Marshal(handlers.CreateAffinityGroupInput{
+				Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte(start)), EndKey: affinityTestKey([]byte(end))}},
+			})
+			re.NoError(err)
+			return data
+		}
+		body := fmt.Appendf(nil, `{"affinity_groups":{"duplicate":%s,"other":%s,"duplicate":%s}}`,
+			input("a", "b"), input("c", "d"), input("e", "f"))
+		for _, suffix := range []string{"", "?skip_exist_check=true"} {
+			var message string
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr)+suffix, body,
+				testutil.Status(re, http.StatusBadRequest), testutil.ExtractJSON(re, &message)))
+			re.Contains(message, "ErrAffinityGroupContent")
+			re.Contains(message, "duplicate")
+			re.Empty(mustGetAllAffinityGroups(re, serverAddr).AffinityGroups)
+		}
+	})
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateDuplicateJSONMembers() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		serverAddr := leader.GetAddr()
+		start := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("a")))
+		end := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("b")))
+		input := fmt.Sprintf(`{"ranges":[{"start_key":%q,"end_key":%q}]}`, start, end)
+
+		for _, tc := range []struct {
+			name string
+			body []byte
+		}{
+			{
+				name: "Affinity_Groups",
+				body: fmt.Appendf(nil, `{"affinity_groups":{"g1":%s},"Affinity_Groups":{"g1":%s}}`, input, input),
+			},
+			{
+				name: "start_Key",
+				body: fmt.Appendf(nil, `{"affinity_groups":{"g1":{"ranges":[{"start_key":%q,"start_\u212aey":%q,"end_key":%q}]}}}`, start, start, end),
+			},
+		} {
+			for _, suffix := range []string{"", "?skip_exist_check=true"} {
+				var message string
+				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr)+suffix, tc.body,
+					testutil.Status(re, http.StatusBadRequest), testutil.ExtractJSON(re, &message)))
+				re.Contains(message, "ErrAffinityGroupContent")
+				re.Contains(message, tc.name)
+				re.Empty(mustGetAllAffinityGroups(re, serverAddr).AffinityGroups)
+
+				persisted := 0
+				re.NoError(leader.GetServer().GetStorage().LoadAllAffinityGroups(func(_, _ string) { persisted++ }))
+				re.Zero(persisted)
+			}
+		}
+
+		// Case-distinct group IDs in affinity_groups remain distinct valid groups.
+		cstart := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("c")))
+		cend := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("d")))
+		input2 := fmt.Sprintf(`{"ranges":[{"start_key":%q,"end_key":%q}]}`, cstart, cend)
+		caseDistinctBody := fmt.Appendf(nil, `{"affinity_groups":{"g1":%s,"G1":%s}}`, input, input2)
+		var created handlers.AffinityGroupsResponse
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr), caseDistinctBody,
+			testutil.Status(re, http.StatusOK), testutil.ExtractJSON(re, &created)))
+		re.Len(created.AffinityGroups, 2)
+		re.Contains(created.AffinityGroups, "g1")
+		re.Contains(created.AffinityGroups, "G1")
 	})
 }
 
@@ -1598,8 +1675,10 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDQueriesMCS() {
 					if strings.HasPrefix(path, "/") {
 						re.Equal(http.StatusNotFound, resp.StatusCode, "%s%s: %s", url, path, body)
 					} else {
-						re.Equal(http.StatusBadRequest, resp.StatusCode, "%s%s: %s", url, path, body)
-						re.Contains(string(body), "pd-ctl --keyspace-id")
+						re.Equal(http.StatusOK, resp.StatusCode, "%s%s: %s", url, path, body)
+						var result handlers.AffinityGroupsResponse
+						re.NoError(json.Unmarshal(body, &result))
+						re.Empty(result.AffinityGroups)
 					}
 				}
 			}

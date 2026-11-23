@@ -85,8 +85,9 @@ func TestNextGenTiDBGroupOperations(t *testing.T) {
 		re.ErrorContains(err, "pd-ctl --keyspace-id")
 		_, err = manager.CheckAndGetAffinityGroupState(id)
 		re.NoError(err)
-		_, err = CollectGroupStates(manager, []string{"custom_group", id})
-		re.ErrorContains(err, "pd-ctl --keyspace-id")
+		states, err := CollectGroupStates(manager, []string{"custom_group", id})
+		re.NoError(err)
+		re.Contains(states, id)
 		for _, ranges := range [][]keyutil.KeyRange{nil, {{StartKey: []byte("a"), EndKey: []byte("b")}}} {
 			op := []GroupKeyRanges{{GroupID: id, KeyRanges: ranges}}
 			re.ErrorContains(manager.UpdateAffinityGroupKeyRanges(op, nil), "pd-ctl --keyspace-id")

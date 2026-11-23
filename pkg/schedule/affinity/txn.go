@@ -106,14 +106,10 @@ func (m *Manager) CreateAffinityGroupsIfNotExists(changes []GroupKeyRanges) erro
 func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExisting bool) error {
 	// Step 0: Validate all groups first (without lock)
 	groups := make([]*Group, 0, len(changes))
-	uniqueChanges := make([]GroupKeyRanges, 0, len(changes))
 	seenIDs := make(map[string]struct{}, len(changes))
 	for _, change := range changes {
 		if _, exists := seenIDs[change.GroupID]; exists {
-			if skipExisting {
-				continue
-			}
-			return errs.ErrAffinityGroupExist.FastGenByArgs(change.GroupID)
+			return errs.ErrAffinityGroupContent.FastGenByArgs("duplicate group " + change.GroupID)
 		}
 		seenIDs[change.GroupID] = struct{}{}
 		if err := validateGroupKeyRanges(change); err != nil {
@@ -129,9 +125,7 @@ func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExi
 			return err
 		}
 		groups = append(groups, group)
-		uniqueChanges = append(uniqueChanges, change)
 	}
-	changes = uniqueChanges
 
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
@@ -400,14 +394,20 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 
 	plan := m.regionLabeler.NewPlan()
 
-	// Step 0: Validate that a Group is either fully added or fully removed.
+	// Step 0: Each group can have at most one nonempty operation.
 	for _, op := range addOps {
+		if len(op.KeyRanges) == 0 {
+			continue
+		}
 		if _, exists := toAdd[op.GroupID]; exists {
 			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
 		}
 		toAdd[op.GroupID] = op
 	}
 	for _, op := range removeOps {
+		if len(op.KeyRanges) == 0 {
+			continue
+		}
 		if _, exists := toRemove[op.GroupID]; exists {
 			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
 		}
@@ -423,7 +423,6 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	// Step 1: Validate the added KeyRanges.
 	for _, op := range addOps {
 		if len(op.KeyRanges) == 0 {
-			delete(toAdd, op.GroupID)
 			continue
 		}
 		currentRanges, err := m.getCurrentRanges(op.GroupID)
@@ -447,7 +446,6 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	// Step 2: Validate the removed KeyRanges.
 	for _, op := range removeOps {
 		if len(op.KeyRanges) == 0 {
-			delete(toRemove, op.GroupID)
 			continue
 		}
 		currentRanges, err := m.getCurrentRanges(op.GroupID)
@@ -464,10 +462,10 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	// Step 3: Validate merged ranges and plan labels in request order, adds first.
 	// Keep the operation order identical to CommitOps and the cache updates.
 	for _, op := range addOps {
-		updated, ok := toAdd[op.GroupID]
-		if !ok {
+		if len(op.KeyRanges) == 0 {
 			continue
 		}
+		updated := toAdd[op.GroupID]
 		if err := validateGroupKeyRanges(updated); err != nil {
 			return err
 		}
@@ -486,10 +484,10 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	}
 	// Leave untouched legacy ranges in place so they can be removed incrementally.
 	for _, op := range removeOps {
-		ranges, ok := toRemove[op.GroupID]
-		if !ok {
+		if len(op.KeyRanges) == 0 {
 			continue
 		}
+		ranges := toRemove[op.GroupID]
 		var labelRule *labeler.LabelRule
 
 		if len(ranges.KeyRanges) > 0 {

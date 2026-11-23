@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -51,23 +52,38 @@ func transactionRangeForTest(keyspaceID uint32, tableID int64) keyutil.KeyRange 
 }
 
 func TestCreateAffinityGroupsDuplicateIDs(t *testing.T) {
-	for _, size := range []int{2, 122} {
+	for _, size := range []int{2, etcdutil.MaxEtcdTxnOps + 2} {
 		t.Run(strconv.Itoa(size), func(t *testing.T) {
 			re := require.New(t)
 			manager := newRangeTestManager(t)
 			first := GroupKeyRanges{GroupID: "duplicate", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1)}}
-			changes := []GroupKeyRanges{first}
+			changes := make([]GroupKeyRanges, 0, size)
+			changes = append(changes, first)
 			for i := 1; i < size-1; i++ {
-				changes = append(changes, GroupKeyRanges{GroupID: fmt.Sprintf("padding_%d", i), KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, int64(i+1))}})
+				changes = append(changes, GroupKeyRanges{GroupID: fmt.Sprintf("padding_%d", i)})
 			}
 			changes = append(changes, GroupKeyRanges{GroupID: first.GroupID})
-			re.ErrorIs(manager.CreateAffinityGroups(changes), errs.ErrAffinityGroupExist)
-			re.Zero(manager.GetAffinityGroupCount())
+			storedGroups := func() map[string]string {
+				groups := make(map[string]string)
+				re.NoError(manager.storage.LoadAllAffinityGroups(func(key, value string) { groups[key] = value }))
+				return groups
+			}
+			assertRejected := func() {
+				before := storedGroups()
+				for _, create := range []func([]GroupKeyRanges) error{
+					manager.CreateAffinityGroups, manager.CreateAffinityGroupsIfNotExists,
+				} {
+					re.ErrorIs(create(changes), errs.ErrAffinityGroupContent)
+					re.Equal(before, storedGroups())
+					re.Equal(len(before), manager.GetAffinityGroupCount())
+				}
+			}
+			re.Empty(storedGroups())
+			assertRejected()
 			re.Empty(manager.keyRanges)
 			re.Nil(manager.regionLabeler.GetLabelRule(GetLabelRuleID(first.GroupID)))
-			re.NoError(manager.CreateAffinityGroupsIfNotExists(changes))
-			re.Equal(size-1, manager.GetAffinityGroupCount())
-			re.Equal(1, manager.GetAffinityGroupState(first.GroupID).RangeCount)
+			re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{first}))
+			assertRejected()
 			re.Equal(first, manager.keyRanges[first.GroupID])
 			re.ErrorIs(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "overlap", KeyRanges: first.KeyRanges}}), errs.ErrAffinityGroupContent)
 		})
@@ -85,16 +101,21 @@ func TestUpdateAffinityGroupKeyRangesEmptyOperations(t *testing.T) {
 		re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, op))
 	}
 	nonempty := GroupKeyRanges{GroupID: "ranges", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 2)}}
+	empty := GroupKeyRanges{GroupID: "ranges"}
 	for _, ops := range []struct{ add, remove []GroupKeyRanges }{
-		{add: []GroupKeyRanges{nonempty, {GroupID: "ranges"}}},
-		{add: []GroupKeyRanges{{GroupID: "ranges"}, nonempty}},
-		{remove: []GroupKeyRanges{initial, {GroupID: "ranges"}}},
-		{add: []GroupKeyRanges{nonempty}, remove: []GroupKeyRanges{{GroupID: "ranges"}}},
-		{add: []GroupKeyRanges{{GroupID: "ranges"}}, remove: []GroupKeyRanges{initial}},
-		{add: []GroupKeyRanges{{GroupID: "empty"}, {GroupID: "empty"}}},
+		{add: []GroupKeyRanges{nonempty, empty}},
+		{add: []GroupKeyRanges{empty, nonempty}},
+		{add: []GroupKeyRanges{nonempty}, remove: []GroupKeyRanges{empty}},
 	} {
-		re.ErrorIs(manager.UpdateAffinityGroupKeyRanges(ops.add, ops.remove), errs.ErrAffinityGroupExist)
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(ops.add, ops.remove))
+		re.Equal(2, manager.GetAffinityGroupState("ranges").RangeCount)
+		re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{empty}, []GroupKeyRanges{nonempty, empty}))
+		re.Equal(initial, manager.keyRanges[initial.GroupID])
 	}
+	re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{empty, empty}, nil))
+	re.ErrorIs(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{nonempty, nonempty}, nil), errs.ErrAffinityGroupExist)
+	re.ErrorIs(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{initial, initial}), errs.ErrAffinityGroupExist)
+	re.ErrorIs(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{nonempty}, []GroupKeyRanges{initial}), errs.ErrAffinityGroupExist)
 	re.Equal(initial, manager.keyRanges[initial.GroupID])
 	re.Equal(1, manager.GetAffinityGroupState("ranges").RangeCount)
 	re.Nil(manager.regionLabeler.GetLabelRule(GetLabelRuleID("empty")))
