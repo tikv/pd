@@ -91,11 +91,10 @@ func (s *Service) checkServing() error {
 // keys, not paths. The latter two prefixes also cover their legacy prefix scans
 // without a trailing slash.
 func validateMetaStorageAccess(key, rangeEnd []byte) error {
-	start, end := string(key), string(rangeEnd)
 	var upper string
-	if strings.HasPrefix(start, "/pd/") {
+	if bytes.HasPrefix(key, []byte("/pd/")) {
 		prefix := strings.TrimSuffix(keypath.RegionLabelPathPrefix(), "/")
-		if strings.HasPrefix(start, prefix) {
+		if bytes.HasPrefix(key, []byte(prefix)) {
 			if len(rangeEnd) == 0 {
 				return nil
 			}
@@ -108,7 +107,7 @@ func validateMetaStorageAccess(key, rangeEnd []byte) error {
 			{"resource_group/", "resource_group0"},
 			{"/tidb/br-stream", "/tidb/br-strean"},
 		} {
-			if strings.HasPrefix(start, scope.prefix) {
+			if bytes.HasPrefix(key, []byte(scope.prefix)) {
 				upper = scope.upper
 				break
 			}
@@ -121,7 +120,7 @@ func validateMetaStorageAccess(key, rangeEnd []byte) error {
 		// etcd ranges are half-open. A whole-prefix query ends at the prefix's
 		// successor, which need not itself start with the allowed prefix.
 		// The NUL sentinel means all keys from start onwards, beyond this prefix.
-		if end != "\x00" && end > start && end <= upper {
+		if !bytes.Equal(rangeEnd, []byte{0}) && bytes.Compare(rangeEnd, key) > 0 && bytes.Compare(rangeEnd, []byte(upper)) <= 0 {
 			return nil
 		}
 	}
@@ -131,13 +130,13 @@ func validateMetaStorageAccess(key, rangeEnd []byte) error {
 // validateMetaStorageWriteAccess permits only log backup metadata mutations.
 // Other component metadata must be updated through its owner.
 func validateMetaStorageWriteAccess(key []byte) error {
+	if bytes.HasPrefix(key, []byte("/tidb/br-stream")) {
+		return nil
+	}
 	if err := validateMetaStorageAccess(key, nil); err != nil {
 		return err
 	}
-	if !strings.HasPrefix(string(key), "/tidb/br-stream") {
-		return status.Error(codes.PermissionDenied, "meta storage can only modify log backup metadata")
-	}
-	return nil
+	return status.Error(codes.PermissionDenied, "meta storage can only modify log backup metadata")
 }
 
 // Watch watches the key with a given prefix and revision.
