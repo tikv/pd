@@ -140,7 +140,7 @@ func TestSendTokenBucketRequestsStopsWhenContextIsCanceled(t *testing.T) {
 	require.NoError(t, err)
 	// Make a plain send block so the canceled context is the only exit path.
 	controller.tokenResponseChan <- nil
-	controller.sendTokenBucketRequests(ctx, nil, FromLowRU, notifyMsg{})
+	controller.sendTokenBucketRequests(ctx, nil, nil, FromLowRU, notifyMsg{})
 	select {
 	case <-called:
 	case <-time.After(time.Second):
