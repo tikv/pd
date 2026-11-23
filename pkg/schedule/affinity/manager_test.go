@@ -482,6 +482,14 @@ func TestRangeConflictOperationsConcurrentWithLookups(t *testing.T) {
 			}
 		}(worker%2 == 0)
 	}
+	var stopOnce sync.Once
+	stopWorkers := func() {
+		stopOnce.Do(func() {
+			close(done)
+			wg.Wait()
+		})
+	}
+	defer stopWorkers()
 
 	for i := range 20 {
 		id := fmt.Sprintf("tmp-%d", i)
@@ -494,8 +502,7 @@ func TestRangeConflictOperationsConcurrentWithLookups(t *testing.T) {
 	}
 	re.NoError(manager.DeleteAffinityGroups([]string{"conflict-b"}, true))
 
-	close(done)
-	wg.Wait()
+	stopWorkers()
 	close(errCh)
 	for lookupErr := range errCh {
 		re.NoError(lookupErr)

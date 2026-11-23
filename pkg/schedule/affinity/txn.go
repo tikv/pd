@@ -844,8 +844,7 @@ func (m *Manager) reconcileRangeConflictsLocked(conflicts map[string]struct{}) {
 // loadRegionLabel rebuilds the mapping between groups and label rules after restart.
 // It should be called with the manager lock held.
 func (m *Manager) loadRegionLabel() {
-	// Collect all key ranges from label rules and populate in-memory cache
-	var allRanges []GroupKeyRanges
+	totalRanges := 0
 
 	m.regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
 		groupID, ok := parseAffinityGroupIDFromLabelRule(rule)
@@ -871,7 +870,7 @@ func (m *Manager) loadRegionLabel() {
 		}
 
 		if len(gkr.KeyRanges) > 0 {
-			allRanges = append(allRanges, gkr)
+			totalRanges += len(gkr.KeyRanges)
 			// Populate in-memory key ranges cache
 			m.keyRanges[groupID] = gkr
 		}
@@ -886,11 +885,5 @@ func (m *Manager) loadRegionLabel() {
 
 	log.Info("rebuilt group-label mapping",
 		zap.Int("total-groups", len(m.keyRanges)),
-		zap.Int("total-ranges", func() int {
-			total := 0
-			for _, gkr := range allRanges {
-				total += len(gkr.KeyRanges)
-			}
-			return total
-		}()))
+		zap.Int("total-ranges", totalRanges))
 }
