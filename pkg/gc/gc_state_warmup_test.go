@@ -568,23 +568,18 @@ func TestGCStateWarmupInitialTargetsOnly(t *testing.T) {
 
 func newGCWarmupRuntimeTest(t *testing.T, intercept grpc.UnaryClientInterceptor) *GCStateManager {
 	t.Helper()
-	var clientCfg clientv3.Config
-	_, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{etcdClientCfgModifier: func(cfg *clientv3.Config) {
-		cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(intercept))
-		clientCfg = *cfg
-	}})
-	client, err := clientv3.New(clientCfg)
-	require.NoError(t, err)
+	_, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
+		useEnabledKeyspaceIndex: true,
+		etcdClientCfgModifier: func(cfg *clientv3.Config) {
+			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(intercept))
+		},
+	})
+	m.stopGCStateGeneration(m.activeGeneration.Load())
 	t.Cleanup(func() {
 		m.stopGCStateGeneration(m.activeGeneration.Load())
-		require.NoError(t, client.Close())
 		cancel()
 		clean()
 	})
-	// The unconfigured manager remains passive in classic deployments.
-	require.Nil(t, m.activeGeneration.Load().index)
-	m.stopGCStateGeneration(m.activeGeneration.Load())
-	m.InitEtcdClient(client, 0)
 	return m
 }
 

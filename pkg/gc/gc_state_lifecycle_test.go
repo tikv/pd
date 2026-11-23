@@ -71,8 +71,6 @@ func TestStarterGCMigrationStartup(t *testing.T) {
 	defer cancel()
 	ctx, client := t.Context(), native.etcdClient
 	native.stopGCStateGeneration(native.activeGeneration.Load())
-	upgraded := NewGCStateManager(provider, *native.getConfig(), native.keyspaceManager, native.metaServiceGroupManager)
-	defer upgraded.CloseBarrierMetrics()
 	canceled, cancelRead := context.WithCancel(ctx)
 	cancelRead()
 	_, err := LoadMigrationCutoff(canceled, client)
@@ -105,7 +103,8 @@ func TestStarterGCMigrationStartup(t *testing.T) {
 	cutoff, err := LoadMigrationCutoff(ctx, client)
 	require.NoError(t, err)
 	require.Equal(t, put.Header.Revision, cutoff)
-	upgraded.InitEtcdClient(client, cutoff)
+	upgraded := NewGCStateManager(provider, *native.getConfig(), native.keyspaceManager, native.metaServiceGroupManager, client, cutoff)
+	defer upgraded.CloseBarrierMetrics()
 	_, err = upgraded.GetGCState(2, true)
 	require.ErrorIs(t, err, errs.ErrNotLeader)
 	stop := upgraded.OnNodeBecomesLeader()

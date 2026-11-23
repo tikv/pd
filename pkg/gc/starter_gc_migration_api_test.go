@@ -46,8 +46,10 @@ func newStarterGCFixture(t *testing.T, count int, beforeCutoff func(destination,
 	_, source, closeSource := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(closeSource)
 	opt := newGCStateManagerForTestOptions{
-		etcdClientCfgModifier: clientConfig,
-		metaServiceGroups:     map[string]string{"group1": strings.Join(source.Endpoints(), ",")},
+		useEnabledKeyspaceIndex: true,
+		disableWarmupWorkers:    true,
+		etcdClientCfgModifier:   clientConfig,
+		metaServiceGroups:       map[string]string{"group1": strings.Join(source.Endpoints(), ",")},
 		beforeLeader: func(cli *clientv3.Client) {
 			destination = cli
 			for i := 1; i <= count; i++ {
@@ -69,10 +71,14 @@ func newStarterGCFixture(t *testing.T, count int, beforeCutoff func(destination,
 	_, _, manager, clean, cancel := newGCStateManagerForTest(t, opt)
 	t.Cleanup(clean)
 	t.Cleanup(cancel)
-	// The fixture's first generation has no warmup workers. Configure its client
-	// before handing it to the first foreground operation under test.
-	manager.InitEtcdClient(destination, cutoff)
 	return manager, destination, source, cutoff
+}
+
+// Start a new generation with one worker after the foreground-only setup.
+func startStarterWarmup(m *GCStateManager) func() {
+	m.stopGCStateGeneration(m.activeGeneration.Load())
+	m.cfg.GCStateCacheWarmupConcurrency = 1
+	return m.OnNodeBecomesLeader()
 }
 
 func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
@@ -162,7 +168,7 @@ func TestStarterGCMigrationWarmupAndReenabledTenant(t *testing.T) {
 	now := time.Now()
 	_, err := manager.keyspaceManager.UpdateKeyspaceStateByID(2, keyspacepb.KeyspaceState_DISABLED, now.Unix())
 	re.NoError(err)
-	t.Cleanup(manager.OnNodeBecomesLeader())
+	t.Cleanup(startStarterWarmup(manager))
 	gcWarmupWait(t, manager.activeGeneration.Load().warmup.done)
 	states, err := manager.GetAllKeyspacesGCStates(t.Context(), true)
 	re.NoError(err)

@@ -81,12 +81,6 @@ func LoadMigrationCutoff(ctx context.Context, client *clientv3.Client) (int64, e
 	return entry.CreateRevision, nil
 }
 
-// InitEtcdClient configures NextGen GC before the manager is published.
-func (m *GCStateManager) InitEtcdClient(client *clientv3.Client, migrationCutoff int64) {
-	m.etcdClient = client
-	m.migrationCutoff = migrationCutoff
-}
-
 // OnNodeBecomesLeader starts a unique leadership generation and returns its
 // idempotent cleanup. A delayed cleanup only affects the generation it owns.
 func (m *GCStateManager) OnNodeBecomesLeader() func() {

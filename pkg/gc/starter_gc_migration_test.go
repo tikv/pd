@@ -409,9 +409,6 @@ func TestStarterGCMigrationWarmupGroupConcurrency(t *testing.T) {
 	m, dest, source, _ := newStarterGCFixture(t, 2, func(dest, _ *clientv3.Client) {
 		setStarterKeyspaceConfig(t, dest, 2, keyspace.MetaServiceGroupIDKey, "group2")
 	}, nil)
-	cfg := *m.getConfig()
-	cfg.GCStateCacheWarmupConcurrency = 1
-	m.SetConfigGetter(func() *config.PDServerConfig { return &cfg })
 
 	group1, group2 := recordStarterGroups(t, m, dest, source)
 	entered, resume := make(chan struct{}, 2), make(chan struct{})
@@ -423,7 +420,7 @@ func TestStarterGCMigrationWarmupGroupConcurrency(t *testing.T) {
 	}
 	group1.beforeRead, group2.beforeRead = blockRead, blockRead
 
-	stop := m.OnNodeBecomesLeader()
+	stop := startStarterWarmup(m)
 	defer stop()
 	defer unblock()
 	gcWarmupWait(t, entered)

@@ -223,10 +223,20 @@ type GCStateManager struct {
 	nextWatcherID uint64
 }
 
-// NewGCStateManager creates a GCStateManager of GC and services.
-func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig, keyspaceManager *keyspace.Manager, metaServiceGroupManager *keyspace.MetaServiceGroupManager) *GCStateManager {
+// NewGCStateManager creates the GC state manager. A non-nil etcd client enables
+// the keyspace index and warmup. A positive migration cutoff enables Starter GC migration.
+func NewGCStateManager(
+	store endpoint.GCStateProvider,
+	cfg config.PDServerConfig,
+	keyspaceManager *keyspace.Manager,
+	metaServiceGroupManager *keyspace.MetaServiceGroupManager,
+	etcdClient *clientv3.Client,
+	migrationCutoff int64,
+) *GCStateManager {
 	m := &GCStateManager{
 		gcMetaStorage:                    store,
+		etcdClient:                       etcdClient,
+		migrationCutoff:                  migrationCutoff,
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
 		metaServiceGroupManager:          metaServiceGroupManager,

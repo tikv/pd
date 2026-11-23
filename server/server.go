@@ -584,11 +584,15 @@ func (s *Server) startServer(ctx context.Context, migrationCutoff int64) error {
 	} else {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
-	gcStateManager := gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager, s.metaServiceGroupManager)
-	gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
+	var gcEtcdClient *clientv3.Client
 	if kerneltype.IsNextGen() {
-		gcStateManager.InitEtcdClient(s.client, migrationCutoff)
+		gcEtcdClient = s.client
 	}
+	gcStateManager := gc.NewGCStateManager(
+		s.storage.GetGCStateProvider(), s.cfg.PDServerCfg,
+		s.keyspaceManager, s.metaServiceGroupManager, gcEtcdClient, migrationCutoff,
+	)
+	gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
 	s.gcStateManager = gcStateManager
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.

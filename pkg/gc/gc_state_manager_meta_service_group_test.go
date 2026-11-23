@@ -904,7 +904,7 @@ func TestTxnSafePointRoutingRevisionScopes(t *testing.T) {
 		_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 		defer clean()
 		storage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
-		manager := NewGCStateManager(storage.GetGCStateProvider(), config.PDServerConfig{}, nil, nil)
+		manager := NewGCStateManager(storage.GetGCStateProvider(), config.PDServerConfig{}, nil, nil, nil, 0)
 		defer manager.CloseBarrierMetrics()
 		re.NoError(storage.Save(keypath.CompatibleTiDBMinStartTSPrefix(constant.NullKeyspaceID)+"tidb-local", "100"))
 		for _, id := range []uint32{constant.NullKeyspaceID, constant.ValidKeyspaceIDMask + 1} {
