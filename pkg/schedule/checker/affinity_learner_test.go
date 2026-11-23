@@ -1587,6 +1587,55 @@ func TestAffinityCheckerStaleExpireRace(t *testing.T) {
 	}
 }
 
+func TestAffinityCheckerRefetchedWitnessTarget(t *testing.T) {
+	re := require.New(t)
+	c, tc, _ := newLearnerConflictController(t)
+	tc.SetEnableWitness(true)
+	rule := tc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	rule.Count = 2
+	re.NoError(tc.GetRuleManager().SetRule(rule))
+	re.NoError(tc.GetRuleManager().SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: "witness", Role: placement.Voter, Count: 1, IsWitness: true,
+		LabelConstraints: []placement.LabelConstraint{{Key: "ID", Op: placement.In, Values: []string{"3"}}},
+	}))
+	region := tc.GetRegion(1).Clone(core.WithWitness(tc.GetRegion(1).GetStorePeer(3).GetId()))
+	tc.PutRegion(region)
+	manager := tc.GetAffinityManager()
+	const id = "refetched-witness-target"
+	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: id}, region.GetStartKey(), region.GetEndKey()))
+
+	// Pause placement fitting after Check reads the group without a target.
+	barrier := &getStoreBarrierCluster{
+		CheckerCluster: tc,
+		entered:        make(chan struct{}),
+		release:        make(chan struct{}),
+	}
+	checker := c.affinityChecker
+	checker.cluster = barrier
+	ops := make(chan []*operator.Operator, 1)
+	go func() {
+		ops <- checker.Check(region)
+	}()
+	select {
+	case <-barrier.entered:
+	case <-time.After(3 * time.Second):
+		close(barrier.release)
+		t.Fatal("checker did not reach store lookup after reading group snapshot")
+	}
+
+	target := []uint64{1, 2, 4}
+	_, err := manager.UpdateAffinityGroupPeers(id, 1, target)
+	close(barrier.release)
+	firstOps := <-ops
+	re.NoError(err)
+	re.Empty(firstOps, "a refetched target must not displace the witness")
+	assertCommittedAffinityTarget(re, tc, id, 1, target)
+
+	// The next pass validates the target and relearns from the region.
+	re.Empty(checker.Check(region))
+	assertCommittedAffinityTarget(re, tc, id, 1, []uint64{1, 2, 3})
+}
+
 func TestAffinityCheckerWitnessTargetReassignment(t *testing.T) {
 	t.Run("four-replica-no-bounce", func(t *testing.T) {
 		re := require.New(t)

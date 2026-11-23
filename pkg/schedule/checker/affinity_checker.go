@@ -191,6 +191,11 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	if needRefetch && !isAffinity {
+		// Validate a concurrently updated target on the next check before scheduling.
+		return nil
+	}
+
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
 		return c.mergeCheck(region, group)
