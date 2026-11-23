@@ -155,12 +155,7 @@ def plan_layout(packages, config, layout_name, parallel, module_penalty=MODULE_P
         if len(pools) != 1:
             raise ValueError(f"package must match exactly one test scope: {package.module}: {package.path} ({pools})")
         eligible[(package.module, package.path)] = [i for i, runner in enumerate(layout) if pools[0] in runner["pools"]]
-    shards = plan_shards(packages, len(layout), parallel, eligible, module_penalty)
-    for module in ("client", "tools"):
-        owners = [i for i, shard in enumerate(shards) if any(p.module == module for p in shard)]
-        if len(owners) > 1:
-            raise ValueError(f"native go test module {module} must stay on one runner")
-    return shards
+    return plan_shards(packages, len(layout), parallel, eligible, module_penalty)
 
 
 def merge_results(directory, root):
@@ -295,10 +290,12 @@ def update_profile(profile, reports):
             samples[(package, test)].append(seconds)
     profile["tests"] = {}
     profile["packages"] = {}
+    package_timings = collections.defaultdict(list)
     for (package, test), values in samples.items():
-        profile["tests"][f"{package}.{test}"] = round(statistics.median(values), 3)
-    for package in {package for package, _ in samples}:
-        values = [seconds for key, seconds in profile["tests"].items() if key.startswith(package + ".")]
+        seconds = round(statistics.median(values), 3)
+        profile["tests"][f"{package}.{test}"] = seconds
+        package_timings[package].append(seconds)
+    for package, values in package_timings.items():
         profile["packages"][package] = {"seconds": round(sum(values), 3), "longest": max(values)}
     return profile
 
