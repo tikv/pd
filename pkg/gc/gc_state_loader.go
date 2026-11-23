@@ -87,7 +87,7 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 		return gcStateLoadResult{}, err
 	}
 	if len(pending) != 0 {
-		m.migrateStarterBatch(ctx, generation, pending, 2, func(group []*starterMigrationItem) {
+		m.migrateStarterBatch(ctx, generation, pending, 0, func(group []*starterMigrationItem) {
 			m.publishStarterGroup(ctx, generation, batch, group)
 		})
 	}

@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server/config"
 )
@@ -154,9 +157,10 @@ func TestStarterGCMigrationConcurrentTakeover(t *testing.T) {
 	require.Equal(t, advancedRevision, rev)
 }
 
-func TestStarterGCMigrationAmbiguousCommit(t *testing.T) {
+func TestStarterGCMigrationFullBatchAmbiguousCommit(t *testing.T) {
+	const count = endpoint.MaxGCSafePointBatchSize
 	var loseReply atomic.Bool
-	manager, dest, _, _ := newStarterGCFixture(t, 1, nil, func(cfg *clientv3.Config) {
+	manager, dest, _, marker := newStarterGCFixture(t, count, nil, func(cfg *clientv3.Config) {
 		cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			err := invoke(ctx, method, req, reply, cc, opts...)
 			txn, ok := req.(*etcdserverpb.TxnRequest)
@@ -169,14 +173,54 @@ func TestStarterGCMigrationAmbiguousCommit(t *testing.T) {
 		}))
 	})
 	loseReply.Store(true)
-	ctx := context.Background()
-	require.NoError(t, manager.ensureMigratedTxnSafePoint(ctx, manager.activeGeneration.Load(), 1))
-	require.False(t, loseReply.Load())
-	resp, err := dest.Get(ctx, keypath.TxnSafePointPath(1))
+	ids := make([]uint32, count)
+	for i := range ids {
+		ids[i] = uint32(i + 1)
+	}
+	ctx := t.Context()
+	result, err := manager.loadGCStateBatch(ctx, manager.activeGeneration.Load(), gcStateLoadCandidates(ids...))
 	require.NoError(t, err)
-	require.Len(t, resp.Kvs, 1)
-	require.Equal(t, "101", string(resp.Kvs[0].Value))
-	require.EqualValues(t, 2, resp.Kvs[0].Version)
+	require.Empty(t, result.failed)
+	require.ElementsMatch(t, ids, result.completed)
+	require.False(t, loseReply.Load())
+	// All 60 writes landed in the same transaction, and none was repeated after the lost reply.
+	var revision int64
+	for _, id := range ids {
+		resp, err := dest.Get(ctx, keypath.TxnSafePointPath(id))
+		require.NoError(t, err)
+		require.Len(t, resp.Kvs, 1)
+		row := resp.Kvs[0]
+		require.Equal(t, strconv.FormatUint(uint64(100+id), 10), string(row.Value))
+		require.EqualValues(t, 2, row.Version)
+		if revision == 0 {
+			revision = row.ModRevision
+			require.Greater(t, revision, marker)
+		}
+		require.Equal(t, revision, row.ModRevision)
+	}
+}
+
+func TestStarterGCMigrationBatchWithChangingRoute(t *testing.T) {
+	m, dest, _, marker := newStarterGCAPIFixture(t, 2)
+	const hook = "github.com/tikv/pd/pkg/gc/starterGCMigrationSourceLoaded"
+	require.NoError(t, failpoint.EnableCall(hook, func(firstID uint32) {
+		if firstID == 1 {
+			// Change the route revision after every source read for keyspace 1.
+			setStarterSourceGroup(t, dest, 1, "group1")
+		}
+	}))
+	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+
+	result, err := m.loadGCStateBatch(t.Context(), m.activeGeneration.Load(), gcStateLoadCandidates(1, 2))
+	require.NoError(t, err)
+	require.ErrorIs(t, result.failed[1], errs.ErrEtcdTxnConflict)
+	require.Equal(t, []uint32{2}, result.completed)
+	value, rev := readStarterSafePoint(t, m, 1)
+	require.EqualValues(t, 10, value)
+	require.LessOrEqual(t, rev, marker)
+	value, rev = readStarterSafePoint(t, m, 2)
+	require.EqualValues(t, 102, value)
+	require.Greater(t, rev, marker)
 }
 
 func TestStarterGCMigrationSameBackend(t *testing.T) {
@@ -346,7 +390,7 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 	ctx := t.Context()
 	var localReads [][]string
 	var readsMu sync.Mutex
-	m, dest, source, marker := newStarterGCFixture(t, 7, func(dest, source *clientv3.Client) {
+	m, dest, source, marker := newStarterGCFixture(t, 8, func(dest, source *clientv3.Client) {
 		// Keyspaces 1 and 2 use the second group. Keyspace 7 uses the PD default.
 		setStarterSourceGroup(t, dest, 1, "group2")
 		setStarterSourceGroup(t, dest, 2, "group2")
@@ -387,6 +431,14 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 		return rpc
 	}
 	healthy, unavailable := record("group1"), record("group2")
+	// Advance G after the initial local snapshot, while the group read is in flight.
+	healthy.beforeRead = func() error {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+			return wb.SetGCSafePoint(8, 109)
+		})
+	}
 	entered, resume := make(chan struct{}), make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(resume) })
 	defer unblock()
@@ -395,7 +447,7 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 	require.NoError(t, err)
 	done := make(chan gcStateLoadResult, 1)
 	go func() {
-		r, err := m.loadGCStateBatch(ctx, m.activeGeneration.Load(), gcStateLoadCandidates(1, 2, 3, 4, 5, 6, 7))
+		r, err := m.loadGCStateBatch(ctx, m.activeGeneration.Load(), gcStateLoadCandidates(1, 2, 3, 4, 5, 6, 7, 8))
 		if err != nil {
 			r.failed = map[uint32]error{0: err}
 		}
@@ -412,15 +464,17 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 	readsMu.Lock()
 	reads := localReads
 	readsMu.Unlock()
-	require.Equal(t, [][]string{{keypath.TxnSafePointPath(3), keypath.GCSafePointPath(3), keypath.TxnSafePointPath(4), keypath.GCSafePointPath(4)}}, reads)
+	healthyKeys := []string{keypath.TxnSafePointPath(3), keypath.GCSafePointPath(3), keypath.TxnSafePointPath(4), keypath.GCSafePointPath(4)}
+	require.Equal(t, [][]string{append(slices.Clone(healthyKeys), keypath.TxnSafePointPath(8), keypath.GCSafePointPath(8)), healthyKeys}, reads)
 	require.ElementsMatch(t, []uint32{3, 4, 6, 7}, result.completed)
-	require.Len(t, result.failed, 3)
-	for _, id := range []uint32{1, 2, 5} {
+	require.Len(t, result.failed, 4)
+	require.ErrorContains(t, result.failed[8], "GC safe point 109 exceeds frozen transaction safe point 108")
+	for _, id := range []uint32{1, 2, 5, 8} {
 		require.Error(t, result.failed[id])
 		_, rev := readStarterSafePoint(t, m, id)
 		require.LessOrEqual(t, rev, marker)
 	}
-	require.Equal(t, [][]string{{keypath.TxnSafePointPath(3), keypath.TxnSafePointPath(4), keypath.TxnSafePointPath(5)}}, healthy.requests)
+	require.Equal(t, [][]string{{keypath.TxnSafePointPath(3), keypath.TxnSafePointPath(4), keypath.TxnSafePointPath(5), keypath.TxnSafePointPath(8)}}, healthy.requests)
 	require.Equal(t, [][]string{{keypath.TxnSafePointPath(1), keypath.TxnSafePointPath(2)}}, unavailable.requests)
 	for id, want := range map[uint32]uint64{3: 103, 4: 104, 6: 106, 7: 10} {
 		value, rev := readStarterSafePoint(t, m, id)
