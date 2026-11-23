@@ -63,9 +63,9 @@ func (m *GCStateManager) ensureMigratedTxnSafePoint(ctx context.Context, generat
 	defer cancel()
 	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, []uint32{id})
 	if err == nil {
-		item := starterMigrationItem{target: pairs[0]}
+		item := migrationItem{localRead: pairs[0]}
 		if item.needsMigration(m) {
-			m.migrateStarterBatch(ctx, generation, []*starterMigrationItem{&item}, 0, nil)
+			m.migrateStarterBatch(ctx, generation, []*migrationItem{&item}, 0, nil)
 		}
 		err = item.err
 	}
@@ -75,17 +75,17 @@ func (m *GCStateManager) ensureMigratedTxnSafePoint(ctx context.Context, generat
 	return err
 }
 
-type starterMigrationItem struct {
-	index        int // slot in the loader's original batch
-	target       endpoint.GCSafePointReadResult
-	metaRevision int64
-	txnSafePoint uint64
-	err          error
+type migrationItem struct {
+	index        int                            // Position in the loader batch before grouping by source.
+	localRead    endpoint.GCSafePointReadResult // Safe points read from PD etcd before looking up the source.
+	metaRevision int64                          // ModRevision of the keyspace metadata used to select the source.
+	txnSafePoint uint64                         // Transaction safe point to install from the selected source.
+	err          error                          // Error to report for this keyspace.
 }
 
 // A legacy local T may be behind G. Only compare the pair once T is confirmed.
-func (item *starterMigrationItem) needsMigration(m *GCStateManager) bool {
-	pair := item.target
+func (item *migrationItem) needsMigration(m *GCStateManager) bool {
+	pair := item.localRead
 	item.err = pair.Err
 	if item.err == nil {
 		if !pair.TxnSafePointEmpty && m.needsStarterCheck(pair.KeyspaceID, pair.TxnSafePointRevision) {
@@ -98,8 +98,8 @@ func (item *starterMigrationItem) needsMigration(m *GCStateManager) bool {
 
 // Each group completes independently. The loader can publish the group as soon
 // as its conditional writes finish, even if another group is unreachable.
-func (m *GCStateManager) migrateStarterBatch(ctx context.Context, generation *gcStateGeneration, pending []*starterMigrationItem, attempt int, finish func([]*starterMigrationItem)) {
-	rows, err := readStarterKeys(ctx, m.etcdClient, pending, keypath.KeyspaceMetaPath)
+func (m *GCStateManager) migrateStarterBatch(ctx context.Context, generation *gcStateGeneration, pending []*migrationItem, attempt int, finish func([]*migrationItem)) {
+	metaRows, err := readStarterKeys(ctx, m.etcdClient, pending, keypath.KeyspaceMetaPath)
 	if err != nil {
 		for _, item := range pending {
 			item.err = err
@@ -110,17 +110,17 @@ func (m *GCStateManager) migrateStarterBatch(ctx context.Context, generation *gc
 		return
 	}
 
-	groups := make(map[string][]*starterMigrationItem)
+	groups := make(map[string][]*migrationItem)
 	for i, item := range pending {
-		group, err := item.route(rows[i], m.migrationCutoff)
+		groupID, err := item.resolveSourceGroup(metaRows[i], m.migrationCutoff)
 		item.err = err
-		groups[group] = append(groups[group], item)
+		groups[groupID] = append(groups[groupID], item)
 	}
 
 	var workers sync.WaitGroup
-	for group, items := range groups {
+	for groupID, items := range groups {
 		run := func() {
-			m.migrateStarterGroup(ctx, generation, group, items, attempt)
+			m.migrateStarterGroup(ctx, generation, groupID, items, attempt)
 			if finish != nil {
 				finish(items)
 			}
@@ -136,9 +136,9 @@ func (m *GCStateManager) migrateStarterBatch(ctx context.Context, generation *gc
 
 // Read the frozen values together even on retry. After a failed commit, write
 // the remaining scopes individually so a changing route cannot block its peers.
-func (m *GCStateManager) migrateStarterGroup(ctx context.Context, generation *gcStateGeneration, group string, items []*starterMigrationItem, attempt int) {
-	configRevision, err := m.readStarterGroup(ctx, group, items)
-	ready := make([]*starterMigrationItem, 0, len(items))
+func (m *GCStateManager) migrateStarterGroup(ctx context.Context, generation *gcStateGeneration, groupID string, items []*migrationItem, attempt int) {
+	configRevision, err := m.readSourceTxnSafePoints(ctx, groupID, items)
+	ready := make([]*migrationItem, 0, len(items))
 	for _, item := range items {
 		if err != nil {
 			item.err = err
@@ -147,11 +147,11 @@ func (m *GCStateManager) migrateStarterGroup(ctx context.Context, generation *gc
 			ready = append(ready, item)
 		}
 	}
-	size := endpoint.MaxGCSafePointBatchSize
+	writeBatchSize := endpoint.MaxGCSafePointBatchSize
 	if attempt > 0 {
-		size = 1
+		writeBatchSize = 1
 	}
-	for batch := range slices.Chunk(ready, size) {
+	for batch := range slices.Chunk(ready, writeBatchSize) {
 		if err := m.commitStarterBatch(ctx, generation, batch, configRevision); err != nil {
 			// A failed CAS invalidates data conflicts observed before the commit too.
 			for _, item := range batch {
@@ -160,7 +160,7 @@ func (m *GCStateManager) migrateStarterGroup(ctx context.Context, generation *gc
 		}
 	}
 	if attempt < 2 {
-		if retry := m.reloadStarterConflicts(ctx, items); len(retry) > 0 {
+		if retry := m.reloadRetryableItems(ctx, items); len(retry) > 0 {
 			m.migrateStarterBatch(ctx, generation, retry, attempt+1, nil)
 		}
 	}
@@ -168,26 +168,26 @@ func (m *GCStateManager) migrateStarterGroup(ctx context.Context, generation *gc
 
 // A CAS conflict or lost reply may already have installed or advanced T.
 // Recheck the local revisions before looking up any frozen source again.
-func (m *GCStateManager) reloadStarterConflicts(ctx context.Context, items []*starterMigrationItem) []*starterMigrationItem {
+func (m *GCStateManager) reloadRetryableItems(ctx context.Context, items []*migrationItem) []*migrationItem {
 	var ids []uint32
-	var conflicts []*starterMigrationItem
+	var retryable []*migrationItem
 	for _, item := range items {
 		if errors.Is(item.err, errs.ErrEtcdTxnConflict) || errors.Is(item.err, errs.ErrEtcdTxnInternal) {
-			ids = append(ids, item.target.KeyspaceID)
-			conflicts = append(conflicts, item)
+			ids = append(ids, item.localRead.KeyspaceID)
+			retryable = append(retryable, item)
 		}
 	}
-	if len(conflicts) == 0 {
+	if len(retryable) == 0 {
 		return nil
 	}
 	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
-	pending := conflicts[:0]
-	for i, item := range conflicts {
+	pending := retryable[:0]
+	for i, item := range retryable {
 		if err != nil {
 			item.err = err
 			continue
 		}
-		item.target = pairs[i]
+		item.localRead = pairs[i]
 		if item.needsMigration(m) {
 			pending = append(pending, item)
 		}
@@ -196,12 +196,12 @@ func (m *GCStateManager) reloadStarterConflicts(ctx context.Context, items []*st
 }
 
 // readStarterKeys fetches one exact key per item at the same etcd revision.
-func readStarterKeys(ctx context.Context, client *clientv3.Client, items []*starterMigrationItem, path func(uint32) string) ([]*mvccpb.KeyValue, error) {
+func readStarterKeys(ctx context.Context, client *clientv3.Client, items []*migrationItem, path func(uint32) string) ([]*mvccpb.KeyValue, error) {
 	ctx, cancel := context.WithTimeout(ctx, etcdutil.DefaultRequestTimeout)
 	defer cancel()
 	ops := make([]clientv3.Op, len(items))
 	for i, item := range items {
-		ops[i] = clientv3.OpGet(path(item.target.KeyspaceID))
+		ops[i] = clientv3.OpGet(path(item.localRead.KeyspaceID))
 	}
 	resp, err := client.Txn(ctx).Then(ops...).Commit()
 	if err != nil {
@@ -227,8 +227,8 @@ func readStarterKeys(ctx context.Context, client *clientv3.Client, items []*star
 	return rows, nil
 }
 
-// An empty group selects the verified PD default or a tenant created after the cutoff.
-func (item *starterMigrationItem) route(row *mvccpb.KeyValue, cutoff int64) (string, error) {
+// An empty group ID selects PD etcd as the source for this keyspace.
+func (item *migrationItem) resolveSourceGroup(row *mvccpb.KeyValue, cutoff int64) (string, error) {
 	if row == nil || len(row.Value) == 0 {
 		return "", errs.ErrKeyspaceNotFound
 	}
@@ -236,7 +236,7 @@ func (item *starterMigrationItem) route(row *mvccpb.KeyValue, cutoff int64) (str
 	if err := proto.Unmarshal(row.Value, meta); err != nil {
 		return "", err
 	}
-	id := item.target.KeyspaceID
+	id := item.localRead.KeyspaceID
 	if meta.GetId() != id {
 		return "", fmt.Errorf("metadata for keyspace %d has ID %d", id, meta.GetId())
 	}
@@ -247,49 +247,49 @@ func (item *starterMigrationItem) route(row *mvccpb.KeyValue, cutoff int64) (str
 		return "", err
 	}
 	item.metaRevision = row.ModRevision
-	group, hasGroup := meta.Config[keyspace.MetaServiceGroupIDKey]
+	groupID, hasGroup := meta.Config[keyspace.MetaServiceGroupIDKey]
 	if row.CreateRevision > cutoff || !hasGroup {
-		item.txnSafePoint = item.target.TxnSafePoint
+		item.txnSafePoint = item.localRead.TxnSafePoint
 		return "", nil
 	}
-	if group == "" || !config.IsValidMetaServiceGroupID(group) {
-		return "", fmt.Errorf("invalid meta-service group %q for keyspace %d", group, id)
+	if groupID == "" || !config.IsValidMetaServiceGroupID(groupID) {
+		return "", fmt.Errorf("invalid meta-service group %q for keyspace %d", groupID, id)
 	}
-	return group, nil
+	return groupID, nil
 }
 
-func (m *GCStateManager) readStarterGroup(ctx context.Context, group string, items []*starterMigrationItem) (int64, error) {
-	if group == "" {
+func (m *GCStateManager) readSourceTxnSafePoints(ctx context.Context, groupID string, items []*migrationItem) (int64, error) {
+	if groupID == "" {
 		return -1, nil // No external group configuration to check.
 	}
 	if m.metaServiceGroupManager == nil {
-		return 0, fmt.Errorf("unavailable meta-service group %q", group)
+		return 0, fmt.Errorf("unavailable meta-service group %q", groupID)
 	}
-	client, revision, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, group)
+	client, configRevision, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, groupID)
 	if err != nil {
 		return 0, err
 	}
 	rows, err := readStarterKeys(ctx, client, items, keypath.TxnSafePointPath)
 	if err != nil {
-		return 0, fmt.Errorf("read meta-service group %q: %w", group, err)
+		return 0, fmt.Errorf("read meta-service group %q: %w", groupID, err)
 	}
 	for i, item := range items {
 		item.txnSafePoint = 0
 		if rows[i] != nil {
 			value, err := strconv.ParseUint(string(rows[i].Value), 10, 64)
 			if err != nil {
-				item.err = fmt.Errorf("invalid transaction safe point for keyspace %d in meta-service group %q: %w", item.target.KeyspaceID, group, err)
+				item.err = fmt.Errorf("invalid transaction safe point for keyspace %d in meta-service group %q: %w", item.localRead.KeyspaceID, groupID, err)
 			}
 			item.txnSafePoint = value
 		}
 	}
-	return revision, nil
+	return configRevision, nil
 }
 
-func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcStateGeneration, items []*starterMigrationItem, configRevision int64) error {
+func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcStateGeneration, items []*migrationItem, configRevision int64) error {
 	ids := make([]uint32, len(items))
 	for i, item := range items {
-		ids[i] = item.target.KeyspaceID
+		ids[i] = item.localRead.KeyspaceID
 	}
 	failpoint.InjectCall("starterGCMigrationSourceLoaded", ids[0])
 	m.mu.Lock()
@@ -314,7 +314,7 @@ func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcS
 		}
 		for i, item := range items {
 			id := ids[i]
-			if err := wb.ExpectTxnSafePointRevision(id, item.target.TxnSafePointRevision); err != nil {
+			if err := wb.ExpectTxnSafePointRevision(id, item.localRead.TxnSafePointRevision); err != nil {
 				return err
 			}
 			if err := wb.ExpectKeyspaceMetaRevision(id, item.metaRevision); err != nil {
@@ -325,8 +325,8 @@ func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcS
 			switch {
 			case current[i].Err != nil:
 				item.err = current[i].Err
-			case item.target.TxnSafePoint > item.txnSafePoint:
-				item.err = fmt.Errorf("keyspace %d local transaction safe point %d exceeds frozen value %d", id, item.target.TxnSafePoint, item.txnSafePoint)
+			case item.localRead.TxnSafePoint > item.txnSafePoint:
+				item.err = fmt.Errorf("keyspace %d local transaction safe point %d exceeds frozen value %d", id, item.localRead.TxnSafePoint, item.txnSafePoint)
 			case current[i].GCSafePoint > item.txnSafePoint:
 				item.err = fmt.Errorf("keyspace %d GC safe point %d exceeds frozen transaction safe point %d", id, current[i].GCSafePoint, item.txnSafePoint)
 			default:

@@ -87,8 +87,8 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 		return gcStateLoadResult{}, err
 	}
 	if len(pending) != 0 {
-		m.migrateStarterBatch(ctx, generation, pending, 0, func(group []*starterMigrationItem) {
-			m.publishStarterGroup(ctx, generation, batch, group)
+		m.migrateStarterBatch(ctx, generation, pending, 0, func(items []*migrationItem) {
+			m.publishStarterGroup(ctx, generation, batch, items)
 		})
 	}
 	return batch.result, nil
@@ -96,11 +96,11 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 
 // Hold the read lock from the group's final local read through publication.
 // An ordinary GC write may already have advanced beyond the frozen T.
-func (m *GCStateManager) publishStarterGroup(ctx context.Context, generation *gcStateGeneration, batch *gcStateLoadBatch, group []*starterMigrationItem) {
-	ids := make([]uint32, 0, len(group))
-	for _, item := range group {
+func (m *GCStateManager) publishStarterGroup(ctx context.Context, generation *gcStateGeneration, batch *gcStateLoadBatch, items []*migrationItem) {
+	ids := make([]uint32, 0, len(items))
+	for _, item := range items {
 		if item.err == nil {
-			ids = append(ids, item.target.KeyspaceID)
+			ids = append(ids, item.localRead.KeyspaceID)
 		}
 	}
 	m.mu.RLock()
@@ -108,7 +108,7 @@ func (m *GCStateManager) publishStarterGroup(ctx context.Context, generation *gc
 	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
 	generation.mu.Lock()
 	defer generation.mu.Unlock()
-	for _, item := range group {
+	for _, item := range items {
 		pair := endpoint.GCSafePointReadResult{Err: item.err}
 		if pair.Err == nil {
 			pair.Err = err
@@ -120,7 +120,7 @@ func (m *GCStateManager) publishStarterGroup(ctx context.Context, generation *gc
 	}
 }
 
-func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool), batch *gcStateLoadBatch) ([]*starterMigrationItem, error) {
+func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool), batch *gcStateLoadBatch) ([]*migrationItem, error) {
 	failpoint.InjectCall("beforeGCStateLoadManagerLock")
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -185,13 +185,13 @@ func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *g
 	}
 	generation.mu.Lock()
 	defer generation.mu.Unlock()
-	var pending []*starterMigrationItem
+	var pending []*migrationItem
 	for i, id := range batch.keyspaceIDs {
 		pair := endpoint.GCSafePointReadResult{Err: err}
 		if err == nil {
 			pair = values[i]
 			if pair.Err == nil && !pair.TxnSafePointEmpty && m.needsStarterCheck(id, pair.TxnSafePointRevision) {
-				pending = append(pending, &starterMigrationItem{index: i, target: pair})
+				pending = append(pending, &migrationItem{index: i, localRead: pair})
 				continue
 			}
 		}
