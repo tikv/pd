@@ -254,7 +254,7 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 	groupInfo.SetAvailability(groupAvailable)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
-	groupInfo.targetUnpersisted = false
+	groupInfo.persistedGroup = nil
 	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil
@@ -583,20 +583,21 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
 		return true
 	}
-	if groupInfo.targetUnpersisted && group.LeaderStoreID == 0 && len(group.VoterStoreIDs) == 0 {
+	// A reload of the last stored target leaves a local replacement in place.
+	if groupInfo.persistedGroup != nil && sameStoredGroup(groupInfo.persistedGroup, group) {
 		return false
 	}
 
 	// A duplicate or a healthy local confirmation preserves runtime state
 	// if the voter order also matches.
-	if (!groupInfo.targetUnpersisted || groupInfo.IsAvailable()) &&
+	if (groupInfo.persistedGroup == nil || groupInfo.IsAvailable()) &&
 		sameStoredGroup(&groupInfo.Group, group) && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
-		groupInfo.targetUnpersisted = false
+		groupInfo.persistedGroup = nil
 		return false
 	}
 	groupInfo.Group = *group
 	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
-	groupInfo.targetUnpersisted = false
+	groupInfo.persistedGroup = nil
 	// Start a fresh grace period for a changed target or a newly confirmed
 	// local target that is no longer available.
 	groupInfo.availability = groupDegraded

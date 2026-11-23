@@ -838,6 +838,122 @@ func TestFirstWinUnsupportedTargetWriter(t *testing.T) {
 	})
 }
 
+func TestFirstWinUnsupportedTargetWriterReplacesStoredTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		condition storeCondition
+		voters    []uint64
+	}{
+		{name: "evicted leader", condition: storeLeaderEvicted, voters: []uint64{1, 2}},
+		{name: "expired voters", condition: storeDown, voters: []uint64{1, 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				pdManager, store := newTargetTestManager(t)
+				m, _ := newTargetTestManager(t)
+				re.NoError(pdManager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+				_, err := pdManager.UpdateAffinityGroupPeers("g", 2, []uint64{1, 2})
+				re.NoError(err)
+				stored := loadStoredGroup(re, store, "g")
+				m.SyncGroupFromEtcd(stored)
+				m.applyStoreConditions(map[uint64]storeCondition{2: tc.condition})
+
+				var sent []GroupTarget
+				supported := false
+				m.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []GroupTarget) ([]string, error) {
+					sent = append(sent, targets...)
+					if !supported {
+						return nil, ErrTargetWriterUnsupported
+					}
+					return pdManager.UpdateAffinityGroupTargets(targets)
+				}))
+
+				region := generateRegionForTest(10, tc.voters, nonOverlappingRange)
+				before := m.GetAffinityGroupState("g")
+				re.False(before.AffinitySchedulingAllowed)
+				re.Equal(tc.condition == storeDown, before.RegularSchedulingAllowed)
+				m.ObserveAvailableRegion(region, before)
+				synctest.Wait()
+
+				target := GroupTarget{Expected: *stored, LeaderStoreID: 1, VoterStoreIDs: tc.voters}
+				re.Equal([]GroupTarget{target}, sent)
+				local := m.GetAffinityGroupState("g")
+				re.True(local.AffinitySchedulingAllowed)
+				re.True(local.HasUnpersistedTarget())
+				re.Equal(*target.result(), local.Group)
+				re.Equal(stored, loadStoredGroup(re, store, "g"))
+
+				m.SyncGroupFromEtcd(stored)
+				re.Equal(local, m.GetAffinityGroupState("g"), "an unchanged etcd target must preserve the local replacement")
+
+				supported = true
+				time.Sleep(time.Second)
+				m.ObserveAvailableRegion(region, m.GetAffinityGroupState("g"))
+				synctest.Wait()
+				re.Equal([]GroupTarget{target, target}, sent, "the retry must compare against the old persisted target")
+				persisted := loadStoredGroup(re, store, "g")
+				re.Equal(local.Group, *persisted)
+				m.SyncGroupFromEtcd(persisted)
+				confirmed := m.GetAffinityGroupState("g")
+				re.False(confirmed.HasUnpersistedTarget())
+				re.True(confirmed.AffinitySchedulingAllowed)
+				re.Equal(local.affinityVer, confirmed.affinityVer, "confirming the active target preserves its version")
+			})
+		})
+	}
+}
+
+func TestFirstWinStoredTargetAfterLocalReplacement(t *testing.T) {
+	for _, source := range []string{"admin update", "recreation", "matching observation"} {
+		t.Run(source, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				m, _ := newTargetTestManager(t)
+				stored := Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2}}
+				m.SyncGroupFromEtcd(&stored)
+				m.applyStoreConditions(map[uint64]storeCondition{2: storeLeaderEvicted})
+				calls := 0
+				m.SetTargetWriter(targetWriterFunc(func(context.Context, []GroupTarget) ([]string, error) {
+					calls++
+					return nil, ErrTargetWriterUnsupported
+				}))
+
+				m.ObserveAvailableRegion(generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange), m.GetAffinityGroupState("g"))
+				synctest.Wait()
+				local := m.GetAffinityGroupState("g")
+				re.True(local.AffinitySchedulingAllowed)
+				re.True(local.HasUnpersistedTarget())
+				re.Equal(1, calls)
+
+				want := stored
+				switch source {
+				case "admin update":
+					want.LeaderStoreID = 3
+					want.VoterStoreIDs = []uint64{1, 3}
+					m.SyncGroupFromEtcd(&want)
+				case "recreation":
+					m.applyStoreConditions(nil)
+					want.CreateTimestamp++
+					m.SyncGroupFromEtcd(&want)
+				case "matching observation":
+					m.applyStoreConditions(map[uint64]storeCondition{1: storeLeaderEvicted})
+					m.ObserveAvailableRegion(generateRegionForTest(20, []uint64{2, 1}, nonOverlappingRange), m.GetAffinityGroupState("g"))
+					synctest.Wait()
+					re.Equal(1, calls, "the persisted target can be restored without a write")
+				}
+				state := m.GetAffinityGroupState("g")
+				re.Equal(want, state.Group)
+				re.False(state.HasUnpersistedTarget())
+				re.True(state.AffinitySchedulingAllowed)
+				if source == "recreation" {
+					re.NotSame(local.groupInfoPtr, state.groupInfoPtr)
+				}
+			})
+		})
+	}
+}
+
 type targetReplyStorage struct {
 	endpoint.AffinityStorage
 	beforeCommit func()

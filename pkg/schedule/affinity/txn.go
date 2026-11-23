@@ -345,28 +345,25 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 			return group, nil
 		}
 		if m.targetWriter != nil {
+			expected := group.Group
 			m.RLock()
 			conditionsKnown := m.storeConditionsKnown
+			if group.targetUnpersisted {
+				expected = m.groups[groupID].storedGroup()
+				expected.VoterStoreIDs = slices.Clone(expected.VoterStoreIDs)
+			}
 			m.RUnlock()
 			if !conditionsKnown && !group.targetUnpersisted && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
 				return group, nil
 			}
-			expected := group.Group
-			if group.targetUnpersisted {
-				expected.LeaderStoreID = 0
-				expected.VoterStoreIDs = nil
-			}
 			target := GroupTarget{Expected: expected, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
 			persistOnly := group.AffinitySchedulingAllowed && group.targetUnpersisted
-			if !group.AffinitySchedulingAllowed && sameStoredGroup(&group.Group, target.result()) {
-				m.Lock()
-				if groupInfo, ok := m.groups[groupID]; ok && groupInfo.AffinityVer == observed.affinityVer && !groupInfo.IsAvailable() {
-					m.setTargetAvailabilityLocked(groupInfo)
-					m.resetCountLocked(groupInfo)
-				}
-				m.Unlock()
+			result := target.result()
+			matchesStored := sameStoredGroup(&target.Expected, result)
+			if !group.AffinitySchedulingAllowed && (matchesStored || sameStoredGroup(&group.Group, result)) {
+				m.applyLocalObservedTarget(target, observed.groupInfoPtr, observed.affinityVer)
 			}
-			if !sameStoredGroup(&target.Expected, target.result()) {
+			if !matchesStored {
 				m.sendObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, persistOnly)
 			}
 			return m.GetAffinityGroupState(groupID), nil

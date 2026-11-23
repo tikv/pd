@@ -28,7 +28,7 @@ import (
 
 // sendObservedTarget permits one outstanding first-win write per Manager. Busy
 // observations are discarded. A 404 pauses HTTP attempts but lets groups
-// without an active target use a fresh observation locally. Caller holds metaMutex.
+// without an available target use a fresh observation locally. Caller holds metaMutex.
 func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64, persistOnly bool) {
 	m.targetWriteMutex.Lock()
 	now := time.Now()
@@ -77,14 +77,10 @@ func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGr
 	}()
 }
 
-// applyLocalObservedTarget initializes or updates a group's target in memory
-// when PD does not yet implement the conditional target endpoint. Once PD
-// upgrades, later patrol observations persist the target against the empty
-// stored group in Expected. Caller holds metaMutex.
+// applyLocalObservedTarget applies a healthy observation without a write when it
+// matches the current or stored target, or PD does not implement the target
+// endpoint. Caller holds metaMutex.
 func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64) {
-	if target.Expected.LeaderStoreID != 0 || len(target.Expected.VoterStoreIDs) != 0 {
-		return
-	}
 	voterStoreIDs := sortedStoreIDs(target.VoterStoreIDs)
 	if target.LeaderStoreID == 0 || len(voterStoreIDs) == 0 {
 		return
@@ -114,7 +110,10 @@ func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *run
 	}
 	groupInfo.LeaderStoreID = target.LeaderStoreID
 	groupInfo.VoterStoreIDs = voterStoreIDs
-	groupInfo.targetUnpersisted = true
+	groupInfo.persistedGroup = nil
+	if !sameStoredGroup(&stored, &groupInfo.Group) {
+		groupInfo.persistedGroup = &stored
+	}
 	groupInfo.SetAvailability(groupAvailable)
 	m.resetCountLocked(groupInfo)
 }

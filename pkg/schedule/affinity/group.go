@@ -171,10 +171,9 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
-	// targetUnpersisted indicates that LeaderStoreID and VoterStoreIDs were applied
-	// locally while PD did not implement the target endpoint, and etcd still stores
-	// an empty target for CreateTimestamp.
-	targetUnpersisted bool
+	// persistedGroup holds the last stored group while Group holds a local target.
+	// It is nil when Group itself holds the stored target.
+	persistedGroup *Group
 	// availability must be used together with degradedExpiredAt. Therefore, GetAvailability and SetAvailability must
 	// always be used to read or modify them, and availability must not be accessed directly.
 	availability groupAvailability
@@ -219,14 +218,14 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		RegionCount:               len(g.Regions),
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
-		targetUnpersisted:         g.targetUnpersisted,
+		targetUnpersisted:         g.persistedGroup != nil,
 		groupInfoPtr:              g,
 	}
 }
 
 func (g *runtimeGroupInfo) storedGroup() Group {
-	if g.targetUnpersisted {
-		return Group{ID: g.ID, CreateTimestamp: g.CreateTimestamp}
+	if g.persistedGroup != nil {
+		return *g.persistedGroup
 	}
 	return g.Group
 }
