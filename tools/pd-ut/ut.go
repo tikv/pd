@@ -51,10 +51,10 @@ const (
 )
 
 // initTags sets up the tags.
-func initTags(module string) {
+func initTags() {
 	tmpTags := []string{deadlockTag}
 
-	if isNextGenEnabled() && module != "client" && module != "tools" {
+	if isNextGenEnabled() {
 		tmpTags = append(tmpTags, nextGenTag)
 	}
 
@@ -149,8 +149,7 @@ func main() {
 
 func run() (exitCode int) {
 	// Initialize tags
-	module := stripFlag("--module")
-	initTags(module)
+	initTags()
 
 	race = handleFlag("--race")
 	parallelStr := stripFlag("--parallel")
@@ -206,16 +205,6 @@ func run() (exitCode int) {
 		fmt.Println("os.Getwd() error", err)
 	}
 	repoRoot = workDir
-	if module != "" && module != "." {
-		switch module {
-		case "client", "tools", "tests/integrations":
-			modulePath = filepath.Join("github.com", "tikv", "pd", module)
-			workDir = filepath.Join(repoRoot, module)
-		default:
-			fmt.Println("unsupported test module:", module)
-			return 1
-		}
-	}
 
 	srv := alloc.RunHTTPServer(context.Background())
 	defer func() {

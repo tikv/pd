@@ -259,8 +259,9 @@ def run_shard(root, packages, durations, parallel):
                     directory = root / module
                     environment["CGO_ENABLED"] = "1"
                 else:
+                    subcommand = ["it", "run"] if module == "tests/integrations" else ["run"]
                     command = [
-                        str(root / "bin/pd-ut"), "run", "--module", module,
+                        str(root / "bin/pd-ut"), *subcommand,
                         "--packages", ",".join(sorted(p.path for p in group)),
                         "--parallel", str(parallel),
                         "--cpu-budget", str(available_parallelism()),

@@ -22,20 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestModuleTags(t *testing.T) {
-	original := tags
-	t.Cleanup(func() { tags = original })
-	t.Setenv("NEXT_GEN", "1")
-	for _, module := range []string{".", "tests/integrations"} {
-		initTags(module)
-		require.Equal(t, "deadlock nextgen", tags)
-	}
-	for _, module := range []string{"client", "tools"} {
-		initTags(module)
-		require.Equal(t, "deadlock", tags)
-	}
-}
-
 func TestSelectPackages(t *testing.T) {
 	available := []string{"server", "server/api", "pkg/mcs/tso/server"}
 	selected, err := selectPackages(available, "server")
