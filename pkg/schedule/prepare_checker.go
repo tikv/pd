@@ -30,6 +30,7 @@ type prepareChecker struct {
 	start              time.Time
 	totalRegionCountFn func() (int, error)
 	prepared           bool
+	storesPrepared     bool
 }
 
 func newPrepareChecker(totalRegionCountFn func() (int, error)) *prepareChecker {
@@ -56,11 +57,15 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	if err != nil {
 		return false
 	}
+	// Store preparation retains its 90% latch while scheduling waits for full collection.
+	if !checker.storesPrepared && float64(totalRegionCount)*core.CollectFactor <= float64(notLoadedFromRegionsCnt) {
+		checker.storesPrepared = areStoreRegionsCollected(c, core.CollectFactor)
+	}
 	// Wait for all regions so incomplete leader counts do not trigger premature balancing.
 	if notLoadedFromRegionsCnt < totalRegionCount {
 		return false
 	}
-	if !areStoreRegionsCollected(c) {
+	if !areStoreRegionsCollected(c, 1) {
 		return false
 	}
 	// Scan for missing leaders and stale subtrees only after the cheaper count
@@ -69,7 +74,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		return false
 	}
 	// Store heartbeats can reveal more Regions while the snapshot is scanned.
-	if !areStoreRegionsCollected(c) {
+	if !areStoreRegionsCollected(c, 1) {
 		return false
 	}
 	// Schedulers score StoreInfo snapshots rather than the Region subtrees.
@@ -79,18 +84,28 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	return true
 }
 
-func areStoreRegionsCollected(c *core.BasicCluster) bool {
+func areStoreRegionsCollected(c *core.BasicCluster, factor float64) bool {
 	for _, store := range c.GetStores() {
 		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		storeID := store.GetID()
 		collected := c.GetNotFromStorageRegionsCntByStore(storeID)
-		if collected < int(store.GetStoreStats().GetRegionCount()) || collected < c.GetStoreRegionCount(storeID) {
+		if float64(collected) < float64(store.GetStoreStats().GetRegionCount())*factor || float64(collected) < float64(c.GetStoreRegionCount(storeID))*factor {
 			return false
 		}
 	}
 	return true
+}
+
+// AreStoresPrepared reports whether the original collection thresholds have been met.
+func (checker *prepareChecker) AreStoresPrepared() bool {
+	if checker == nil {
+		return false
+	}
+	checker.RLock()
+	defer checker.RUnlock()
+	return checker.prepared || checker.storesPrepared
 }
 
 // IsPrepared returns whether the coordinator is prepared.

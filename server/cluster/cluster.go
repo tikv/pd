@@ -2156,7 +2156,7 @@ func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (i
 	case metapb.NodeState_Preparing:
 		readyToServe := store.GetUptime() >= c.opt.GetMaxStorePreparingTime() ||
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
-		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
+		if !readyToServe && (c.areStoresPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
 			kr := keyutil.NewKeyRange("", "")
 			threshold = c.getThreshold(c.GetStores(), store, &kr, regionSizes)
 			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),

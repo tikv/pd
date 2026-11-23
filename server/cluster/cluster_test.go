@@ -5559,55 +5559,124 @@ func TestInterval(t *testing.T) {
 }
 
 func TestCheckStoresWithPartialRegionCollection(t *testing.T) {
-	for _, tc := range []struct {
-		collected int
-		state     metapb.NodeState
+	for _, mode := range []struct {
+		name        string
+		independent bool
 	}{
-		{collected: 89, state: metapb.NodeState_Preparing},
-		{collected: 90, state: metapb.NodeState_Serving},
-		{collected: 99, state: metapb.NodeState_Serving},
+		{name: "integrated"},
+		{name: "independent", independent: true},
 	} {
-		t.Run(strconv.Itoa(tc.collected), func(t *testing.T) {
-			re := require.New(t)
-			ctx := t.Context()
-			_, opt, err := newTestScheduleConfig()
-			re.NoError(err)
-			cfg := opt.GetReplicationConfig()
-			cfg.EnablePlacementRules = false
-			cfg.MaxReplicas = 1
-			opt.SetReplicationConfig(cfg)
-			cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-			cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-			cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
-			now := time.Now()
-			for _, store := range newTestStores(2, "6.0.0") {
-				meta := store.GetMeta()
-				meta.StartTimestamp = now.Add(-time.Hour).Unix()
-				if meta.GetId() == 2 {
-					meta.NodeState = metapb.NodeState_Preparing
-				}
-				cluster.PutStore(core.NewStoreInfo(meta, core.SetLastHeartbeatTS(now), core.SetRegionSize(1000)))
-			}
-			for i := range 200 {
-				storeID := uint64(i/100 + 1)
-				peer := &metapb.Peer{Id: uint64(i + 1), StoreId: storeID}
-				meta := newTestRegionMeta(uint64(i + 1))
-				meta.Peers = []*metapb.Peer{peer}
-				source := core.Storage
-				if storeID == 2 || i < tc.collected {
-					source = core.Heartbeat
-				}
-				cluster.PutRegion(core.NewRegionInfo(meta, peer, core.SetSource(source), core.SetApproximateSize(10)))
-			}
+		t.Run(mode.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name              string
+				collected         int
+				reported          uint32
+				unassigned        int
+				schedulerPrepared bool
+				recheck           bool
+				integratedState   metapb.NodeState
+				independentState  metapb.NodeState
+			}{
+				{name: "89 percent", collected: 89},
+				{name: "90 percent", collected: 90, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+				{name: "99 percent", collected: 99, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+				{name: "all collected", collected: 100, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+				{name: "reported count incomplete", collected: 90, reported: 101, independentState: metapb.NodeState_Serving},
+				{name: "global count incomplete", collected: 90, unassigned: 12, independentState: metapb.NodeState_Serving},
+				{name: "collection drops after preparation", collected: 90, recheck: true, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+				{name: "scheduler already prepared", collected: 89, schedulerPrepared: true, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					re := require.New(t)
+					ctx := t.Context()
+					_, opt, err := newTestScheduleConfig()
+					re.NoError(err)
+					cfg := opt.GetReplicationConfig()
+					cfg.EnablePlacementRules = false
+					cfg.MaxReplicas = 1
+					opt.SetReplicationConfig(cfg)
+					cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+					cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+					if mode.independent {
+						cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
+					}
+					if tc.schedulerPrepared {
+						cluster.SetPrepared()
+					}
+					now := time.Now()
+					for _, store := range newTestStores(2, "6.0.0") {
+						meta := store.GetMeta()
+						meta.StartTimestamp = now.Add(-time.Hour).Unix()
+						reported := uint32(100)
+						if meta.GetId() == 1 && tc.reported != 0 {
+							reported = tc.reported
+						}
+						if meta.GetId() == 2 {
+							meta.NodeState = metapb.NodeState_Preparing
+						}
+						cluster.PutStore(core.NewStoreInfo(meta,
+							core.SetLastHeartbeatTS(now), core.SetRegionSize(1000),
+							core.SetStoreStats(&pdpb.StoreStats{RegionCount: reported})))
+					}
+					for i := range 200 {
+						storeID := uint64(i/100 + 1)
+						peer := &metapb.Peer{Id: uint64(i + 1), StoreId: storeID}
+						meta := newTestRegionMeta(uint64(i + 1))
+						meta.Peers = []*metapb.Peer{peer}
+						source := core.Storage
+						if storeID == 2 || i < tc.collected {
+							source = core.Heartbeat
+						}
+						cluster.PutRegion(core.NewRegionInfo(meta, peer, core.SetSource(source), core.SetApproximateSize(10)))
+					}
+					for i := range tc.unassigned {
+						cluster.PutRegion(core.NewRegionInfo(newTestRegionMeta(uint64(201+i)), nil, core.SetSource(core.Storage)))
+					}
 
-			// A missing heartbeat on a Serving store must not prevent another store
-			// with enough data from finishing preparation once 90% is collected.
-			re.Equal(100, cluster.GetStoreRegionCount(1))
-			re.Equal(tc.collected, cluster.GetNotFromStorageRegionsCntByStore(1))
-			re.False(cluster.IsPrepared())
-			re.Less(cluster.GetStore(2).GetUptime(), opt.GetMaxStorePreparingTime())
-			cluster.checkStores()
-			re.Equal(tc.state, cluster.GetStore(2).GetNodeState())
+					// Store preparation must retain its thresholds without lowering the scheduler's 100% gate.
+					re.Equal(100, cluster.GetStoreRegionCount(1))
+					re.Equal(tc.collected, cluster.GetNotFromStorageRegionsCntByStore(1))
+					schedulerPrepared := tc.schedulerPrepared || tc.collected == 100
+					re.Equal(schedulerPrepared, cluster.coordinator.ShouldRun())
+					re.Less(cluster.GetStore(2).GetUptime(), opt.GetMaxStorePreparingTime())
+					cluster.checkStores()
+					state := tc.integratedState
+					if mode.independent {
+						state = tc.independentState
+					}
+					re.Equal(state, cluster.GetStore(2).GetNodeState())
+					re.Equal(schedulerPrepared, cluster.IsPrepared())
+					if tc.recheck {
+						cluster.PutStore(cluster.GetStore(1).Clone(core.SetStoreStats(&pdpb.StoreStats{RegionCount: 200})))
+						for _, storeID := range []uint64{3, 4} {
+							if storeID == 4 {
+								// A new coordinator must collect its own preparation evidence.
+								cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+							}
+							meta := newTestStores(storeID, "6.0.0")[storeID-1].GetMeta()
+							meta.NodeState = metapb.NodeState_Preparing
+							meta.StartTimestamp = now.Add(-time.Hour).Unix()
+							cluster.PutStore(core.NewStoreInfo(meta,
+								core.SetLastHeartbeatTS(now), core.SetRegionSize(1000),
+								core.SetStoreStats(&pdpb.StoreStats{RegionCount: 100})))
+							for i := range uint64(100) {
+								id := (storeID-1)*100 + i + 1
+								peer := &metapb.Peer{Id: id, StoreId: storeID}
+								region := newTestRegionMeta(id)
+								region.Peers = []*metapb.Peer{peer}
+								cluster.PutRegion(core.NewRegionInfo(region, peer, core.SetSource(core.Heartbeat), core.SetApproximateSize(10)))
+							}
+							re.False(cluster.coordinator.ShouldRun())
+							cluster.checkStores()
+							state := metapb.NodeState_Serving
+							if storeID == 4 && !mode.independent {
+								state = metapb.NodeState_Preparing
+							}
+							re.Equal(state, cluster.GetStore(storeID).GetNodeState())
+						}
+					}
+				})
+			}
 		})
 	}
 }

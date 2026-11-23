@@ -318,6 +318,7 @@ func TestPrepareCheckerCollectionTimeout(t *testing.T) {
 		time.Sleep(time.Nanosecond)
 		re.True(checker.check(cluster))
 		re.True(checker.IsPrepared())
+		re.True(checker.AreStoresPrepared())
 	})
 }
 
@@ -337,5 +338,6 @@ func TestPrepareCheckerLeaderCollectionTimeout(t *testing.T) {
 		time.Sleep(time.Nanosecond)
 		re.True(checker.check(cluster))
 		re.True(checker.IsPrepared())
+		re.True(checker.AreStoresPrepared())
 	})
 }
