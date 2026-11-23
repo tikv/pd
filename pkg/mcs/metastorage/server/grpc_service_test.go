@@ -92,13 +92,11 @@ func TestValidateMetaStorageWriteAccess(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		key     string
-		end     string
 		allowed bool
 	}{
 		{name: "timestamp", key: keypath.TimestampPath(1)},
 		{name: "other cluster timestamp", key: fmt.Sprintf("/ms/%d/tso/00001/gta/timestamp", keypath.ClusterID()+1)},
 		{name: "other group timestamp", key: "/ms/42/tso/65535/gta/timestamp"},
-		{name: "timestamp with range", key: "/ms/42/tso/00001/gta/timestamp", end: "/ms0"},
 		{name: "default tso primary", key: "/ms/42/tso/00000/primary"},
 		{name: "keyspace group primary", key: "/ms/42/tso/keyspace_groups/election/00001/primary"},
 		{name: "scheduling primary", key: "/ms/42/scheduling/primary"},
@@ -110,7 +108,6 @@ func TestValidateMetaStorageWriteAccess(t *testing.T) {
 		{name: "timestamp sibling", key: "/ms/42/tso/00001/gta/timestamp-other"},
 		{name: "timestamp child", key: "/ms/42/tso/00001/gta/timestamp/child"},
 		{name: "discovery root", key: "/ms/"},
-		{name: "whole discovery namespace", key: "/ms/", end: "/ms0"},
 		{name: "binary discovery suffix", key: "/ms/\xff"},
 		{name: "controller", key: "resource_group/controller"},
 		{name: "resource group settings", key: "resource_group/settings/default"},
@@ -119,10 +116,9 @@ func TestValidateMetaStorageWriteAccess(t *testing.T) {
 		{name: "backup checkpoint", key: "/tidb/br-stream/storage-checkpoint/task/1", allowed: true},
 		{name: "region label", key: keypath.RegionLabelPathPrefix() + "rule"},
 		{name: "outside allowed namespaces", key: "/pd/42/leader"},
-		{name: "unbounded discovery", key: "/ms/42/", end: "\x00"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateMetaStorageWriteAccess([]byte(tc.key), []byte(tc.end))
+			err := validateMetaStorageWriteAccess([]byte(tc.key))
 			if tc.allowed {
 				require.NoError(t, err)
 			} else {
