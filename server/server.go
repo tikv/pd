@@ -569,11 +569,12 @@ func (s *Server) startServer(ctx context.Context) error {
 	} else {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
-	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager, s.metaServiceGroupManager)
-	s.gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
+	gcStateManager := gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager, s.metaServiceGroupManager)
+	gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
 	if kerneltype.IsNextGen() {
-		s.gcStateManager.SetEtcdClient(s.client)
+		gcStateManager.SetEtcdClient(s.client)
 	}
+	s.gcStateManager = gcStateManager
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
@@ -2069,6 +2070,7 @@ func (s *Server) campaignLeader() {
 	// not consult IsServing. Resigning first bounds that to the in-memory stores
 	// at the top of Member.Resign.
 	resetLeader := func() {
+		s.gcStateManager.InvalidateStarterMigrationLeader()
 		cancel()
 		s.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)

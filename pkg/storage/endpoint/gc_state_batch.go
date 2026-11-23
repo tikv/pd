@@ -31,10 +31,12 @@ const MaxGCSafePointBatchSize = etcdutil.MaxEtcdTxnOps / 2
 // GCSafePointReadResult contains one scope's safe points. The safe points are valid
 // only when Err is nil.
 type GCSafePointReadResult struct {
-	KeyspaceID   uint32
-	TxnSafePoint uint64
-	GCSafePoint  uint64
-	Err          error
+	KeyspaceID           uint32
+	TxnSafePoint         uint64
+	GCSafePoint          uint64
+	TxnSafePointRevision int64 // zero when the key is absent
+	TxnSafePointEmpty    bool  // present with an empty value
+	Err                  error
 }
 
 // LoadGCSafePointPairs reads both safe points for each scope in one atomic read
@@ -75,29 +77,33 @@ func (p GCStateProvider) LoadGCSafePointPairs(ctx context.Context, keyspaceIDs [
 	if !response.Succeeded || len(response.Responses) != len(ops) {
 		return nil, errors.New("invalid GC safe point batch response")
 	}
-	// Validate every point read before returning any scope's decoded values.
-	values := make([]string, len(ops))
-	for i, item := range response.Responses {
-		if len(item.KeyValuePairs) == 0 {
-			continue
-		}
-		if len(item.KeyValuePairs) != 1 || item.KeyValuePairs[0].Key != ops[i].Key {
-			return nil, errors.Errorf("invalid GC safe point read response for key %q", ops[i].Key)
-		}
-		values[i] = item.KeyValuePairs[0].Value
-	}
 	results := make([]GCSafePointReadResult, len(keyspaceIDs))
 	for i, id := range keyspaceIDs {
+		var values [2]kv.KeyValuePair
+		for j := range values {
+			item := response.Responses[2*i+j].KeyValuePairs
+			if len(item) == 0 {
+				continue
+			}
+			key := ops[2*i+j].Key
+			if len(item) != 1 || item[0].Key != key || item[0].ModRevision <= 0 {
+				return nil, errors.Errorf("invalid GC safe point read response for key %q", key)
+			}
+			values[j] = item[0]
+		}
 		result := &results[i]
 		result.KeyspaceID = id
-		result.TxnSafePoint, result.Err = decodeTxnSafePoint(values[2*i])
+		txn := values[0]
+		result.TxnSafePointRevision = txn.ModRevision
+		result.TxnSafePointEmpty = txn.Key != "" && txn.Value == ""
+		result.TxnSafePoint, result.Err = decodeTxnSafePoint(txn.Value)
 		if result.Err != nil {
 			continue
 		}
 		if id == constant.NullKeyspaceID {
-			result.GCSafePoint, result.Err = decodeUnifiedGCSafePoint(values[2*i+1])
+			result.GCSafePoint, result.Err = decodeUnifiedGCSafePoint(values[1].Value)
 		} else {
-			result.GCSafePoint, result.Err = decodeKeyspaceGCSafePoint(values[2*i+1])
+			result.GCSafePoint, result.Err = decodeKeyspaceGCSafePoint(values[1].Value)
 		}
 	}
 	return results, nil

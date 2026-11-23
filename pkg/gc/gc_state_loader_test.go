@@ -879,7 +879,11 @@ func TestGCStateLoadPublicationPrecedesSafePointWriter(t *testing.T) {
 			}
 			values, err := provider.LoadGCSafePointPairs(context.Background(), []uint32{2})
 			require.NoError(t, err)
-			require.Equal(t, []endpoint.GCSafePointReadResult{{KeyspaceID: 2, TxnSafePoint: 90, GCSafePoint: 70}}, values)
+			require.Len(t, values, 1)
+			require.NoError(t, values[0].Err)
+			require.Equal(t, uint32(2), values[0].KeyspaceID)
+			require.Equal(t, uint64(90), values[0].TxnSafePoint)
+			require.Equal(t, uint64(70), values[0].GCSafePoint)
 			unblock()
 			for _, done := range []<-chan error{loaded, written} {
 				select {
@@ -894,7 +898,11 @@ func TestGCStateLoadPublicationPrecedesSafePointWriter(t *testing.T) {
 			require.Equal(t, tc.want, entry, "late publication must not overwrite the writer's newer state")
 			values, err = provider.LoadGCSafePointPairs(context.Background(), []uint32{2})
 			require.NoError(t, err)
-			require.Equal(t, []endpoint.GCSafePointReadResult{{KeyspaceID: 2, TxnSafePoint: tc.want.TxnSafePoint, GCSafePoint: tc.want.GCSafePoint}}, values)
+			require.Len(t, values, 1)
+			require.NoError(t, values[0].Err)
+			require.Equal(t, uint32(2), values[0].KeyspaceID)
+			require.Equal(t, tc.want.TxnSafePoint, values[0].TxnSafePoint)
+			require.Equal(t, tc.want.GCSafePoint, values[0].GCSafePoint)
 		})
 	}
 }
@@ -1293,4 +1301,50 @@ func TestGCStateLeadershipResetDisablesFastReads(t *testing.T) {
 	state := <-states
 	require.Zero(t, state.TxnSafePoint)
 	require.Zero(t, state.GCSafePoint)
+}
+
+func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
+	m, destination, _, _ := newStarterGCAPIFixture(t, 3)
+	generation := m.activeGeneration.Load()
+	// The first scope was already migrated by a previous leader.
+	_, err := destination.Put(t.Context(), keypath.TxnSafePointPath(1), "101")
+	require.NoError(t, err)
+	const hook = "github.com/tikv/pd/pkg/gc/starterGCMigrationSourceLoaded"
+	pending, resume := make(chan struct{}), make(chan struct{})
+	release := sync.OnceFunc(func() { close(resume) })
+	require.NoError(t, failpoint.EnableCall(hook, func(id uint32) {
+		if id == 2 {
+			close(pending)
+			<-resume
+		}
+	}))
+	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+	defer release()
+
+	done := make(chan gcStateLoadResult, 1)
+	go func() {
+		result, err := m.loadGCStateBatch(t.Context(), generation, gcStateLoadCandidates(1, 2, 3))
+		if err != nil {
+			result.failed = map[uint32]error{0: err}
+		}
+		done <- result
+	}()
+	gcWarmupWait(t, pending)
+	entry, cached := m.gcStateCache.load(1)
+	require.True(t, cached)
+	require.EqualValues(t, 101, entry.TxnSafePoint)
+	_, cached = m.gcStateCache.load(2)
+	require.False(t, cached, "the unconfirmed local value must not be published")
+
+	// A foreground request for the other pending flight can finish while the
+	// backend for scope 2 is stalled, even though both belong to the same batch.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	state, err := m.getGCStateImpl(ctx, 3, true)
+	require.NoError(t, err)
+	require.EqualValues(t, 103, state.TxnSafePoint)
+	release()
+	result := <-done
+	require.Empty(t, result.failed)
+	require.ElementsMatch(t, []uint32{1, 2, 3}, result.completed)
 }

@@ -1757,7 +1757,9 @@ func TestWatchGCStatesBlockedSendCleansUpPublicHandler(t *testing.T) {
 			advance(10)
 			waitWatchGCStatesSignal(t, stream.sendStarted, "send did not start")
 			if tc.reason == "leader_lost" {
-				stop := manager.OnNodeBecomesLeader()
+				gcLeader, err := manager.PrepareLeaderGeneration(streamCtx, leaderServer.GetServer().GetMember().GetLeadership())
+				re.NoError(err)
+				stop := gcLeader.Start()
 				t.Cleanup(stop)
 			} else if tc.name == "slow consumer" {
 				// Fill the default live queue before the final update overflows it.

@@ -3029,7 +3029,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	var keyspaceID uint32
 	err := s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getMaxTxnSafePointAmongAllKeyspaces(wb)
+		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getMaxTxnSafePointAmongAllKeyspaces(context.Background(), wb)
 		return err1
 	})
 	re.NoError(err)
@@ -3044,7 +3044,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	}
 	err = s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getMaxTxnSafePointAmongAllKeyspaces(wb)
+		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getMaxTxnSafePointAmongAllKeyspaces(context.Background(), wb)
 		return err1
 	})
 	re.NoError(err)
@@ -3419,7 +3419,7 @@ func TestGetMaxTxnSafePointAmongAllKeyspacesOnTooManyKeyspaces(t *testing.T) {
 		var keyspaceNameWithMaxTxnSafePoint string
 		err = gcStateManager.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 			var err1 error
-			maxTxnSafePoint, keyspaceNameWithMaxTxnSafePoint, keyspaceIDWithMaxTxnSafePoint, err1 = gcStateManager.getMaxTxnSafePointAmongAllKeyspaces(wb)
+			maxTxnSafePoint, keyspaceNameWithMaxTxnSafePoint, keyspaceIDWithMaxTxnSafePoint, err1 = gcStateManager.getMaxTxnSafePointAmongAllKeyspaces(context.Background(), wb)
 			return err1
 		})
 		re.NoError(err)

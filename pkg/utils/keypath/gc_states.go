@@ -25,6 +25,11 @@ func GCStateRevisionPath() string {
 	return fmt.Sprintf(gcStateRevisionPathFormat, ClusterID())
 }
 
+// StarterGCMigrationPath returns the cluster marker for a Starter v1 upgrade.
+func StarterGCMigrationPath() string {
+	return fmt.Sprintf("/pd/%d/gc/starter_v2_migration", ClusterID())
+}
+
 // GCSafePointPath returns the key path of the GC safe point.
 // Please note that the value format differs between the NullKeyspace and other keyspaces.
 func GCSafePointPath(keyspaceID uint32) string {
