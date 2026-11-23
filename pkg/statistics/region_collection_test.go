@@ -29,6 +29,19 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 )
 
+func TestRegionStatsEmptyCountUsesKeys(t *testing.T) {
+	regions := []*core.RegionInfo{
+		core.NewRegionInfo(&metapb.Region{Id: 1}, nil,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(0)),
+		core.NewRegionInfo(&metapb.Region{Id: 2}, nil,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1)),
+	}
+
+	require.Equal(t, 1, GetRegionStats(regions, nil).EmptyCount)
+}
+
 func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
@@ -75,6 +88,11 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[EmptyRegion], 1)
 	re.Len(regionStats.stats[UndersizedRegion], 1)
 	re.Len(regionStats.stats[OfflinePeer], 1)
+
+	regionWithKeys := region1.Clone(core.SetApproximateSize(1), core.SetApproximateKeys(2))
+	re.True(regionStats.RegionStatsNeedUpdate(regionWithKeys))
+	regionStats.Observe(regionWithKeys, stores)
+	re.Empty(regionStats.stats[EmptyRegion])
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
