@@ -436,7 +436,11 @@ func getGroupID(cmd *cobra.Command, existing bool) (string, error) {
 		keyspaceID = &id
 	}
 	groupID := formatAffinityGroupID(tableID, partitionID, keyspaceID)
-	if err := affinity.ValidateGroupID(groupID); err != nil {
+	validate := affinity.ValidateGroupID
+	if existing {
+		validate = affinity.ValidateExistingGroupID
+	}
+	if err := validate(groupID); err != nil {
 		return "", err
 	}
 	return groupID, nil

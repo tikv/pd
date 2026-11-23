@@ -1509,12 +1509,12 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{2},
 	}
-	err := createAffinityGroupForTest(affinityManager, group1, affinityTestRange("", "m"))
+	err := createAffinityGroupForTest(affinityManager, group1, affinityTestRange("", "g"))
 	re.NoError(err)
 
 	// Set region 1 to have the right key range
 	region1 := tc.GetRegion(1).Clone(
-		withAffinityTestRange("", "m"),
+		withAffinityTestRange("", "g"),
 	)
 	tc.PutRegion(region1)
 
@@ -1533,12 +1533,12 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 		LeaderStoreID: 8,
 		VoterStoreIDs: []uint64{6, 7, 8, 9, 10},
 	}
-	err = createAffinityGroupForTest(affinityManager, group2, affinityTestRange("m", ""))
+	err = createAffinityGroupForTest(affinityManager, group2, affinityTestRange("g", "n"))
 	re.NoError(err)
 
 	// Set region 2 to have the right key range
 	region2 := tc.GetRegion(2).Clone(
-		withAffinityTestRange("m", ""),
+		withAffinityTestRange("g", "n"),
 	)
 	tc.PutRegion(region2)
 
@@ -1557,8 +1557,18 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 		LeaderStoreID: 8,
 		VoterStoreIDs: []uint64{6, 7, 8, 9, 10}, // 5 replicas
 	}
-	err = createAffinityGroupForTest(affinityManager, group3)
+	err = createAffinityGroupForTest(affinityManager, group3, affinityTestRange("n", ""))
 	re.NoError(err)
+
+	// Set region 3 to have the right key range
+	region3 := tc.GetRegion(3).Clone(
+		withAffinityTestRange("n", ""),
+	)
+	tc.PutRegion(region3)
+
+	groupState, _ := affinityManager.GetRegionAffinityGroupState(tc.GetRegion(3))
+	re.NotNil(groupState)
+	re.Equal(group3.ID, groupState.ID)
 
 	// Should NOT create operator when replica counts don't match
 	ops = checker.Check(tc.GetRegion(3))

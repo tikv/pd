@@ -15,6 +15,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -128,15 +129,21 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		const groupID = "protected-group"
 		ruleID := affinity.GetLabelRuleID(groupID)
 		ruleURL := prefix + "/rule/" + url.QueryEscape(ruleID)
+		createRange := testutil.TxnKeyspaceRange([]byte{0x10}, []byte{0x20})
+		addRange := testutil.TxnKeyspaceRange([]byte{0x20}, []byte{0x30})
 		data, err := json.Marshal(handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				groupID: {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+				groupID: {Ranges: []handlers.AffinityKeyRange{{StartKey: createRange.StartKey, EndKey: createRange.EndKey}}},
 			},
 		})
 		re.NoError(err)
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
 		var original labeler.LabelRule
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &original))
+		re.ElementsMatch(keyutil.BuildKeyRangeMaps(
+			hex.EncodeToString(createRange.StartKey),
+			hex.EncodeToString(createRange.EndKey),
+		), original.Data)
 
 		ordinary := &labeler.LabelRule{
 			ID: "ordinary-protected-batch", Labels: []labeler.RegionLabel{{Key: "k", Value: "v"}},
@@ -225,14 +232,19 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		// The owning API can still update its protected label rule's ranges.
 		data, err = json.Marshal(handlers.BatchModifyAffinityGroupsRequest{
 			Add: []handlers.GroupRangesModification{
-				{ID: groupID, Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				{ID: groupID, Ranges: []handlers.AffinityKeyRange{{StartKey: addRange.StartKey, EndKey: addRange.EndKey}}},
 			},
 		})
 		re.NoError(err)
 		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
 		re.Equal(original.Labels, kept.Labels)
-		re.ElementsMatch(keyutil.BuildKeyRangeMaps("10", "20", "20", "30"), kept.Data)
+		re.ElementsMatch(keyutil.BuildKeyRangeMaps(
+			hex.EncodeToString(createRange.StartKey),
+			hex.EncodeToString(createRange.EndKey),
+			hex.EncodeToString(addRange.StartKey),
+			hex.EncodeToString(addRange.EndKey),
+		), kept.Data)
 
 		re.NoError(testutil.CheckDelete(tests.TestDialClient, affinityURL+"/"+groupID+"?force=true", testutil.StatusOK(re)))
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, ruleURL, nil, testutil.Status(re, http.StatusNotFound)))

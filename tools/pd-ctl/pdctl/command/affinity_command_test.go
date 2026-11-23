@@ -17,6 +17,7 @@ package command
 import (
 	"context"
 	"encoding/hex"
+	"io"
 	"strconv"
 	"testing"
 
@@ -28,6 +29,8 @@ import (
 	"github.com/tikv/pd/client/constants"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 type affinityRangeAddClient struct {
@@ -220,5 +223,127 @@ func TestKeyspaceOfKeyRejectsNonTxnPrefixes(t *testing.T) {
 	for _, key := range [][]byte{codec.EncodeBytes([]byte("y")), codec.EncodeBytes([]byte("y\x00")), {'x', 0, 0, 1, 't'}} {
 		_, ok := keyspaceOfKey(key)
 		require.False(t, ok, "%x", key)
+	}
+}
+
+type affinityStructuredSelectorClient struct {
+	pd.Client
+	calledID string
+}
+
+func (c *affinityStructuredSelectorClient) GetAffinityGroup(_ context.Context, groupID string) (*pd.AffinityGroupState, error) {
+	c.calledID = groupID
+	return &pd.AffinityGroupState{ID: groupID}, nil
+}
+
+func (c *affinityStructuredSelectorClient) GetRegionLabelRulesByIDs(_ context.Context, ruleIDs []string) ([]*pd.LabelRule, error) {
+	if len(ruleIDs) == 1 {
+		c.calledID = ruleIDs[0]
+	}
+	return []*pd.LabelRule{{ID: c.calledID}}, nil
+}
+
+func (c *affinityStructuredSelectorClient) DeleteAffinityGroup(_ context.Context, groupID string, _ bool) error {
+	c.calledID = groupID
+	return nil
+}
+
+func (c *affinityStructuredSelectorClient) BatchDeleteAffinityGroups(_ context.Context, groupIDs []string, _ bool) error {
+	if len(groupIDs) == 1 {
+		c.calledID = groupIDs[0]
+	}
+	return nil
+}
+
+func (c *affinityStructuredSelectorClient) RemoveAffinityGroupKeyRanges(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange) (map[string]*pd.AffinityGroupState, error) {
+	for id := range groups {
+		c.calledID = id
+	}
+	return map[string]*pd.AffinityGroupState{c.calledID: {ID: c.calledID}}, nil
+}
+
+func (c *affinityStructuredSelectorClient) CreateAffinityGroups(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange, _ ...pd.CreateAffinityGroupsOption) (map[string]*pd.AffinityGroupState, error) {
+	for id := range groups {
+		c.calledID = id
+	}
+	return map[string]*pd.AffinityGroupState{c.calledID: {ID: c.calledID}}, nil
+}
+
+func (c *affinityStructuredSelectorClient) AddAffinityGroupKeyRanges(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange) (map[string]*pd.AffinityGroupState, error) {
+	for id := range groups {
+		c.calledID = id
+	}
+	return map[string]*pd.AffinityGroupState{c.calledID: {ID: c.calledID}}, nil
+}
+
+func (c *affinityStructuredSelectorClient) UpdateAffinityGroupPeers(_ context.Context, groupID string, _ uint64, _ []uint64) (*pd.AffinityGroupState, error) {
+	c.calledID = groupID
+	return &pd.AffinityGroupState{ID: groupID}, nil
+}
+
+func TestAffinityStructuredSelectorValidation(t *testing.T) {
+	previous := PDCli
+	t.Cleanup(func() { PDCli = previous })
+
+	runCmd := func(args ...string) (string, error) {
+		client := &affinityStructuredSelectorClient{}
+		PDCli = client
+		cmd := NewAffinityCommand()
+		cmd.PersistentPreRunE = nil
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs(args)
+		err := cmd.Execute()
+		return client.calledID, err
+	}
+
+	const sampleRange = "7800000174800000ff0000000064000000fc,7800000174800000ff0000000065000000fc"
+
+	// Lookups and removals accept unscoped --table-id / --partition-id in both Classic and NextGen.
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		wantID string
+	}{
+		{"show_table", []string{"show", "--table-id", "9001"}, "_tidb_t_9001"},
+		{"show_partition", []string{"show", "--table-id", "9001", "--partition-id", "9002"}, "_tidb_pt_9001_p9002"},
+		{"range_show_table", []string{"range", "show", "--table-id", "9001"}, affinity.GetLabelRuleID("_tidb_t_9001")},
+		{"delete_table", []string{"delete", "--table-id", "9001"}, "_tidb_t_9001"},
+		{"delete_force_table", []string{"delete", "--table-id", "9001", "--force"}, "_tidb_t_9001"},
+		{"range_remove_table", []string{"range", "remove", "--table-id", "9001", "--force", "--range", sampleRange}, "_tidb_t_9001"},
+		{"range_remove_partition", []string{"range", "remove", "--table-id", "9001", "--partition-id", "9002", "--force", "--range", sampleRange}, "_tidb_pt_9001_p9002"},
+		{"create_keyspace_table", []string{"create", "--table-id", "9001", "--keyspace-id", "1"}, "_tidb_ks1_t_9001"},
+		{"range_add_keyspace_table", []string{"range", "add", "--table-id", "9001", "--keyspace-id", "1", "--force", "--range", sampleRange}, "_tidb_ks1_t_9001"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			calledID, err := runCmd(tc.args...)
+			re.NoError(err)
+			re.Equal(tc.wantID, calledID)
+		})
+	}
+
+	// Create, update, and range add require --keyspace-id in NextGen.
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		wantID string
+	}{
+		{"create_unscoped_table", []string{"create", "--table-id", "9001"}, "_tidb_t_9001"},
+		{"create_unscoped_partition", []string{"create", "--table-id", "9001", "--partition-id", "9002"}, "_tidb_pt_9001_p9002"},
+		{"range_add_unscoped_table", []string{"range", "add", "--table-id", "9001", "--force", "--range", sampleRange}, "_tidb_t_9001"},
+		{"update_unscoped_table", []string{"update", "--table-id", "9001", "--leader", "1", "--voters", "1,2,3"}, "_tidb_t_9001"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			calledID, err := runCmd(tc.args...)
+			if kerneltype.IsNextGen() {
+				re.ErrorContains(err, "nextgen requires keyspace-aware TiDB affinity group IDs")
+				re.Empty(calledID)
+				return
+			}
+			re.NoError(err)
+			re.Equal(tc.wantID, calledID)
+		})
 	}
 }
