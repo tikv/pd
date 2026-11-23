@@ -192,34 +192,36 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
 }
 
+func auditMetricCounts(re *require.Assertions) map[string]float64 {
+	families, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	counts := make(map[string]float64)
+	for _, family := range families {
+		if family.GetName() != "pd_service_audit_requests_total" && family.GetName() != "pd_service_audit_handling_seconds" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			var service string
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "service" {
+					service = label.GetValue()
+				}
+			}
+			counts[family.GetName()+":"+service] += metric.GetCounter().GetValue() + float64(metric.GetHistogram().GetSampleCount())
+		}
+	}
+	return counts
+}
+
 func (suite *keyspaceTestSuite) TestHTTPAuditSwitch() {
 	re := suite.Require()
 	logFile := testutil.InitTempFileLogger(suite.T(), "info")
 	configURL := suite.server.GetAddr() + "/pd/api/v1/service-middleware/config"
-	snapshot := func() map[string]float64 {
-		families, err := prometheus.DefaultGatherer.Gather()
-		re.NoError(err)
-		counts := make(map[string]float64)
-		for _, family := range families {
-			if family.GetName() != "pd_service_audit_requests_total" && family.GetName() != "pd_service_audit_handling_seconds" {
-				continue
-			}
-			for _, metric := range family.GetMetric() {
-				var service string
-				for _, label := range metric.GetLabel() {
-					if label.GetName() == "service" {
-						service = label.GetValue()
-					}
-				}
-				counts[family.GetName()+":"+service] += metric.GetCounter().GetValue() + float64(metric.GetHistogram().GetSampleCount())
-			}
-		}
-		return counts
-	}
+
 	for i, enabled := range []bool{false, true, false} {
 		body := fmt.Appendf(nil, `{"audit.enable-audit":"%t"}`, enabled)
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, body, testutil.StatusOK(re)))
-		before := snapshot()
+		before := auditMetricCounts(re)
 		request := &handlers.CreateKeyspaceParams{Name: fmt.Sprintf("audit-keyspace-%d", i)}
 		MustCreateKeyspace(re, suite.server, request)
 		re.Equal(request.Name, mustLoadKeyspaces(re, suite.server, request.Name).Name)
@@ -237,7 +239,7 @@ func (suite *keyspaceTestSuite) TestHTTPAuditSwitch() {
 		}
 		re.Equal(expected, strings.Count(string(data), "ServiceLabel:CreateKeyspace,"))
 		re.NotContains(string(data), "ServiceLabel:LoadKeyspace,")
-		after := snapshot()
+		after := auditMetricCounts(re)
 		increment := float64(0)
 		if enabled {
 			increment = 1

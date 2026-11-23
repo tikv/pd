@@ -56,7 +56,7 @@ func (s *testHTTPAuditServer) GetAuditBackend() []audit.Backend {
 }
 
 func (s *testHTTPAuditServer) GetServiceAuditBackendLabels(label string) *audit.BackendLabels {
-	if label != "Selected" {
+	if label != "Selected" || len(s.labels.Labels) == 0 {
 		return nil
 	}
 	return s.labels
@@ -105,6 +105,8 @@ func TestHTTPAuditParity(t *testing.T) {
 			labels       []string
 			enabled      bool
 			mode         logutil.RedactInfoLogType
+			size         int
+			emptyBody    bool
 			consume      int
 			readErr      error
 			panic        bool
@@ -113,15 +115,18 @@ func TestHTTPAuditParity(t *testing.T) {
 		}{
 			{name: "unselected", enabled: true, consume: -1},
 			{name: "disabled", labels: both, consume: -1},
-			{name: "metrics only", labels: []string{audit.PrometheusHistogram}, enabled: true, consume: -1},
+			{name: "metrics only", labels: []string{audit.PrometheusHistogram}, enabled: true, size: 4 << 20, consume: -1},
 			{name: "local log", labels: []string{audit.LocalLogLabel}, enabled: true, consume: -1},
+			{name: "empty body", labels: both, enabled: true, emptyBody: true, consume: -1},
+			{name: "large body", labels: both, enabled: true, size: 4 << 20, consume: -1},
 			{name: "both", labels: both, enabled: true, consume: -1},
 			{name: "existing metadata", labels: both, enabled: true, consume: -1, existingInfo: true},
 			{name: "already captured", labels: both, enabled: true, consume: -1, existingInfo: true, captured: "earlier-capture"},
 			{name: "early rejection", labels: both, enabled: true},
 			{name: "partial consumption", labels: both, enabled: true, consume: 3},
 			{name: "read error", labels: both, enabled: true, consume: -1, readErr: io.ErrUnexpectedEOF},
-			{name: "fully redacted", labels: both, enabled: true, mode: logutil.RedactInfoLogON, consume: -1, readErr: io.ErrUnexpectedEOF},
+			{name: "one-shot read error", labels: both, enabled: true, consume: -1, readErr: iotest.ErrTimeout},
+			{name: "fully redacted", labels: both, enabled: true, mode: logutil.RedactInfoLogON, size: 4 << 20, consume: -1, readErr: io.ErrUnexpectedEOF},
 			{name: "marker", labels: both, enabled: true, mode: logutil.RedactInfoLogMarker, consume: -1, readErr: io.ErrUnexpectedEOF},
 			{name: "panic", labels: both, enabled: true, consume: -1, panic: true},
 		} {
@@ -131,9 +136,16 @@ func TestHTTPAuditParity(t *testing.T) {
 				var props *log.ZapProperties
 				re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, tc.mode))
 				t.Cleanup(func() { re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, logutil.RedactInfoLogOFF)) })
-				const payload = "0123456789"
+				payload := "0123456789"
+				if tc.emptyBody {
+					payload = ""
+				} else if tc.size > 0 {
+					payload = strings.Repeat("x", tc.size)
+				}
 				var reader io.Reader = strings.NewReader(payload)
-				if tc.readErr != nil {
+				if tc.readErr == iotest.ErrTimeout {
+					reader = iotest.TimeoutReader(reader)
+				} else if tc.readErr != nil {
 					reader = io.MultiReader(reader, iotest.ErrReader(tc.readErr))
 				}
 				body := &testHTTPAuditBody{Reader: reader}
@@ -144,6 +156,7 @@ func TestHTTPAuditParity(t *testing.T) {
 						info, ok := requestutil.RequestInfoFrom(r.Context())
 						re.True(ok)
 						re.Equal("Selected", info.ServiceLabel)
+						re.Contains(info.Method, "POST:/selected")
 						_, hasEnd := requestutil.EndTimeFrom(r.Context())
 						re.Equal(!before, hasEnd)
 						if before {
@@ -161,6 +174,11 @@ func TestHTTPAuditParity(t *testing.T) {
 				handler := func(w http.ResponseWriter, r *http.Request) {
 					re.Zero(body.reads, "auditing must not read ahead of the handler")
 					re.False(body.closed)
+					_, hasInfo := requestutil.RequestInfoFrom(r.Context())
+					re.Equal(tc.existingInfo || tc.enabled && len(tc.labels) > 0, hasInfo)
+					if !tc.enabled || !slices.Contains(tc.labels, audit.LocalLogLabel) || tc.mode == logutil.RedactInfoLogON || tc.captured != "" {
+						re.Same(body, r.Body)
+					}
 					if tc.consume < 0 {
 						data, err := io.ReadAll(r.Body)
 						re.Equal(payload, string(data))
@@ -230,6 +248,11 @@ func TestHTTPAuditParity(t *testing.T) {
 					expected = append(expected, audit.PrometheusHistogram)
 				}
 				re.Equal(expected, events)
+				if tc.consume >= 0 {
+					remaining, err := io.ReadAll(body.Reader)
+					re.NoError(err)
+					re.Equal(payload[tc.consume:], string(remaining))
+				}
 			})
 		}
 	}

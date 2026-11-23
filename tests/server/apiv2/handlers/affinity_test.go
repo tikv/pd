@@ -1445,11 +1445,13 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDQueriesMCS() {
 	})
 }
 
-// TestAffinityForwardedHeader verifies microservice forwarding sets the header and returns the scheduling response.
+// TestAffinityForwardedHeader verifies scheduling responses and audit metrics on forwarded reads.
 func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
+		initialAudit := leader.GetServer().GetAuditConfig()
+		defer func() { re.NoError(leader.GetServer().SetAuditConfig(*initialAudit)) }()
 		serverAddr := leader.GetAddr()
 
 		// Create a group to ensure GET succeeds.
@@ -1472,5 +1474,28 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 			return ok
 		})
 		re.Contains(result.AffinityGroups, "header-check")
+		for _, enabled := range []bool{false, true, false} {
+			re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+			for _, tc := range []struct{ path, service string }{
+				{getAffinityGroupURL(serverAddr), "GetAllAffinityGroups"},
+				{getAffinityGroupURL(serverAddr, "header-check"), "GetAffinityGroup"},
+			} {
+				before := auditMetricCounts(re)
+				response, err := tests.TestDialClient.Get(tc.path)
+				re.NoError(err)
+				re.NoError(response.Body.Close())
+				re.Equal(http.StatusOK, response.StatusCode)
+				re.Equal("true", response.Header.Get(apiutil.XForwardedToMicroserviceHeader))
+				after := auditMetricCounts(re)
+				increment := float64(0)
+				if enabled {
+					increment = 1
+				}
+				for _, family := range []string{"pd_service_audit_requests_total", "pd_service_audit_handling_seconds"} {
+					key := family + ":" + tc.service
+					re.Equal(increment, after[key]-before[key], key)
+				}
+			}
+		}
 	})
 }

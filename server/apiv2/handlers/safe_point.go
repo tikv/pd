@@ -30,7 +30,7 @@ import (
 // RegisterSafePoint registers GC safe point related handlers to router paths.
 func RegisterSafePoint(r *gin.RouterGroup) {
 	router := r.Group("gc/safepoint")
-	router.Use(middlewares.Redirector(), middlewares.BootstrapChecker())
+	router.Use(middlewares.BootstrapChecker())
 	router.GET("/:keyspaceID", middlewares.Audit("LoadGCSafePoint", audit.PrometheusHistogram), LoadGCSafePoint)
 }
 

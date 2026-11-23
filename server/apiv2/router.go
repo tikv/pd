@@ -53,8 +53,9 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 		c.Next()
 	})
 	root := router.Group(apiV2Prefix)
+	// add ready check handler before Redirector to avoid redirecting it to the leader
 	handlers.RegisterReadyCheck(root)
-	// Routes audit locally handled requests after redirection and bootstrap checks.
+	root.Use(middlewares.Redirector())
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
 	handlers.RegisterMetaServiceGroup(root)

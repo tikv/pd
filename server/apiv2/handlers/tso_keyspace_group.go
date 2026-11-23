@@ -44,7 +44,7 @@ const (
 // RegisterTSOKeyspaceGroup registers keyspace group handlers to the server.
 func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router := r.Group("tso/keyspace-groups")
-	router.Use(middlewares.Redirector(), middlewares.BootstrapChecker())
+	router.Use(middlewares.BootstrapChecker())
 	router.POST("", middlewares.Audit("CreateKeyspaceGroups", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspaceGroups)
 	router.GET("", middlewares.Audit("GetKeyspaceGroups", audit.PrometheusHistogram), GetKeyspaceGroups)
 	router.GET("/:id", middlewares.Audit("GetKeyspaceGroupByID", audit.PrometheusHistogram), GetKeyspaceGroupByID)

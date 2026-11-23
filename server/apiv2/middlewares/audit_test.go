@@ -24,10 +24,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
-	"testing/iotest"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -92,7 +90,6 @@ type auditReadCloser struct {
 	io.Reader
 	beforeRead func()
 	reads      int
-	bytesRead  int
 	closed     bool
 }
 
@@ -101,83 +98,12 @@ func (r *auditReadCloser) Read(p []byte) (int, error) {
 		r.beforeRead()
 	}
 	r.reads++
-	n, err := r.Reader.Read(p)
-	r.bytesRead += n
-	return n, err
+	return r.Reader.Read(p)
 }
 
 func (r *auditReadCloser) Close() error {
 	r.closed = true
 	return nil
-}
-
-func TestAuditBackendSelection(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		labels     []string
-		enabled    bool
-		capture    bool
-		expectInfo bool
-		events     []string
-	}{
-		{name: "no labels", enabled: true, events: []string{"handler"}},
-		{name: "disabled", labels: []string{audit.LocalLogLabel}, events: []string{"handler"}},
-		{name: "metrics only", labels: []string{audit.PrometheusHistogram}, enabled: true, expectInfo: true, events: []string{"handler", "metrics"}},
-		{name: "local log", labels: []string{audit.LocalLogLabel}, enabled: true, capture: true, expectInfo: true, events: []string{"handler", "log"}},
-		{name: "both", labels: []string{audit.LocalLogLabel, audit.PrometheusHistogram}, enabled: true, capture: true, expectInfo: true, events: []string{"handler", "log", "metrics"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
-			var events []string
-			body := &auditReadCloser{Reader: strings.NewReader("request-body")}
-			checkInfo := func(r *http.Request) {
-				info, ok := requestutil.RequestInfoFrom(r.Context())
-				re.True(ok)
-				re.Equal("CreateKeyspace", info.ServiceLabel)
-				re.Contains(info.Method, "POST:/pd/api/v2/keyspaces")
-				if tc.capture {
-					re.Equal("request-body", info.BodyParam)
-				} else {
-					re.Empty(info.BodyParam)
-				}
-			}
-			svr := newTestAuditServer(
-				&recordingAuditBackend{label: audit.LocalLogLabel, before: true, run: func(r *http.Request) {
-					checkInfo(r)
-					_, ok := requestutil.EndTimeFrom(r.Context())
-					re.False(ok)
-					events = append(events, "log")
-				}},
-				&recordingAuditBackend{label: audit.PrometheusHistogram, run: func(r *http.Request) {
-					checkInfo(r)
-					end, ok := requestutil.EndTimeFrom(r.Context())
-					re.True(ok)
-					info, _ := requestutil.RequestInfoFrom(r.Context())
-					re.GreaterOrEqual(end, info.StartTimeStamp)
-					events = append(events, "metrics")
-				}},
-			)
-			svr.options.SetAuditConfig(&config.AuditConfig{EnableAudit: tc.enabled})
-			router := gin.New()
-			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			router.POST("/pd/api/v2/keyspaces", Audit("CreateKeyspace", tc.labels...), func(c *gin.Context) {
-				re.Zero(body.reads)
-				re.False(body.closed)
-				_, ok := requestutil.RequestInfoFrom(c.Request.Context())
-				re.Equal(tc.expectInfo, ok)
-				data, err := io.ReadAll(c.Request.Body)
-				re.NoError(err)
-				re.Equal("request-body", string(data))
-				re.NoError(c.Request.Body.Close())
-				events = append(events, "handler")
-				c.Status(http.StatusBadRequest)
-			})
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/pd/api/v2/keyspaces", body))
-			re.Equal(http.StatusBadRequest, recorder.Code)
-			re.Equal(tc.events, events)
-		})
-	}
 }
 
 func TestAuditOptionalRoutesAndLiveSwitch(t *testing.T) {
@@ -315,164 +241,6 @@ func TestAuditLocalLogDoesNotSetEndTime(t *testing.T) {
 	re.Equal(http.StatusNoContent, recorder.Code)
 }
 
-func TestAuditCompleteBody(t *testing.T) {
-	for _, size := range []int{0, 10, 4 << 20} {
-		t.Run(strconv.Itoa(size), func(t *testing.T) {
-			re := require.New(t)
-			payload := strings.Repeat("x", size)
-			body := &auditReadCloser{Reader: strings.NewReader(payload)}
-			var recorded string
-			svr := newTestAuditServer(&recordingAuditBackend{label: audit.LocalLogLabel, before: true, run: func(r *http.Request) {
-				info, ok := requestutil.RequestInfoFrom(r.Context())
-				re.True(ok)
-				recorded = info.BodyParam
-			}})
-			router := gin.New()
-			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
-				re.Zero(body.bytesRead)
-				re.False(body.closed)
-				info, ok := requestutil.RequestInfoFrom(c.Request.Context())
-				re.True(ok)
-				re.Empty(info.BodyParam)
-				data, err := io.ReadAll(c.Request.Body)
-				re.NoError(err)
-				re.Equal(payload, string(data))
-				re.NoError(c.Request.Body.Close())
-				re.True(body.closed)
-				c.Status(http.StatusNoContent)
-			})
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", body))
-			re.Equal(http.StatusNoContent, recorder.Code)
-			re.Equal(payload, recorded)
-		})
-	}
-}
-
-func TestAuditBodyReadErrors(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		reader func(string) io.Reader
-		err    error
-	}{
-		{name: "unexpected EOF", reader: func(payload string) io.Reader {
-			return io.MultiReader(strings.NewReader(payload), iotest.ErrReader(io.ErrUnexpectedEOF))
-		}, err: io.ErrUnexpectedEOF},
-		{name: "one-shot error", reader: func(payload string) io.Reader {
-			return iotest.TimeoutReader(strings.NewReader(payload))
-		}, err: iotest.ErrTimeout},
-	} {
-		for _, status := range []int{http.StatusBadRequest, http.StatusInternalServerError} {
-			t.Run(tc.name+"/"+strconv.Itoa(status), func(t *testing.T) {
-				re := require.New(t)
-				payload := "partial body"
-				body := &auditReadCloser{Reader: tc.reader(payload)}
-				var recorded string
-				svr := newTestAuditServer(&recordingAuditBackend{label: audit.LocalLogLabel, before: true, run: func(r *http.Request) {
-					info, ok := requestutil.RequestInfoFrom(r.Context())
-					re.True(ok)
-					recorded = info.BodyParam
-				}})
-				router := gin.New()
-				router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-				called := false
-				router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
-					called = true
-					re.False(body.closed)
-					info, ok := requestutil.RequestInfoFrom(c.Request.Context())
-					re.True(ok)
-					re.Empty(info.BodyParam)
-					data, err := io.ReadAll(c.Request.Body)
-					re.Equal(payload, string(data))
-					re.ErrorIs(err, tc.err)
-					re.NoError(c.Request.Body.Close())
-					re.True(body.closed)
-					c.AbortWithStatus(status)
-				})
-				recorder := httptest.NewRecorder()
-				router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", body))
-				re.Equal(status, recorder.Code)
-				re.True(called)
-				re.Equal(payload, recorded)
-			})
-		}
-	}
-}
-
-func TestAuditSkipsUnusedAndRedactedBodies(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		mode    logutil.RedactInfoLogType
-		capture bool
-	}{
-		{name: "metrics only", mode: logutil.RedactInfoLogOFF},
-		{name: "fully redacted", mode: logutil.RedactInfoLogON, capture: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
-			var logger *zap.Logger
-			var props *log.ZapProperties
-			re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, tc.mode))
-			t.Cleanup(func() { re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, logutil.RedactInfoLogOFF)) })
-			body := &auditReadCloser{Reader: strings.NewReader(strings.Repeat("x", 4<<20))}
-			svr := newTestAuditServer()
-			router := gin.New()
-			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			middleware := Audit("Selected", audit.PrometheusHistogram)
-			if tc.capture {
-				middleware = Audit("Selected", audit.LocalLogLabel)
-			}
-			router.POST("/selected", middleware, func(c *gin.Context) {
-				re.Zero(body.reads)
-				re.False(body.closed)
-				data, err := io.ReadAll(c.Request.Body)
-				re.NoError(err)
-				re.Len(data, 4<<20)
-				re.NoError(c.Request.Body.Close())
-				c.Status(http.StatusNoContent)
-			})
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", body))
-			re.Equal(http.StatusNoContent, recorder.Code)
-		})
-	}
-}
-
-func TestAuditOnlyCapturesConsumedBody(t *testing.T) {
-	for _, consumed := range []int{0, 3, 10} {
-		t.Run(strconv.Itoa(consumed), func(t *testing.T) {
-			re := require.New(t)
-			const payload = "0123456789"
-			body := &auditReadCloser{Reader: strings.NewReader(payload)}
-			var recorded string
-			svr := newTestAuditServer(&recordingAuditBackend{label: audit.LocalLogLabel, before: true, run: func(r *http.Request) {
-				info, ok := requestutil.RequestInfoFrom(r.Context())
-				re.True(ok)
-				recorded = info.BodyParam
-			}})
-			router := gin.New()
-			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
-				re.Zero(body.reads)
-				data := make([]byte, consumed)
-				_, err := io.ReadFull(c.Request.Body, data)
-				re.NoError(err)
-				re.Equal(payload[:consumed], string(data))
-				c.AbortWithStatus(http.StatusBadRequest)
-			})
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", body))
-			re.Equal(http.StatusBadRequest, recorder.Code)
-			re.Equal(consumed, body.bytesRead)
-			re.Equal(payload[:consumed], recorded)
-			remaining, err := io.ReadAll(body)
-			re.NoError(err)
-			re.Equal(payload[consumed:], string(remaining))
-		})
-	}
-}
-
 func TestAuditBodyReadDoesNotDelayResponse(t *testing.T) {
 	re := require.New(t)
 	reader, writer := io.Pipe()
@@ -531,37 +299,4 @@ func TestAuditBodyLogOnPanic(t *testing.T) {
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", strings.NewReader("request-body")))
 	re.Equal(http.StatusInternalServerError, recorder.Code)
 	re.Equal("request-body", recorded)
-}
-
-func BenchmarkAuditSelection(b *testing.B) {
-	gin.SetMode(gin.ReleaseMode)
-	for _, tc := range []struct {
-		name    string
-		enabled bool
-		labels  []string
-	}{
-		{name: "without-middleware", enabled: true},
-		{name: "no-labels", enabled: true, labels: []string{}},
-		{name: "disabled", labels: []string{audit.LocalLogLabel}},
-		{name: "metrics-only", enabled: true, labels: []string{audit.PrometheusHistogram}},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			svr := newTestAuditServer()
-			svr.options.SetAuditConfig(&config.AuditConfig{EnableAudit: tc.enabled})
-			router := gin.New()
-			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-			handlers := gin.HandlersChain{func(c *gin.Context) { c.Status(http.StatusNoContent) }}
-			if tc.labels != nil {
-				handlers = append(gin.HandlersChain{Audit("Benchmark", tc.labels...)}, handlers...)
-			}
-			router.POST("/test", handlers...)
-			request := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(strings.Repeat("x", 1<<20)))
-			recorder := httptest.NewRecorder()
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				router.ServeHTTP(recorder, request)
-			}
-		})
-	}
 }

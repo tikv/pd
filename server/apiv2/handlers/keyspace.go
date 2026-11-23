@@ -39,7 +39,7 @@ const managerUninitializedErr = "keyspace manager is not initialized"
 // RegisterKeyspace register keyspace related handlers to router paths.
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
-	router.Use(middlewares.Redirector(), middlewares.BootstrapChecker())
+	router.Use(middlewares.BootstrapChecker())
 	router.POST("", middlewares.Audit("CreateKeyspace", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspace)
 	router.POST("/id", middlewares.Audit("CreateKeyspaceByID", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspaceByID)
 	router.GET("", middlewares.Audit("LoadAllKeyspaces", audit.PrometheusHistogram), LoadAllKeyspaces)
