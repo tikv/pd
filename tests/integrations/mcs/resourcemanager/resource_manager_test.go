@@ -559,6 +559,8 @@ func (suite *resourceManagerClientTestSuite) TearDownTest() {
 func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupControllerWatchCount() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
+	etcdClient := suite.cluster.GetLeaderServer().GetEtcdClient()
+	configKey := keypath.ControllerConfigPath()
 
 	// This test overwrites the shared controller config key, so save the
 	// original value and restore it afterwards to avoid polluting other tests.
@@ -566,24 +568,24 @@ func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupController
 	re.NoError(err)
 	defer func() {
 		if len(originalConfig.GetKvs()) == 0 {
-			_, err := suite.client.Put(suite.ctx, pd.ControllerConfigPathPrefixBytes, []byte("{}"))
+			_, err := etcdClient.Put(suite.ctx, configKey, "{}")
 			re.NoError(err)
 			return
 		}
 		// Use suite.ctx because the test-scoped ctx is canceled by earlier defers.
-		_, err := suite.client.Put(suite.ctx, pd.ControllerConfigPathPrefixBytes, originalConfig.GetKvs()[0].GetValue())
+		_, err := etcdClient.Put(suite.ctx, configKey, string(originalConfig.GetKvs()[0].GetValue()))
 		re.NoError(err)
 	}()
 
 	minRevision := int64(0)
 	maxRevision := int64(0)
 	for i := range 3 {
-		res, err := suite.client.Put(ctx, fmt.Appendf(nil, "%s/%d", pd.ControllerConfigPathPrefixBytes, i), []byte("{}"))
+		res, err := etcdClient.Put(ctx, fmt.Sprintf("%s/%d", configKey, i), "{}")
 		re.NoError(err)
 		if i == 0 {
-			minRevision = res.GetHeader().GetRevision()
+			minRevision = res.Header.Revision
 		}
-		maxRevision = res.GetHeader().GetRevision()
+		maxRevision = res.Header.Revision
 	}
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError", fmt.Sprintf("return(%d)", maxRevision)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/watchStreamError", "return(true)"))
@@ -615,7 +617,7 @@ func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupController
 	configBytes, err := json.Marshal(config)
 	re.NoError(err)
 	// trigger resource group controller to watch config changes.
-	_, err = suite.client.Put(ctx, pd.ControllerConfigPathPrefixBytes, configBytes)
+	_, err = etcdClient.Put(ctx, configKey, string(configBytes))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return rgController.GetRUVersion() == controller.RUVersionV2
