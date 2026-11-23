@@ -87,6 +87,8 @@ type Manager struct {
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
+	// groupModRevisions tracks the last etcd revision of each watched group's stored target.
+	groupModRevisions map[string]int64
 	// storeConditionsKnown is set when the first availability check records
 	// store conditions. Targets loaded or reapplied from storage start degraded
 	// while conditions are unknown.
@@ -117,6 +119,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
 		unavailableStores:   make(map[uint64]storeCondition),
+		groupModRevisions:   make(map[string]int64),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}
@@ -342,6 +345,7 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	m.labelRuleVer.Add(1)
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
+	delete(m.groupModRevisions, groupID)
 }
 
 func (m *Manager) deleteGroups(groupIDs []string) {
@@ -509,15 +513,27 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
+	m.SyncGroupFromEtcdWithRevision(group, 0)
+}
+
+// SyncGroupFromEtcdWithRevision synchronizes a group and its key's modification revision.
+// A zero modRevision deduplicates by stored group contents.
+func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
 	// Fast path: avoid taking write lock if nothing changes.
 	m.RLock()
 	existingGroup, exists := m.groups[group.ID]
+	matchesStored := false
 	if exists {
+		if modRevision > 0 && modRevision <= m.groupModRevisions[group.ID] {
+			m.RUnlock()
+			return
+		}
 		stored := existingGroup.storedGroup()
-		if sameStoredGroup(&stored, group) {
+		matchesStored = sameStoredGroup(&stored, group)
+		if modRevision == 0 && matchesStored {
 			m.RUnlock()
 			return
 		}
@@ -547,8 +563,20 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	defer m.Unlock()
 	// Check if the group exists again to avoid other threads modifying the group.
 	groupInfo, exists := m.groups[group.ID]
-	if !exists {
+	switch {
+	case !exists:
 		m.initGroupLocked(group)
+	case matchesStored:
+		// A newer etcd write can reassert the stored peers after a local replacement.
+		// Apply it and invalidate observations made before the write.
+		m.applyGroupTargetLocked(groupInfo, group)
+	default:
+		m.syncGroupTargetLocked(groupInfo, group)
+	}
+	if modRevision > 0 {
+		m.groupModRevisions[group.ID] = modRevision
+	}
+	if !exists {
 		if labelRule != nil {
 			if labelErr != nil {
 				log.Warn("failed to attach existing label rule to new affinity group",
@@ -567,8 +595,6 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		}
 		// Once group created, the buffer must be deleted.
 		delete(m.labelRuleBuffer, group.ID)
-	} else {
-		m.syncGroupTargetLocked(groupInfo, group)
 	}
 }
 
@@ -595,6 +621,13 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		groupInfo.persistedGroup = nil
 		return false
 	}
+	m.applyGroupTargetLocked(groupInfo, group)
+	return true
+}
+
+// applyGroupTargetLocked installs the persisted target and invalidates cached affinity.
+// The write lock of RWMutex must be held.
+func (m *Manager) applyGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) {
 	groupInfo.Group = *group
 	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
 	groupInfo.persistedGroup = nil
@@ -606,7 +639,6 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		m.setTargetAvailabilityLocked(groupInfo)
 	}
 	m.resetCountLocked(groupInfo)
-	return true
 }
 
 // SyncGroupDeleteFromEtcd synchronizes a group deletion from etcd.
