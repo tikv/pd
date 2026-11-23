@@ -25,9 +25,11 @@ type key int
 const (
 	// requestInfoKey is the context key for the request info.
 	requestInfoKey key = iota
-	// endTimeKey is the context key for the end time.
+	// endTimeKey stores the request end time as Unix seconds (int64), retained
+	// for compatibility with callers that calculate duration from timestamps.
 	endTimeKey
-	// requestDurationKey is the context key for the elapsed request duration.
+	// requestDurationKey stores elapsed time (time.Duration) with subsecond
+	// precision. Metrics prefer it over subtracting whole-second timestamps.
 	requestDurationKey
 )
 
