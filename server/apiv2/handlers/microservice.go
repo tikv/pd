@@ -39,7 +39,7 @@ const tsoPrimaryEvictPath = "/tso/api/v1/primary/evict"
 func RegisterMicroservice(r *gin.RouterGroup) {
 	router := r.Group("ms")
 	redirect := middlewares.Redirector()
-	router.GET("members/:service", redirect, middlewares.Audit("GetMembers", audit.PrometheusHistogram), GetMembers)
+	router.GET("members/:service", redirect, middlewares.Audit("GetMicroserviceMembers", audit.PrometheusHistogram), GetMembers)
 	router.GET("primary/:service", redirect, middlewares.Audit("GetPrimary", audit.PrometheusHistogram), GetPrimary)
 	router.POST("tso/primary/evict", redirect, middlewares.Audit("EvictTSOPrimary", audit.LocalLogLabel, audit.PrometheusHistogram), EvictTSOPrimary)
 }

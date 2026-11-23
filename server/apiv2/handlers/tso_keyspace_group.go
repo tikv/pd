@@ -44,19 +44,19 @@ const (
 // RegisterTSOKeyspaceGroup registers keyspace group handlers to the server.
 func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router := r.Group("tso/keyspace-groups")
-	redirect, bootstrap := middlewares.Redirector(), middlewares.BootstrapChecker()
-	router.POST("", redirect, bootstrap, middlewares.Audit("CreateKeyspaceGroups", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspaceGroups)
-	router.GET("", redirect, bootstrap, middlewares.Audit("GetKeyspaceGroups", audit.PrometheusHistogram), GetKeyspaceGroups)
-	router.GET("/:id", redirect, bootstrap, middlewares.Audit("GetKeyspaceGroupByID", audit.PrometheusHistogram), GetKeyspaceGroupByID)
-	router.DELETE("/:id", redirect, bootstrap, middlewares.Audit("DeleteKeyspaceGroupByID", audit.LocalLogLabel, audit.PrometheusHistogram), DeleteKeyspaceGroupByID)
-	router.PATCH("/:id", redirect, bootstrap, middlewares.Audit("SetNodesForKeyspaceGroup", audit.LocalLogLabel, audit.PrometheusHistogram), SetNodesForKeyspaceGroup)
-	router.PATCH("/:id/*node", redirect, bootstrap, middlewares.Audit("SetPriorityForKeyspaceGroup", audit.LocalLogLabel, audit.PrometheusHistogram), SetPriorityForKeyspaceGroup)
-	router.POST("/:id/alloc", redirect, bootstrap, middlewares.Audit("AllocNodesForKeyspaceGroup", audit.LocalLogLabel, audit.PrometheusHistogram), AllocNodesForKeyspaceGroup)
-	router.POST("/:id/split", redirect, bootstrap, middlewares.Audit("SplitKeyspaceGroupByID", audit.LocalLogLabel, audit.PrometheusHistogram), SplitKeyspaceGroupByID)
-	router.DELETE("/:id/split", redirect, bootstrap, middlewares.Audit("FinishSplitKeyspaceByID", audit.LocalLogLabel, audit.PrometheusHistogram), FinishSplitKeyspaceByID)
-	router.POST("/:id/merge", redirect, bootstrap, middlewares.Audit("MergeKeyspaceGroups", audit.LocalLogLabel, audit.PrometheusHistogram), MergeKeyspaceGroups)
-	router.DELETE("/:id/merge", redirect, bootstrap, middlewares.Audit("FinishMergeKeyspaceByID", audit.LocalLogLabel, audit.PrometheusHistogram), FinishMergeKeyspaceByID)
-	router.DELETE("/:id/keyspaces", redirect, bootstrap, middlewares.Audit("RemoveKeyspacesFromGroup", audit.LocalLogLabel, audit.PrometheusHistogram), RemoveKeyspacesFromGroup)
+	router.Use(middlewares.Redirector(), middlewares.BootstrapChecker())
+	router.POST("", middlewares.Audit("CreateKeyspaceGroups", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspaceGroups)
+	router.GET("", middlewares.Audit("GetKeyspaceGroups", audit.PrometheusHistogram), GetKeyspaceGroups)
+	router.GET("/:id", middlewares.Audit("GetKeyspaceGroupByID", audit.PrometheusHistogram), GetKeyspaceGroupByID)
+	router.DELETE("/:id", middlewares.Audit("DeleteKeyspaceGroupByID", audit.LocalLogLabel, audit.PrometheusHistogram), DeleteKeyspaceGroupByID)
+	router.PATCH("/:id", middlewares.Audit("SetNodesForKeyspaceGroup", audit.LocalLogLabel, audit.PrometheusHistogram), SetNodesForKeyspaceGroup)
+	router.PATCH("/:id/*node", middlewares.Audit("SetPriorityForKeyspaceGroup", audit.LocalLogLabel, audit.PrometheusHistogram), SetPriorityForKeyspaceGroup)
+	router.POST("/:id/alloc", middlewares.Audit("AllocNodesForKeyspaceGroup", audit.LocalLogLabel, audit.PrometheusHistogram), AllocNodesForKeyspaceGroup)
+	router.POST("/:id/split", middlewares.Audit("SplitKeyspaceGroupByID", audit.LocalLogLabel, audit.PrometheusHistogram), SplitKeyspaceGroupByID)
+	router.DELETE("/:id/split", middlewares.Audit("FinishSplitKeyspaceByID", audit.LocalLogLabel, audit.PrometheusHistogram), FinishSplitKeyspaceByID)
+	router.POST("/:id/merge", middlewares.Audit("MergeKeyspaceGroups", audit.LocalLogLabel, audit.PrometheusHistogram), MergeKeyspaceGroups)
+	router.DELETE("/:id/merge", middlewares.Audit("FinishMergeKeyspaceByID", audit.LocalLogLabel, audit.PrometheusHistogram), FinishMergeKeyspaceByID)
+	router.DELETE("/:id/keyspaces", middlewares.Audit("RemoveKeyspacesFromGroup", audit.LocalLogLabel, audit.PrometheusHistogram), RemoveKeyspacesFromGroup)
 }
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.

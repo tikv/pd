@@ -22,9 +22,12 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/negroni/v3"
 	"go.uber.org/zap"
@@ -229,5 +232,45 @@ func TestHTTPAuditParity(t *testing.T) {
 				re.Equal(expected, events)
 			})
 		}
+	}
+}
+
+func TestHTTPAuditMetricsDuration(t *testing.T) {
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			re := require.New(t)
+			histogram := prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "audit_duration_seconds"}, []string{"service", "method"})
+			counter := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "audit_requests_total"}, []string{"service", "method", "caller_component"})
+			svr := &testHTTPAuditServer{
+				options:  config.NewServiceMiddlewarePersistOptions(config.NewServiceMiddlewareConfig()),
+				labels:   &audit.BackendLabels{Labels: []string{audit.PrometheusHistogram}},
+				backends: []audit.Backend{audit.NewPrometheusBackend(histogram, counter, false)},
+			}
+			handler := func(w http.ResponseWriter, _ *http.Request) {
+				time.Sleep(20 * time.Millisecond)
+				w.WriteHeader(http.StatusNoContent)
+			}
+			var router http.Handler
+			if version == "v1" {
+				r := mux.NewRouter()
+				r.Handle("/selected", negroni.New(&auditMiddleware{svr: svr}, negroni.WrapFunc(handler))).Name("Selected")
+				router = r
+			} else {
+				r := gin.New()
+				r.Use(func(c *gin.Context) { c.Set(v2.ServerContextKey, svr) })
+				r.GET("/selected", v2.Audit("Selected", audit.PrometheusHistogram), func(c *gin.Context) { handler(c.Writer, c.Request) })
+				router = r
+			}
+			started := time.Now()
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/selected", http.NoBody))
+			elapsed := time.Since(started)
+			re.Equal(http.StatusNoContent, recorder.Code)
+			var metric dto.Metric
+			re.NoError(histogram.WithLabelValues("Selected", "HTTP").(prometheus.Metric).Write(&metric))
+			re.EqualValues(1, metric.GetHistogram().GetSampleCount())
+			re.GreaterOrEqual(metric.GetHistogram().GetSampleSum(), (20 * time.Millisecond).Seconds())
+			re.LessOrEqual(metric.GetHistogram().GetSampleSum(), elapsed.Seconds())
+		})
 	}
 }

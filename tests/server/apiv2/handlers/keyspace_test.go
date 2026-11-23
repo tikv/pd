@@ -223,6 +223,12 @@ func (suite *keyspaceTestSuite) TestHTTPAuditSwitch() {
 		request := &handlers.CreateKeyspaceParams{Name: fmt.Sprintf("audit-keyspace-%d", i)}
 		MustCreateKeyspace(re, suite.server, request)
 		re.Equal(request.Name, mustLoadKeyspaces(re, suite.server, request.Name).Name)
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, suite.server.GetAddr()+"/pd/api/v1/members", nil, testutil.StatusOK(re)))
+		microserviceStatus := http.StatusNotFound
+		if suite.server.GetServer().IsKeyspaceGroupEnabled() {
+			microserviceStatus = http.StatusOK
+		}
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, suite.server.GetAddr()+"/pd/api/v2/ms/members/tso", nil, testutil.Status(re, microserviceStatus)))
 		data, err := os.ReadFile(logFile)
 		re.NoError(err)
 		expected := 0
@@ -237,7 +243,7 @@ func (suite *keyspaceTestSuite) TestHTTPAuditSwitch() {
 			increment = 1
 		}
 		for _, family := range []string{"pd_service_audit_requests_total", "pd_service_audit_handling_seconds"} {
-			for _, service := range []string{"CreateKeyspace", "LoadKeyspace"} {
+			for _, service := range []string{"CreateKeyspace", "LoadKeyspace", "GetMembers", "GetMicroserviceMembers"} {
 				key := family + ":" + service
 				re.Equal(increment, after[key]-before[key], key)
 			}

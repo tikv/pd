@@ -105,6 +105,9 @@ func (b *PrometheusBackend) ProcessHTTPRequest(req *http.Request) bool {
 	}
 
 	duration := float64(endTime - requestInfo.StartTimeStamp)
+	if elapsed, ok := requestutil.RequestDurationFrom(req.Context()); ok {
+		duration = elapsed.Seconds()
+	}
 	b.histogramVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP").Observe(duration)
 
 	b.counterVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP", requestInfo.CallerID).Inc()
@@ -157,6 +160,7 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 		next(w, r)
 		return
 	}
+	start := time.Now()
 	info, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
 		info = requestutil.GetRequestInfoWithoutBody(r)
@@ -197,8 +201,10 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 		if !hasAfterBackend {
 			return
 		}
-		end := time.Now().Unix()
-		auditRequest = auditRequest.WithContext(requestutil.WithEndTime(auditRequest.Context(), end))
+		end := time.Now()
+		ctx := requestutil.WithEndTime(auditRequest.Context(), end.Unix())
+		ctx = requestutil.WithRequestDuration(ctx, end.Sub(start))
+		auditRequest = auditRequest.WithContext(ctx)
 		for _, backend := range backends {
 			if !backend.ProcessBeforeHandler() && backend.Match(labels) {
 				backend.ProcessHTTPRequest(auditRequest)

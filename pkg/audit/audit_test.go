@@ -33,6 +33,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
@@ -104,6 +105,15 @@ func TestPrometheusBackend(t *testing.T) {
 	info.CallerID = "user2"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.True(backend.ProcessHTTPRequest(req))
+
+	var metric dto.Metric
+	re.NoError(serviceAuditHistogramTest.WithLabelValues("test", "HTTP").(prometheus.Metric).Write(&metric))
+	legacyDuration := float64(3 * (endTime - info.StartTimeStamp))
+	re.Equal(legacyDuration, metric.GetHistogram().GetSampleSum())
+	req = req.WithContext(requestutil.WithRequestDuration(req.Context(), 125*time.Millisecond))
+	re.True(backend.ProcessHTTPRequest(req))
+	re.NoError(serviceAuditHistogramTest.WithLabelValues("test", "HTTP").(prometheus.Metric).Write(&metric))
+	re.Equal(legacyDuration+0.125, metric.GetHistogram().GetSampleSum())
 
 	req, err = http.NewRequest(http.MethodGet, ts.URL, http.NoBody)
 	re.NoError(err)
