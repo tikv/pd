@@ -119,14 +119,20 @@ func TestTiDBGroupKeyRange(t *testing.T) {
 
 func TestParseAffinityKeyRanges(t *testing.T) {
 	re := require.New(t)
-	ranges, err := parseAffinityKeyRanges([]string{"0a,0b", " 7480 , 7481 ", ","})
-	re.NoError(err)
-	re.Len(ranges, 3)
-	re.Equal([]byte{0x0a}, ranges[0].StartKey)
-	re.Equal([]byte{0x0b}, ranges[0].EndKey)
-	re.Equal([]byte{0x74, 0x80}, ranges[1].StartKey)
-	re.Empty(ranges[2].StartKey)
-	re.Empty(ranges[2].EndKey)
+	for _, tc := range []struct {
+		input, expected string
+	}{
+		{"0a,0b", "0a,0b"},
+		{" 7480 , 7481 ", "7480,7481"},
+		{"61,", "61,"},
+		{",61", ",61"},
+		{",", ","},
+	} {
+		ranges, err := parseAffinityKeyRanges([]string{tc.input})
+		re.NoError(err, tc.input)
+		re.Len(ranges, 1)
+		re.Equal(tc.expected, formatAffinityKeyRange(ranges[0]))
+	}
 
 	for _, raw := range []string{"0a", "0a,0b,0c", "zz,0b", "0a,zz", "0,1"} {
 		_, err := parseAffinityKeyRanges([]string{raw})

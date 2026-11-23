@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
@@ -51,6 +52,7 @@ func RegisterAffinity(r *gin.RouterGroup) {
 
 // AffinityKeyRange represents a key range in affinity group API requests.
 // It uses underscore naming for JSON fields to maintain consistency with other API structures.
+// For Classic custom groups, an empty start or end key leaves that endpoint unbounded.
 type AffinityKeyRange struct {
 	StartKey []byte `json:"start_key"`
 	EndKey   []byte `json:"end_key"`
@@ -192,7 +194,7 @@ func createAffinityGroups(c *gin.Context) {
 		var keyRanges []keyutil.KeyRange
 		for _, kr := range input.Ranges {
 			// Validate key range
-			if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
+			if err := validateKeyRange(groupID, kr.StartKey, kr.EndKey, false); err != nil {
 				c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 				return
 			}
@@ -596,18 +598,19 @@ func handleAffinityError(c *gin.Context, err error) bool {
 	return true
 }
 
-// validateKeyRange checks if a key range is valid.
-// It ensures that StartKey < EndKey unless both are empty (representing the entire key space).
-func validateKeyRange(startKey, endKey []byte) error {
-	// Both empty means the entire key space, which is valid
+// validateKeyRange checks the endpoints of a range in a create, add, or remove request.
+func validateKeyRange(groupID string, startKey, endKey []byte, remove bool) error {
+	// Both empty represents the entire key space.
 	if len(startKey) == 0 && len(endKey) == 0 {
 		return nil
 	}
-	// If only one is empty, it's invalid
 	if len(startKey) == 0 || len(endKey) == 0 {
+		// Removal must match persisted ranges even if creation would reject them.
+		if remove || (!kerneltype.IsNextGen() && !strings.HasPrefix(groupID, "_tidb_")) {
+			return nil
+		}
 		return errs.ErrAffinityGroupContent.FastGenByArgs("key range must have both start_key and end_key, or both empty for entire key space")
 	}
-	// StartKey must be less than EndKey
 	if bytes.Compare(startKey, endKey) >= 0 {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("start_key must be less than end_key")
 	}
@@ -642,11 +645,8 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 		}
 		// Validate and merge ranges for this group
 		for _, kr := range op.Ranges {
-			// Removal must also match persisted half-unbounded ranges.
-			if !remove || (len(kr.StartKey) > 0 && len(kr.EndKey) > 0) {
-				if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
-					return nil, err
-				}
+			if err := validateKeyRange(op.ID, kr.StartKey, kr.EndKey, remove); err != nil {
+				return nil, err
 			}
 			grouped[op.ID] = append(grouped[op.ID], keyutil.KeyRange{
 				StartKey: kr.StartKey,

@@ -999,26 +999,35 @@ func (suite *affinityHandlerTestSuite) TestAffinityInvalidKeyRanges() {
 		statusCode, errorMsg = doCreateAffinityGroups(re, serverAddr, &createReq)
 		re.Equal(http.StatusBadRequest, statusCode)
 		re.Contains(errorMsg, "start_key must be less than end_key")
+	})
+}
 
-		// Test only StartKey provided
-		createReq = handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"only-start": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{})}}},
-			},
-		}
-		statusCode, errorMsg = doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
-		re.Contains(errorMsg, "key range must have both start_key and end_key")
+func (suite *affinityHandlerTestSuite) TestAffinityOpenEndedKeyRanges() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		key := affinityTestKey([]byte{0x61})
 
-		// Test only EndKey provided
-		createReq = handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"only-end": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{}), EndKey: affinityTestKey([]byte{0x10})}}},
-			},
+		for _, tc := range []struct {
+			groupID  string
+			keyRange handlers.AffinityKeyRange
+		}{
+			{"only-start", handlers.AffinityKeyRange{StartKey: key}},
+			{"only-end", handlers.AffinityKeyRange{EndKey: key}},
+		} {
+			status, message := doCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+					tc.groupID: {Ranges: []handlers.AffinityKeyRange{tc.keyRange}},
+				},
+			})
+			if kerneltype.IsNextGen() {
+				re.Equal(http.StatusBadRequest, status)
+				re.Contains(message, "key range must have both start_key and end_key")
+				continue
+			}
+			re.Equal(http.StatusOK, status, message)
+			mustDeleteAffinityGroup(re, serverAddr, tc.groupID, true)
 		}
-		statusCode, errorMsg = doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
-		re.Contains(errorMsg, "key range must have both start_key and end_key")
 	})
 }
 

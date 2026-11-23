@@ -409,16 +409,12 @@ func TestAffinityGroupAndRangeCommands(t *testing.T) {
 		return hex.EncodeToString(codec.EncodeBytes(key))
 	}
 	extraRange := tableKey(200) + "," + tableKey(201)
-	unscopedTableGroupError := "ADMIN REPAIR AFFINITY TABLE GROUP"
-	if kerneltype.IsNextGen() {
-		unscopedTableGroupError = "pd-ctl --keyspace-id"
-	}
 	for _, tc := range []struct {
 		args []string
 		err  string
 	}{
 		{[]string{"create", "--group-id", tidbPrefix + "103", "--range", "0a,0b"}, "derived from its ID"},
-		{[]string{"create", "--group-id", "_tidb_tg_1_i0"}, unscopedTableGroupError},
+		{[]string{"create", "--group-id", "_tidb_tg_1_i0"}, "ADMIN REPAIR AFFINITY TABLE GROUP"},
 		{[]string{"create", "--group-id", "_tidb_ks1_tg_1_i0"}, "ADMIN REPAIR AFFINITY TABLE GROUP"},
 		{[]string{"create", "--group-id", "_tidb_pg1"}, "reserved for TiDB"},
 		{[]string{"create", "--group-id", "_tidb_custom"}, "reserved for TiDB"},
@@ -481,9 +477,8 @@ func TestAffinityGroupAndRangeCommands(t *testing.T) {
 	re.ErrorContains(err, "affinity group poc-leftover not found")
 }
 
-// TestAffinityCustomGroupKeyspace tests the key ranges that pd-ctl takes for
-// a group with a custom ID. Nextgen requires them to lie in one keyspace, with
-// the ranges that the group has, while Classic takes any range that PD takes.
+// TestAffinityCustomGroupKeyspace checks that Classic accepts unbounded ranges
+// and NextGen keeps all ranges of a custom group within one transaction keyspace.
 func TestAffinityCustomGroupKeyspace(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -506,13 +501,33 @@ func TestAffinityCustomGroupKeyspace(t *testing.T) {
 	}
 
 	if !kerneltype.IsNextGen() {
-		// Classic has no keyspaces, and a custom group may take the whole key space.
 		groups := make(map[string]*pd.AffinityGroupState)
+		const openGroup = "poc-open"
+		// Exercise both open endpoints on both the create and add paths.
+		for _, pair := range [][2]string{{"61,", ",61"}, {",61", "61,"}} {
+			mustRun(&groups, "create", "--group-id", openGroup, "--range", pair[0])
+			re.Equal(1, groups[openGroup].RangeCount)
+			mustRun(&groups, "range", "add", "--group-id", openGroup, "--range", pair[1])
+			re.Equal(2, groups[openGroup].RangeCount)
+			mustRun(&groups, "range", "remove", "--group-id", openGroup, "--range", pair[0], "--range", pair[1])
+			re.Zero(groups[openGroup].RangeCount)
+			_, err := run("delete", "--group-id", openGroup)
+			re.NoError(err)
+		}
+
+		// A range without either endpoint covers the whole key space.
 		mustRun(&groups, "create", "--group-id", "poc-all", "--range", ",")
 		re.Equal(1, groups["poc-all"].RangeCount)
-		for _, keyRange := range []string{"01,", ",10"} {
-			_, err := run("create", "--group-id", "poc-one-sided", "--range", keyRange)
-			re.ErrorContains(err, "key range must have both start_key and end_key, or both empty for entire key space")
+		mustRun(&groups, "range", "remove", "--group-id", "poc-all", "--range", ",")
+		re.Zero(groups["poc-all"].RangeCount)
+		mustRun(&groups, "range", "add", "--group-id", "poc-all", "--range", ",")
+		re.Equal(1, groups["poc-all"].RangeCount)
+
+		for _, keyRange := range []string{"61,61", "62,61"} {
+			_, err := run("create", "--group-id", "poc-invalid", "--range", keyRange)
+			re.ErrorContains(err, "start_key must be less than end_key", keyRange)
+			_, err = run("range", "add", "--group-id", "poc-all", "--range", keyRange)
+			re.ErrorContains(err, "start_key must be less than end_key", keyRange)
 		}
 		return
 	}
@@ -534,29 +549,33 @@ func TestAffinityCustomGroupKeyspace(t *testing.T) {
 		return fmt.Sprintf("nextgen requires the key ranges of custom group %s to lie in one keyspace, but ", groupID)
 	}
 
-	// pd-ctl does not send a range that takes the Regions of several
-	// keyspaces, of all of them, or of none.
+	groups := make(map[string]*pd.AffinityGroupState)
+	mustRun(&groups, "create", "--group-id", "poc-one", "--range", table(1, 100))
+	re.Equal(1, groups["poc-one"].RangeCount)
+
+	// pd-ctl rejects unbounded ranges and ranges outside a single transaction keyspace.
 	for _, tc := range []struct {
 		groupID, keyRange, problem string
 	}{
 		{"poc-cross", keyRange(key(1, 100), key(3, 100)), "starts in keyspace 1 and ends after it"},
 		{"poc-keyspaces", keyRange(key(1, 0), key(3, 0)), "starts in keyspace 1 and ends after it"},
 		{"poc-all", ",", "covers the whole key space"},
+		{"poc-open-end", "61,", "does not start in a transaction keyspace"},
+		{"poc-open-start", ",61", "has no start key"},
 		{"poc-no-end", keyRange(key(1, 100), nil), "starts in keyspace 1 and has no end key"},
 		{"poc-outside", "0a,0b", "does not start in a transaction keyspace"},
 	} {
 		_, err := run("create", "--group-id", tc.groupID, "--range", tc.keyRange)
 		re.EqualError(err, fmt.Sprintf("%skey range %q %s", rule(tc.groupID), tc.keyRange, tc.problem), tc.groupID)
 		re.False(manager.IsGroupExist(tc.groupID), tc.groupID)
+		_, err = run("range", "add", "--group-id", "poc-one", "--range", tc.keyRange)
+		re.EqualError(err, fmt.Sprintf("%skey range %q %s", rule("poc-one"), tc.keyRange, tc.problem))
 	}
 	_, err = run("create", "--group-id", "poc-two", "--range", table(1, 100), "--range", table(2, 100))
 	re.EqualError(err, fmt.Sprintf("%skey range %q lies in keyspace 2 and key range %q in keyspace 1", rule("poc-two"), table(2, 100), table(1, 100)))
 	re.False(manager.IsGroupExist("poc-two"))
 
 	// PD checks the new ranges with the persisted ranges of the group.
-	groups := make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "create", "--group-id", "poc-one", "--range", table(1, 100))
-	re.Equal(1, groups["poc-one"].RangeCount)
 	_, err = run("range", "add", "--group-id", "poc-one", "--range", table(2, 100))
 	re.ErrorContains(err, "key ranges must belong to transaction keyspace 1")
 	groups = make(map[string]*pd.AffinityGroupState)

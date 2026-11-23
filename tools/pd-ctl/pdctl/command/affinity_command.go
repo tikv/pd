@@ -87,8 +87,10 @@ func newAffinityCreateCommand() *cobra.Command {
 		Use:   "create",
 		Short: "create an affinity group with key ranges",
 		Long: `Create an affinity group.
-A group with a custom ID needs --range. In nextgen, each key range of a custom group needs both keys, and all its key ranges must
-lie in one keyspace. The key ranges of a TiDB table or partition group are derived from its ID, for example --table-id 100
+A group with a custom ID needs --range. In Classic, either endpoint may be empty, and a range with both endpoints empty covers
+all keys. In NextGen, both endpoints are required and all ranges of the group must lie in one transaction keyspace.
+
+The key ranges of a TiDB table or partition group are derived from its ID, for example --table-id 100
 --partition-id 101, or --group-id _tidb_pt_100_p101. Groups of TiDB affinity table groups are created by TiDB.
 
 Creating a _tidb_ group in PD does not set the table's AFFINITY attribute in TiDB. For a table without that attribute,
@@ -116,8 +118,9 @@ func newAffinityRangeCommand() *cobra.Command {
 		Use:   "add",
 		Short: "add key ranges to an affinity group",
 		Long: `Add key ranges to an affinity group.
-In nextgen, each key range of a group with a custom ID needs both keys, and all its key ranges, with the ones it has, must lie in
-one keyspace.`,
+For a group with a custom ID in Classic, either endpoint may be empty, and a range with both endpoints empty covers all keys.
+In NextGen, both endpoints are required and all ranges of the group, including existing ranges, must lie in one transaction
+keyspace.`,
 		Args: cobra.NoArgs,
 		RunE: affinityRangeAddCommandFunc,
 	}
