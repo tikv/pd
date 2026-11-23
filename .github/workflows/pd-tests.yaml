@@ -50,19 +50,19 @@ jobs:
                   ...context.repo, workflow_id: 'pd-tests.yaml', branch: scope.branch,
                   event: scope.event, status: 'success', per_page: 100,
                 });
-                const run = data.workflow_runs.find(run =>
-                  run.id < context.runId && run.head_repository.id === scope.repository);
-                if (!run) continue;
-                const {data: results} = await github.rest.actions.listWorkflowRunArtifacts({
-                  ...context.repo, run_id: run.id, per_page: 100,
-                });
-                const artifact = results.artifacts.find(artifact =>
-                  artifact.name === 'test-duration-history' && !artifact.expired);
-                if (artifact) {
-                  core.setOutput('artifact-id', artifact.id);
-                  core.setOutput('run-id', run.id);
-                  core.info(`Using duration history from ${run.html_url}`);
-                  return;
+                for (const run of data.workflow_runs) {
+                  if (run.id >= context.runId || run.head_repository.id !== scope.repository) continue;
+                  const {data: results} = await github.rest.actions.listWorkflowRunArtifacts({
+                    ...context.repo, run_id: run.id, per_page: 100,
+                  });
+                  const artifact = results.artifacts.find(artifact =>
+                    artifact.name === 'test-duration-history' && !artifact.expired);
+                  if (artifact) {
+                    core.setOutput('artifact-id', artifact.id);
+                    core.setOutput('run-id', run.id);
+                    core.info(`Using duration history from ${run.html_url}`);
+                    return;
+                  }
                 }
               }
               core.info('No successful duration history found; using default estimates.');
