@@ -1300,7 +1300,7 @@ func (c *client) GetAffinityGroup(ctx context.Context, groupID string) (*Affinit
 	var state AffinityGroupState
 	err := c.request(ctx, newRequestInfo().
 		WithName("GetAffinityGroup").
-		WithURI(AffinityGroupByID(groupID)).
+		WithURI(AffinityGroupByIDPath(groupID)).
 		WithMethod(http.MethodGet).
 		WithResp(&state))
 	if err != nil {
@@ -1380,7 +1380,7 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 	var state AffinityGroupState
 	err = c.request(ctx, newRequestInfo().
 		WithName("UpdateAffinityGroupPeers").
-		WithURI(AffinityGroupByID(groupID)).
+		WithURI(AffinityGroupByIDPath(groupID)).
 		WithMethod(http.MethodPut).
 		WithBody(reqJSON).
 		WithResp(&state))
@@ -1395,7 +1395,7 @@ func (c *client) DeleteAffinityGroup(ctx context.Context, groupID string, force 
 	if groupID == "" {
 		return errors.New("group ID must not be empty")
 	}
-	uri := AffinityGroupByID(groupID)
+	uri := AffinityGroupByIDPath(groupID)
 	if force {
 		uri = fmt.Sprintf("%s?force=true", uri)
 	}

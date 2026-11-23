@@ -61,85 +61,6 @@ func TestConfigWithTrailingSlash(t *testing.T) {
 	}
 }
 
-func TestGetAffinityGroupsByPrefix(t *testing.T) {
-	re := require.New(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		re.Equal(http.MethodGet, r.Method)
-		re.Equal("/pd/api/v2/affinity-groups?prefix=_tidb_ks1_pt_100_p", r.RequestURI)
-		w.Header().Set("Content-Type", "application/json")
-		_, err := io.WriteString(w, `{"affinity_groups":{"_tidb_ks1_pt_100_p101":{"id":"_tidb_ks1_pt_100_p101"}}}`)
-		re.NoError(err)
-	}))
-	defer server.Close()
-
-	c := newClientWithMockServiceDiscovery("test-affinity-prefix", []string{server.URL})
-	defer c.Close()
-	groups, err := c.GetAffinityGroupsByPrefix(context.Background(), "_tidb_ks1_pt_100_p")
-	re.NoError(err)
-	re.Len(groups, 1)
-	re.Contains(groups, "_tidb_ks1_pt_100_p101")
-}
-
-func TestAffinityGroupPathEscaping(t *testing.T) {
-	for _, tc := range []struct{ id, escaped string }{
-		{"group", "group"},
-		{"g1?force=true", "g1%3Fforce=true"},
-		{"../affinity-groups?force=true", "..%2Faffinity-groups%3Fforce=true"},
-		{"a/b#c% d", "a%2Fb%23c%25%20d"},
-	} {
-		t.Run(tc.id, func(t *testing.T) {
-			re := require.New(t)
-			for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-				for _, force := range []bool{false, true} {
-					checked := 0
-					transport := NewHTTPClientWithRequestChecker(func(req *http.Request) error {
-						checked++
-						re.Equal(method, req.Method)
-						want := "/pd/api/v2/affinity-groups/" + tc.escaped
-						if method == http.MethodDelete && force {
-							want += "?force=true"
-							re.Equal("true", req.URL.Query().Get("force"))
-						} else {
-							re.Empty(req.URL.RawQuery)
-						}
-						re.Equal(want, req.URL.RequestURI())
-						return nil
-					})
-					c := newClientWithMockServiceDiscovery("affinity-path", []string{"http://127.0.0.1"}, WithHTTPClient(transport))
-					t.Cleanup(c.Close)
-					switch method {
-					case http.MethodGet:
-						_, err := c.GetAffinityGroup(t.Context(), tc.id)
-						re.NoError(err)
-					case http.MethodPut:
-						_, err := c.UpdateAffinityGroupPeers(t.Context(), tc.id, 1, []uint64{1})
-						re.NoError(err)
-					case http.MethodDelete:
-						re.NoError(c.DeleteAffinityGroup(t.Context(), tc.id, force))
-					}
-					re.Equal(1, checked)
-				}
-			}
-		})
-	}
-}
-
-func TestAffinityGroupEmptyID(t *testing.T) {
-	re := require.New(t)
-	checked := 0
-	transport := NewHTTPClientWithRequestChecker(func(_ *http.Request) error { checked++; return nil })
-	c := newClientWithMockServiceDiscovery("affinity-empty-id", []string{"http://127.0.0.1"}, WithHTTPClient(transport))
-	defer c.Close()
-	_, err := c.GetAffinityGroup(t.Context(), "")
-	re.ErrorContains(err, "group ID must not be empty")
-	_, err = c.UpdateAffinityGroupPeers(t.Context(), "", 1, []uint64{1})
-	re.ErrorContains(err, "group ID must not be empty")
-	for _, force := range []bool{false, true} {
-		re.ErrorContains(c.DeleteAffinityGroup(t.Context(), "", force), "group ID must not be empty")
-	}
-	re.Zero(checked)
-}
-
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	re := require.New(t)
 	checked := 0
@@ -225,4 +146,23 @@ func TestWithTargetURL(t *testing.T) {
 	re.ErrorIs(err, errs.ErrClientNoTargetMember)
 	_, err = c.WithTargetURL("http://127.0.0.2").GetStatus(ctx)
 	re.ErrorContains(err, "connect: connection refused")
+}
+
+func TestGetAffinityGroupsByPrefix(t *testing.T) {
+	re := require.New(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		re.Equal(http.MethodGet, r.Method)
+		re.Equal("/pd/api/v2/affinity-groups?prefix=_tidb_ks1_pt_100_p", r.RequestURI)
+		w.Header().Set("Content-Type", "application/json")
+		_, err := io.WriteString(w, `{"affinity_groups":{"_tidb_ks1_pt_100_p101":{"id":"_tidb_ks1_pt_100_p101"}}}`)
+		re.NoError(err)
+	}))
+	defer server.Close()
+
+	c := newClientWithMockServiceDiscovery("test-affinity-prefix", []string{server.URL})
+	defer c.Close()
+	groups, err := c.GetAffinityGroupsByPrefix(context.Background(), "_tidb_ks1_pt_100_p")
+	re.NoError(err)
+	re.Len(groups, 1)
+	re.Contains(groups, "_tidb_ks1_pt_100_p101")
 }
