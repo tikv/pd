@@ -283,27 +283,43 @@ func (p *planner) repairTargets(g *groupState, leaves []solution, current cost, 
 	}
 	var queue []rejected
 	var checked [][]int
-	check := func(sol solution) bool {
+	var targetRejected bool
+	// A check can finish the search by accepting a target or observing a stop.
+	check := func(sol solution) (solution, bool) {
 		key := slices.Clone(sol.voters)
 		slices.Sort(key)
 		key = append(key, sol.leader)
 		if slices.ContainsFunc(checked, func(k []int) bool { return slices.Equal(key, k) }) {
-			return false
+			return solution{}, false
+		}
+		if p.stopped() {
+			p.placementLimited = p.placementLimited || targetRejected
+			return solution{}, true
 		}
 		checked = append(checked, key)
-		feedback := p.checkTarget(g, sol.voters, sol.leader)
-		if feedback.Status == TargetSatisfied {
-			return sol.c.cmp(current) < 0
+		feedback := p.runTargetCheck(g, sol.voters, sol.leader)
+		switch feedback.Status {
+		case TargetSatisfied:
+			if sol.c.cmp(current) < 0 {
+				return sol, true
+			}
+		case TargetRejected:
+			targetRejected = true
+			if len(feedback.Replace) > 0 {
+				queue = append(queue, rejected{sol: sol, feedback: feedback})
+			}
 		}
-		if feedback.Status == TargetRejected && len(feedback.Replace) > 0 {
-			queue = append(queue, rejected{sol: sol, feedback: feedback})
-		}
-		return false
+		return solution{}, false
 	}
 	for _, sol := range leaves {
-		if check(sol) {
-			return sol
+		if result, done := check(sol); done {
+			return result
 		}
+	}
+	// A cutoff while collecting leaves may hide alternatives even without repairs.
+	if rs.limited && targetRejected {
+		p.placementLimited = true
+		return solution{}
 	}
 	for len(queue) > 0 {
 		node := queue[0]
@@ -314,7 +330,7 @@ func (p *planner) repairTargets(g *groupState, leaves []solution, current cost, 
 		// Let children take a second step without letting a deep rejected
 		// chain or one wide parent consume every remaining node.
 		for range min(4, len(node.repairs)) {
-			if rs.done() || p.stopped() {
+			if rs.done() {
 				p.placementLimited = true
 				return solution{}
 			}
@@ -324,12 +340,10 @@ func (p *planner) repairTargets(g *groupState, leaves []solution, current cost, 
 			voters[slices.Index(voters, replacement.old)] = replacement.next
 			rs.nodes++
 			candidate := p.assignTarget(g, voters, rs)
-			if p.stopped() || !candidate.ok && rs.done() {
-				p.placementLimited = true // Assignment left this repair unexplored.
-				return solution{}
-			}
-			if candidate.ok && check(candidate) {
-				return candidate
+			if candidate.ok {
+				if result, done := check(candidate); done {
+					return result
+				}
 			}
 		}
 		if len(node.repairs) > 0 {

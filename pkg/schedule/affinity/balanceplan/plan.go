@@ -185,8 +185,8 @@ type Result struct {
 	Changed         int
 	// TemporarilyBlocked reports a temporary placement rejection.
 	TemporarilyBlocked bool
-	// PlacementLimited reports rejected targets whose directed repairs were
-	// cut off with alternatives unexplored by a search limit or cancellation.
+	// PlacementLimited reports a cutoff that left alternatives to a rejected
+	// target unexplored.
 	PlacementLimited bool
 }
 
@@ -697,11 +697,13 @@ func (p *planner) checkTarget(g *groupState, voters []int, leader int) TargetFee
 	if p.stopped() {
 		return TargetFeedback{Status: TargetRejected}
 	}
+	return p.runTargetCheck(g, voters, leader)
+}
+
+// runTargetCheck records a callback's result after the caller checks for a stop.
+func (p *planner) runTargetCheck(g *groupState, voters []int, leader int) TargetFeedback {
 	feedback := g.CheckTarget(voters, leader, p.opt.WorkBudget-p.work)
 	p.work += max(1, feedback.Work)
-	if p.stopped() && feedback.Status != TargetRejected {
-		return TargetFeedback{Status: TargetRejected}
-	}
 	p.blocked = p.blocked || feedback.Status == TargetTemporarilyBlocked
 	return feedback
 }

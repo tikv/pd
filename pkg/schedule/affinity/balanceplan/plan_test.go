@@ -694,6 +694,48 @@ func TestDirectedPlacementFeedback(t *testing.T) {
 	}
 }
 
+func TestTargetFeedbackAtStop(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stop   StopReason
+		status TargetStatus
+	}{
+		{"satisfied at budget", StopBudget, TargetSatisfied},
+		{"satisfied at cancellation", StopCanceled, TargetSatisfied},
+		{"blocked at budget", StopBudget, TargetTemporarilyBlocked},
+		{"blocked at cancellation", StopCanceled, TargetTemporarilyBlocked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := general(1, 3, 2, 1)
+			g := &in.Groups[0]
+			g.LeaderPinned = true
+			in.BaseVoters[1] = 5
+			calls, canceled := 0, false
+			g.CheckTarget = func(voters []int, _ int, limit int64) TargetFeedback {
+				calls++
+				require.ElementsMatch(t, []int{0, 2}, voters)
+				if tc.stop == StopBudget {
+					return TargetFeedback{Status: tc.status, Work: limit}
+				}
+				canceled = true
+				return TargetFeedback{Status: tc.status}
+			}
+			r := Plan(in, Options{Sweeps: 1, Cancel: func() bool { return canceled }})
+			require.Equal(t, 1, calls)
+			require.Equal(t, tc.stop, r.Stop)
+			require.Equal(t, tc.status == TargetTemporarilyBlocked, r.TemporarilyBlocked)
+			require.False(t, r.PlacementLimited)
+			if tc.status == TargetSatisfied {
+				require.ElementsMatch(t, []int{0, 2}, r.Voters[0])
+				require.True(t, r.Score.Less(r.Baseline))
+			} else {
+				require.Equal(t, g.Voters, r.Voters[0])
+			}
+			require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score)
+		})
+	}
+}
+
 // Exhausted, cyclic and non-improving branches leave legal siblings reachable.
 func TestDirectedRepairAlternatives(t *testing.T) {
 	for _, c := range []struct {
@@ -814,6 +856,48 @@ func TestDirectedRepairStops(t *testing.T) {
 	}
 }
 
+func TestDirectedRepairNodeBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		candidates  int
+		stop        StopReason
+		wantLimited bool
+	}{
+		{"last node", maxSearchNodes - 1, StopGreedy, false},
+		{"pending replacement", maxSearchNodes, StopGreedy, true},
+		{"last node at budget", maxSearchNodes - 1, StopBudget, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := general(1, 3+tc.candidates, 2, 1)
+			g := &in.Groups[0]
+			candidates := g.Rules[0].Stores[3:]
+			g.Rules = []*Rule{
+				{Role: RoleLeader, Count: 1, Stores: []int{0}},
+				{Role: RoleFollower, Count: 1, Stores: []int{1, 2}},
+			}
+			g.RuleOf[1] = 1
+			in.BaseVoters[1] = 5
+			calls := 0
+			g.CheckTarget = func(voters []int, _ int, limit int64) TargetFeedback {
+				calls++
+				require.ElementsMatch(t, []int{0, 2}, voters)
+				feedback := TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: 2, Candidates: candidates}}}
+				if tc.stop == StopBudget {
+					// Each replacement takes one scan to queue and one membership
+					// check per voter and rule to prove it is unassignable.
+					feedback.Work = limit - int64(tc.candidates*(1+len(g.Voters)*len(g.Rules)))
+				}
+				return feedback
+			}
+			r := Plan(in, Options{Sweeps: 1})
+			require.Equal(t, 1, calls)
+			require.Equal(t, tc.stop, r.Stop)
+			require.Equal(t, tc.wantLimited, r.PlacementLimited)
+			require.Zero(t, r.Changed)
+		})
+	}
+}
+
 // Two overlapping voter rules need two replacements when their relaxed picks
 // cover only three zones. The callback offers every store in the missing zones.
 func fiveZones(balanced, feedback bool) *Input {
@@ -922,6 +1006,92 @@ func TestCompleteLeavesBeforeRepairs(t *testing.T) {
 	require.ElementsMatch(t, []int{0, 1}, r.Voters[0])
 	require.Equal(t, 1, r.Leaders[0])
 	require.Less(t, calls, 5)
+}
+
+func TestCompleteLeavesStoppedAfterRejection(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		stop        StopReason
+		otherStore  int
+		wantCalls   int
+		wantLimited bool
+	}{
+		{"budget", StopBudget, 3, 1, true},
+		{"canceled", StopCanceled, 3, 1, true},
+		{"duplicate leaf", StopBudget, 2, 1, false},
+		{"complete checks", StopGreedy, 3, 2, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := general(1, 6, 3, 1)
+			g := &in.Groups[0]
+			g.Rules = []*Rule{
+				{Role: RoleLeader, Count: 1, Stores: []int{0}},
+				{Role: RoleFollower, Count: 1, Stores: []int{1, 2}},
+				{Role: RoleFollower, Count: 1, Stores: []int{1, tc.otherStore}},
+			}
+			g.Voters, g.RuleOf = []int{0, 4, 5}, []int{0, 1, 2}
+			in.BaseVoters[4], in.BaseVoters[5] = 5, 5
+			calls, canceled := 0, false
+			g.CheckTarget = func(_ []int, _ int, limit int64) TargetFeedback {
+				calls++
+				if calls > 1 {
+					return TargetFeedback{Status: TargetSatisfied}
+				}
+				feedback := TargetFeedback{Status: TargetRejected}
+				if tc.stop == StopBudget {
+					feedback.Work = limit
+				}
+				canceled = tc.stop == StopCanceled
+				return feedback
+			}
+			r := Plan(in, Options{Sweeps: 1, Cancel: func() bool { return canceled }})
+			require.Equal(t, tc.wantCalls, calls)
+			require.Equal(t, tc.stop, r.Stop)
+			require.Equal(t, tc.wantLimited, r.PlacementLimited)
+			require.Equal(t, tc.stop == StopGreedy, r.Score.Less(r.Baseline))
+		})
+	}
+}
+
+func TestCompleteLeavesAfterRuleSearchCutoff(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		pairs       int
+		status      TargetStatus
+		wantLimited bool
+	}{
+		{"exhausted", 5, TargetRejected, false},
+		{"cut off", 6, TargetRejected, true},
+		{"temporarily blocked", 6, TargetTemporarilyBlocked, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := general(1, 1+3*tc.pairs, 1+2*tc.pairs, 1)
+			g := &in.Groups[0]
+			g.Rules = []*Rule{{Role: RoleLeader, Count: 1, Stores: []int{0}}}
+			// Each pair competes for one cheap store and can fill either rule
+			// first. Five pairs take 63 nodes. Six leave a branch unsearched.
+			for i := range tc.pairs {
+				cheap := 1 + 3*i
+				for j := 1; j <= 2; j++ {
+					store, ri := cheap+j, len(g.Rules)
+					g.Rules = append(g.Rules, &Rule{Role: RoleFollower, Count: 1, Stores: []int{cheap, store}})
+					g.Voters[ri], g.RuleOf[ri] = store, ri
+					in.BaseVoters[store] = 5
+				}
+			}
+			calls := 0
+			g.CheckTarget = func(_ []int, _ int, _ int64) TargetFeedback {
+				calls++
+				return TargetFeedback{Status: tc.status}
+			}
+			r := Plan(in, Options{Sweeps: 1})
+			require.Equal(t, 32, calls)
+			require.Equal(t, StopGreedy, r.Stop)
+			require.Equal(t, tc.wantLimited, r.PlacementLimited)
+			require.Equal(t, tc.status == TargetTemporarilyBlocked, r.TemporarilyBlocked)
+			require.Zero(t, r.Changed)
+		})
+	}
 }
 
 func TestTwoReplacements(t *testing.T) {
