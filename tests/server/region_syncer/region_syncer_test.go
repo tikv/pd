@@ -363,9 +363,10 @@ func TestFullSyncWithAddMember(t *testing.T) {
 func TestRemovingStoreAfterLeaderTransfer(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
+	// Accelerate store checks without speeding up unrelated cluster jobs.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyNodeStateCheck", `return(true)`))
 	t.Cleanup(func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyNodeStateCheck"))
 	})
 	var stateChecks atomic.Uint64
 	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/blockCheckStores", func() {
