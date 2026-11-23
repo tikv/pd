@@ -1024,6 +1024,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveCache = true
 				return
 			}
+			// Split scatter retries use the cached region read CPU to project leader moves.
+			if region.GetReadCPUUsage() != origin.GetReadCPUUsage() {
+				saveCache = true
+			}
 		}
 		return
 	}
