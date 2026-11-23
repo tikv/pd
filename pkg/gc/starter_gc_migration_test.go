@@ -51,6 +51,97 @@ func readStarterSafePoint(t *testing.T, m *GCStateManager, id uint32) (uint64, i
 	return rows[0].TxnSafePoint, rows[0].TxnSafePointRevision
 }
 
+func TestStarterGCMigrationNativeReadCosts(t *testing.T) {
+	var cutoffReads, pairReads atomic.Int64
+	opt := newGCStateManagerForTestOptions{
+		useEnabledKeyspaceIndex: true,
+		etcdClientCfgModifier: func(cfg *clientv3.Config) {
+			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				if r, ok := req.(*etcdserverpb.RangeRequest); ok && string(r.Key) == keypath.GCMigrationCutoffPath() {
+					cutoffReads.Add(1)
+				}
+				if gcWarmupRead(req) != nil {
+					pairReads.Add(1)
+				}
+				return invoke(ctx, method, req, reply, cc, opts...)
+			}))
+		},
+	}
+	opt.generateKeyspacesByCount(1)
+	_, _, manager, clean, cancel := newGCStateManagerForTest(t, opt)
+	t.Cleanup(clean)
+	t.Cleanup(cancel)
+	for range 2 {
+		stop := manager.OnNodeBecomesLeader()
+		t.Cleanup(stop)
+		gcWarmupWait(t, manager.activeGeneration.Load().warmup.done)
+		reads := pairReads.Load()
+		// A cold load costs one batch read. Subsequent cache hits cost none.
+		manager.gcStateCache.remove(1)
+		for range 5 {
+			_, err := manager.GetGCState(1, true)
+			require.NoError(t, err)
+		}
+		require.Equal(t, reads+1, pairReads.Load())
+		stop()
+	}
+	require.EqualValues(t, 1, cutoffReads.Load())
+}
+
+func TestStarterGCMigrationStartup(t *testing.T) {
+	_, provider, native, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{useEnabledKeyspaceIndex: true})
+	defer clean()
+	defer cancel()
+	ctx, client := t.Context(), native.etcdClient
+	native.stopGCStateGeneration(native.activeGeneration.Load())
+	canceled, cancelRead := context.WithCancel(ctx)
+	cancelRead()
+	_, err := LoadMigrationCutoff(canceled, client)
+	require.Error(t, err)
+	key := keypath.GCMigrationCutoffPath()
+	_, err = client.Put(ctx, key, "unknown")
+	require.NoError(t, err)
+	_, err = LoadMigrationCutoff(ctx, client)
+	require.ErrorContains(t, err, "invalid starter GC migration cutoff")
+	// Rewriting the cutoff key violates its create-once contract even with a valid value.
+	_, err = client.Put(ctx, key, "1")
+	require.NoError(t, err)
+	_, err = LoadMigrationCutoff(ctx, client)
+	require.ErrorContains(t, err, "invalid starter GC migration cutoff")
+	_, err = client.Delete(ctx, key)
+	require.NoError(t, err)
+	lease, err := client.Grant(ctx, 60)
+	require.NoError(t, err)
+	_, err = client.Put(ctx, key, "1", clientv3.WithLease(lease.ID))
+	require.NoError(t, err)
+	_, err = LoadMigrationCutoff(ctx, client)
+	require.ErrorContains(t, err, "invalid starter GC migration cutoff")
+	_, err = client.Delete(ctx, key)
+	require.NoError(t, err)
+
+	_, err = client.Put(ctx, keypath.TxnSafePointPath(2), "42")
+	require.NoError(t, err)
+	put, err := client.Put(ctx, key, "1")
+	require.NoError(t, err)
+	cutoff, err := LoadMigrationCutoff(ctx, client)
+	require.NoError(t, err)
+	require.Equal(t, put.Header.Revision, cutoff)
+	upgraded := NewGCStateManager(provider, *native.getConfig(), native.keyspaceManager, native.metaServiceGroupManager, client, cutoff)
+	defer upgraded.CloseBarrierMetrics()
+	_, err = upgraded.GetGCState(2, true)
+	require.ErrorIs(t, err, errs.ErrNotLeader)
+	stop := upgraded.OnNodeBecomesLeader()
+	defer stop()
+	state, err := upgraded.GetGCState(2, true)
+	require.NoError(t, err)
+	require.EqualValues(t, 42, state.TxnSafePoint)
+	_, revision := readStarterSafePoint(t, upgraded, 2)
+	require.Greater(t, revision, put.Header.Revision)
+	stop()
+	_, err = upgraded.GetGCState(2, true)
+	require.ErrorIs(t, err, errs.ErrNotLeader)
+}
+
 func TestStarterGCMigrationSourceValues(t *testing.T) {
 	const missing = "(missing)"
 	cases := []struct {
