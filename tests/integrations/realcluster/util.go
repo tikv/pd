@@ -45,7 +45,12 @@ func ExtractPhysical(ts uint64) int64 {
 }
 
 func runCommandWithOutput(cmdStr string) (string, error) {
+	return runCommandWithOutputInDir(cmdStr, "")
+}
+
+func runCommandWithOutputInDir(cmdStr, dir string) (string, error) {
 	cmd := exec.Command("sh", "-c", cmdStr)
+	cmd.Dir = dir
 	log.Info(cmd.String())
 	bytes, err := cmd.Output()
 	if err != nil {
