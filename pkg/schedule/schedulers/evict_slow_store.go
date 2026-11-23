@@ -778,7 +778,7 @@ func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerClu
 			idx := (start + i) % n
 			before := len(ops)
 			ops = uniqueAppendOperator(ops, scheduleEvictLeaderOnce(s.GetName(), cluster,
-				singleEvictLeaderStore{evictSlowStoreSchedulerConfig: s.conf, storeID: stores[idx]})...)
+				singleEvictLeaderStore{evictSlowStoreSchedulerConfig: s.conf, storeID: stores[idx]}, nil)...)
 			if len(ops) > before {
 				progressed = true
 				s.evictLeaderNext = idx + 1

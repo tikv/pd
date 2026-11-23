@@ -119,6 +119,10 @@ type HotPeerStat struct {
 	allowInherited bool
 }
 
+func (stat *HotPeerStat) isReportedHot(minDegree, antiCount int) bool {
+	return stat.HotDegree >= minDegree && !stat.inCold && stat.AntiCount == antiCount
+}
+
 // ID returns region ID. Implementing TopNItem.
 func (stat *HotPeerStat) ID() uint64 {
 	return stat.RegionID

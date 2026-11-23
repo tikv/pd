@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -169,7 +170,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region) {
 				return
 			}
-			oc.SendScheduleCommand(region, step, source)
+			oc.dispatchStep(region, step, source, op)
 		case SUCCESS:
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
@@ -624,10 +625,13 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 	var step OpStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
 		if step = op.Check(region); step != nil {
-			oc.SendScheduleCommand(region, step, DispatchFromCreate)
+			oc.dispatchStep(region, step, DispatchFromCreate, op)
 		}
 	}
 
+	if op.leaderTargetTried != nil {
+		op.leaderTargetTried.Store(true)
+	}
 	oc.opNotifierQueue.push(&operatorWithTime{op: op, time: getNextPushOperatorTime(step, time.Now())})
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
 	for _, counter := range op.Counters {
@@ -844,10 +848,32 @@ func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 
 // SendScheduleCommand sends a command to the region.
 func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, source string) {
+	oc.dispatchStep(region, step, source, nil)
+}
+
+func (oc *Controller) dispatchStep(region *core.RegionInfo, step OpStep, source string, op *Operator) {
+	preferTarget := op != nil && op.leaderTargetTried != nil
+	if preferTarget && source != DispatchFromCreate && !op.leaderTargetTried.Load() {
+		// A heartbeat can observe the operator before its create command is enqueued.
+		return
+	}
 	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
+	if tl, ok := step.(TransferLeader); ok && op != nil && op.evictTargets != nil {
+		tl.ToStores = op.evictTargets(region, tl.ToStores)
+		if len(tl.ToStores) == 0 {
+			return
+		}
+		if !slices.Contains(tl.ToStores, tl.ToStore) {
+			tl.ToStore = tl.ToStores[0]
+		}
+		step = tl
+	}
 	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
 		return
+	}
+	if preferTarget && source == DispatchFromCreate && cmd.TransferLeader != nil {
+		cmd.TransferLeader.Peers = nil
 	}
 	log.Info("send schedule command",
 		zap.Uint64("region-id", region.GetID()),

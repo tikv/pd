@@ -95,6 +95,16 @@ type Operator struct {
 	// not set at creation time; callers opt in after the operator is built
 	// (see SetStoreHealthCheck), similar to additionalInfos.
 	needStoreHealthCheck atomic.Bool
+	leaderTargetTried    *atomic.Bool
+	evictTargets         func(*core.RegionInfo, []uint64) []uint64
+}
+
+// SetEvictLeaderTargets rechecks the allowed receivers on every dispatch.
+func (o *Operator) SetEvictLeaderTargets(filter func(*core.RegionInfo, []uint64) []uint64, preferFirst bool) {
+	o.evictTargets = filter
+	if preferFirst {
+		o.leaderTargetTried = new(atomic.Bool)
+	}
 }
 
 // SetStoreHealthCheck marks whether the operator's in-progress steps should

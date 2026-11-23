@@ -18,10 +18,12 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"math/rand/v2"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
@@ -36,8 +38,10 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -337,7 +341,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf), nil
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf, s.OpController), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -361,11 +365,11 @@ type evictLeaderStoresConf interface {
 	getBatch() int
 }
 
-func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, explicit *operator.Controller) []*operator.Operator {
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for range batchSize {
-		once := scheduleEvictLeaderOnce(name, cluster, conf)
+		once := scheduleEvictLeaderOnce(name, cluster, conf, explicit)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -379,7 +383,7 @@ func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf e
 	return ops
 }
 
-func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, explicit *operator.Controller) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -390,10 +394,22 @@ func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf ev
 		var filters []filter.Filter
 		pendingFilter := filter.NewRegionPendingFilter()
 		downFilter := filter.NewRegionDownFilter()
-		region := filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil, pendingFilter, downFilter)
+		sample := func() []*core.RegionInfo {
+			regions := cluster.RandLeaderRegions(storeID, ranges)
+			if explicit != nil {
+				// An active eviction owns its retries. Other operators can still
+				// be preempted by an urgent drain.
+				regions = slices.DeleteFunc(regions, func(r *core.RegionInfo) bool {
+					active := explicit.GetOperator(r.GetID())
+					return active != nil && active.Desc() == name
+				})
+			}
+			return regions
+		}
+		region := filter.SelectOneRegion(sample(), nil, pendingFilter, downFilter)
 		if region == nil {
 			// try to pick unhealthy region
-			region = filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil)
+			region = filter.SelectOneRegion(sample(), nil)
 			if region == nil {
 				evictLeaderNoLeaderCounter.Inc()
 				continue
@@ -409,31 +425,138 @@ func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf ev
 			filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores))
 		}
 
-		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
+		state := &filter.StoreStateFilter{ActionScope: name, TransferLeader: true}
+		if explicit == nil {
+			state.OperatorLevel = constant.Urgent
+		}
+		filters = append(filters, state)
 		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
-		// Compatible with old TiKV transfer leader logic.
-		target := candidates.RandomPick()
-		targets := candidates.PickAll()
-		// `targets` MUST contains `target`, so only needs to check if `target` is nil here.
-		if target == nil {
+		targetIDs := make([]uint64, 0, len(candidates.Stores))
+		for _, store := range candidates.Stores {
+			targetIDs = append(targetIDs, store.GetID())
+		}
+		allowed := func(r *core.RegionInfo, ids []uint64) []uint64 {
+			return eligibleEvictTargets(cluster, r, ids)
+		}
+		if explicit != nil {
+			targetIDs = allowed(region, targetIDs)
+		}
+		if len(targetIDs) == 0 {
 			evictLeaderNoTargetStoreCounter.Inc()
 			continue
 		}
-		targetIDs := make([]uint64, 0, len(targets))
-		for _, t := range targets {
-			targetIDs = append(targetIDs, t.GetID())
+		target := targetIDs[rand.IntN(len(targetIDs))]
+		prefer := false
+		if explicit != nil && len(targetIDs) > 1 {
+			target, prefer = pickEvictLeaderTarget(cluster, explicit, name, region, targetIDs, target, targetIDs[rand.IntN(len(targetIDs))])
 		}
-		op, err := operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), targetIDs, operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(name, cluster, region, target, targetIDs, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
+		}
+		if explicit != nil {
+			op.SetEvictLeaderTargets(allowed, prefer)
 		}
 		op.SetPriorityLevel(constant.Urgent)
 		op.Counters = append(op.Counters, evictLeaderNewOperatorCounter)
 		ops = append(ops, op)
 	}
 	return ops
+}
+
+// A target may be a voter while its placement rule still requires it to remain
+// a follower. Check the resulting role assignment before advertising any peer.
+func eligibleEvictTargets(cluster sche.SchedulerCluster, region *core.RegionInfo, ids []uint64) []uint64 {
+	conf := cluster.GetSharedConfig()
+	var fit *placement.RegionFit
+	var rules []*placement.Rule
+	if conf.IsPlacementRulesEnabled() {
+		rm := cluster.GetRuleManager()
+		rules = rm.GetRulesForApplyRegion(region)
+		// Voter-only rules are invariant under a leadership change.
+		if slices.ContainsFunc(rules, func(r *placement.Rule) bool { return r.Role == placement.Leader || r.Role == placement.Follower }) {
+			fit = rm.FitRegion(cluster.GetBasicCluster(), region)
+			rules = fit.GetRules()
+		}
+		if len(rules) == 0 {
+			return nil
+		}
+	}
+	// Admission already consumed the transfer budget for this operator.
+	// Check persistent store exclusions without charging that budget again.
+	state := &filter.StoreStateFilter{TransferLeader: true, AllowTemporaryStates: true}
+	eligible := make([]uint64, 0, len(ids))
+	for _, id := range ids {
+		p := region.GetStorePeer(id)
+		if p == nil || p.GetIsWitness() || !core.IsVoterOrIncomingVoter(p) ||
+			region.GetDownPeer(p.GetId()) != nil || region.GetPendingPeer(p.GetId()) != nil {
+			continue
+		}
+		store := cluster.GetStore(id)
+		if store == nil || store.IsDisconnected() || !state.Target(conf, store).IsOK() {
+			continue
+		}
+		if len(rules) > 0 && !placement.MatchesLeaderRules(rules, store) {
+			continue
+		}
+		if fit == nil || fit.AllowsLeader(region, p, conf.IsWitnessAllowed()) {
+			eligible = append(eligible, id)
+		}
+	}
+	return eligible
+}
+
+func pickEvictLeaderTarget(cluster sche.SchedulerCluster, oc *operator.Controller, name string, region *core.RegionInfo, ids []uint64, ordinary, other uint64) (uint64, bool) {
+	// A late ACK belongs to the current attempt. Only a finished timeout
+	// advances its primary, using the controller's existing operator history.
+	last := oc.GetOperatorStatus(region.GetID())
+	if last != nil && last.Operator.Status() == operator.TIMEOUT && last.Desc() == name &&
+		last.RegionEpoch().GetConfVer() == region.GetRegionEpoch().GetConfVer() &&
+		last.RegionEpoch().GetVersion() == region.GetRegionEpoch().GetVersion() {
+		if step, ok := last.Step(0).(operator.TransferLeader); ok && step.FromStore == region.GetLeader().GetStoreId() {
+			slices.Sort(ids)
+			i, found := slices.BinarySearch(ids, step.ToStore)
+			if found {
+				i++
+			}
+			return ids[i%len(ids)], true
+		}
+	}
+	if other == ordinary {
+		return ordinary, false
+	}
+	a, b := storeReadRate(cluster.GetStore(ordinary)), storeReadRate(cluster.GetStore(other))
+	if a <= b || b < 0 {
+		return ordinary, false
+	}
+	degree := utils.Read.HotDegreeThreshold(cluster.GetSchedulerConfig().GetHotRegionCacheHitsThreshold())
+	rate := cluster.TryHotReadLeaderRate(region.GetID(), region.GetLeader().GetStoreId(), degree)
+	// Compare two independent draws. Even if old telemetry keeps favouring one
+	// store, it can only win if sampled. A gap smaller than the Region's own
+	// rate is too small to justify redirecting the ordinary choice.
+	if rate > 0 && a-b >= rate {
+		return other, true
+	}
+	return ordinary, false
+}
+
+func storeReadRate(store *core.StoreInfo) float64 {
+	if store == nil || store.IsDisconnected() {
+		return -1
+	}
+	stats := store.GetStoreStats()
+	interval := stats.GetInterval()
+	if interval.GetEndTimestamp() <= interval.GetStartTimestamp() {
+		return -1
+	}
+	// A fresh heartbeat can still carry a replayed measurement.
+	measuredAt := time.Unix(int64(interval.EndTimestamp), 0)
+	if store.GetLastHeartbeatTS().Sub(measuredAt).Abs() > utils.StoreHeartBeatReportInterval*time.Second {
+		return -1
+	}
+	return float64(stats.GetBytesRead()) / float64(interval.EndTimestamp-interval.StartTimestamp)
 }
 
 type evictLeaderHandler struct {
