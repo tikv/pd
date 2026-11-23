@@ -150,7 +150,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.worker_id }}
+          name: test-results-${{ github.run_attempt }}-${{ matrix.worker_id }}
           path: junitfile
           if-no-files-found: ignore
           overwrite: true
@@ -198,17 +198,32 @@ jobs:
         if: needs.chunks.result == 'success'
         uses: actions/download-artifact@v4
         with:
-          pattern: test-results-*
+          pattern: test-results-${{ github.run_attempt }}-*
           path: ${{ runner.temp }}/pd-test-history/results
-      - name: Refresh duration history
+      - name: Check complete duration reports
+        id: duration-reports
         if: needs.chunks.result == 'success'
+        env:
+          TOTAL_JOBS: ${{ needs.chunks.outputs.job-total }}
+        run: |
+          # Partial reruns retain successful jobs from earlier attempts.
+          for worker in $(seq 1 "$TOTAL_JOBS"); do
+            report="$RUNNER_TEMP/pd-test-history/results/test-results-$GITHUB_RUN_ATTEMPT-$worker/junitfile"
+            if [ ! -f "$report" ]; then
+              echo "Incomplete test reports for attempt $GITHUB_RUN_ATTEMPT; skipping duration history."
+              exit 0
+            fi
+          done
+          echo "complete=true" >> "$GITHUB_OUTPUT"
+      - name: Refresh duration history
+        if: steps.duration-reports.outputs.complete == 'true'
         run: |
           python3 scripts/ci-shard.py update \
-            "$RUNNER_TEMP"/pd-test-history/results/test-results-*/junitfile \
+            "$RUNNER_TEMP"/pd-test-history/results/test-results-"$GITHUB_RUN_ATTEMPT"-*/junitfile \
             --durations "$RUNNER_TEMP/pd-test-history/ci-test-durations.json" \
             --source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
       - name: Save duration history for future runs
-        if: needs.chunks.result == 'success'
+        if: steps.duration-reports.outputs.complete == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: test-duration-history
