@@ -15,6 +15,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -127,14 +128,14 @@ func validateMetaStorageAccess(key, rangeEnd []byte) error {
 	return status.Error(codes.PermissionDenied, "meta storage access is outside the allowed key prefixes")
 }
 
-// validateMetaStorageWriteAccess reserves microservice metadata mutations for
-// their etcd owners while preserving discovery reads and watches.
+// validateMetaStorageWriteAccess permits only log backup metadata mutations.
+// Other component metadata must be updated through its owner.
 func validateMetaStorageWriteAccess(key, rangeEnd []byte) error {
 	if err := validateMetaStorageAccess(key, rangeEnd); err != nil {
 		return err
 	}
-	if strings.HasPrefix(string(key), "/ms/") {
-		return status.Error(codes.PermissionDenied, "meta storage cannot modify microservice metadata")
+	if !strings.HasPrefix(string(key), "/tidb/br-stream") {
+		return status.Error(codes.PermissionDenied, "meta storage can only modify log backup metadata")
 	}
 	return nil
 }
@@ -232,7 +233,13 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	if err := validateMetaStorageAccess(req.GetKey(), req.GetRangeEnd()); err != nil {
+	rangeEnd := req.GetRangeEnd()
+	if bytes.Equal(req.GetKey(), rangeEnd) {
+		// Equal bounds are a valid empty Get range. Authorize the key while
+		// forwarding the original bounds to etcd.
+		rangeEnd = nil
+	}
+	if err := validateMetaStorageAccess(req.GetKey(), rangeEnd); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
