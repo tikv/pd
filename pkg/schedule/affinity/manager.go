@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -102,6 +103,10 @@ type Manager struct {
 	// has no group, because the group watcher may be behind: the rule may arrive
 	// before its group, or before the deletion of the group that it replaces.
 	labelRuleBuffer map[string]*labeler.LabelRule // {group_id} -> labelRule
+
+	// splitMutex orders denial and recovery notifications. Policy lookups run outside it.
+	splitMutex         syncutil.Mutex
+	splitDeniedRegions cache.Cache // region ID -> *splitDenial
 }
 
 // NewManager creates a new affinity Manager.
@@ -122,6 +127,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groupModRevisions:   make(map[string]int64),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
+		splitDeniedRegions:  cache.NewCache(splitDeniedRegionLimit, cache.LRUCache),
 	}
 	if err := m.initialize(); err != nil {
 		return nil, err

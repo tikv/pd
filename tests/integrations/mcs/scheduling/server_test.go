@@ -37,12 +37,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -940,6 +943,77 @@ func (suite *serverTestSuite) TestStoreLimit() {
 			operator.TransferLeader{FromStore: 1, ToStore: 2})
 		checkOperatorSuccess(re, oc, op)
 	}
+
+	// Exhaust an existing limiter, then verify that a scheduling config update
+	// refreshes it before the next admission check.
+	const exhaustedRate = 0.00006
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, exhaustedRate)
+	re.NoError(err)
+	waitSyncFinish(re, tc, storelimit.AddPeer, exhaustedRate)
+	testutil.Eventually(re, func() bool {
+		store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+		return ok && limit.Rate(storelimit.AddPeer) == exhaustedRate/60
+	})
+	store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, coreconstant.Medium))
+	re.False(store.IsAvailable(storelimit.AddPeer, coreconstant.Medium))
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 120)
+	re.NoError(err)
+	waitSyncFinish(re, tc, storelimit.AddPeer, 120)
+	testutil.Eventually(re, func() bool {
+		store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+		return ok && limit.Rate(storelimit.AddPeer) == 2.0 && store.IsAvailable(storelimit.AddPeer, coreconstant.Medium)
+	})
+}
+
+func (suite *serverTestSuite) TestStoreLimitInitialLoad() {
+	re := suite.Require()
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetAddr())
+	defer conn.Close()
+	resp, err := grpcPDClient.PutStore(suite.ctx, &pdpb.PutStoreRequest{
+		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Store: &metapb.Store{
+			Id:      2,
+			Address: "mock://tikv-2:2",
+			State:   metapb.StoreState_Up,
+			Version: "7.0.0",
+		},
+	})
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+	limits := []struct {
+		typ  storelimit.Type
+		rate float64
+	}{
+		{storelimit.AddPeer, 120},
+		{storelimit.RemovePeer, 180},
+		{storelimit.TransferLeaderIn, 240},
+	}
+	for _, limit := range limits {
+		re.NoError(suite.pdLeader.GetRaftCluster().SetStoreLimit(2, limit.typ, limit.rate))
+	}
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	// WaitForPrimaryServing sends Region heartbeats that can trigger admission
+	// and lazily refresh limiters, masking a missing initial watcher refresh.
+	testutil.Eventually(re, func() bool { return tc.GetPrimaryServer() != nil }, testutil.WithWaitFor(10*time.Second))
+	store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+	re.NotNil(store)
+	limiter, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+	re.True(ok)
+	for _, limit := range limits {
+		re.Equal(limit.rate/60, limiter.Rate(limit.typ), limit.typ.String())
+	}
+
+	for _, limit := range limits {
+		rate := limit.rate + 180
+		re.NoError(suite.pdLeader.GetRaftCluster().SetStoreLimit(2, limit.typ, rate))
+		testutil.Eventually(re, func() bool { return limiter.Rate(limit.typ) == rate/60 })
+	}
 }
 
 func checkOperatorSuccess(re *require.Assertions, oc *operator.Controller, op *operator.Operator) {
@@ -1393,6 +1467,95 @@ func (suite *serverTestSuite) TestBatchSplit() {
 
 	suite.TearDownSuite()
 	suite.SetupSuite()
+}
+
+// TestAffinitySplitNotifications delivers denial and recovery through PD.
+func (suite *serverTestSuite) TestAffinitySplitNotifications() {
+	re := suite.Require()
+	defer func() {
+		suite.TearDownSuite()
+		suite.SetupSuite()
+	}()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	cluster := tc.WaitForPrimaryServing(re).GetCluster()
+	suite.pdLeader.GetPersistOptions().SetAffinityScheduleLimit(4)
+	persistConfig(re, suite.pdLeader)
+
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	header := testutil.NewRequestHeader(suite.pdLeader.GetClusterID())
+	for id := uint64(1); id <= 3; id++ {
+		resp, err := s.PutStore(suite.ctx, &pdpb.PutStoreRequest{Header: header, Store: &metapb.Store{
+			Id: id, Address: fmt.Sprintf("mock://tikv-%d:%d", id, id), Version: "7.0.0",
+			NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano(),
+		}})
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	manager := suite.pdLeader.GetRaftCluster().GetAffinityManager()
+	const groupID = "split-notifications"
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}},
+	}}))
+	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetAddr())
+	defer conn.Close()
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
+	notifications := make(chan *pdpb.RegionHeartbeatResponse, 4)
+	go func() {
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				return
+			}
+			if split := resp.GetChangeSplit(); split != nil {
+				select {
+				case notifications <- resp:
+				default:
+				}
+			}
+		}
+	}()
+	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 33, StoreId: 3}}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: header, Region: &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader: peers[0], ApproximateSize: 5 * units.MiB, ApproximateKeys: 500,
+	}
+	testutil.Eventually(re, func() bool {
+		re.NoError(stream.Send(regionReq))
+		region := cluster.GetRegion(10)
+		return region != nil && !cluster.GetAffinityManager().AllowSplit(region, pdpb.SplitReason_SIZE)
+	})
+	splitResp, err := grpcPDClient.AskBatchSplit(suite.ctx, &pdpb.AskBatchSplitRequest{
+		Header: header, Region: regionReq.GetRegion(), SplitCount: 1, Reason: pdpb.SplitReason_SIZE,
+	})
+	re.NoError(err)
+	re.Contains(splitResp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
+	// Resend unchanged metadata so recovery is exercised without a cache update.
+	expectSplit := func(enabled bool) {
+		testutil.Eventually(re, func() bool {
+			re.NoError(stream.Send(regionReq))
+			select {
+			case resp := <-notifications:
+				re.Equal(uint64(10), resp.GetRegionId())
+				re.Equal(peers[0], resp.GetTargetPeer())
+				re.Equal(enabled, resp.GetChangeSplit().GetAutoSplitEnabled())
+				return true
+			default:
+				return false
+			}
+		})
+	}
+	expectSplit(false)
+	re.NoError(manager.DeleteAffinityGroups([]string{groupID}, true))
+	expectSplit(true)
 }
 
 func (suite *serverTestSuite) TestBatchSplitCompatibility() {

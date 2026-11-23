@@ -276,7 +276,10 @@ func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], 
 		select {
 		case <-w.ctx.Done():
 			return
-		case task := <-queue.Out:
+		case task, ok := <-queue.Out:
+			if !ok {
+				return
+			}
 			runTask(task)
 		}
 	}
