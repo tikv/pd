@@ -102,21 +102,9 @@ func waitHeartbeatStreamBound(t *testing.T, hbStreams *hbstream.HeartbeatStreams
 func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	re := require.New(t)
 
-	svc, cluster, stream := newTestSchedulingServiceForSplit(t)
+	svc, cluster, stream := newTestSchedulingServiceForSplit(t, true)
 
-	region := newAffinitySplitTestRegion()
-	cluster.PutRegion(region)
-	err := cluster.GetAffinityManager().CreateAffinityGroups([]affinity.GroupKeyRanges{
-		{
-			GroupID: "g1",
-			KeyRanges: []keyutil.KeyRange{
-				testutil.TxnKeyspaceRange([]byte("a"), []byte("z")),
-			},
-		},
-	})
-	re.NoError(err)
-	_, err = cluster.GetAffinityManager().UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
-	re.NoError(err)
+	region := putAffinitySplitTestGroup(t, cluster)
 	hbStreams := cluster.GetCoordinator().GetHeartbeatStreams()
 	hbStreams.BindStream(1, stream)
 	waitHeartbeatStreamBound(t, hbStreams, region, stream)
@@ -151,10 +139,41 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
 }
 
+func TestRegionHeartbeatRecoversAffinitySplitAfterSchedulingResumes(t *testing.T) {
+	re := require.New(t)
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
+	region := putAffinitySplitTestGroup(t, cluster)
+	streams := cluster.GetCoordinator().GetHeartbeatStreams()
+	resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
+		Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_SIZE,
+	})
+	re.NoError(err)
+	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
+	denial, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+	re.True(ok)
+	re.NotNil(denial.GetChangeSplit())
+	re.False(denial.GetChangeSplit().GetAutoSplitEnabled())
+
+	cluster.persistConfig.SetHaltScheduling(true, "test")
+	re.NoError(cluster.GetAffinityManager().DeleteAffinityGroups([]string{"g1"}, true))
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	re.Zero(streams.MsgLength(), "PD would drop a recovery during a halt")
+
+	cluster.persistConfig.SetHaltScheduling(false, "test")
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	recovery, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+	re.True(ok)
+	re.Equal(region.GetID(), recovery.GetRegionId())
+	re.NotNil(recovery.GetChangeSplit())
+	re.True(recovery.GetChangeSplit().GetAutoSplitEnabled())
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	re.Zero(streams.MsgLength(), "recovery is sent once")
+}
+
 func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re := require.New(t)
 
-	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t, true)
 	cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000})
 
 	region := newAffinitySplitTestRegion()
@@ -171,8 +190,28 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re.Equal(float64(2), splitScatterPendingMetricValue(t))
 }
 
+// TestSplitNotificationsAfterClusterStop covers requests that retained the cluster
+// before primary cleanup cleared its heartbeat streams.
+func TestSplitNotificationsAfterClusterStop(t *testing.T) {
+	re := require.New(t)
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t, true)
+	region := putAffinitySplitTestGroup(t, cluster)
+	request := &schedulingpb.AskBatchSplitRequest{Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_LOAD}
+	_, err := svc.AskBatchSplit(t.Context(), request)
+	re.NoError(err)
+	cluster.stopCluster()
+	resp, err := svc.AskBatchSplit(t.Context(), request)
+	re.NoError(err)
+	re.Contains(resp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
+	cfg := cluster.persistConfig.GetScheduleConfig().Clone()
+	cfg.AffinityScheduleLimit = 0
+	cluster.persistConfig.SetScheduleConfig(cfg)
+	re.NoError(cluster.HandleRegionHeartbeat(region))
+}
+
 func newTestSchedulingServiceForSplit(
 	t *testing.T,
+	runHeartbeatStreams bool,
 ) (*Service, *Cluster, *captureHeartbeatStream) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -202,7 +241,12 @@ func newTestSchedulingServiceForSplit(
 	}
 
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	var hbStreams *hbstream.HeartbeatStreams
+	if runHeartbeatStreams {
+		hbStreams = hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	} else {
+		hbStreams = hbstream.NewTestHeartbeatStreams(ctx, basicCluster, false)
+	}
 	persistConfig := config.NewPersistConfig(
 		cfg,
 		cache.NewStringTTL(ctx, sc.DefaultGCInterval, sc.DefaultTTL),
@@ -242,6 +286,22 @@ func newAffinitySplitTestRegion() *core.RegionInfo {
 		core.SetApproximateSize(5),
 		core.SetApproximateKeys(int64(5*sc.RegionSizeToKeysRatio)),
 	)
+}
+
+// putAffinitySplitTestGroup puts the test Region into affinity group g1, which
+// denies its automatic splits.
+func putAffinitySplitTestGroup(t *testing.T, cluster *Cluster) *core.RegionInfo {
+	t.Helper()
+	re := require.New(t)
+	region := newAffinitySplitTestRegion()
+	cluster.PutRegion(region)
+	manager := cluster.GetAffinityManager()
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{testutil.TxnKeyspaceRange([]byte("a"), []byte("z"))},
+	}}))
+	_, err := manager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	return region
 }
 
 func splitScatterPendingMetricValue(t *testing.T) float64 {

@@ -140,7 +140,7 @@ regions-dump:
 stores-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
 pd-ut: pd-xprog
-	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '$(TEST_TAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '$(TEST_TAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go pd-ut/shard.go
 pd-xprog:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -tags xprog -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/xprog pd-ut/xprog.go
 
@@ -196,7 +196,11 @@ install-tools:
 	}
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
-.PHONY: install-tools
+install-test-tools:
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@go install github.com/pingcap/failpoint/failpoint-ctl
+
+.PHONY: install-tools install-test-tools
 
 #### Static checks ####
 
@@ -295,17 +299,19 @@ gotest: install-tools
 	go test $(GOTEST_ARGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-ci-test-job: install-tools dashboard-ui pd-ut
+JOB_COUNT ?= 10
+JOB_LAYOUT ?= standard
+ci-test-job: install-test-tools dashboard-ui pd-ut
 	@$(FAILPOINT_ENABLE)
-	./scripts/ci-subtask.sh $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
+	./scripts/ci-subtask.sh $(JOB_INDEX) $(JOB_COUNT) $(JOB_LAYOUT) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 TSO_FUNCTION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 
-test-tso-function: install-tools
+test-tso-function: install-test-tools
 	# testing TSO function...
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race -tags without_dashboard,deadlock $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	CGO_ENABLED=1 go test -count=1 -race -tags without_dashboard,deadlock $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
