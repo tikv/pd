@@ -515,6 +515,72 @@ func TestSetOfflineStore(t *testing.T) {
 	re.Nil(cluster.GetStore(1))
 }
 
+func TestRemovingStoreWithZeroRegionSize(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		source      core.RegionSource
+		leaderStore uint64
+		role        metapb.PeerRole
+	}{
+		{name: "storage", source: core.Storage},
+		{name: "synced leader", source: core.Sync, leaderStore: 1},
+		{name: "synced follower", source: core.Sync, leaderStore: 2},
+		{name: "synced learner", source: core.Sync, leaderStore: 2, role: metapb.PeerRole_Learner},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+			cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+			for _, store := range newTestStores(4, "5.0.0") {
+				re.NoError(cluster.PutMetaStore(store.GetMeta()))
+			}
+			meta := &metapb.Region{
+				Id:          1,
+				RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+				Peers: []*metapb.Peer{
+					{Id: 1, StoreId: 1, Role: tc.role},
+					{Id: 2, StoreId: 2},
+					{Id: 3, StoreId: 3},
+				},
+			}
+			if tc.source == core.Storage {
+				re.NoError(cluster.storage.SaveRegion(meta))
+				re.NoError(cluster.storage.LoadRegions(ctx, cluster.CheckAndPutRegion))
+			} else {
+				cluster.PutRegion(core.NewRegionInfo(meta, meta.Peers[tc.leaderStore-1], core.SetSource(tc.source)))
+			}
+			re.NoError(cluster.RemoveStore(1, false))
+
+			// The Region index is populated before the asynchronous store statistics refresh.
+			re.Equal(1, cluster.GetStoreRegionCount(1))
+			re.Zero(cluster.GetStore(1).GetRegionCount())
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoving())
+
+			cluster.UpdateAllStoreStatus()
+			re.Equal(1, cluster.GetStore(1).GetRegionCount())
+			re.Zero(cluster.GetStore(1).GetRegionSize())
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoving())
+
+			// Preparation can finish while synced Regions still have no size statistics.
+			cluster.SetPrepared()
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoving())
+
+			region := cluster.GetRegion(1).Clone(core.WithRemoveStorePeer(1), core.WithLeader(meta.Peers[1]), core.WithIncConfVer())
+			cluster.PutRegion(region)
+			cluster.UpdateAllStoreStatus()
+			re.Zero(cluster.GetStoreRegionCount(1))
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoved())
+		})
+	}
+}
+
 func TestSetOfflineWithReplica(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
