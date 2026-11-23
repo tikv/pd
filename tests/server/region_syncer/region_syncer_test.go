@@ -16,20 +16,17 @@ package syncer_test
 
 import (
 	"context"
-<<<<<<< HEAD
-=======
-	"errors"
 	"fmt"
-	"slices"
 	"sync/atomic"
->>>>>>> ab7e6138b0 (cluster: check Region count before tombstoning removing stores (#11644))
 	"testing"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -427,4 +424,17 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	rc = cluster.GetLeaderServer().GetServer().GetRaftCluster()
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+}
+
+func waitRegionsPersisted(re *require.Assertions, server *tests.TestServer, regions []*core.RegionInfo) {
+	testutil.Eventually(re, func() bool {
+		for _, region := range regions {
+			var stored metapb.Region
+			ok, err := server.GetServer().GetStorage().LoadRegion(region.GetID(), &stored)
+			if err != nil || !ok || !proto.Equal(&stored, region.GetMeta()) {
+				return false
+			}
+		}
+		return true
+	})
 }
