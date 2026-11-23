@@ -17,15 +17,17 @@ package syncer_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync/atomic"
 	"testing"
-	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -88,9 +90,8 @@ func TestRegionSyncer(t *testing.T) {
 	close(mockSyncFull)
 
 	checkRegions := func(expectedRegions []*core.RegionInfo) {
-		// ensure flush to region storage, we use a duration larger than the
-		// region storage flush rate limit (3s).
-		time.Sleep(4 * time.Second)
+		waitRegionsPersisted(re, leaderServer, expectedRegions)
+		waitRegionsPersisted(re, followerServer, expectedRegions)
 
 		// test All regions have been synchronized to the cache of followerServer
 		re.NotNil(followerServer)
@@ -311,8 +312,7 @@ func TestFullSyncWithAddMember(t *testing.T) {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
+	waitRegionsPersisted(re, leaderServer, regions)
 	// restart pd1
 	err = leaderServer.Stop()
 	re.NoError(err)
@@ -337,6 +337,81 @@ func TestFullSyncWithAddMember(t *testing.T) {
 	re.Equal(regionLen, loadRegionLen)
 }
 
+func TestRemovingStoreAfterLeaderTransfer(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	})
+	var stateChecks atomic.Uint64
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/blockCheckStores", func() {
+		stateChecks.Add(1)
+	}))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/blockCheckStores"))
+	})
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.PDServerCfg.UseRegionStorage = true
+		conf.Schedule.EnableHeartbeatConcurrentRunner = false
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	rc := leader.GetRaftCluster()
+	for storeID := uint64(1); storeID <= 4; storeID++ {
+		re.NoError(rc.PutMetaStore(&metapb.Store{
+			Id:        storeID,
+			Address:   fmt.Sprintf("mock://tikv-%d:%d", storeID, storeID),
+			NodeState: metapb.NodeState_Serving,
+		}))
+	}
+	regions := tests.InitRegions(21)
+	for i, region := range regions {
+		regions[i] = region.Clone(core.SetApproximateSize(10))
+		re.NoError(rc.HandleRegionHeartbeat(regions[i]))
+	}
+	testutil.Eventually(re, func() bool {
+		return rc.GetStore(1).GetRegionCount() == len(regions) && rc.GetStore(1).GetRegionSize() > 0
+	})
+	re.True(cluster.WaitRegionSyncerClientsReady(2))
+	for _, follower := range cluster.GetServers() {
+		if follower == leader {
+			continue
+		}
+		waitRegionsPersisted(re, follower, regions)
+		testutil.Eventually(re, func() bool {
+			bc := follower.GetServer().GetBasicCluster()
+			region := bc.GetRegion(regions[0].GetID())
+			return bc.GetStoreRegionCount(1) == len(regions) && region != nil && region.GetApproximateSize() == 0
+		})
+	}
+	re.NoError(rc.RemoveStore(1, false))
+	re.NoError(cluster.ResignLeader())
+	re.NotEqual(leader.GetServer().Name(), cluster.WaitLeader())
+	rc = cluster.GetLeaderServer().GetRaftCluster()
+	re.Equal(len(regions), rc.GetStoreRegionCount(1))
+	re.Zero(rc.GetStore(1).GetRegionSize())
+	re.Equal(len(regions), rc.GetStoreLeaderCount(1))
+
+	// Observe completed state checks before any fresh TiKV Region heartbeat arrives.
+	checksBefore := stateChecks.Load()
+	testutil.Eventually(re, func() bool { return stateChecks.Load() >= checksBefore+3 })
+	re.True(rc.GetStore(1).IsRemoving())
+
+	for _, region := range regions {
+		drained := region.Clone(core.WithRemoveStorePeer(1), core.WithAddPeer(&metapb.Peer{
+			Id: region.GetID() + 1000, StoreId: 4,
+		}), core.WithLeader(region.GetStorePeer(2)), core.WithIncConfVer())
+		re.NoError(rc.HandleRegionHeartbeat(drained))
+	}
+	testutil.Eventually(re, func() bool { return rc.GetStore(1).IsRemoved() })
+	re.Zero(rc.GetStoreRegionCount(1))
+}
+
 func TestPrepareChecker(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -359,8 +434,8 @@ func TestPrepareChecker(t *testing.T) {
 		re.NoError(err)
 	}
 
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
+	waitRegionsPersisted(re, leaderServer, regions)
+	testutil.Eventually(re, leaderServer.GetRaftCluster().IsPrepared)
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 
 	// join new PD
@@ -420,8 +495,8 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
+	waitRegionsPersisted(re, leaderServer, regions)
+	testutil.Eventually(re, leaderServer.GetRaftCluster().IsPrepared)
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 
 	// join new PD
@@ -449,4 +524,17 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	rc = cluster.GetLeaderServer().GetServer().GetRaftCluster()
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+}
+
+func waitRegionsPersisted(re *require.Assertions, server *tests.TestServer, regions []*core.RegionInfo) {
+	testutil.Eventually(re, func() bool {
+		for _, region := range regions {
+			var stored metapb.Region
+			ok, err := server.GetServer().GetStorage().LoadRegion(region.GetID(), &stored)
+			if err != nil || !ok || !proto.Equal(&stored, region.GetMeta()) {
+				return false
+			}
+		}
+		return true
+	})
 }

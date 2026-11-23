@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !without_dashboard
+
 package dashboard_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/tests"
@@ -32,13 +37,28 @@ func TestCancelDuringStarting(t *testing.T) {
 	defer cancel()
 
 	re := require.New(t)
+	starting := make(chan struct{})
+	notifyStarting := sync.OnceFunc(func() { close(starting) })
+	const hook = "github.com/tikv/pd/pkg/dashboard/adapter/beforeDashboardServiceStart"
+	re.NoError(failpoint.EnableCall(hook, func(ctx context.Context) {
+		notifyStarting()
+		<-ctx.Done()
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(hook)) })
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
-	defer cluster.Destroy()
+	defer func() {
+		cancel()
+		cluster.Destroy()
+	}()
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
 
-	time.Sleep(60 * time.Millisecond)
+	select {
+	case <-starting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dashboard did not reach service startup")
+	}
 	cancel()
 }
 

@@ -15,19 +15,24 @@
 package schedulers
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -168,6 +173,85 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 		re.Nil(storeInfos[storeID].PendingSum)
 	}
 	clearPendingInfluence(hb)
+}
+
+func TestHotRegionRevertAffinity(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		resource resourceType
+		buckets  bool
+		expired  bool
+	}{
+		{name: "move-peer", resource: writePeer},
+		{name: "transfer-leader", resource: readLeader},
+		{name: "split-buckets", resource: writePeer, buckets: true},
+		{name: "expired-group", resource: writePeer, expired: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest()
+			defer cancel()
+			hb := newHotScheduler(oc, initHotRegionScheduleConfig())
+			hb.types = []resourceType{testCase.resource}
+			hb.conf.setRankFormulaVersion("v2")
+			hb.conf.setHistorySampleDuration(0)
+			hb.conf.setSrcToleranceRatio(0)
+			hb.conf.setDstToleranceRatio(0)
+			hb.conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
+			hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+			hb.searchRevertRegions[testCase.resource] = true
+			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+			// Loads from TestHotWriteRegionScheduleWithRevertRegionsDimFirst: Region 6 goes from
+			// store 2 to 5, and reverting Region 7, which the group covers, from 5 to 2 improves it.
+			rwTy, updateStats, checkTransfer := utils.Write, tc.UpdateStorageWrittenStats, operatorutil.CheckTransferPeer
+			regions := []testRegionInfo{
+				{6, []uint64{3, 2, 4}, 3 * units.MiB, 1.8 * units.MiB, 0},
+				{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
+			}
+			if testCase.resource == readLeader {
+				rwTy, updateStats, checkTransfer = utils.Read, tc.UpdateStorageReadStats, operatorutil.CheckTransferLeader
+				regions[0].peers, regions[1].peers = []uint64{2, 1, 5}, []uint64{5, 4, 2}
+			}
+			for id := uint64(1); id <= 5; id++ {
+				tc.AddRegionStore(id, 20)
+				updateStats(id, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+			}
+			updateStats(2, 20*units.MiB*utils.StoreHeartBeatReportInterval, 14*units.MiB*utils.StoreHeartBeatReportInterval)
+			updateStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
+			addRegionInfo(tc, rwTy, regions)
+			revertRegion := tc.GetRegion(7)
+			if testCase.buckets {
+				// An oversized revert Region with buckets gets a USEKEY split instead of a move.
+				tc.SetRegionBucketEnabled(true)
+				revertRegion = revertRegion.Clone(core.SetApproximateSize(1024))
+				re.True(revertRegion.UpdateBuckets(&metapb.Buckets{
+					RegionId: 7, PeriodInMs: 1000,
+					Keys: [][]byte{revertRegion.GetStartKey(), fmt.Appendf(nil, "%20d5", 7), revertRegion.GetEndKey()},
+				}, revertRegion.GetBuckets()))
+				tc.PutRegion(revertRegion)
+			}
+			mgr := tc.GetAffinityManager()
+			re.NoError(mgr.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+				GroupID: "hot-revert", KeyRanges: []keyutil.KeyRange{{StartKey: revertRegion.GetStartKey(), EndKey: revertRegion.GetEndKey()}},
+			}}))
+			_, err := mgr.UpdateAffinityGroupPeers("hot-revert", regions[1].peers[0], regions[1].peers)
+			re.NoError(err)
+			if testCase.expired {
+				// An expired group allows regular scheduling, so the revert is kept.
+				mgr.ExpireAffinityGroup("hot-revert")
+			}
+			ops, _ := hb.Schedule(tc, false)
+			if testCase.expired {
+				re.Len(ops, 2)
+				re.Equal(uint64(7), ops[1].RegionID())
+				checkTransfer(re, ops[1], operator.OpHotRegion, 5, 2)
+			} else {
+				re.Len(ops, 1)
+			}
+			re.Equal(uint64(6), ops[0].RegionID())
+			checkTransfer(re, ops[0], operator.OpHotRegion, 2, 5)
+		})
+	}
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementV2(t *testing.T) {

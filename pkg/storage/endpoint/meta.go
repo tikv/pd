@@ -18,7 +18,6 @@ import (
 	"context"
 	"math"
 	"strconv"
-	"time"
 
 	"github.com/gogo/protobuf/proto"
 
@@ -179,10 +178,7 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 	// a variable rangeLimit to work around.
 	rangeLimit := MaxKVRangeLimit
 	for {
-		failpoint.Inject("slowLoadRegion", func() {
-			rangeLimit = 1
-			time.Sleep(time.Second)
-		})
+		failpoint.InjectCall("slowLoadRegion", ctx, &rangeLimit)
 		startKey := keypath.RegionPath(se.nextRegionID)
 		_, res, err := se.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {

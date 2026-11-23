@@ -964,6 +964,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 			// Update related stores.
 			start := time.Now()
 			c.UpdateAllStoreStatus()
+			failpoint.InjectCall("afterUpdateStoreStats", c)
 			updateStoreStatsGauge.Set(time.Since(start).Seconds())
 		}
 	}
@@ -1433,9 +1434,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		}
 		return nil
 	}
-	failpoint.Inject("concurrentRegionHeartbeat", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("concurrentRegionHeartbeat")
 	tracer.OnSaveCacheBegin()
 	var overlaps []*core.RegionInfo
 	if saveCache {
@@ -2175,8 +2174,10 @@ func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (i
 		}
 	case metapb.NodeState_Serving:
 	case metapb.NodeState_Removing:
-		// If the store is empty, it can be buried.
-		needBury := regionSize == 0
+		// Region sizes may be zero after loading from storage or syncing from another PD.
+		// Only bury the store after all its Region peers have been removed.
+		// Wait for cached statistics to catch up so Tombstone stores report no Regions.
+		needBury := store.GetRegionCount() == 0 && regionSize == 0 && c.GetStoreRegionCount(storeID) == 0
 		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
 			needBury = false
 		})
@@ -2423,9 +2424,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	failpoint.Inject("versionChangeConcurrency", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("versionChangeConcurrency")
 	if minVersion == nil || clusterVersion.Equal(*minVersion) {
 		return
 	}
@@ -2897,10 +2896,11 @@ func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit
 	// deleted but that hasn't been finally removed from StoresInfo yet (tombstone
 	// is not deletion). Get's create-on-miss side effect would resurrect that
 	// entry here.
-	ratePerSec := c.opt.PeekStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
-	if limit.Rate(limitType) != ratePerSec {
-		c.ResetStoreLimit(storeID, limitType, ratePerSec)
-	}
+	limit.Refresh(limitType, func() float64 {
+		ratePerSec := c.opt.PeekStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
+		failpoint.InjectCall("storeLimitRateRead", storeID, limitType, ratePerSec)
+		return ratePerSec
+	})
 }
 
 // GetClusterVersion returns the current cluster version.

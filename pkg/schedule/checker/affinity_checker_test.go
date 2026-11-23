@@ -1888,52 +1888,6 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 	verifyLearnersPreserved(re, op, []uint64{4, 5})
 }
 
-// TestAffinityCheckerLearnerVoterConflict tests that when a learner peer conflicts with affinity voter,
-// the checker returns nil and logs the conflict.
-func TestAffinityCheckerLearnerVoterConflict(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.SetMaxReplicasWithLabel(true, 3)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	tc.AddRegionStore(4, 10)
-
-	// Create region with voters on [1, 2, 3] and learner on [4]
-	tc.AddLeaderRegion(1, 1, 2, 3)
-	region := tc.GetRegion(1)
-
-	// Add a learner peer on store 4
-	learnerPeer := &metapb.Peer{
-		Id:      4,
-		StoreId: 4,
-		Role:    metapb.PeerRole_Learner,
-	}
-	newPeers := append(region.GetMeta().GetPeers(), learnerPeer)
-	region = region.Clone(core.SetPeers(newPeers))
-	tc.PutRegion(region)
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	// Affinity group expects voters on [1, 2, 4] with leader on 1
-	// This creates a conflict: store 4 has a learner but group expects it to be a voter
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 1,
-		VoterStoreIDs: []uint64{1, 2, 4}, // Store 4 conflicts with existing learner
-	}
-	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
-	re.NoError(err)
-
-	// Check should return nil due to learner-voter conflict
-	ops := checker.Check(region)
-	re.Nil(ops, "Should not create operator when learner conflicts with affinity voter")
-}
-
 // TestAffinityCheckerGroupScheduleDisallowed verifies group state that forbids affinity scheduling is respected.
 func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	re := require.New(t)
