@@ -324,6 +324,11 @@ func (sc *schedulingController) IsRegionHot(region *core.RegionInfo) bool {
 	return sc.hotStat.IsRegionHot(region, sc.opt.GetHotRegionCacheHitsThreshold())
 }
 
+// TryHotReadLeaderRate reads the existing hot-peer classification when available.
+func (sc *schedulingController) TryHotReadLeaderRate(regionID, storeID uint64, minDegree int) float64 {
+	return sc.hotStat.TryHotReadLeaderRate(regionID, storeID, minDegree)
+}
+
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.
 func (sc *schedulingController) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *statistics.HotPeerStat {
 	return sc.hotStat.GetHotPeerStat(rw, regionID, storeID)
@@ -334,11 +339,7 @@ func (sc *schedulingController) GetHotPeerStat(rw utils.RWType, regionID, storeI
 // The result only includes peers that are hot enough.
 func (sc *schedulingController) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
 	// GetHotPeerStats is a thread-safe method
-	threshold := sc.opt.GetHotRegionCacheHitsThreshold()
-	if rw == utils.Read {
-		threshold = sc.opt.GetHotRegionCacheHitsThreshold() *
-			(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
-	}
+	threshold := rw.HotDegreeThreshold(sc.opt.GetHotRegionCacheHitsThreshold())
 	return sc.hotStat.GetHotPeerStats(rw, threshold)
 }
 

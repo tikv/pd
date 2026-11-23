@@ -958,14 +958,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	if b.skipPlacementRulesCheck || len(b.rules) == 0 {
 		return true
 	}
-	for _, r := range b.rules {
-		if (r.Role == placement.Leader || r.Role == placement.Voter) &&
-			placement.MatchLabelConstraints(store, r.LabelConstraints) {
-			return true
-		}
-	}
-
-	return false
+	return placement.MatchesLeaderRules(b.rules, store)
 }
 
 // stepPlan is exec step. It can be:

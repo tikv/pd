@@ -36,8 +36,11 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -75,64 +78,160 @@ func TestEvictLeader(t *testing.T) {
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 }
 
-func TestEvictReadHotLeaderBatch(t *testing.T) {
+func bindEvictStream(re *require.Assertions, oc *operator.Controller, r *core.RegionInfo) func() *pdpb.TransferLeader {
+	stream := mockhbstream.NewHeartbeatStream()
+	hbs := oc.GetHBStreams()
+	hbs.BindStream(r.GetLeader().GetStoreId(), stream)
+	// Binding and sending use independent queues. Wait for a round trip.
+	testutil.Eventually(re, func() bool { hbs.SendMsg(r, &hbstream.Operation{}); return stream.Recv() != nil })
+	return func() *pdpb.TransferLeader {
+		var transfer *pdpb.TransferLeader
+		testutil.Eventually(re, func() bool {
+			if msg := stream.Recv(); msg != nil {
+				transfer = msg.(*pdpb.RegionHeartbeatResponse).GetTransferLeader()
+			}
+			return transfer != nil
+		})
+		return transfer
+	}
+}
+
+func TestEvictReadHotLeader(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest(true)
 	defer cancel()
 	for _, id := range []uint64{1, 2, 3} {
 		tc.AddLeaderStore(id, 0)
 	}
-	for _, id := range []uint64{10, 11} {
-		tc.AddRegionWithReadInfo(id, 1, 100<<20, 10000, 10000, 10, []uint64{2, 3}, 10)
-	}
-	for id, bytes := range map[uint64]uint64{2: 40 << 20, 3: 10 << 20} {
+	tc.AddRegionWithReadInfo(10, 1, 100<<20, 10000, 10000, 10, []uint64{2, 3}, 32)
+	region := tc.GetRegion(10)
+	setRead := func(id, rate uint64) {
+		end := uint64(time.Now().Unix())
 		tc.PutStore(tc.GetStore(id), core.SetStoreStats(&pdpb.StoreStats{
-			BytesRead: bytes, Interval: &pdpb.TimeInterval{StartTimestamp: 10, EndTimestamp: 20},
+			BytesRead: rate * 10, Interval: &pdpb.TimeInterval{StartTimestamp: end - 10, EndTimestamp: end},
 		}), core.SetLastHeartbeatTS(time.Now()))
 	}
-	kind := types.EvictLeaderScheduler
-	sl, err := CreateScheduler(kind, oc, storage.NewStorageWithMemoryBackend(),
-		ConfigSliceDecoder(kind, []string{"1"}), nil)
+	setRead(2, 40<<20)
+	setRead(3, 1<<20)
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), nil)
 	re.NoError(err)
-	var ops []*operator.Operator
-	testutil.Eventually(re, func() bool {
-		ops, _ = sl.Schedule(tc, false)
-		return len(ops) == 2
-	})
-	// The first hot leader fills the 3 MiB/s gap before either Store reports again.
-	re.Equal(uint64(3), ops[0].Step(0).(operator.TransferLeader).ToStore)
-	re.Equal(uint64(2), ops[1].Step(0).(operator.TransferLeader).ToStore)
-
-	// Exercise both wire formats through actual operator admission and redispatch.
-	op := ops[0]
-	region := tc.GetRegion(op.RegionID())
-	stream := mockhbstream.NewHeartbeatStream()
-	oc.GetHBStreams().BindStream(region.GetLeader().GetStoreId(), stream)
-	recv := func() *pdpb.TransferLeader {
-		var msg core.RegionHeartbeatResponse
-		testutil.Eventually(re, func() bool {
-			msg = stream.Recv()
-			return msg != nil
-		})
-		return msg.(*pdpb.RegionHeartbeatResponse).GetTransferLeader()
+	ids := []uint64{2, 3}
+	pick := func(a, b uint64) uint64 {
+		id, _ := pickEvictLeaderTarget(tc, oc, sl.GetName(), region, ids, a, b)
+		return id
 	}
-	re.True(oc.AddOperator(op))
-	first := recv()
-	re.Equal(uint64(3), first.GetPeer().GetStoreId())
-	re.Empty(first.GetPeers())
-	oc.Dispatch(region, operator.DispatchFromHeartBeat, nil)
-	retry := recv()
-	re.Equal(uint64(2), retry.GetPeer().GetStoreId())
-	re.Len(retry.GetPeers(), 2)
+	testutil.Eventually(re, func() bool { return pick(2, 3) == 3 })
+	re.Equal(uint64(2), pick(2, 2))
+	// A single 10 MiB/s arrival exceeds the measured 3 MiB/s gap. All
+	// possible draw pairs retain their ordinary choice, even across passes.
+	setRead(2, 4<<20)
+	for _, a := range ids {
+		for _, b := range ids {
+			re.Equal(a, pick(a, b))
+		}
+	}
+	// A fresh heartbeat may carry an old sample or none at all.
+	for _, interval := range []*pdpb.TimeInterval{nil, {StartTimestamp: 10, EndTimestamp: 20}} {
+		tc.PutStore(tc.GetStore(3), core.SetStoreStats(&pdpb.StoreStats{Interval: interval}))
+		re.Equal(uint64(2), pick(2, 3))
+	}
+	setRead(3, 1<<20)
+	// A busy statistics worker cannot hold up the eviction.
+	setRead(2, 40<<20)
+	entered, resume := make(chan struct{}), make(chan struct{})
+	re.True(tc.CheckReadAsync(func(*statistics.HotPeerCache) { close(entered); <-resume }))
+	<-entered
+	func() {
+		defer close(resume)
+		done := make(chan uint64, 1)
+		go func() { done <- pick(2, 3) }()
+		select {
+		case result := <-done:
+			re.Equal(uint64(2), result)
+		case <-time.After(time.Second):
+			t.Fatal("eviction waited for the hot cache")
+		}
+	}()
+	// Exercise real operator admission, heartbeat redispatch and timeout history.
+	recv := bindEvictStream(re, oc, region)
+	for _, lateReply := range []bool{true, false} {
+		ops, _ := sl.Schedule(tc, false)
+		re.Len(ops, 1)
+		op := ops[0]
+		re.True(oc.AddOperator(op))
+		first := recv().GetPeer()
+		duplicates, _ := sl.Schedule(tc, false)
+		re.Empty(duplicates)
+		for _, reason := range []string{operator.DispatchFromHeartBeat, operator.DispatchFromNotifierQueue} {
+			oc.Dispatch(region, reason, nil)
+			retry := recv()
+			re.Equal(first, retry.GetPeer())
+			re.Len(retry.GetPeers(), 2)
+		}
+		leader := first
+		if !lateReply {
+			// Both followers still look eligible to PD. Only the primary is silent.
+			op.SetStatusReachTime(operator.STARTED, time.Now().Add(-time.Hour))
+			oc.Dispatch(region, operator.DispatchFromHeartBeat, nil)
+			re.Equal(operator.TIMEOUT, op.Status())
+			ops, _ = sl.Schedule(tc, false)
+			re.Len(ops, 1)
+			op = ops[0]
+			re.True(oc.AddOperator(op))
+			alternate := recv()
+			leader = alternate.GetPeer()
+			re.NotEqual(first, leader)
+			re.Empty(alternate.GetPeers())
+		}
+		moved := region.Clone(core.WithLeader(leader))
+		tc.PutRegion(moved)
+		oc.Dispatch(moved, operator.DispatchFromHeartBeat, nil)
+		re.Equal(operator.SUCCESS, op.Status())
+		tc.PutRegion(region)
+	}
+}
 
-	// After one eviction completes, the other can still leave without target telemetry.
-	tc.PutRegion(region.Clone(core.WithLeader(region.GetStorePeer(3))))
-	tc.PutStore(tc.GetStore(3), core.SetStoreStats(&pdpb.StoreStats{}))
-	ops, _ = sl.Schedule(tc, false)
-	re.Len(ops, 1)
-	re.NotEqual(op.RegionID(), ops[0].RegionID())
-	re.True(oc.AddOperator(ops[0]))
-	re.Len(recv().GetPeers(), 2)
+func TestEvictLeaderRespectsOverlappingPlacement(t *testing.T) {
+	for _, role := range []placement.PeerRoleType{placement.Leader, placement.Follower} {
+		t.Run(string(role), func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest(true)
+			defer cancel()
+			tc.SetEnablePlacementRules(true)
+			for id, zone := range map[uint64]string{1: "east", 2: "west", 3: "east"} {
+				tc.AddLeaderStore(id, 0)
+				tc.SetStoreLabel(id, map[string]string{"zone": zone})
+			}
+			tc.AddLeaderRegion(10, 1, 2, 3)
+			sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), nil)
+			re.NoError(err)
+			// The running operator was created before the new rule.
+			next := bindEvictStream(re, oc, tc.GetRegion(10))
+			ops, _ := sl.Schedule(tc, false)
+			re.Len(ops, 1)
+			re.True(oc.AddOperator(ops[0]))
+			re.Len(next().GetPeers(), 2)
+			rm := tc.GetRuleManager()
+			re.NoError(rm.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: "others", Index: 1, Role: placement.Voter, Count: 2}))
+			zone := "east"
+			if role == placement.Follower {
+				zone = "west"
+			}
+			re.NoError(rm.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: role, Count: 1,
+				LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{zone}}}}))
+			r := tc.GetRegion(10)
+			oc.Dispatch(r, operator.DispatchFromHeartBeat, nil)
+			cmd := next()
+			re.Equal(uint64(3), cmd.GetPeer().GetStoreId())
+			re.Equal([]*metapb.Peer{r.GetStorePeer(3)}, cmd.GetPeers())
+			re.True(rm.FitRegionWithoutCache(tc, r.Clone(core.WithLeader(cmd.GetPeer()))).IsSatisfied())
+			re.True(oc.RemoveOperator(ops[0]))
+			ops, _ = sl.Schedule(tc, false)
+			re.Len(ops, 1)
+			operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
+		})
+	}
 }
 
 func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {

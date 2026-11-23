@@ -16,6 +16,7 @@ package placement
 
 import (
 	"math"
+	"slices"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -100,6 +101,30 @@ func (f *RegionFit) ExtraCount() int {
 		desired += r.Rule.Count
 	}
 	return len(f.regionStores) - desired
+}
+
+// MatchesLeaderRules reports whether any rule permits the store to lead.
+func MatchesLeaderRules(rules []*Rule, store *core.StoreInfo) bool {
+	return slices.ContainsFunc(rules, func(r *Rule) bool {
+		return (r.Role == Leader || r.Role == Voter) && MatchLabelConstraints(store, r.LabelConstraints)
+	})
+}
+
+// AllowsLeader checks the placement after a role change using this fit's rules
+// and store snapshot. Changing leadership must not worsen an incomplete placement.
+func (f *RegionFit) AllowsLeader(region *core.RegionInfo, peer *metapb.Peer, supportWitness bool) bool {
+	// The fitter reads topology, peer health and the proposed leader.
+	moved := core.NewRegionInfo(region.GetMeta(), peer, core.WithDownPeers(region.GetDownPeers()), core.WithPendingPeers(region.GetPendingPeers()))
+	proposed := fitRegion(f.regionStores, moved, f.rules, supportWitness)
+	if proposed.IsSatisfied() {
+		return true
+	}
+	for i, old := range f.RuleFits {
+		if compareRuleFit(proposed.RuleFits[i], old) < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // GetRuleFit returns the RuleFit that contains the peer.

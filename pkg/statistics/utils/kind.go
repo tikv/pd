@@ -234,6 +234,12 @@ func (rw RWType) ReportInterval() int {
 	}
 }
 
+// HotDegreeThreshold converts a threshold in Region heartbeat intervals to
+// the number of reports of this kind that cover the same time.
+func (rw RWType) HotDegreeThreshold(threshold int) int {
+	return threshold * (RegionHeartBeatReportInterval / rw.ReportInterval())
+}
+
 // DefaultAntiCount returns the default anti count of read or write.
 func (rw RWType) DefaultAntiCount() int {
 	switch rw {

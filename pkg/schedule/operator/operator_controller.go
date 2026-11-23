@@ -18,7 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/rand/v2"
+	"slices"
 	"sync"
 	"time"
 
@@ -858,25 +858,22 @@ func (oc *Controller) dispatchStep(region *core.RegionInfo, step OpStep, source 
 		return
 	}
 	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
+	if tl, ok := step.(TransferLeader); ok && op != nil && op.evictTargets != nil {
+		tl.ToStores = op.evictTargets(region, tl.ToStores)
+		if len(tl.ToStores) == 0 {
+			return
+		}
+		if !slices.Contains(tl.ToStores, tl.ToStore) {
+			tl.ToStore = tl.ToStores[0]
+		}
+		step = tl
+	}
 	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
 		return
 	}
-	if tl, ok := step.(TransferLeader); preferTarget && ok {
-		transfer := cmd.TransferLeader
-		if transfer.GetPeer().GetStoreId() == tl.ToStore && len(transfer.Peers) > 1 {
-			if source == DispatchFromCreate {
-				// With multiple peers TiKV may choose any caught-up follower.
-				transfer.Peers = nil
-			} else {
-				// A client that only understands Peer also gets another choice on retry.
-				i := rand.IntN(len(transfer.Peers) - 1)
-				if transfer.Peers[i].GetStoreId() == tl.ToStore {
-					i = len(transfer.Peers) - 1
-				}
-				transfer.Peer = transfer.Peers[i]
-			}
-		}
+	if preferTarget && source == DispatchFromCreate && cmd.TransferLeader != nil {
+		cmd.TransferLeader.Peers = nil
 	}
 	log.Info("send schedule command",
 		zap.Uint64("region-id", region.GetID()),

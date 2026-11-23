@@ -22,6 +22,7 @@ import (
 // RegionStatInformer provides access to a shared informer of statistics.
 type RegionStatInformer interface {
 	GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *HotPeerStat
+	TryHotReadLeaderRate(regionID, storeID uint64, minDegree int) float64
 	IsRegionHot(region *core.RegionInfo) bool
 	// GetHotPeerStats return the read or write statistics for hot regions.
 	// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.

@@ -33,17 +33,19 @@ type HotCache struct {
 	ctx        context.Context
 	writeCache *HotPeerCache
 	readCache  *HotPeerCache
+	idleReads  chan func(*HotPeerCache)
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 	w := &HotCache{
 		ctx:        ctx,
+		idleReads:  make(chan func(*HotPeerCache)),
 		writeCache: NewHotPeerCache(ctx, cluster, utils.Write),
 		readCache:  NewHotPeerCache(ctx, cluster, utils.Read),
 	}
-	go w.updateItems(w.readCache.taskQueue, w.runReadTask)
-	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)
+	go w.updateItems(w.readCache.taskQueue, w.idleReads, w.runReadTask)
+	go w.updateItems(w.writeCache.taskQueue, nil, w.runWriteTask)
 	return w
 }
 
@@ -222,6 +224,25 @@ func waitRet(ctx context.Context, ret chan bool) bool {
 	}
 }
 
+// TryHotReadLeaderRate returns the read bytes/s of a hot leader. An eviction
+// can proceed immediately with ordinary selection while the read worker is busy.
+func (w *HotCache) TryHotReadLeaderRate(regionID, storeID uint64, minDegree int) float64 {
+	reply := make(chan float64, 1)
+	select {
+	case w.idleReads <- func(cache *HotPeerCache) {
+		stat := cache.getHotPeerStat(regionID, storeID)
+		var rate float64
+		if stat != nil && stat.IsLeader() && stat.isReportedHot(minDegree, utils.Read.DefaultAntiCount()) {
+			rate = stat.GetLoad(utils.ByteDim)
+		}
+		reply <- rate
+	}:
+		return <-reply
+	default:
+		return 0
+	}
+}
+
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.
 func (w *HotCache) GetHotPeerStat(kind utils.RWType, regionID, storeID uint64) *HotPeerStat {
 	ret := make(chan *HotPeerStat, 1)
@@ -269,13 +290,15 @@ func ResetHotCacheStatusMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 
-func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], runTask func(task func(*HotPeerCache))) {
+func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], idle <-chan func(*HotPeerCache), runTask func(task func(*HotPeerCache))) {
 	defer logutil.LogPanic()
 
 	for {
 		select {
 		case <-w.ctx.Done():
 			return
+		case task := <-idle:
+			runTask(task)
 		case task, ok := <-queue.Out:
 			if !ok {
 				return

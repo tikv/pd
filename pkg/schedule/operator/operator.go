@@ -96,12 +96,15 @@ type Operator struct {
 	// (see SetStoreHealthCheck), similar to additionalInfos.
 	needStoreHealthCheck atomic.Bool
 	leaderTargetTried    *atomic.Bool
+	evictTargets         func(*core.RegionInfo, []uint64) []uint64
 }
 
-// PreferLeaderTargetOnCreate asks TiKV to try the primary target on the initial
-// transfer. Set it before submitting the operator. Retries retain all alternatives.
-func (o *Operator) PreferLeaderTargetOnCreate() {
-	o.leaderTargetTried = new(atomic.Bool)
+// SetEvictLeaderTargets rechecks the allowed receivers on every dispatch.
+func (o *Operator) SetEvictLeaderTargets(filter func(*core.RegionInfo, []uint64) []uint64, preferFirst bool) {
+	o.evictTargets = filter
+	if preferFirst {
+		o.leaderTargetTried = new(atomic.Bool)
+	}
 }
 
 // SetStoreHealthCheck marks whether the operator's in-progress steps should

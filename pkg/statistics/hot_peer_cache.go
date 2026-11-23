@@ -160,7 +160,7 @@ func (f *HotPeerCache) GetHotPeerStats(minHotDegree int) map[uint64][]*HotPeerSt
 	for storeID, peers := range f.peersOfStore {
 		stat := make([]*HotPeerStat, 0, peers.Len())
 		peers.Range(func(v utils.TopNItem) bool {
-			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == defaultAntiCount {
+			if peer := v.(*HotPeerStat); peer.isReportedHot(minHotDegree, defaultAntiCount) {
 				stat = append(stat, peer)
 			}
 			return true
