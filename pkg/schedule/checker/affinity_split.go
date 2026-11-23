@@ -137,8 +137,8 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 				return wait("split-attempt-limit")
 			}
 			c.pruneSplitAttempts(now)
+			c.nextSplitPruneAt = now.Add(affinitySplitPruneInterval)
 			if len(c.splitAttempts) >= c.maxSplitAttempts {
-				c.nextSplitPruneAt = now.Add(affinitySplitPruneInterval)
 				return wait("split-attempt-limit")
 			}
 		}

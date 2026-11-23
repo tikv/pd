@@ -422,7 +422,7 @@ func TestAffinitySplitBeforeMoveReclaimsAttempts(t *testing.T) {
 				cluster, checker := newAffinitySplitTest(t)
 				checker.maxSplitAttempts = 2
 				regions := putOversizedAffinityRegions(cluster)
-				first, second, third := regions[0], regions[1], regions[2]
+				first, second, third, fourth := regions[0], regions[1], regions[2], regions[3]
 				attempts := checker.splitAttempts
 				firstSplit := checker.Check(first)
 				requireAffinitySplit(t, firstSplit)
@@ -449,13 +449,26 @@ func TestAffinitySplitBeforeMoveReclaimsAttempts(t *testing.T) {
 				}
 				re.Equal(before+2, promtestutil.ToFloat64(limitWaits))
 				advanceAffinitySplitTime(cluster, time.Nanosecond)
-				requireAffinitySplit(t, checker.Check(third))
+				thirdSplit := checker.Check(third)
+				requireAffinitySplit(t, thirdSplit)
 				re.Len(attempts, 2)
 				re.NotContains(attempts, first.GetID())
 				re.Same(secondSplit[0], attempts[second.GetID()].split)
 				if reason == "expired split" {
 					re.Equal(operator.EXPIRED, firstSplit[0].Status())
 				}
+
+				// Reject the replacement while the cooldown from the successful sweep is active.
+				re.True(thirdSplit[0].Cancel())
+				re.False(thirdSplit[0].HasStarted())
+				advanceAffinitySplitTime(cluster, affinitySplitPruneInterval-time.Nanosecond)
+				before = promtestutil.ToFloat64(limitWaits)
+				re.Empty(checker.Check(fourth))
+				re.Equal(before+1, promtestutil.ToFloat64(limitWaits))
+				re.Same(thirdSplit[0], attempts[third.GetID()].split)
+				advanceAffinitySplitTime(cluster, time.Nanosecond)
+				requireAffinitySplit(t, checker.Check(fourth))
+				re.NotContains(attempts, third.GetID())
 			})
 		})
 	}
