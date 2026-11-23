@@ -43,6 +43,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
@@ -63,6 +64,43 @@ const (
 	skipCampaignLeaderCheckFailpoint  = "github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"
 	watchGCStatesRegisteredFailpoint  = "github.com/tikv/pd/pkg/gc/watchGCStatesRegistered"
 )
+
+func TestStarterGCMigrationStartupRetry(t *testing.T) {
+	if !kerneltype.IsNextGen() {
+		t.Skip("only NextGen PD reads the Starter GC migration cutoff")
+	}
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	t.Cleanup(cluster.Destroy)
+	re.NoError(cluster.RunInitialServers())
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	client := cluster.GetServer(leader).GetEtcdClient()
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(follower)
+	cfg := follower.GetConfig().Clone()
+	re.NoError(follower.Stop())
+
+	key := keypath.GCMigrationCutoffPath()
+	_, err = client.Put(ctx, key, "invalid")
+	re.NoError(err)
+	failed, err := tests.NewTestServer(ctx, cfg.Clone(), nil)
+	re.NoError(err)
+	re.ErrorContains(failed.Run(), "invalid starter GC migration cutoff")
+
+	// The live quorum can repair the cutoff while this member is down.
+	_, err = client.Delete(ctx, key)
+	re.NoError(err)
+	_, err = client.Put(ctx, key, "1")
+	re.NoError(err)
+	retry, err := tests.NewTestServer(ctx, cfg, nil)
+	re.NoError(err)
+	re.NoError(retry.Run())
+	t.Cleanup(func() { re.NoError(retry.Stop()) })
+	re.Equal(follower.GetServerID(), retry.GetServerID())
+}
 
 func makeKeyspaceScope(keyspaceID uint32) *pdpb.KeyspaceScope {
 	return &pdpb.KeyspaceScope{

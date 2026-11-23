@@ -61,25 +61,30 @@ func (g *gcStateGeneration) retire() {
 	}
 }
 
-// InitEtcdClient configures NextGen GC before the manager is published.
-// The upgrade script creates the cutoff key before the first NextGen PD starts.
-func (m *GCStateManager) InitEtcdClient(ctx context.Context, client *clientv3.Client) error {
+// LoadMigrationCutoff returns the revision of the Starter upgrade cutoff, or zero
+// if the cluster has no cutoff. The upgrade script creates it before PD starts.
+func LoadMigrationCutoff(ctx context.Context, client *clientv3.Client) (int64, error) {
 	key := keypath.GCMigrationCutoffPath()
 	resp, err := etcdutil.EtcdKVGetWithContext(ctx, client, key)
 	if err != nil {
-		return errors.Annotate(err, "read starter GC migration cutoff")
+		return 0, errors.Annotate(err, "read starter GC migration cutoff")
 	}
-	if len(resp.Kvs) != 0 {
-		entry := resp.Kvs[0]
-		if string(entry.Value) != "1" || entry.Version != 1 || entry.Lease != 0 ||
-			entry.CreateRevision <= 0 || entry.CreateRevision != entry.ModRevision {
-			return errors.Errorf("invalid starter GC migration cutoff %s (version %d, create revision %d, mod revision %d, lease %d)",
-				key, entry.Version, entry.CreateRevision, entry.ModRevision, entry.Lease)
-		}
-		m.migrationCutoff = entry.CreateRevision
+	if len(resp.Kvs) == 0 {
+		return 0, nil
 	}
+	entry := resp.Kvs[0]
+	if string(entry.Value) != "1" || entry.Version != 1 || entry.Lease != 0 ||
+		entry.CreateRevision <= 0 || entry.CreateRevision != entry.ModRevision {
+		return 0, errors.Errorf("invalid starter GC migration cutoff %s (version %d, create revision %d, mod revision %d, lease %d)",
+			key, entry.Version, entry.CreateRevision, entry.ModRevision, entry.Lease)
+	}
+	return entry.CreateRevision, nil
+}
+
+// InitEtcdClient configures NextGen GC before the manager is published.
+func (m *GCStateManager) InitEtcdClient(client *clientv3.Client, migrationCutoff int64) {
 	m.etcdClient = client
-	return nil
+	m.migrationCutoff = migrationCutoff
 }
 
 // OnNodeBecomesLeader starts a unique leadership generation and returns its

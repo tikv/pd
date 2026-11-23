@@ -71,7 +71,7 @@ func newStarterGCFixture(t *testing.T, count int, beforeCutoff func(destination,
 	t.Cleanup(cancel)
 	// The fixture's first generation has no warmup workers. Configure its client
 	// before handing it to the first foreground operation under test.
-	re.NoError(manager.InitEtcdClient(ctx, destination))
+	manager.InitEtcdClient(destination, cutoff)
 	return manager, destination, source, cutoff
 }
 

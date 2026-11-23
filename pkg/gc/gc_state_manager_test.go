@@ -161,7 +161,9 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm, mgm)
 	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager, mgm)
 	if opt.useEnabledKeyspaceIndex {
-		re.NoError(gcStateManager.InitEtcdClient(ctx, client))
+		cutoff, err := LoadMigrationCutoff(ctx, client)
+		re.NoError(err)
+		gcStateManager.InitEtcdClient(client, cutoff)
 	}
 	t.Cleanup(gcStateManager.CloseBarrierMetrics)
 

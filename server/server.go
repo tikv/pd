@@ -365,19 +365,7 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 			etcd.Server.Stop()
 		}
 		go etcd.Close()
-		if s.client != nil {
-			if cerr := s.client.Close(); cerr != nil {
-				log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
-			}
-		}
-		if s.electionClient != nil {
-			if cerr := s.electionClient.Close(); cerr != nil {
-				log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
-			}
-		}
-		if s.httpClient != nil {
-			s.httpClient.CloseIdleConnections()
-		}
+		s.closeEtcdClients()
 	}
 	defer func() {
 		if retErr != nil {
@@ -456,6 +444,23 @@ func (s *Server) startClient() error {
 	return nil
 }
 
+func (s *Server) closeEtcdClients() {
+	if s.client != nil {
+		if err := s.client.Close(); err != nil {
+			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+	if s.electionClient != nil {
+		if err := s.electionClient.Close(); err != nil {
+			log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+
+	if s.httpClient != nil {
+		s.httpClient.CloseIdleConnections()
+	}
+}
+
 func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
 	// Update advertise peer URLs.
 	etcdMembers, err := etcdutil.ListEtcdMembers(ctx, s.client)
@@ -482,14 +487,23 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
-func (s *Server) startServer(ctx context.Context) error {
+// initClusterMetadata initializes the PD cluster ID and reads the NextGen GC
+// migration cutoff before PD opens its local storage.
+func (s *Server) initClusterMetadata(ctx context.Context) (int64, error) {
 	clusterID, err := endpoint.InitClusterID(s.client)
 	if err != nil {
 		log.Error("failed to init cluster id", errs.ZapError(err))
-		return err
+		return 0, err
 	}
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", clusterID)).Set(0)
+	if kerneltype.IsNextGen() {
+		return gc.LoadMigrationCutoff(ctx, s.client)
+	}
+	return 0, nil
+}
+
+func (s *Server) startServer(ctx context.Context, migrationCutoff int64) error {
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name())
@@ -507,6 +521,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Label:  id.DefaultLabel,
 		Member: s.member.MemberValue(),
 	})
+	var err error
 	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
@@ -572,9 +587,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	gcStateManager := gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager, s.metaServiceGroupManager)
 	gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
 	if kerneltype.IsNextGen() {
-		if err := gcStateManager.InitEtcdClient(ctx, s.client); err != nil {
-			return err
-		}
+		gcStateManager.InitEtcdClient(s.client, migrationCutoff)
 	}
 	s.gcStateManager = gcStateManager
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
@@ -641,20 +654,8 @@ func (s *Server) Close() {
 	if s.meteringWriter != nil {
 		s.meteringWriter.Stop()
 	}
-	if s.client != nil {
-		if err := s.client.Close(); err != nil {
-			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
-		}
-	}
-	if s.electionClient != nil {
-		if err := s.electionClient.Close(); err != nil {
-			log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
-		}
-	}
 
-	if s.httpClient != nil {
-		s.httpClient.CloseIdleConnections()
-	}
+	s.closeEtcdClients()
 
 	if s.member.Etcd() != nil {
 		s.member.Close()
@@ -699,18 +700,26 @@ func (s *Server) IsClosed() bool {
 
 // Run runs the pd server.
 func (s *Server) Run() error {
-	go systimemon.StartMonitor(s.ctx, time.Now, func() {
-		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
-		timeJumpBackCounter.Inc()
-	})
 	if err := s.startEtcd(s.ctx); err != nil {
 		return err
 	}
 
-	if err := s.startServer(s.ctx); err != nil {
+	migrationCutoff, err := s.initClusterMetadata(s.ctx)
+	if err != nil {
+		s.closeEtcdClients()
+		s.member.Close()
+		s.grpcServiceRateLimiter.Close()
+		s.serviceRateLimiter.Close()
+		return err
+	}
+	if err := s.startServer(s.ctx, migrationCutoff); err != nil {
 		return err
 	}
 
+	go systimemon.StartMonitor(s.ctx, time.Now, func() {
+		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
+		timeJumpBackCounter.Inc()
+	})
 	s.cgMonitor.StartMonitor(s.ctx)
 
 	failpoint.Inject("delayStartServerLoop", func() {
