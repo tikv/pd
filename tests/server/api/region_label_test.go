@@ -23,9 +23,9 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -147,9 +147,11 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.StatusOK(re)))
 		unwritten := *ordinary
 		unwritten.ID = "ordinary-rejected-batch"
+		expectedData, err := json.Marshal(errs.ErrAffinityLabelProtected.FastGenByArgs())
+		re.NoError(err)
 		protectedErrorChecks := []func([]byte, int, http.Header){
 			testutil.Status(re, http.StatusBadRequest),
-			testutil.WithHeader(re, "TiDB-Error-Code", errcode.InvalidInputCode.CodeStr().String()),
+			testutil.WithHeader(re, "TiDB-Error-Code", "input"),
 			func(body []byte, _ int, _ http.Header) {
 				var response struct {
 					Code string          `json:"code"`
@@ -160,7 +162,7 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 				re.Equal("input", response.Code)
 				re.Contains(response.Msg, "PD:affinity:ErrAffinityLabelProtected")
 				re.Contains(response.Msg, "affinity API")
-				re.NotNil(response.Data)
+				re.JSONEq(string(expectedData), string(response.Data))
 			},
 		}
 

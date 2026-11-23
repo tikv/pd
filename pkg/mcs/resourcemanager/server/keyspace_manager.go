@@ -122,6 +122,9 @@ func validateResourceGroupProto(grouppb *rmpb.ResourceGroup) error {
 	if grouppb.GetPriority() > maxPriority {
 		return errs.ErrInvalidGroup.FastGenByArgs("the group priority")
 	}
+	if grouppb.GetMode() != rmpb.GroupMode_RUMode {
+		return errs.ErrInvalidGroup.FastGenByArgs("the group mode: only RU mode is supported")
+	}
 	return nil
 }
 
@@ -283,6 +286,9 @@ func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.Resour
 	}
 	if !krgm.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
+	}
+	if err := validateResourceGroupProto(group); err != nil {
+		return err
 	}
 	err := curGroup.PatchSettings(group)
 	if err != nil {

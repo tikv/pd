@@ -15,6 +15,7 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -270,7 +271,8 @@ func newGCStateProvider(storage *StorageEndpoint) GCStateProvider {
 // GCStateWriteBatch is the batch of write operations within a GCStateTransaction, which can be started by calling
 // GCStateProvider.RunInGCStateTransaction.
 type GCStateWriteBatch struct {
-	ops []kv.RawTxnOp
+	ops        []kv.RawTxnOp
+	conditions []kv.RawTxnCondition
 }
 
 // LoadGCSafePoint loads current GC safe point of the given keyspaceID from storage.
@@ -341,6 +343,13 @@ func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 		return 0, err
 	}
 	return decodeTxnSafePoint(value)
+}
+
+// LoadTxnSafePointRevision loads the modification revision of the scope's txn safe point in a linearizable read.
+// A missing txn safe point has revision zero.
+func (p GCStateProvider) LoadTxnSafePointRevision(ctx context.Context, keyspaceID uint32) (int64, error) {
+	_, revision, err := p.storage.loadValueWithRevision(ctx, keypath.TxnSafePointPath(keyspaceID))
+	return revision, err
 }
 
 func decodeTxnSafePoint(value string) (uint64, error) {
@@ -506,7 +515,8 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 	if err != nil {
 		return errors.AddStack(err)
 	}
-	result, err := txn.If(condition).Then(ops...).Commit()
+	conditions := append(wb.conditions, condition)
+	result, err := txn.If(conditions...).Then(ops...).Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()
 	}
@@ -533,6 +543,41 @@ func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints(keyspaceID uint32)
 	}
 
 	return keys, ssps, nil
+}
+
+// ExpectKeyspaceMetaRevision stages a metadata revision check that runs atomically with the GC writes at commit.
+func (wb *GCStateWriteBatch) ExpectKeyspaceMetaRevision(keyspaceID uint32, revision int64) error {
+	if revision <= 0 {
+		return errors.New("keyspace metadata revision must be positive")
+	}
+	wb.conditions = append(wb.conditions, kv.RawTxnCondition{
+		Key: keypath.KeyspaceMetaPath(keyspaceID), CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
+	})
+	return nil
+}
+
+// ExpectConfigRevision stages a config revision check that runs atomically with the GC writes.
+// Revision zero guards the absence of persisted config during file-config initialization.
+func (wb *GCStateWriteBatch) ExpectConfigRevision(revision int64) error {
+	if revision < 0 {
+		return errors.New("config revision must not be negative")
+	}
+	wb.conditions = append(wb.conditions, kv.RawTxnCondition{
+		Key: keypath.ConfigPath(), CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
+	})
+	return nil
+}
+
+// ExpectTxnSafePointRevision rejects reports prepared before another advancement in the same GC scope.
+// Revision zero guards a txn safe point that did not exist before the report read.
+func (wb *GCStateWriteBatch) ExpectTxnSafePointRevision(keyspaceID uint32, revision int64) error {
+	if revision < 0 {
+		return errors.New("txn safe point revision must not be negative")
+	}
+	wb.conditions = append(wb.conditions, kv.RawTxnCondition{
+		Key: keypath.TxnSafePointPath(keyspaceID), CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
+	})
+	return nil
 }
 
 // writeJSON marshals the given data into JSON and writes it to the given key.

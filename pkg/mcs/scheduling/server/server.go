@@ -582,7 +582,7 @@ func (s *Server) startCluster(ctx context.Context) error {
 	am := cluster.GetAffinityManager()
 	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	ruleWatcher, err = rule.NewWatcher(ctx, s.GetClient(), cluster.GetStorage(),
-		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), am)
 	if err != nil {
 		return err
 	}
@@ -623,7 +623,7 @@ func (s *Server) startMetaConfWatcher(
 	if err != nil {
 		return nil, nil, err
 	}
-	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, storage)
+	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, basicCluster, storage)
 	if err != nil {
 		metaWatcher.Close()
 		return nil, nil, err
