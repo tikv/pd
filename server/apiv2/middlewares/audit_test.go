@@ -23,7 +23,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 
@@ -68,17 +67,8 @@ func newTestAuditServer(backends ...audit.Backend) *testAuditServer {
 }
 
 type recordingAuditBackend struct {
-	label  string
-	before bool
-	run    func(*http.Request)
-}
-
-func (b *recordingAuditBackend) Match(labels *audit.BackendLabels) bool {
-	return slices.Contains(labels.Labels, b.label)
-}
-
-func (b *recordingAuditBackend) ProcessBeforeHandler() bool {
-	return b.before
+	audit.Backend
+	run func(*http.Request)
 }
 
 func (b *recordingAuditBackend) ProcessHTTPRequest(r *http.Request) bool {
@@ -87,35 +77,35 @@ func (b *recordingAuditBackend) ProcessHTTPRequest(r *http.Request) bool {
 }
 
 type auditReadCloser struct {
-	io.Reader
+	io.ReadCloser
 	beforeRead func()
-	reads      int
-	closed     bool
 }
 
 func (r *auditReadCloser) Read(p []byte) (int, error) {
-	if r.beforeRead != nil {
-		r.beforeRead()
-	}
-	r.reads++
-	return r.Reader.Read(p)
-}
-
-func (r *auditReadCloser) Close() error {
-	r.closed = true
-	return nil
+	r.beforeRead()
+	return r.ReadCloser.Read(p)
 }
 
 func TestAuditOptionalRoutesAndLiveSwitch(t *testing.T) {
 	re := require.New(t)
 	calls := 0
 	svr := newTestAuditServer(&recordingAuditBackend{
-		label: audit.LocalLogLabel, before: true,
-		run: func(*http.Request) { calls++ },
+		Backend: audit.NewLocalLogBackend(true),
+		run:     func(*http.Request) { calls++ },
 	})
 	router := gin.New()
-	router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-	handler := func(c *gin.Context) { c.Status(http.StatusNoContent) }
+	var handlerRequest *http.Request
+	router.Use(func(c *gin.Context) {
+		c.Set(ServerContextKey, svr)
+		c.Next()
+		re.Same(handlerRequest, c.Request)
+		_, ok := requestutil.EndTimeFrom(c.Request.Context())
+		re.False(ok)
+	})
+	handler := func(c *gin.Context) {
+		handlerRequest = c.Request
+		c.Status(http.StatusNoContent)
+	}
 	router.POST("/selected", Audit("Selected", audit.LocalLogLabel), handler)
 	router.POST("/plain", handler)
 	for _, tc := range []struct {
@@ -220,27 +210,6 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 	}
 }
 
-func TestAuditLocalLogDoesNotSetEndTime(t *testing.T) {
-	re := require.New(t)
-	svr := newTestAuditServer(audit.NewLocalLogBackend(true))
-	router := gin.New()
-	var handlerRequest *http.Request
-	router.Use(func(c *gin.Context) {
-		c.Set(ServerContextKey, svr)
-		c.Next()
-		re.Same(handlerRequest, c.Request)
-		_, ok := requestutil.EndTimeFrom(c.Request.Context())
-		re.False(ok)
-	})
-	router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
-		handlerRequest = c.Request
-		c.Status(http.StatusNoContent)
-	})
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", http.NoBody))
-	re.Equal(http.StatusNoContent, recorder.Code)
-}
-
 func TestAuditBodyReadDoesNotDelayResponse(t *testing.T) {
 	re := require.New(t)
 	reader, writer := io.Pipe()
@@ -250,9 +219,9 @@ func TestAuditBodyReadDoesNotDelayResponse(t *testing.T) {
 	})
 	started := make(chan struct{})
 	finished := make(chan error, 1)
-	body := &auditReadCloser{Reader: reader, beforeRead: func() { close(started) }}
+	body := &auditReadCloser{ReadCloser: reader, beforeRead: func() { close(started) }}
 	logged := false
-	svr := newTestAuditServer(&recordingAuditBackend{label: audit.LocalLogLabel, before: true, run: func(r *http.Request) {
+	svr := newTestAuditServer(&recordingAuditBackend{Backend: audit.NewLocalLogBackend(true), run: func(r *http.Request) {
 		info, ok := requestutil.RequestInfoFrom(r.Context())
 		re.True(ok)
 		re.Empty(info.BodyParam)
@@ -281,7 +250,7 @@ func TestAuditBodyReadDoesNotDelayResponse(t *testing.T) {
 func TestAuditBodyLogOnPanic(t *testing.T) {
 	re := require.New(t)
 	var recorded string
-	svr := newTestAuditServer(&recordingAuditBackend{label: audit.LocalLogLabel, before: true, run: func(r *http.Request) {
+	svr := newTestAuditServer(&recordingAuditBackend{Backend: audit.NewLocalLogBackend(true), run: func(r *http.Request) {
 		info, ok := requestutil.RequestInfoFrom(r.Context())
 		re.True(ok)
 		recorded = info.BodyParam
