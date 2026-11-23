@@ -64,6 +64,7 @@ func TestMetaStorageRejectOutOfScope(t *testing.T) {
 	}{
 		{name: "protected key", key: protected},
 		{name: "protected empty range", key: protected, end: protected},
+		{name: "protected reversed range", key: protected, end: "/"},
 		{name: "whole keyspace", key: "\x00", end: "\x00"},
 		{name: "empty key", end: "\x00"},
 		{name: "empty key and range"},
@@ -100,6 +101,20 @@ func TestMetaStorageRejectOutOfScope(t *testing.T) {
 	t.Run("Put", func(t *testing.T) {
 		_, err := cli.Put(t.Context(), &meta_storagepb.PutRequest{Key: []byte(protected), Value: []byte("overwritten")})
 		require.Equal(t, codes.PermissionDenied, status.Code(err))
+	})
+	t.Run("backup read and watch bounds", func(t *testing.T) {
+		key := "/tidb/br-stream/meta-storage-boundary-test"
+		_, err := cli.Get(t.Context(), &meta_storagepb.GetRequest{Key: []byte(key), RangeEnd: []byte{0}})
+		require.Equal(t, codes.PermissionDenied, status.Code(err))
+		for _, end := range []string{key, "/", "\x00", "resource_group0"} {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			stream, err := cli.Watch(ctx, &meta_storagepb.WatchRequest{Key: []byte(key), RangeEnd: []byte(end)})
+			if err == nil {
+				_, err = stream.Recv()
+			}
+			cancel()
+			require.Equal(t, codes.PermissionDenied, status.Code(err))
+		}
 	})
 	resp, err := etcd.Get(t.Context(), protected)
 	require.NoError(t, err)
@@ -358,18 +373,38 @@ func TestMetaStorageLogBackupWriteCompatibility(t *testing.T) {
 	_, err = cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(otherKey), Value: []byte("other")})
 	require.NoError(t, err)
 
-	// RangeEnd must not turn the existing single-key Delete into a range delete.
-	deleted, err := cli.Delete(ctx, &meta_storagepb.DeleteRequest{
-		Key: []byte(key), RangeEnd: []byte(clientv3.GetPrefixRangeEnd("/tidb/br-stream")), PrevKv: true,
-	})
-	require.NoError(t, err)
-	require.Nil(t, deleted.GetHeader().GetError())
-	require.Len(t, deleted.GetPrevKvs(), 1)
-	require.Equal(t, key, string(deleted.PrevKvs[0].Key))
-	remaining, err := etcd.Get(ctx, otherKey)
-	require.NoError(t, err)
-	require.Len(t, remaining.Kvs, 1)
-	require.Equal(t, "other", string(remaining.Kvs[0].Value))
+	// RangeEnd is ignored by the existing single-key Delete.
+	for _, tc := range []struct {
+		name string
+		end  string
+	}{
+		{name: "omitted"},
+		{name: "equal", end: key},
+		{name: "reversed", end: "/"},
+		{name: "prefix boundary", end: clientv3.GetPrefixRangeEnd("/tidb/br-stream")},
+		{name: "unbounded", end: "\x00"},
+		{name: "cross namespace", end: "resource_group0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(key), Value: []byte("second")})
+			require.NoError(t, err)
+			deleted, err := cli.Delete(ctx, &meta_storagepb.DeleteRequest{
+				Key: []byte(key), RangeEnd: []byte(tc.end), PrevKv: true,
+			})
+			require.NoError(t, err)
+			require.Nil(t, deleted.GetHeader().GetError())
+			require.Len(t, deleted.GetPrevKvs(), 1)
+			require.Equal(t, key, string(deleted.PrevKvs[0].Key))
+			require.Equal(t, "second", string(deleted.PrevKvs[0].Value))
+			removed, err := etcd.Get(ctx, key)
+			require.NoError(t, err)
+			require.Empty(t, removed.Kvs)
+			remaining, err := etcd.Get(ctx, otherKey)
+			require.NoError(t, err)
+			require.Len(t, remaining.Kvs, 1)
+			require.Equal(t, "other", string(remaining.Kvs[0].Value))
+		})
+	}
 }
 
 func TestMetaStorageGetEmptyRange(t *testing.T) {
@@ -381,13 +416,24 @@ func TestMetaStorageGetEmptyRange(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			seed, err := etcd.Put(t.Context(), key, "value")
 			require.NoError(t, err)
-			resp, err := cli.Get(t.Context(), &meta_storagepb.GetRequest{Key: []byte(key), RangeEnd: []byte(key)})
-			require.NoError(t, err)
-			require.Nil(t, resp.GetHeader().GetError())
-			require.Empty(t, resp.GetKvs())
-			require.Zero(t, resp.GetCount())
-			require.False(t, resp.GetMore())
-			require.GreaterOrEqual(t, resp.GetHeader().GetRevision(), seed.Header.Revision)
+			for _, tc := range []struct {
+				name string
+				end  string
+			}{
+				{name: "equal", end: key},
+				{name: "reversed within namespace", end: key[:len(key)-1]},
+				{name: "reversed outside namespace", end: "/"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					resp, err := cli.Get(t.Context(), &meta_storagepb.GetRequest{Key: []byte(key), RangeEnd: []byte(tc.end)})
+					require.NoError(t, err)
+					require.Nil(t, resp.GetHeader().GetError())
+					require.Empty(t, resp.GetKvs())
+					require.Zero(t, resp.GetCount())
+					require.False(t, resp.GetMore())
+					require.GreaterOrEqual(t, resp.GetHeader().GetRevision(), seed.Header.Revision)
+				})
+			}
 		})
 	}
 }

@@ -130,8 +130,8 @@ func validateMetaStorageAccess(key, rangeEnd []byte) error {
 
 // validateMetaStorageWriteAccess permits only log backup metadata mutations.
 // Other component metadata must be updated through its owner.
-func validateMetaStorageWriteAccess(key, rangeEnd []byte) error {
-	if err := validateMetaStorageAccess(key, rangeEnd); err != nil {
+func validateMetaStorageWriteAccess(key []byte) error {
+	if err := validateMetaStorageAccess(key, nil); err != nil {
 		return err
 	}
 	if !strings.HasPrefix(string(key), "/tidb/br-stream") {
@@ -234,9 +234,9 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 		return nil, err
 	}
 	rangeEnd := req.GetRangeEnd()
-	if bytes.Equal(req.GetKey(), rangeEnd) {
-		// Equal bounds are a valid empty Get range. Authorize the key while
-		// forwarding the original bounds to etcd.
+	if len(rangeEnd) > 0 && string(rangeEnd) != "\x00" && bytes.Compare(rangeEnd, req.GetKey()) <= 0 {
+		// Non-increasing bounds form an empty Get range, except for etcd's
+		// unbounded sentinel. Authorize the key and forward the original bounds.
 		rangeEnd = nil
 	}
 	if err := validateMetaStorageAccess(req.GetKey(), rangeEnd); err != nil {
@@ -282,7 +282,7 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	if err := validateMetaStorageWriteAccess(req.GetKey(), nil); err != nil {
+	if err := validateMetaStorageWriteAccess(req.GetKey()); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -321,7 +321,7 @@ func (s *Service) Delete(ctx context.Context, req *meta_storagepb.DeleteRequest)
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	if err := validateMetaStorageWriteAccess(req.GetKey(), req.GetRangeEnd()); err != nil {
+	if err := validateMetaStorageWriteAccess(req.GetKey()); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
