@@ -40,6 +40,14 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
+func readStarterSafePoint(t *testing.T, m *GCStateManager, id uint32) (uint64, int64) {
+	t.Helper()
+	rows, err := m.gcMetaStorage.LoadGCSafePointPairs(t.Context(), []uint32{id})
+	require.NoError(t, err)
+	require.NoError(t, rows[0].Err)
+	return rows[0].TxnSafePoint, rows[0].TxnSafePointRevision
+}
+
 func TestStarterGCMigrationSourceValues(t *testing.T) {
 	const missing = "(missing)"
 	cases := []struct {
@@ -55,8 +63,8 @@ func TestStarterGCMigrationSourceValues(t *testing.T) {
 		{"max uint64", missing, "18446744073709551615", 0, "18446744073709551615", ""},
 		{"target ahead", "151", "150", 0, "", "exceeds frozen"},
 		{"G ahead", "100", "150", 151, "", "exceeds frozen"},
-		{"target with missing source", "1", missing, 0, "", "frozen transaction safe point is missing"},
-		{"G with missing source", missing, missing, 1, "", "frozen transaction safe point is missing"},
+		{"target with missing source", "1", missing, 0, "", "exceeds frozen"},
+		{"G with missing source", missing, missing, 1, "", "exceeds frozen"},
 		{"empty target", "", "100", 0, "", "empty transaction safe point"},
 		{"malformed target", "bad", "100", 0, "", "invalid syntax"},
 		{"empty source", "0", "", 0, "", "invalid transaction safe point"},
@@ -109,7 +117,7 @@ func TestStarterGCMigrationSourceValues(t *testing.T) {
 
 func TestStarterGCMigrationConcurrentTakeover(t *testing.T) {
 	ctx := context.Background()
-	manager, dest, _, markerRev := newStarterGCAPIFixture(t, 3)
+	manager, _, _, _ := newStarterGCAPIFixture(t, 2)
 	generation := manager.activeGeneration.Load()
 	const hook = "github.com/tikv/pd/pkg/gc/starterGCMigrationSourceLoaded"
 	reached, resume := make(chan struct{}), make(chan struct{})
@@ -138,24 +146,12 @@ func TestStarterGCMigrationConcurrentTakeover(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = manager.AdvanceGCSafePoint(1, 240)
 	require.NoError(t, err)
-	_, advancedRevision, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, 1)
-	require.NoError(t, err)
+	_, advancedRevision := readStarterSafePoint(t, manager, 1)
 	release()
 	require.NoError(t, <-first)
-	txn, rev, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, 1)
-	require.NoError(t, err)
+	txn, rev := readStarterSafePoint(t, manager, 1)
 	require.EqualValues(t, 350, txn)
 	require.Equal(t, advancedRevision, rev)
-
-	// A different election of the same member must fence the old term even
-	// before the old process has noticed its loss of leadership.
-	_, err = dest.Put(ctx, keypath.ElectionPath(nil), "member1")
-	require.NoError(t, err)
-	err = manager.ensureMigratedTxnSafePoint(ctx, generation, 3)
-	require.ErrorIs(t, err, errs.ErrEtcdTxnConflict)
-	_, rev, err = manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, 3)
-	require.NoError(t, err)
-	require.LessOrEqual(t, rev, markerRev)
 }
 
 func TestStarterGCMigrationAmbiguousCommit(t *testing.T) {
@@ -202,8 +198,7 @@ func TestStarterGCMigrationSameBackend(t *testing.T) {
 		state, err := manager.GetGCState(id, true)
 		require.NoError(t, err)
 		require.EqualValues(t, 10, state.TxnSafePoint)
-		_, revision, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
-		require.NoError(t, err)
+		_, revision := readStarterSafePoint(t, manager, id)
 		return revision
 	}
 	first := make(map[uint32]int64)
@@ -214,9 +209,7 @@ func TestStarterGCMigrationSameBackend(t *testing.T) {
 
 	// The next leader must serve both values without contacting the group or writing T again.
 	require.NoError(t, manager.metaServiceGroupManager.Close())
-	_, err = dest.Put(ctx, keypath.ElectionPath(nil), "member1")
-	require.NoError(t, err)
-	startStarterGCAPITestTerm(t, manager, dest, markerRevision)
+	t.Cleanup(manager.OnNodeBecomesLeader())
 	for id, revision := range first {
 		require.Equal(t, revision, readRevision(id))
 	}
@@ -258,8 +251,7 @@ func TestStarterGCMigrationGroupConfigChangedBeforeCommit(t *testing.T) {
 	require.NoError(t, err)
 	release()
 	require.ErrorIs(t, <-done, errs.ErrEtcdTxnConflict)
-	value, revision, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, 1)
-	require.NoError(t, err)
+	value, revision := readStarterSafePoint(t, manager, 1)
 	require.EqualValues(t, 10, value)
 	require.LessOrEqual(t, revision, markerRev)
 	_, cached := manager.gcStateCache.load(1)
@@ -272,8 +264,7 @@ func TestStarterGCMigrationGroupConfigChangedBeforeCommit(t *testing.T) {
 	state, err := manager.GetGCState(1, true)
 	require.NoError(t, err)
 	require.EqualValues(t, 101, state.TxnSafePoint)
-	_, revision, err = manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, 1)
-	require.NoError(t, err)
+	_, revision = readStarterSafePoint(t, manager, 1)
 	require.Greater(t, revision, markerRev)
 
 	// A confirmed scope also survives a cache miss with its source offline.
@@ -306,8 +297,7 @@ func TestStarterGCMigrationStaleScope(t *testing.T) {
 	for _, id := range []uint32{1, 2} {
 		_, cached := manager.gcStateCache.load(id)
 		require.False(t, cached)
-		_, revision, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
-		require.NoError(t, err)
+		_, revision := readStarterSafePoint(t, manager, id)
 		require.LessOrEqual(t, revision, markerRev)
 	}
 }
@@ -354,6 +344,8 @@ func (c *recordingStarterKV) Txn(ctx context.Context, req *etcdserverpb.TxnReque
 
 func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 	ctx := t.Context()
+	var localReads [][]string
+	var readsMu sync.Mutex
 	m, dest, source, marker := newStarterGCFixture(t, 7, func(dest, source *clientv3.Client) {
 		// Keyspaces 1 and 2 use the second group. Keyspace 7 uses the PD default.
 		setStarterSourceGroup(t, dest, 1, "group2")
@@ -361,7 +353,24 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 		setStarterSourceGroup(t, dest, 7, "")
 		_, err := source.Put(ctx, keypath.TxnSafePointPath(5), "invalid")
 		require.NoError(t, err)
-	}, nil)
+	}, func(cfg *clientv3.Config) {
+		cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+			// The initial read starts at keyspace 1. Record subsequent snapshot reads for the healthy group.
+			if txn, ok := req.(*etcdserverpb.TxnRequest); ok && len(txn.Compare) == 0 && len(txn.Success) > 0 {
+				first := string(txn.Success[0].GetRequestRange().GetKey())
+				if first == keypath.TxnSafePointPath(3) || first == keypath.TxnSafePointPath(4) {
+					keys := make([]string, 0, len(txn.Success))
+					for _, op := range txn.Success {
+						keys = append(keys, string(op.GetRequestRange().GetKey()))
+					}
+					readsMu.Lock()
+					localReads = append(localReads, keys)
+					readsMu.Unlock()
+				}
+			}
+			return invoke(ctx, method, req, reply, cc, opts...)
+		}))
+	})
 	// The first group is remote. The second uses the target etcd and will reject the batch.
 	groups := map[string]string{"group1": source.Endpoints()[0], "group2": dest.Endpoints()[0]}
 	cfg, err := json.Marshal(&config.Config{Keyspace: config.KeyspaceConfig{MetaServiceGroups: groups}})
@@ -400,19 +409,21 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 	require.EqualValues(t, 103, state.TxnSafePoint)
 	unblock()
 	result := <-done
+	readsMu.Lock()
+	reads := localReads
+	readsMu.Unlock()
+	require.Equal(t, [][]string{{keypath.TxnSafePointPath(3), keypath.GCSafePointPath(3), keypath.TxnSafePointPath(4), keypath.GCSafePointPath(4)}}, reads)
 	require.ElementsMatch(t, []uint32{3, 4, 6, 7}, result.completed)
 	require.Len(t, result.failed, 3)
 	for _, id := range []uint32{1, 2, 5} {
 		require.Error(t, result.failed[id])
-		_, rev, err := m.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
-		require.NoError(t, err)
+		_, rev := readStarterSafePoint(t, m, id)
 		require.LessOrEqual(t, rev, marker)
 	}
 	require.Equal(t, [][]string{{keypath.TxnSafePointPath(3), keypath.TxnSafePointPath(4), keypath.TxnSafePointPath(5)}}, healthy.requests)
 	require.Equal(t, [][]string{{keypath.TxnSafePointPath(1), keypath.TxnSafePointPath(2)}}, unavailable.requests)
 	for id, want := range map[uint32]uint64{3: 103, 4: 104, 6: 106, 7: 10} {
-		value, rev, err := m.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
-		require.NoError(t, err)
+		value, rev := readStarterSafePoint(t, m, id)
 		require.Equal(t, want, value)
 		require.Greater(t, rev, marker)
 	}

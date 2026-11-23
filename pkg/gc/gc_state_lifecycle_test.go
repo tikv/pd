@@ -24,16 +24,9 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
-
-// OnNodeBecomesLeader starts a native generation for unit tests that simulate elections.
-func (m *GCStateManager) OnNodeBecomesLeader() func() {
-	return m.startLeaderGeneration(nil)
-}
 
 func TestStarterGCMigrationNativeReadCosts(t *testing.T) {
 	var markerReads, pairReads atomic.Int64
@@ -55,10 +48,8 @@ func TestStarterGCMigrationNativeReadCosts(t *testing.T) {
 	_, _, manager, clean, cancel := newGCStateManagerForTest(t, opt)
 	t.Cleanup(clean)
 	t.Cleanup(cancel)
-	for term := range 2 {
-		start, err := manager.PrepareLeaderGeneration(t.Context(), nil)
-		require.NoError(t, err)
-		stop := start()
+	for range 2 {
+		stop := manager.OnNodeBecomesLeader()
 		t.Cleanup(stop)
 		gcWarmupWait(t, manager.activeGeneration.Load().warmup.done)
 		reads := pairReads.Load()
@@ -69,110 +60,55 @@ func TestStarterGCMigrationNativeReadCosts(t *testing.T) {
 			require.NoError(t, err)
 		}
 		require.Equal(t, reads+1, pairReads.Load())
-		require.EqualValues(t, term+1, markerReads.Load())
 		stop()
 	}
+	require.EqualValues(t, 1, markerReads.Load())
 }
 
-func TestStarterGCMigrationLeaderInitialization(t *testing.T) {
-	_, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{useEnabledKeyspaceIndex: true})
+func TestStarterGCMigrationStartup(t *testing.T) {
+	_, provider, native, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{useEnabledKeyspaceIndex: true})
 	defer clean()
 	defer cancel()
-	m.stopGCStateGeneration(m.activeGeneration.Load())
-	ctx := t.Context()
-	client := m.etcdClient
-	markerKey := keypath.StarterGCMigrationPath()
-
-	// A successful read of a missing marker prepares a native generation.
-	// Preparation alone cannot expose the cache or start warmup.
-	_, err := m.gcServingGeneration()
-	require.ErrorIs(t, err, errs.ErrNotLeader)
+	ctx, client := t.Context(), native.etcdClient
+	native.stopGCStateGeneration(native.activeGeneration.Load())
+	upgraded := NewGCStateManager(provider, *native.getConfig(), native.keyspaceManager, native.metaServiceGroupManager)
+	defer upgraded.CloseBarrierMetrics()
 	canceled, cancelRead := context.WithCancel(ctx)
 	cancelRead()
-	_, err = m.PrepareLeaderGeneration(canceled, nil)
-	require.Error(t, err)
-	start, err := m.PrepareLeaderGeneration(ctx, nil)
+	require.Error(t, upgraded.InitEtcdClient(canceled, client))
+	key := keypath.StarterGCMigrationPath()
+	_, err := client.Put(ctx, key, "unknown")
 	require.NoError(t, err)
-	_, err = m.gcServingGeneration()
-	require.ErrorIs(t, err, errs.ErrNotLeader)
-	stop := start()
-	generation, err := m.gcServingGeneration()
+	require.ErrorContains(t, upgraded.InitEtcdClient(ctx, client), "invalid starter GC migration marker")
+	// An overwrite loses the original boundary, even if it restores the v1 format.
+	_, err = client.Put(ctx, key, "1")
 	require.NoError(t, err)
-	require.Nil(t, generation.migration)
-	m.InvalidateStarterMigrationLeader()
-	require.Same(t, generation, m.activeGeneration.Load())
-	stop()
-	_, err = m.gcServingGeneration()
-	require.ErrorIs(t, err, errs.ErrNotLeader)
-	_, err = m.gcReadGeneration(nil)
-	require.ErrorIs(t, err, errs.ErrNotLeader)
-	active, err := m.gcReadGeneration(generation)
+	require.ErrorContains(t, upgraded.InitEtcdClient(ctx, client), "invalid starter GC migration marker")
+	_, err = client.Delete(ctx, key)
 	require.NoError(t, err)
-	require.Nil(t, active)
-
-	// A rewritten marker, even with the same value, has lost its boundary.
-	_, err = client.Put(ctx, markerKey, "2")
+	lease, err := client.Grant(ctx, 60)
 	require.NoError(t, err)
-	_, err = m.PrepareLeaderGeneration(ctx, nil)
-	require.ErrorContains(t, err, "invalid starter GC migration marker")
-	_, err = m.gcReadGeneration(generation)
-	require.ErrorIs(t, err, errs.ErrNotLeader)
-	_, err = client.Put(ctx, markerKey, "1")
+	_, err = client.Put(ctx, key, "1", clientv3.WithLease(lease.ID))
 	require.NoError(t, err)
-	_, err = m.PrepareLeaderGeneration(ctx, nil)
-	require.ErrorContains(t, err, "invalid starter GC migration marker")
-	_, err = client.Delete(ctx, markerKey)
+	require.ErrorContains(t, upgraded.InitEtcdClient(ctx, client), "invalid starter GC migration marker")
+	_, err = client.Delete(ctx, key)
 	require.NoError(t, err)
 
-	const leaderValue = "same-member"
-	leaderKey := keypath.ElectionPath(nil)
-	_, err = client.Delete(ctx, leaderKey)
-	require.NoError(t, err)
-	first := election.NewLeadership(client, leaderKey, "gc", "gc")
-	require.NoError(t, first.Campaign(60, leaderValue))
-	defer first.Reset()
-	_, err = client.Put(ctx, markerKey, "1", clientv3.WithLease(first.GetLease().GetID()))
-	require.NoError(t, err)
-	_, err = m.PrepareLeaderGeneration(ctx, first)
-	require.ErrorContains(t, err, "invalid starter GC migration marker")
-	_, err = client.Delete(ctx, markerKey)
-	require.NoError(t, err)
 	_, err = client.Put(ctx, keypath.TxnSafePointPath(2), "42")
 	require.NoError(t, err)
-	marker, err := client.Put(ctx, markerKey, "1")
+	marker, err := client.Put(ctx, key, "1")
 	require.NoError(t, err)
-	_, err = m.PrepareLeaderGeneration(ctx, nil)
+	require.NoError(t, upgraded.InitEtcdClient(ctx, client))
+	_, err = upgraded.GetGCState(2, true)
 	require.ErrorIs(t, err, errs.ErrNotLeader)
-
-	_, err = m.PrepareLeaderGeneration(ctx, first)
-	require.NoError(t, err)
-
-	// Another campaign with identical member data must fence this old term.
-	_, err = client.Delete(ctx, leaderKey)
-	require.NoError(t, err)
-	next := election.NewLeadership(client, leaderKey, "gc", "gc")
-	require.NoError(t, next.Campaign(60, leaderValue))
-	defer next.Reset()
-	_, err = m.PrepareLeaderGeneration(ctx, first)
-	require.ErrorIs(t, err, errs.ErrNotLeader)
-	start, err = m.PrepareLeaderGeneration(ctx, next)
-	require.NoError(t, err)
-	stop = start()
+	stop := upgraded.OnNodeBecomesLeader()
 	defer stop()
-	state, err := m.GetGCState(2, true)
+	state, err := upgraded.GetGCState(2, true)
 	require.NoError(t, err)
 	require.EqualValues(t, 42, state.TxnSafePoint)
-	_, revision, err := m.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, 2)
-	require.NoError(t, err)
+	_, revision := readStarterSafePoint(t, upgraded, 2)
 	require.Greater(t, revision, marker.Header.Revision)
-
-	// Resignation may block before RaftCluster.Stop runs. A request that
-	// already passed the leader middleware must not return even a cached T.
-	_, err = m.GetGCState(constant.NullKeyspaceID, true)
-	require.NoError(t, err)
-	_, cached := m.gcStateCache.load(constant.NullKeyspaceID)
-	require.True(t, cached)
-	m.InvalidateStarterMigrationLeader()
-	_, err = m.GetGCState(constant.NullKeyspaceID, true)
+	stop()
+	_, err = upgraded.GetGCState(2, true)
 	require.ErrorIs(t, err, errs.ErrNotLeader)
 }

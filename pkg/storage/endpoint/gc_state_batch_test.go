@@ -124,9 +124,6 @@ func TestLoadGCSafePointPairs(t *testing.T) {
 	re.NoError(err)
 	re.Positive(revision)
 	re.Equal([]GCSafePointReadResult{{KeyspaceID: constant.NullKeyspaceID, TxnSafePointRevision: revision, TxnSafePointEmpty: true}}, results)
-	_, gotRevision, err := provider.LoadTxnSafePointWithRevision(context.Background(), constant.NullKeyspaceID)
-	re.ErrorContains(err, "empty transaction safe point")
-	re.Equal(revision, gotRevision)
 }
 
 func TestLoadGCSafePointPairsBatchBounds(t *testing.T) {

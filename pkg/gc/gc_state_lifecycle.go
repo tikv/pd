@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -38,12 +37,11 @@ type gcStateGeneration struct {
 	flights map[uint32]*gcStateLoadFlight
 
 	// Lifecycle ownership is established before publishing this generation.
-	ctx       context.Context
-	cancel    context.CancelFunc
-	workDone  chan struct{}
-	index     *enabledKeyspaceIndex
-	warmup    *gcStateWarmup
-	migration *starterGCMigration
+	ctx      context.Context
+	cancel   context.CancelFunc
+	workDone chan struct{}
+	index    *enabledKeyspaceIndex
+	warmup   *gcStateWarmup
 }
 
 func (g *gcStateGeneration) retire() {
@@ -63,78 +61,30 @@ func (g *gcStateGeneration) retire() {
 	}
 }
 
-// SetEtcdClient enables metadata discovery and initial GC warmup. NextGen
-// configures it before the first leadership generation; other deployments leave
-// it unset and retain passive cache loading.
-func (m *GCStateManager) SetEtcdClient(client *clientv3.Client) {
-	m.lifecycleMu.Lock()
-	defer m.lifecycleMu.Unlock()
-	m.nativeFollowerReads.Store(false)
-	m.etcdClient = client
-}
-
-// PrepareLeaderGeneration checks the migration marker before GC can serve requests.
-// Call the returned start function when the cluster is ready to start its workers.
-// It returns the cleanup function for that leadership term.
-func (m *GCStateManager) PrepareLeaderGeneration(ctx context.Context, leadership *election.Leadership) (start func() func(), err error) {
-	var migration *starterGCMigration
-	if m.etcdClient != nil {
-		m.nativeFollowerReads.Store(false)
-		migration, err = readStarterGCMigration(ctx, m.etcdClient, leadership)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return func() func() { return m.startLeaderGeneration(migration) }, nil
-}
-
-func readStarterGCMigration(ctx context.Context, client *clientv3.Client, leadership *election.Leadership) (*starterGCMigration, error) {
+// InitEtcdClient configures NextGen GC before the manager is published. The
+// upgrade marker, if present, was created before the first NextGen PD started.
+func (m *GCStateManager) InitEtcdClient(ctx context.Context, client *clientv3.Client) error {
 	key := keypath.StarterGCMigrationPath()
 	resp, err := etcdutil.EtcdKVGetWithContext(ctx, client, key)
 	if err != nil {
-		return nil, errors.Annotate(err, "read starter GC migration marker")
+		return errors.Annotate(err, "read starter GC migration marker")
 	}
-	if len(resp.Kvs) == 0 {
-		return nil, nil
+	if len(resp.Kvs) != 0 {
+		marker := resp.Kvs[0]
+		if string(marker.Value) != "1" || marker.Version != 1 || marker.Lease != 0 ||
+			marker.CreateRevision <= 0 || marker.CreateRevision != marker.ModRevision {
+			return errors.Errorf("invalid starter GC migration marker %s (version %d, create revision %d, mod revision %d, lease %d)",
+				key, marker.Version, marker.CreateRevision, marker.ModRevision, marker.Lease)
+		}
+		m.markerRevision = marker.CreateRevision
 	}
-	marker := resp.Kvs[0]
-	if string(marker.Value) != "1" || marker.Version != 1 || marker.Lease != 0 ||
-		marker.CreateRevision <= 0 || marker.CreateRevision != marker.ModRevision {
-		return nil, errors.Errorf("invalid starter GC migration marker %s (version %d, create revision %d, mod revision %d, lease %d)",
-			key, marker.Version, marker.CreateRevision, marker.ModRevision, marker.Lease)
-	}
-
-	// The same PD member can be elected again with the same serialized value.
-	// Only its current campaign lease identifies the election revision that our
-	// migration transactions are allowed to use.
-	leaderKey, leaderValue := leadership.GetLeaderKey(), leadership.GetLeaderValue()
-	if leaderKey == "" || leaderValue == "" {
-		return nil, errs.ErrNotLeader
-	}
-	lease := leadership.GetLease()
-	if lease.IsExpired() {
-		return nil, errs.ErrNotLeader
-	}
-	leader, err := etcdutil.EtcdKVGetWithContext(ctx, client, leaderKey)
-	if err != nil {
-		return nil, errors.Annotate(err, "read PD leadership for starter GC migration")
-	}
-	clusterID := resp.Header.GetClusterId()
-	if clusterID == 0 || leader.Header.GetClusterId() != clusterID {
-		return nil, errors.New("inconsistent etcd cluster identity during starter GC migration initialization")
-	}
-	if len(leader.Kvs) != 1 || leader.Kvs[0].Lease != int64(lease.GetID()) ||
-		string(leader.Kvs[0].Value) != leaderValue || leader.Kvs[0].ModRevision <= 0 {
-		return nil, errs.ErrNotLeader
-	}
-	return &starterGCMigration{
-		markerRevision: marker.CreateRevision,
-		leaderKey:      leaderKey,
-		leaderRevision: leader.Kvs[0].ModRevision,
-	}, nil
+	m.etcdClient = client
+	return nil
 }
 
-func (m *GCStateManager) startLeaderGeneration(migration *starterGCMigration) func() {
+// OnNodeBecomesLeader starts a unique leadership generation and returns its
+// idempotent cleanup. A delayed cleanup only affects the generation it owns.
+func (m *GCStateManager) OnNodeBecomesLeader() func() {
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	if previous := m.activeGeneration.Swap(nil); previous != nil {
@@ -148,11 +98,10 @@ func (m *GCStateManager) startLeaderGeneration(migration *starterGCMigration) fu
 	m.terminateAllGCStateWatchersLocked(errs.ErrNotLeader, watcherTerminationLeaderLost)
 	ctx, cancel := context.WithCancel(context.Background())
 	generation := &gcStateGeneration{
-		done:      make(chan struct{}),
-		flights:   make(map[uint32]*gcStateLoadFlight),
-		ctx:       ctx,
-		cancel:    cancel,
-		migration: migration,
+		done:    make(chan struct{}),
+		flights: make(map[uint32]*gcStateLoadFlight),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 	if m.etcdClient != nil {
 		generation.workDone = make(chan struct{})
@@ -167,7 +116,6 @@ func (m *GCStateManager) startLeaderGeneration(migration *starterGCMigration) fu
 	productionBarrierMetrics.current.Store(m.barrierMetrics)
 	m.generation = generation
 	m.activeGeneration.Store(generation)
-	m.nativeFollowerReads.Store(migration == nil)
 	m.mu.Unlock()
 	if generation.workDone != nil {
 		go func() {
@@ -186,15 +134,6 @@ func (m *GCStateManager) startLeaderGeneration(migration *starterGCMigration) fu
 func (g *gcStateGeneration) waitRuntime() {
 	if g.workDone != nil {
 		<-g.workDone
-	}
-}
-
-// InvalidateStarterMigrationLeader gates in-flight migration reads and cache
-// publication before resigning can block on lease revocation. RaftCluster.Stop
-// later retires the generation, joins its workers and clears the cache.
-func (m *GCStateManager) InvalidateStarterMigrationLeader() {
-	if generation := m.activeGeneration.Load(); generation != nil && generation.migration != nil {
-		m.activeGeneration.CompareAndSwap(generation, nil)
 	}
 }
 
@@ -221,25 +160,4 @@ func (m *GCStateManager) stopGCStateGeneration(generation *gcStateGeneration) {
 
 func (m *GCStateManager) nodeIsLeader() bool {
 	return m.activeGeneration.Load() != nil
-}
-
-// gcServingGeneration allows passive loading only for managers that do not
-// perform NextGen leader initialization. All other callers must observe the
-// mode of a prepared, active generation before reading a transaction safe point.
-func (m *GCStateManager) gcServingGeneration() (*gcStateGeneration, error) {
-	generation := m.activeGeneration.Load()
-	if generation == nil && m.etcdClient != nil {
-		return nil, errs.ErrNotLeader
-	}
-	return generation, nil
-}
-
-// gcReadGeneration lets a read admitted by a native leader still read current
-// storage after stepdown. The next marker preflight revokes this exception.
-func (m *GCStateManager) gcReadGeneration(admitted *gcStateGeneration) (*gcStateGeneration, error) {
-	generation, err := m.gcServingGeneration()
-	if err != nil && admitted != nil && admitted.migration == nil && m.nativeFollowerReads.Load() {
-		return nil, nil
-	}
-	return generation, err
 }

@@ -43,7 +43,6 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/gctuner"
@@ -416,15 +415,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("cluster is not bootstrapped", zap.Duration("cost", loadClusterInfoDuration))
 		return nil
 	}
-	var leadership *election.Leadership
-	if c.member != nil {
-		leadership = c.member.GetLeadership()
-	}
-	startGC, err := s.GetGCStateManager().PrepareLeaderGeneration(c.ctx, leadership)
-	if err != nil {
-		c.cancel()
-		return err
-	}
 	if c.opt.IsPlacementRulesEnabled() {
 		ruleInitStart := time.Now()
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
@@ -504,7 +494,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
 
-	c.stopGCStateManager = startGC()
+	c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesLeader()
 
 	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
 	runnersStart := time.Now()

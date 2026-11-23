@@ -29,8 +29,6 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
-	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -71,29 +69,16 @@ func newStarterGCFixture(t *testing.T, count int, beforeMarker func(destination,
 	_, _, manager, clean, cancel := newGCStateManagerForTest(t, opt)
 	t.Cleanup(clean)
 	t.Cleanup(cancel)
-	startStarterGCAPITestTerm(t, manager, destination, markerRevision)
-	// Supply metadata reads after generation startup to keep this first term unindexed.
-	manager.SetEtcdClient(destination)
+	// The fixture's first generation has no warmup workers. Configure its client
+	// before handing it to the first foreground operation under test.
+	re.NoError(manager.InitEtcdClient(ctx, destination))
 	return manager, destination, source, markerRevision
-}
-
-func startStarterGCAPITestTerm(t *testing.T, manager *GCStateManager, cli *clientv3.Client, markerRevision int64) {
-	t.Helper()
-	key := keypath.ElectionPath(nil)
-	term, err := cli.Get(context.Background(), key)
-	require.NoError(t, err)
-	require.Len(t, term.Kvs, 1)
-	t.Cleanup(manager.startLeaderGeneration(&starterGCMigration{
-		markerRevision: markerRevision,
-		leaderKey:      key,
-		leaderRevision: term.Kvs[0].ModRevision,
-	}))
 }
 
 func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
-	const count = endpoint.MaxGCSafePointBatchSize + 6
+	const count = 5
 	manager, destination, source, revision := newStarterGCAPIFixture(t, count)
 	now := time.Now()
 
@@ -115,15 +100,6 @@ func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 	re.NoError(err)
 	re.Equal(uint64(105), state.TxnSafePoint)
 
-	// More than a batch of untouched keyspaces still constrain this cluster-wide pin.
-	pin, updated, err := manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, keypath.NativeBRServiceSafePointID, 105, math.MaxInt64, now)
-	re.NoError(err)
-	re.False(updated)
-	re.Equal(uint64(100+count), pin.SafePoint)
-	globals, err := manager.LoadAllGlobalGCBarriers()
-	re.NoError(err)
-	re.Empty(globals)
-
 	for i := 1; i <= count; i++ {
 		resp, err := destination.Get(ctx, keypath.TxnSafePointPath(uint32(i)))
 		re.NoError(err)
@@ -135,9 +111,7 @@ func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 	key := keypath.TxnSafePointPath(1)
 	_, err = source.Put(ctx, key, "invalid")
 	re.NoError(err)
-	_, err = destination.Put(ctx, keypath.ElectionPath(nil), "member1")
-	re.NoError(err)
-	startStarterGCAPITestTerm(t, manager, destination, revision)
+	t.Cleanup(manager.OnNodeBecomesLeader())
 	state, err = manager.GetGCState(1, true)
 	re.NoError(err)
 	re.Equal(uint64(101), state.TxnSafePoint)
@@ -177,26 +151,24 @@ func TestStarterGCMigrationFirstWatch(t *testing.T) {
 	}
 	re.Equal(uint64(101), initial[1])
 	re.Zero(initial[id])
-	ts, rev, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
-	re.NoError(err)
+	ts, rev := readStarterSafePoint(t, manager, id)
 	re.Zero(ts)
 	re.Greater(rev, markerRevision)
 }
 
 func TestStarterGCMigrationWarmupAndReenabledTenant(t *testing.T) {
 	re := require.New(t)
-	manager, dest, _, revision := newStarterGCAPIFixture(t, 2)
+	manager, _, _, revision := newStarterGCAPIFixture(t, 2)
 	now := time.Now()
 	_, err := manager.keyspaceManager.UpdateKeyspaceStateByID(2, keyspacepb.KeyspaceState_DISABLED, now.Unix())
 	re.NoError(err)
-	startStarterGCAPITestTerm(t, manager, dest, revision)
+	t.Cleanup(manager.OnNodeBecomesLeader())
 	gcWarmupWait(t, manager.activeGeneration.Load().warmup.done)
 	states, err := manager.GetAllKeyspacesGCStates(t.Context(), true)
 	re.NoError(err)
 	re.Equal(uint64(101), states[1].TxnSafePoint)
 	re.NotContains(states, uint32(2))
-	txn, rev, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(t.Context(), 2)
-	re.NoError(err)
+	txn, rev := readStarterSafePoint(t, manager, 2)
 	re.Equal(uint64(10), txn)
 	re.LessOrEqual(rev, revision)
 
@@ -208,8 +180,7 @@ func TestStarterGCMigrationWarmupAndReenabledTenant(t *testing.T) {
 	re.NoError(err)
 	re.False(changed)
 	re.Equal(uint64(102), pin.SafePoint)
-	txn, rev, err = manager.gcMetaStorage.LoadTxnSafePointWithRevision(t.Context(), 2)
-	re.NoError(err)
+	txn, rev = readStarterSafePoint(t, manager, 2)
 	re.Equal(uint64(102), txn)
 	re.Greater(rev, revision)
 }

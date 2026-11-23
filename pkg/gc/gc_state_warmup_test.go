@@ -584,7 +584,7 @@ func newGCWarmupRuntimeTest(t *testing.T, intercept grpc.UnaryClientInterceptor)
 	// The unconfigured manager remains passive in classic deployments.
 	require.Nil(t, m.activeGeneration.Load().index)
 	m.stopGCStateGeneration(m.activeGeneration.Load())
-	m.SetEtcdClient(client)
+	require.NoError(t, m.InitEtcdClient(t.Context(), client))
 	return m
 }
 

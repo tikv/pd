@@ -87,22 +87,40 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 		return gcStateLoadResult{}, err
 	}
 	if len(pending) != 0 {
-		m.migrateStarterBatch(ctx, generation, pending, func(i int, err error) {
-			m.mu.RLock()
-			defer m.mu.RUnlock()
-			pair := endpoint.GCSafePointReadResult{Err: err}
-			if err == nil {
-				pair = m.readGCStatePair(ctx, generation, batch.keyspaceIDs[i])
-			}
-			generation.mu.Lock()
-			defer generation.mu.Unlock()
-			m.finishGCStateFlight(ctx, generation, batch, i, pair)
+		m.migrateStarterBatch(ctx, generation, pending, 2, func(group []*starterMigrationItem) {
+			m.publishStarterGroup(ctx, generation, batch, group)
 		})
 	}
 	return batch.result, nil
 }
 
-func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool), batch *gcStateLoadBatch) ([]starterMigrationItem, error) {
+// Hold the read lock from the group's final local read through publication.
+// An ordinary GC write may already have advanced beyond the frozen T.
+func (m *GCStateManager) publishStarterGroup(ctx context.Context, generation *gcStateGeneration, batch *gcStateLoadBatch, group []*starterMigrationItem) {
+	ids := make([]uint32, 0, len(group))
+	for _, item := range group {
+		if item.err == nil {
+			ids = append(ids, item.target.KeyspaceID)
+		}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
+	generation.mu.Lock()
+	defer generation.mu.Unlock()
+	for _, item := range group {
+		pair := endpoint.GCSafePointReadResult{Err: item.err}
+		if pair.Err == nil {
+			pair.Err = err
+			if err == nil {
+				pair, pairs = pairs[0], pairs[1:]
+			}
+		}
+		m.finishGCStateFlight(ctx, generation, batch, item.index, pair)
+	}
+}
+
+func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool), batch *gcStateLoadBatch) ([]*starterMigrationItem, error) {
 	failpoint.InjectCall("beforeGCStateLoadManagerLock")
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -167,13 +185,13 @@ func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *g
 	}
 	generation.mu.Lock()
 	defer generation.mu.Unlock()
-	var pending []starterMigrationItem
+	var pending []*starterMigrationItem
 	for i, id := range batch.keyspaceIDs {
 		pair := endpoint.GCSafePointReadResult{Err: err}
 		if err == nil {
 			pair = values[i]
-			if pair.Err == nil && !pair.TxnSafePointEmpty && generation.migration.needsCheck(id, pair.TxnSafePointRevision) {
-				pending = append(pending, starterMigrationItem{index: i, target: pair})
+			if pair.Err == nil && !pair.TxnSafePointEmpty && m.needsStarterCheck(id, pair.TxnSafePointRevision) {
+				pending = append(pending, &starterMigrationItem{index: i, target: pair})
 				continue
 			}
 		}
@@ -193,7 +211,7 @@ func (m *GCStateManager) finishGCStateFlight(ctx context.Context, generation *gc
 			pair.Err = errs.ErrNotLeader
 		} else if ctx.Err() != nil {
 			pair.Err = ctx.Err()
-		} else if generation.migration != nil && id != constant.NullKeyspaceID && pair.Err == nil {
+		} else if m.markerRevision > 0 && id != constant.NullKeyspaceID && pair.Err == nil {
 			pair.Err = validateStarterGCState(pair)
 		}
 		if pair.Err == nil {
@@ -315,18 +333,6 @@ func (m *GCStateManager) readGCStateDirect(ctx context.Context, generation *gcSt
 	defer cancel()
 	failpoint.InjectCall("getGCStateCacheAccess", "miss")
 	gcStateCacheAccessMissCounter.Inc()
-	result := m.readGCStatePair(ctx, generation, id)
-	if generation.migration != nil && id != constant.NullKeyspaceID && result.Err == nil {
-		result.Err = validateStarterGCState(result)
-	}
-	return result
-}
-
-// Called with the manager read lock held after this scope has been confirmed.
-func (m *GCStateManager) readGCStatePair(ctx context.Context, generation *gcStateGeneration, id uint32) endpoint.GCSafePointReadResult {
-	if m.activeGeneration.Load() != generation {
-		return endpoint.GCSafePointReadResult{Err: errs.ErrNotLeader}
-	}
 	if err := ctx.Err(); err != nil {
 		return endpoint.GCSafePointReadResult{Err: err}
 	}
@@ -339,5 +345,9 @@ func (m *GCStateManager) readGCStatePair(ctx context.Context, generation *gcStat
 	if err != nil {
 		return endpoint.GCSafePointReadResult{Err: err}
 	}
-	return values[0]
+	result := values[0]
+	if m.markerRevision > 0 && id != constant.NullKeyspaceID && result.Err == nil {
+		result.Err = validateStarterGCState(result)
+	}
+	return result
 }

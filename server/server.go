@@ -572,7 +572,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	gcStateManager := gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager, s.metaServiceGroupManager)
 	gcStateManager.SetConfigGetter(s.persistOptions.GetPDServerConfig)
 	if kerneltype.IsNextGen() {
-		gcStateManager.SetEtcdClient(s.client)
+		if err := gcStateManager.InitEtcdClient(ctx, s.client); err != nil {
+			return err
+		}
 	}
 	s.gcStateManager = gcStateManager
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
@@ -2070,7 +2072,6 @@ func (s *Server) campaignLeader() {
 	// not consult IsServing. Resigning first bounds that to the in-memory stores
 	// at the top of Member.Resign.
 	resetLeader := func() {
-		s.gcStateManager.InvalidateStarterMigrationLeader()
 		cancel()
 		s.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)

@@ -345,20 +345,6 @@ func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	return decodeTxnSafePoint(value)
 }
 
-// LoadTxnSafePointWithRevision reads T and its modification revision together.
-// A missing key has revision zero. An existing empty value is invalid during migration.
-func (p GCStateProvider) LoadTxnSafePointWithRevision(ctx context.Context, keyspaceID uint32) (uint64, int64, error) {
-	raw, revision, err := p.storage.loadValueWithRevision(ctx, keypath.TxnSafePointPath(keyspaceID))
-	if err != nil {
-		return 0, 0, err
-	}
-	if raw == "" && revision != 0 {
-		return 0, revision, errors.Errorf("empty transaction safe point for keyspace %d", keyspaceID)
-	}
-	ts, err := decodeTxnSafePoint(raw)
-	return ts, revision, err
-}
-
 // LoadTxnSafePointRevision loads the modification revision of the scope's txn safe point in a linearizable read.
 // A missing txn safe point has revision zero.
 func (p GCStateProvider) LoadTxnSafePointRevision(ctx context.Context, keyspaceID uint32) (int64, error) {
@@ -578,17 +564,6 @@ func (wb *GCStateWriteBatch) ExpectConfigRevision(revision int64) error {
 	}
 	wb.conditions = append(wb.conditions, kv.RawTxnCondition{
 		Key: keypath.ConfigPath(), CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
-	})
-	return nil
-}
-
-// ExpectLeaderRevision fences a migration against the exact PD election that authorized it.
-func (wb *GCStateWriteBatch) ExpectLeaderRevision(key string, revision int64) error {
-	if key == "" || revision <= 0 {
-		return errors.New("missing leader key or revision")
-	}
-	wb.conditions = append(wb.conditions, kv.RawTxnCondition{
-		Key: key, CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
 	})
 	return nil
 }
