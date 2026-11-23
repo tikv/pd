@@ -292,7 +292,11 @@ func cmdList(args ...string) bool {
 			return false
 		}
 
-		res := listTestCases(pkg, nil)
+		res, err := listTestCases(pkg, nil)
+		if err != nil {
+			log.Println("list test cases error", err)
+			return false
+		}
 
 		if len(args) == 2 {
 			res, err = filterTestCases(res, args[1])
@@ -402,7 +406,11 @@ func cmdRun(args ...string) bool {
 			return false
 		}
 
-		tasks = listTestCases(pkg, tasks)
+		tasks, err = listTestCases(pkg, tasks)
+		if err != nil {
+			log.Println("list test cases error", err)
+			return false
+		}
 		tasks, err = filterTestCases(tasks, args[1])
 		if err != nil {
 			log.Println("filter test cases error", err)
@@ -488,6 +496,7 @@ func runExistingTestCases(pkgs []string) (tasks []task, err error) {
 
 	wg := &sync.WaitGroup{}
 	tasksChannel := make(chan []task, len(pkgs))
+	errorsChannel := make(chan error, len(pkgs))
 	for _, pkg := range pkgs {
 		_, ok := existPkgs[filepath.Join(modulePath, pkg)]
 		if !ok {
@@ -496,11 +505,18 @@ func runExistingTestCases(pkgs []string) (tasks []task, err error) {
 		}
 
 		wg.Add(1)
-		go listTestCasesConcurrent(wg, pkg, tasksChannel)
+		go listTestCasesConcurrent(wg, pkg, tasksChannel, errorsChannel)
 	}
 
 	wg.Wait()
 	close(tasksChannel)
+	close(errorsChannel)
+	for listErr := range errorsChannel {
+		err = errors.Join(err, listErr)
+	}
+	if err != nil {
+		return nil, err
+	}
 	for t := range tasksChannel {
 		tasks = append(tasks, t...)
 	}
@@ -560,21 +576,24 @@ func (t *task) String() string {
 	return t.pkg + "." + t.test
 }
 
-func listTestCases(pkg string, tasks []task) []task {
-	newCases := listNewTestCases(pkg)
+func listTestCases(pkg string, tasks []task) ([]task, error) {
+	newCases, err := listNewTestCases(pkg)
+	if err != nil {
+		return nil, err
+	}
 	for _, c := range newCases {
 		tasks = append(tasks, task{pkg, c})
 	}
 
-	return tasks
+	return tasks, nil
 }
 
-func listTestCasesConcurrent(wg *sync.WaitGroup, pkg string, tasksChannel chan<- []task) {
+func listTestCasesConcurrent(wg *sync.WaitGroup, pkg string, tasksChannel chan<- []task, errorsChannel chan<- error) {
 	defer wg.Done()
-	newCases := listNewTestCases(pkg)
-	var tasks []task
-	for _, c := range newCases {
-		tasks = append(tasks, task{pkg, c})
+	tasks, err := listTestCases(pkg, nil)
+	if err != nil {
+		errorsChannel <- err
+		return
 	}
 	tasksChannel <- tasks
 }
@@ -952,7 +971,7 @@ func testFileFullPath(pkg string) string {
 	return filepath.Join(workDir, pkg, testFileName(pkg))
 }
 
-func listNewTestCases(pkg string) []string {
+func listNewTestCases(pkg string) ([]string, error) {
 	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	// core.test -test.list Test
 	// #nosec G702 -- pd-ut intentionally executes the test binary in the selected package directory.
@@ -960,14 +979,14 @@ func listNewTestCases(pkg string) []string {
 	cmd.Dir = filepath.Join(workDir, pkg)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
-	err := cmd.Run()
-	res := strings.Split(buf.String(), "\n")
-	if err != nil && len(res) == 0 {
-		fmt.Println("err ==", err)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("list test cases in %s: %w", pkg, err)
 	}
+	res := strings.Split(buf.String(), "\n")
 	return filter(res, func(s string) bool {
 		return strings.HasPrefix(s, "Test") && s != "TestT" && s != "TestBenchDaily"
-	})
+	}), nil
 }
 
 func cmdToLines(cmd *exec.Cmd) ([]string, error) {

@@ -20,11 +20,101 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRootPackageExecution(t *testing.T) {
+	sourceDir, err := os.Getwd()
+	require.NoError(t, err)
+	xprog := filepath.Join(t.TempDir(), "xprog")
+	cmd := goCommand("build", "-tags=xprog", "-o", xprog, filepath.Join(sourceDir, "xprog.go"))
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+
+	originalWorkDir, originalRepoRoot, originalModulePath, originalCache := workDir, repoRoot, modulePath, cache
+	originalParallel, originalBudget := parallel, cpuBudget
+	parallel, cpuBudget = 2, 0
+	t.Cleanup(func() {
+		workDir, repoRoot, modulePath, cache = originalWorkDir, originalRepoRoot, originalModulePath, originalCache
+		parallel, cpuBudget = originalParallel, originalBudget
+	})
+	for _, tc := range []struct {
+		name   string
+		module string
+		pkg    string
+	}{
+		{"root", "github.com/tikv/pd", "."},
+		{"subpackage", "github.com/tikv/pd", "pkg/example"},
+		{"integration-root", "github.com/tikv/pd/tests/integrations", "."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repoRoot = t.TempDir()
+			modulePath, cache = tc.module, false
+			workDir = filepath.Join(repoRoot, strings.TrimPrefix(tc.module, "github.com/tikv/pd"))
+			require.NoError(t, os.MkdirAll(filepath.Join(repoRoot, "bin"), 0700))
+			require.NoError(t, os.Symlink(xprog, filepath.Join(repoRoot, "bin", "xprog")))
+			require.NoError(t, os.MkdirAll(filepath.Join(workDir, tc.pkg), 0700))
+			require.NoError(t, os.WriteFile(filepath.Join(workDir, "go.mod"), []byte("module "+tc.module+"\n\ngo 1.20\n"), 0600))
+			require.NoError(t, os.WriteFile(filepath.Join(workDir, tc.pkg, "fixture_test.go"), []byte(`package fixture
+import ("os"; "testing")
+func TestRoot(t *testing.T) {
+	if os.Getenv("PD_UT_ROOT_FAIL") == "1" { t.Fatal("fixture failure") }
+	if err := os.WriteFile(os.Getenv("PD_UT_ROOT_MARKER"), []byte("executed"), 0600); err != nil { t.Fatal(err) }
+}
+`), 0600))
+			marker := filepath.Join(t.TempDir(), "executed")
+			t.Setenv("PD_UT_ROOT_MARKER", marker)
+			t.Setenv("PD_UT_ROOT_FAIL", "")
+			tasks, err := runExistingTestCases([]string{tc.pkg})
+			require.NoError(t, err)
+			require.Equal(t, []task{{tc.pkg, "TestRoot"}}, tasks)
+			result := new(numa).runTestCase(tc.pkg, "TestRoot")
+			require.NoError(t, result.err)
+			content, err := os.ReadFile(marker)
+			require.NoError(t, err)
+			require.Equal(t, "executed", string(content))
+			t.Setenv("PD_UT_ROOT_FAIL", "1")
+			result = new(numa).runTestCase(tc.pkg, "TestRoot")
+			require.Error(t, result.err)
+			require.NotNil(t, result.Failure)
+		})
+	}
+}
+
+func TestListTestCasesReturnsError(t *testing.T) {
+	originalWorkDir := workDir
+	workDir = t.TempDir()
+	t.Cleanup(func() { workDir = originalWorkDir })
+	for _, tc := range []struct {
+		name   string
+		script string
+	}{
+		{"missing", ""},
+		{"exit-after-output", "#!/bin/sh\necho TestRoot\nexit 1\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.script != "" {
+				require.NoError(t, os.WriteFile(testFileFullPath("."), []byte(tc.script), 0700)) // #nosec G306 -- pd-ut must execute this test-only script.
+			}
+			tasks, err := listTestCases(".", nil)
+			require.Error(t, err)
+			require.Empty(t, tasks)
+			wg := new(sync.WaitGroup)
+			tasksChannel := make(chan []task, 1)
+			errorsChannel := make(chan error, 1)
+			wg.Add(1)
+			go listTestCasesConcurrent(wg, ".", tasksChannel, errorsChannel)
+			wg.Wait()
+			require.Len(t, errorsChannel, 1)
+			require.Error(t, <-errorsChannel)
+			require.Empty(t, tasksChannel)
+		})
+	}
+}
 
 func TestTestCommandCPUAllocation(t *testing.T) {
 	originalParallel, originalBudget := parallel, cpuBudget

@@ -50,6 +50,9 @@ func main() {
 	pkg = pkg[len(prefix) : len(pkg)-len(".test")]
 
 	_, file := filepath.Split(pkg)
+	if file == "" {
+		file = filepath.Base(prefix)
+	}
 
 	// The path of the destination file looks like $CWD/server/api/api.test.bin
 	newName := filepath.Join(cwd, pkg, file+".test.bin")
