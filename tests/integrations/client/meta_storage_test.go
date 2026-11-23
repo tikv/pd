@@ -63,8 +63,10 @@ func TestMetaStorageRejectOutOfScope(t *testing.T) {
 		end  string
 	}{
 		{name: "protected key", key: protected},
+		{name: "protected empty range", key: protected, end: protected},
 		{name: "whole keyspace", key: "\x00", end: "\x00"},
 		{name: "empty key", end: "\x00"},
+		{name: "empty key and range"},
 		{name: "unbounded allowed prefix", key: allowed, end: "\x00"},
 		{name: "cross namespace", key: "/ms/", end: "resource_group0"},
 		{name: "past prefix boundary", key: "resource_group/", end: "resource_group0\x00"},
@@ -160,18 +162,26 @@ func TestMetaStorageProtectTSOTimestamps(t *testing.T) {
 	require.Equal(t, value, event.Events[0].GetKv().GetValue())
 }
 
-func TestMetaStorageProtectMicroserviceMetadata(t *testing.T) {
+func TestMetaStorageProtectOwnedMetadata(t *testing.T) {
 	cli, etcd := newMetaStorageTestClient(t)
 	for _, tc := range []struct {
-		name string
-		key  string
+		name   string
+		key    string
+		prefix string
 	}{
-		{name: "default tso primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.TSOServiceName})},
-		{name: "keyspace group primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.TSOServiceName, GroupID: 1})},
-		{name: "scheduling primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.SchedulingServiceName})},
-		{name: "resource manager primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.ResourceManagerServiceName})},
-		{name: "expected primary", key: keypath.ExpectedPrimaryPath(&keypath.MsParam{ServiceName: constant.TSOServiceName})},
-		{name: "service registry", key: keypath.RegistryPath(constant.RouterServiceName, "meta-storage-test")},
+		{name: "default tso primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.TSOServiceName}), prefix: "/ms/"},
+		{name: "keyspace group primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.TSOServiceName, GroupID: 1}), prefix: "/ms/"},
+		{name: "scheduling primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.SchedulingServiceName}), prefix: "/ms/"},
+		{name: "resource manager primary", key: keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.ResourceManagerServiceName}), prefix: "/ms/"},
+		{name: "expected primary", key: keypath.ExpectedPrimaryPath(&keypath.MsParam{ServiceName: constant.TSOServiceName}), prefix: "/ms/"},
+		{name: "service registry", key: keypath.RegistryPath(constant.RouterServiceName, "meta-storage-test"), prefix: "/ms/"},
+		{name: "controller config", key: keypath.ControllerConfigPath(), prefix: "resource_group/"},
+		{name: "default resource group settings", key: "resource_group/settings/default", prefix: "resource_group/"},
+		{name: "default resource group state", key: "resource_group/states/default", prefix: "resource_group/"},
+		{name: "keyspace resource group settings", key: keypath.KeyspaceResourceGroupSettingPath(42, "default"), prefix: "resource_group/"},
+		{name: "keyspace resource group state", key: keypath.KeyspaceResourceGroupStatePath(42, "default"), prefix: "resource_group/"},
+		{name: "keyspace service limit", key: keypath.KeyspaceServiceLimitPath(42), prefix: "resource_group/"},
+		{name: "region label", key: keypath.RegionLabelKeyPath("meta-storage-test"), prefix: strings.TrimSuffix(keypath.RegionLabelPathPrefix(), "/")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -179,6 +189,7 @@ func TestMetaStorageProtectMicroserviceMetadata(t *testing.T) {
 			defer cancel()
 			lease, err := etcd.Grant(ctx, 60)
 			re.NoError(err)
+			upper := clientv3.GetPrefixRangeEnd(tc.prefix)
 			seed, err := etcd.Put(ctx, tc.key, "original", clientv3.WithLease(lease.ID))
 			re.NoError(err)
 
@@ -193,7 +204,7 @@ func TestMetaStorageProtectMicroserviceMetadata(t *testing.T) {
 					case "Delete":
 						_, err = cli.Delete(ctx, &meta_storagepb.DeleteRequest{Key: []byte(tc.key)})
 					case "DeleteWithRangeEnd":
-						_, err = cli.Delete(ctx, &meta_storagepb.DeleteRequest{Key: []byte(tc.key), RangeEnd: []byte("/ms0")})
+						_, err = cli.Delete(ctx, &meta_storagepb.DeleteRequest{Key: []byte(tc.key), RangeEnd: []byte(upper)})
 					}
 					require.Equal(t, codes.PermissionDenied, status.Code(err))
 					stored, err := etcd.Get(ctx, tc.key)
@@ -210,16 +221,16 @@ func TestMetaStorageProtectMicroserviceMetadata(t *testing.T) {
 			re.Nil(read.GetHeader().GetError())
 			re.Len(read.Kvs, 1)
 			re.Equal("original", string(read.Kvs[0].Value))
-			all, err := cli.Get(ctx, &meta_storagepb.GetRequest{Key: []byte("/ms/"), RangeEnd: []byte("/ms0")})
+			all, err := cli.Get(ctx, &meta_storagepb.GetRequest{Key: []byte(tc.prefix), RangeEnd: []byte(upper)})
 			re.NoError(err)
 			re.Nil(all.GetHeader().GetError())
 			re.NotEmpty(all.Kvs)
 			for _, kv := range all.Kvs {
-				re.True(strings.HasPrefix(string(kv.Key), "/ms/"))
+				re.True(strings.HasPrefix(string(kv.Key), tc.prefix))
 			}
 
 			watch, err := cli.Watch(ctx, &meta_storagepb.WatchRequest{
-				Key: []byte("/ms/"), RangeEnd: []byte("/ms0"), StartRevision: seed.Header.Revision, PrevKv: true,
+				Key: []byte(tc.key), StartRevision: seed.Header.Revision, PrevKv: true,
 			})
 			re.NoError(err)
 			event, err := watch.Recv()
@@ -229,8 +240,8 @@ func TestMetaStorageProtectMicroserviceMetadata(t *testing.T) {
 			re.Equal(tc.key, string(event.Events[0].GetKv().GetKey()))
 			re.Equal("original", string(event.Events[0].GetKv().GetValue()))
 
-			// The metadata owner can still update etcd directly, and discovery
-			// clients continue receiving its changes through MetaStorage.
+			// The metadata owner can still update etcd directly, and readers
+			// continue receiving its changes through MetaStorage.
 			_, err = etcd.Put(ctx, tc.key, "updated", clientv3.WithLease(lease.ID))
 			re.NoError(err)
 			event, err = watch.Recv()
@@ -247,7 +258,7 @@ func TestMetaStorageProtectMicroserviceMetadata(t *testing.T) {
 func TestMetaStorageNamespaceCompatibility(t *testing.T) {
 	cli, etcd := newMetaStorageTestClient(t)
 	for _, prefix := range []string{
-		"resource_group/", "/tidb/br-stream",
+		"/ms/", "resource_group/", "/tidb/br-stream",
 		strings.TrimSuffix(keypath.RegionLabelPathPrefix(), "/"),
 	} {
 		t.Run(prefix, func(t *testing.T) {
@@ -258,27 +269,28 @@ func TestMetaStorageNamespaceCompatibility(t *testing.T) {
 			otherKey := strings.TrimSuffix(prefix, "/") + "/meta-storage-boundary/b"
 			lease, err := etcd.Grant(ctx, 60)
 			re.NoError(err)
-			first, err := cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(key), Value: []byte("first"), Lease: int64(lease.ID)})
+			first, err := etcd.Put(ctx, key, "first", clientv3.WithLease(lease.ID))
 			re.NoError(err)
-			re.Nil(first.GetHeader().GetError())
 			stored, err := etcd.Get(ctx, key)
 			re.NoError(err)
 			re.Len(stored.Kvs, 1)
 			re.Equal(int64(lease.ID), stored.Kvs[0].Lease)
-			second, err := cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(key), Value: []byte("second"), PrevKv: true})
+			second, err := etcd.Put(ctx, key, "second", clientv3.WithPrevKV())
 			re.NoError(err)
-			re.Nil(second.GetHeader().GetError())
-			re.Equal("first", string(second.GetPrevKv().GetValue()))
+			re.Equal("first", string(second.PrevKv.Value))
 
-			old, err := cli.Get(ctx, &meta_storagepb.GetRequest{Key: []byte(key), Revision: first.GetHeader().GetRevision()})
+			old, err := cli.Get(ctx, &meta_storagepb.GetRequest{Key: []byte(key), Revision: first.Header.Revision})
 			re.NoError(err)
 			re.Nil(old.GetHeader().GetError())
 			re.Len(old.GetKvs(), 1)
 			re.Equal("first", string(old.Kvs[0].Value))
-			_, err = cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(otherKey), Value: []byte("other")})
+			_, err = etcd.Put(ctx, otherKey, "other")
 			re.NoError(err)
 			upper := clientv3.GetPrefixRangeEnd(prefix)
 			_, err = etcd.Put(ctx, upper, "outside")
+			re.NoError(err)
+			markerKey := strings.TrimSuffix(prefix, "/") + "/meta-storage-boundary/marker"
+			marker, err := etcd.Put(ctx, markerKey, "marker")
 			re.NoError(err)
 			all, err := cli.Get(ctx, &meta_storagepb.GetRequest{Key: []byte(prefix), RangeEnd: []byte(upper)})
 			re.NoError(err)
@@ -296,7 +308,7 @@ func TestMetaStorageNamespaceCompatibility(t *testing.T) {
 			watchCtx, watchCancel := context.WithCancel(ctx)
 			defer watchCancel()
 			watch, err := cli.Watch(watchCtx, &meta_storagepb.WatchRequest{
-				Key: []byte(prefix), RangeEnd: []byte(upper), StartRevision: second.GetHeader().GetRevision(), PrevKv: true,
+				Key: []byte(prefix), RangeEnd: []byte(upper), StartRevision: second.Header.Revision, PrevKv: true,
 			})
 			re.NoError(err)
 			event, err := watch.Recv()
@@ -305,19 +317,77 @@ func TestMetaStorageNamespaceCompatibility(t *testing.T) {
 			re.GreaterOrEqual(len(event.GetEvents()), 1)
 			re.Equal(key, string(event.Events[0].GetKv().GetKey()))
 			re.Equal("first", string(event.Events[0].GetPrevKv().GetValue()))
+			for seenMarker := false; !seenMarker; {
+				for _, e := range event.Events {
+					re.True(strings.HasPrefix(string(e.GetKv().GetKey()), prefix))
+					if string(e.GetKv().GetKey()) == markerKey {
+						re.Equal(marker.Header.Revision, e.GetKv().GetModRevision())
+						seenMarker = true
+					}
+				}
+				if !seenMarker {
+					event, err = watch.Recv()
+					re.NoError(err)
+					re.Nil(event.GetHeader().GetError())
+				}
+			}
 			watchCancel()
+		})
+	}
+}
 
-			// Preserve the existing Delete behavior: RangeEnd does not turn it into
-			// a range deletion, even when the whole requested range is allowed.
-			deleted, err := cli.Delete(ctx, &meta_storagepb.DeleteRequest{Key: []byte(key), RangeEnd: []byte(upper), PrevKv: true})
-			re.NoError(err)
-			re.Nil(deleted.GetHeader().GetError())
-			re.Len(deleted.GetPrevKvs(), 1)
-			re.Equal(key, string(deleted.PrevKvs[0].Key))
-			remaining, err := etcd.Get(ctx, otherKey)
-			re.NoError(err)
-			re.Len(remaining.Kvs, 1)
-			re.Equal("other", string(remaining.Kvs[0].Value))
+func TestMetaStorageLogBackupWriteCompatibility(t *testing.T) {
+	cli, etcd := newMetaStorageTestClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	key := "/tidb/br-stream/meta-storage-boundary/a"
+	otherKey := "/tidb/br-stream/meta-storage-boundary/b"
+	lease, err := etcd.Grant(ctx, 60)
+	require.NoError(t, err)
+	first, err := cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(key), Value: []byte("first"), Lease: int64(lease.ID)})
+	require.NoError(t, err)
+	require.Nil(t, first.GetHeader().GetError())
+	stored, err := etcd.Get(ctx, key)
+	require.NoError(t, err)
+	require.Len(t, stored.Kvs, 1)
+	require.Equal(t, int64(lease.ID), stored.Kvs[0].Lease)
+	second, err := cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(key), Value: []byte("second"), PrevKv: true})
+	require.NoError(t, err)
+	require.Nil(t, second.GetHeader().GetError())
+	require.Equal(t, "first", string(second.GetPrevKv().GetValue()))
+	_, err = cli.Put(ctx, &meta_storagepb.PutRequest{Key: []byte(otherKey), Value: []byte("other")})
+	require.NoError(t, err)
+
+	// RangeEnd must not turn the existing single-key Delete into a range delete.
+	deleted, err := cli.Delete(ctx, &meta_storagepb.DeleteRequest{
+		Key: []byte(key), RangeEnd: []byte(clientv3.GetPrefixRangeEnd("/tidb/br-stream")), PrevKv: true,
+	})
+	require.NoError(t, err)
+	require.Nil(t, deleted.GetHeader().GetError())
+	require.Len(t, deleted.GetPrevKvs(), 1)
+	require.Equal(t, key, string(deleted.PrevKvs[0].Key))
+	remaining, err := etcd.Get(ctx, otherKey)
+	require.NoError(t, err)
+	require.Len(t, remaining.Kvs, 1)
+	require.Equal(t, "other", string(remaining.Kvs[0].Value))
+}
+
+func TestMetaStorageGetEmptyRange(t *testing.T) {
+	cli, etcd := newMetaStorageTestClient(t)
+	for _, key := range []string{
+		"/ms/meta-storage-boundary", "resource_group/meta-storage-boundary",
+		"/tidb/br-stream/meta-storage-boundary", keypath.RegionLabelKeyPath("meta-storage-boundary"),
+	} {
+		t.Run(key, func(t *testing.T) {
+			seed, err := etcd.Put(t.Context(), key, "value")
+			require.NoError(t, err)
+			resp, err := cli.Get(t.Context(), &meta_storagepb.GetRequest{Key: []byte(key), RangeEnd: []byte(key)})
+			require.NoError(t, err)
+			require.Nil(t, resp.GetHeader().GetError())
+			require.Empty(t, resp.GetKvs())
+			require.Zero(t, resp.GetCount())
+			require.False(t, resp.GetMore())
+			require.GreaterOrEqual(t, resp.GetHeader().GetRevision(), seed.Header.Revision)
 		})
 	}
 }

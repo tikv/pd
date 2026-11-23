@@ -1514,7 +1514,7 @@ func TestPutGet(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 
-	key := []byte("resource_group/meta_storage_test")
+	key := []byte("/tidb/br-stream/meta_storage_test")
 	putResp, err := client.Put(context.Background(), key, []byte("1"))
 	re.NoError(err)
 	re.Empty(putResp.GetPrevKv())
