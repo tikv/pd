@@ -206,7 +206,7 @@ func TestStarterGCMigrationBatchWithChangingRoute(t *testing.T) {
 	require.NoError(t, failpoint.EnableCall(hook, func(firstID uint32) {
 		if firstID == 1 {
 			// Change the route revision after every source read for keyspace 1.
-			setStarterSourceGroup(t, dest, 1, "group1")
+			setStarterKeyspaceConfig(t, dest, 1, keyspace.MetaServiceGroupIDKey, "group1")
 		}
 	}))
 	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
@@ -227,7 +227,7 @@ func TestStarterGCMigrationSameBackend(t *testing.T) {
 	ctx := t.Context()
 	manager, dest, _, cutoff := newStarterGCFixture(t, 2, func(dest, _ *clientv3.Client) {
 		// Keyspace 1 uses the default PD backend. Keyspace 2 uses an explicit group on the same etcd.
-		setStarterSourceGroup(t, dest, 1, "")
+		setStarterKeyspaceConfig(t, dest, 1, keyspace.MetaServiceGroupIDKey, "")
 	}, nil)
 	groups := map[string]string{"group1": strings.Join(dest.Endpoints(), ",")}
 	cfg, err := json.Marshal(&config.Config{Keyspace: config.KeyspaceConfig{MetaServiceGroups: groups}})
@@ -322,15 +322,14 @@ func TestStarterGCMigrationGroupConfigChangedBeforeCommit(t *testing.T) {
 }
 
 func TestStarterGCMigrationStaleScope(t *testing.T) {
-	manager, _, _, cutoff := newStarterGCAPIFixture(t, 2)
+	manager, dest, _, cutoff := newStarterGCAPIFixture(t, 2)
 	ctx, generation := t.Context(), manager.activeGeneration.Load()
-	// An index or earlier metadata snapshot already queued these two independent
-	// scopes when the control plane changed one to unified GC and retired the other.
+	// The loader's candidates came from an earlier snapshot. Seed the metadata
+	// it will actually read without using the API to change an immutable GC mode.
 	next := gcStateLoadCandidates(1, 2)
-	_, err := manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: keyspace.GCManagementType, Value: keyspace.UnifiedGC}})
-	require.NoError(t, err)
+	setStarterKeyspaceConfig(t, dest, 1, keyspace.GCManagementType, keyspace.UnifiedGC)
 	for _, state := range []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_DISABLED, keyspacepb.KeyspaceState_ARCHIVED, keyspacepb.KeyspaceState_TOMBSTONE} {
-		_, err = manager.keyspaceManager.UpdateKeyspaceStateByID(2, state, time.Now().Unix())
+		_, err := manager.keyspaceManager.UpdateKeyspaceStateByID(2, state, time.Now().Unix())
 		require.NoError(t, err)
 	}
 	result, err := manager.loadGCStateBatch(ctx, generation, next)
@@ -346,7 +345,7 @@ func TestStarterGCMigrationStaleScope(t *testing.T) {
 	}
 }
 
-func setStarterSourceGroup(t *testing.T, dest *clientv3.Client, id uint32, group string) {
+func setStarterKeyspaceConfig(t *testing.T, dest *clientv3.Client, id uint32, field, value string) {
 	t.Helper()
 	key := keypath.KeyspaceMetaPath(id)
 	resp, err := dest.Get(t.Context(), key)
@@ -354,10 +353,10 @@ func setStarterSourceGroup(t *testing.T, dest *clientv3.Client, id uint32, group
 	require.Len(t, resp.Kvs, 1)
 	var meta keyspacepb.KeyspaceMeta
 	require.NoError(t, proto.Unmarshal(resp.Kvs[0].Value, &meta))
-	if group == "" {
-		delete(meta.Config, keyspace.MetaServiceGroupIDKey)
+	if value == "" {
+		delete(meta.Config, field)
 	} else {
-		meta.Config[keyspace.MetaServiceGroupIDKey] = group
+		meta.Config[field] = value
 	}
 	data, err := proto.Marshal(&meta)
 	require.NoError(t, err)
@@ -386,15 +385,68 @@ func (c *recordingStarterKV) Txn(ctx context.Context, req *etcdserverpb.TxnReque
 	return c.KVClient.Txn(ctx, req, opts...)
 }
 
+func recordStarterGroups(t *testing.T, m *GCStateManager, dest, source *clientv3.Client) (group1, group2 *recordingStarterKV) {
+	t.Helper()
+	ctx := t.Context()
+	groups := map[string]string{"group1": source.Endpoints()[0], "group2": dest.Endpoints()[0]}
+	cfg, err := json.Marshal(&config.Config{Keyspace: config.KeyspaceConfig{MetaServiceGroups: groups}})
+	require.NoError(t, err)
+	require.NoError(t, m.metaServiceGroupManager.UpdateGroupsSafely(ctx, groups, nil, func() error {
+		_, err := dest.Put(ctx, keypath.ConfigPath(), string(cfg))
+		return err
+	}, nil))
+	record := func(group string) *recordingStarterKV {
+		client, _, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, group)
+		require.NoError(t, err)
+		rpc := &recordingStarterKV{KVClient: etcdserverpb.NewKVClient(client.ActiveConnection())}
+		client.KV = clientv3.NewKVFromKVClient(rpc, client)
+		return rpc
+	}
+	return record("group1"), record("group2")
+}
+
+func TestStarterGCMigrationWarmupGroupConcurrency(t *testing.T) {
+	m, dest, source, _ := newStarterGCFixture(t, 2, func(dest, _ *clientv3.Client) {
+		setStarterKeyspaceConfig(t, dest, 2, keyspace.MetaServiceGroupIDKey, "group2")
+	}, nil)
+	cfg := *m.getConfig()
+	cfg.GCStateCacheWarmupConcurrency = 1
+	m.SetConfigGetter(func() *config.PDServerConfig { return &cfg })
+
+	group1, group2 := recordStarterGroups(t, m, dest, source)
+	entered, resume := make(chan struct{}, 2), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(resume) })
+	blockRead := func() error {
+		entered <- struct{}{}
+		<-resume
+		return nil
+	}
+	group1.beforeRead, group2.beforeRead = blockRead, blockRead
+
+	stop := m.OnNodeBecomesLeader()
+	defer stop()
+	defer unblock()
+	gcWarmupWait(t, entered)
+	select {
+	case <-entered:
+		t.Fatal("a second source read started while the only warmup worker was blocked")
+	case <-time.After(100 * time.Millisecond):
+	}
+	unblock()
+	gcWarmupWait(t, m.activeGeneration.Load().warmup.done)
+	require.Equal(t, [][]string{{keypath.TxnSafePointPath(1)}}, group1.requests)
+	require.Equal(t, [][]string{{keypath.TxnSafePointPath(2)}}, group2.requests)
+}
+
 func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 	ctx := t.Context()
 	var localReads [][]string
 	var readsMu sync.Mutex
 	m, dest, source, cutoff := newStarterGCFixture(t, 8, func(dest, source *clientv3.Client) {
 		// Keyspaces 1 and 2 use the second group. Keyspace 7 uses the PD default.
-		setStarterSourceGroup(t, dest, 1, "group2")
-		setStarterSourceGroup(t, dest, 2, "group2")
-		setStarterSourceGroup(t, dest, 7, "")
+		setStarterKeyspaceConfig(t, dest, 1, keyspace.MetaServiceGroupIDKey, "group2")
+		setStarterKeyspaceConfig(t, dest, 2, keyspace.MetaServiceGroupIDKey, "group2")
+		setStarterKeyspaceConfig(t, dest, 7, keyspace.MetaServiceGroupIDKey, "")
 		_, err := source.Put(ctx, keypath.TxnSafePointPath(5), "invalid")
 		require.NoError(t, err)
 	}, func(cfg *clientv3.Config) {
@@ -415,22 +467,7 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 			return invoke(ctx, method, req, reply, cc, opts...)
 		}))
 	})
-	// The first group is remote. The second uses the target etcd and will reject the batch.
-	groups := map[string]string{"group1": source.Endpoints()[0], "group2": dest.Endpoints()[0]}
-	cfg, err := json.Marshal(&config.Config{Keyspace: config.KeyspaceConfig{MetaServiceGroups: groups}})
-	require.NoError(t, err)
-	require.NoError(t, m.metaServiceGroupManager.UpdateGroupsSafely(ctx, groups, nil, func() error {
-		_, err := dest.Put(ctx, keypath.ConfigPath(), string(cfg))
-		return err
-	}, nil))
-	record := func(group string) *recordingStarterKV {
-		client, _, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, group)
-		require.NoError(t, err)
-		rpc := &recordingStarterKV{KVClient: etcdserverpb.NewKVClient(client.ActiveConnection())}
-		client.KV = clientv3.NewKVFromKVClient(rpc, client)
-		return rpc
-	}
-	healthy, unavailable := record("group1"), record("group2")
+	healthy, unavailable := recordStarterGroups(t, m, dest, source)
 	// Advance G after the initial local snapshot, while the group read is in flight.
 	healthy.beforeRead = func() error {
 		m.mu.Lock()
@@ -439,28 +476,11 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 			return wb.SetGCSafePoint(8, 109)
 		})
 	}
-	entered, resume := make(chan struct{}), make(chan struct{})
-	unblock := sync.OnceFunc(func() { close(resume) })
-	defer unblock()
-	unavailable.beforeRead = func() error { close(entered); <-resume; return errors.New("group2 unavailable") }
-	_, err = dest.Put(ctx, keypath.TxnSafePointPath(6), "106") // confirmed before this load
+	unavailable.beforeRead = func() error { return errors.New("group2 unavailable") }
+	_, err := dest.Put(ctx, keypath.TxnSafePointPath(6), "106") // confirmed before this load
 	require.NoError(t, err)
-	done := make(chan gcStateLoadResult, 1)
-	go func() {
-		r, err := m.loadGCStateBatch(ctx, m.activeGeneration.Load(), gcStateLoadCandidates(1, 2, 3, 4, 5, 6, 7, 8))
-		if err != nil {
-			r.failed = map[uint32]error{0: err}
-		}
-		done <- r
-	}()
-	gcWarmupWait(t, entered)
-	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	state, err := m.getGCStateImpl(readCtx, 3, true)
+	result, err := m.loadGCStateBatch(ctx, m.activeGeneration.Load(), gcStateLoadCandidates(1, 2, 3, 4, 5, 6, 7, 8))
 	require.NoError(t, err)
-	require.EqualValues(t, 103, state.TxnSafePoint)
-	unblock()
-	result := <-done
 	readsMu.Lock()
 	reads := localReads
 	readsMu.Unlock()

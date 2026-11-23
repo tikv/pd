@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
-	"sync"
 
 	"github.com/gogo/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -96,8 +95,8 @@ func (item *migrationItem) needsMigration(m *GCStateManager) bool {
 	return false
 }
 
-// Each group completes independently. The loader can publish the group as soon
-// as its conditional writes finish, even if another group is unreachable.
+// Process one source group at a time so each warmup worker has at most one
+// group read in flight. Publish each group as soon as its writes finish.
 func (m *GCStateManager) migrateStarterBatch(ctx context.Context, generation *gcStateGeneration, pending []*migrationItem, attempt int, finish func([]*migrationItem)) {
 	metaRows, err := readStarterKeys(ctx, m.etcdClient, pending, keypath.KeyspaceMetaPath)
 	if err != nil {
@@ -117,21 +116,12 @@ func (m *GCStateManager) migrateStarterBatch(ctx context.Context, generation *gc
 		groups[groupID] = append(groups[groupID], item)
 	}
 
-	var workers sync.WaitGroup
 	for groupID, items := range groups {
-		run := func() {
-			m.migrateStarterGroup(ctx, generation, groupID, items, attempt)
-			if finish != nil {
-				finish(items)
-			}
-		}
-		if len(groups) == 1 {
-			run()
-		} else {
-			workers.Go(run)
+		m.migrateStarterGroup(ctx, generation, groupID, items, attempt)
+		if finish != nil {
+			finish(items)
 		}
 	}
-	workers.Wait()
 }
 
 // Read the frozen values together even on retry. After a failed commit, write
