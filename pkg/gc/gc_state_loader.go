@@ -181,8 +181,7 @@ func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *g
 		pair := endpoint.GCSafePointReadResult{Err: err}
 		if err == nil {
 			pair = values[i]
-			if generation.migration != nil && id != constant.NullKeyspaceID && pair.Err == nil && !pair.TxnSafePointEmpty &&
-				generation.migration.needsCheck(id, pair.TxnSafePointRevision) {
+			if pair.Err == nil && !pair.TxnSafePointEmpty && generation.migration.needsCheck(id, pair.TxnSafePointRevision) {
 				pending = append(pending, i)
 				continue
 			}

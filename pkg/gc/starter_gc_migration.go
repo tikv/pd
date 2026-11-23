@@ -40,29 +40,16 @@ import (
 // creation revision distinguishes old values from T writes that have passed
 // migration. Neither source etcd revisions nor the PD GC revision are comparable to it.
 type starterGCMigration struct {
-	revision       int64
-	etcdClusterID  uint64
+	markerRevision int64
 	leaderKey      string
 	leaderRevision int64
 
-	localScopes sync.Map // uint32 -> struct{}; native/new or the same physical backend
-	groupSlots  sync.Map // group ID -> chan struct{}; bound reads independently per group
-	flights     singleflight.Group
-}
-
-func newStarterGCMigration(markerRevision int64, etcdClusterID uint64, leaderKey string, leaderRevision int64) *starterGCMigration {
-	return &starterGCMigration{
-		revision: markerRevision, etcdClusterID: etcdClusterID,
-		leaderKey: leaderKey, leaderRevision: leaderRevision,
-	}
+	groupSlots sync.Map // group ID -> chan struct{}; bound reads independently per group
+	flights    singleflight.Group
 }
 
 func (s *starterGCMigration) needsCheck(id uint32, txnRevision int64) bool {
-	if s == nil || id == constant.NullKeyspaceID || txnRevision > s.revision {
-		return false
-	}
-	_, local := s.localScopes.Load(id)
-	return !local
+	return s != nil && id != constant.NullKeyspaceID && txnRevision <= s.markerRevision
 }
 
 // Call outside the manager lock. Shared work belongs to the generation and can
@@ -75,9 +62,6 @@ func (m *GCStateManager) ensureMigratedTxnSafePoint(ctx context.Context, generat
 		return errs.ErrNotLeader
 	}
 	s := generation.migration
-	if !s.needsCheck(id, 0) {
-		return nil
-	}
 	// Only verified pairs may enter this generation's cache.
 	if _, ok := m.gcStateCache.load(id); ok && m.activeGeneration.Load() == generation {
 		return nil
@@ -114,8 +98,7 @@ type starterScopeSource struct {
 	txnSafePoint   uint64
 	metaRevision   int64
 	configRevision int64 // -1 when this scope did not use group configuration
-	local          bool
-	missing        bool // the verified external source did not have a saved_safe_point
+	missing        bool  // the source has no saved_safe_point
 }
 
 func (m *GCStateManager) migrateStarterScope(ctx context.Context, generation *gcStateGeneration, id uint32) error {
@@ -181,7 +164,7 @@ func (m *GCStateManager) migrateStarterScope(ctx context.Context, generation *gc
 		case gcSafePoint > source.txnSafePoint:
 			conflict = fmt.Errorf("keyspace %d GC safe point %d exceeds frozen transaction safe point %d", id, gcSafePoint, source.txnSafePoint)
 		}
-		if conflict != nil || source.local {
+		if conflict != nil {
 			return nil
 		}
 		// Stamp even an equal T (or a verified initial zero) with a new revision.
@@ -189,9 +172,6 @@ func (m *GCStateManager) migrateStarterScope(ctx context.Context, generation *gc
 	})
 	if err != nil {
 		return err
-	}
-	if conflict == nil && source.local {
-		s.localScopes.Store(id, struct{}{})
 	}
 	return conflict
 }
@@ -222,11 +202,12 @@ func (m *GCStateManager) loadStarterSource(ctx context.Context, migration *start
 	if _, _, err := gcKeyspaceScope(id, meta, false); err != nil {
 		return starterScopeSource{}, err
 	}
-	source := starterScopeSource{local: true, txnSafePoint: pair.TxnSafePoint, metaRevision: row.ModRevision, configRevision: -1}
+	source := starterScopeSource{metaRevision: row.ModRevision, configRevision: -1}
 	groupID, hasGroup := meta.Config[keyspace.MetaServiceGroupIDKey]
-	if row.CreateRevision > migration.revision || !hasGroup {
-		// The rollout verifies that the legacy default endpoints use PD etcd.
-		// CreateRevision is unchanged by disabling and re-enabling an old scope.
+	if row.CreateRevision > migration.markerRevision || !hasGroup {
+		// New tenants have no v1 state. The rollout verifies that the v1 default points to PD.
+		source.txnSafePoint = pair.TxnSafePoint
+		source.missing = pair.TxnSafePointRevision == 0
 		return source, nil
 	}
 	if groupID == "" || !config.IsValidMetaServiceGroupID(groupID) || m.metaServiceGroupManager == nil {
@@ -253,15 +234,6 @@ func (m *GCStateManager) loadStarterSource(ctx context.Context, migration *start
 		return starterScopeSource{}, fmt.Errorf("read meta-service group %q: %w", groupID, err)
 	}
 	source.configRevision = configRevision
-	clusterID := result.Header.GetClusterId()
-	if clusterID == 0 {
-		return starterScopeSource{}, fmt.Errorf("unknown etcd cluster identity for meta-service group %q", groupID)
-	}
-	if clusterID == migration.etcdClusterID {
-		return source, nil
-	}
-	source.local = false
-	source.txnSafePoint = 0
 	source.missing = len(result.Kvs) == 0
 	if !source.missing {
 		source.txnSafePoint, err = strconv.ParseUint(string(result.Kvs[0].Value), 10, 64)

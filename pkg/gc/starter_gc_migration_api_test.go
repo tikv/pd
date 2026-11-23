@@ -82,8 +82,11 @@ func startStarterGCAPITestTerm(t *testing.T, manager *GCStateManager, cli *clien
 	term, err := cli.Get(context.Background(), key)
 	require.NoError(t, err)
 	require.Len(t, term.Kvs, 1)
-	migration := newStarterGCMigration(markerRevision, term.Header.ClusterId, key, term.Kvs[0].ModRevision)
-	t.Cleanup(manager.startLeaderGeneration(migration))
+	t.Cleanup(manager.startLeaderGeneration(&starterGCMigration{
+		markerRevision: markerRevision,
+		leaderKey:      key,
+		leaderRevision: term.Kvs[0].ModRevision,
+	}))
 }
 
 func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
@@ -140,7 +143,7 @@ func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 
 func TestStarterGCMigrationFirstWatch(t *testing.T) {
 	re := require.New(t)
-	manager, _, source, _ := newStarterGCAPIFixture(t, 1)
+	manager, _, source, markerRevision := newStarterGCAPIFixture(t, 1)
 	// A keyspace allocated after the marker has no old T to inherit.
 	id := uint32(2)
 	_, err := manager.keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
@@ -172,6 +175,10 @@ func TestStarterGCMigrationFirstWatch(t *testing.T) {
 	}
 	re.Equal(uint64(101), initial[1])
 	re.Zero(initial[id])
+	ts, rev, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
+	re.NoError(err)
+	re.Zero(ts)
+	re.Greater(rev, markerRevision)
 }
 
 func TestStarterGCMigrationWarmupAndReenabledTenant(t *testing.T) {

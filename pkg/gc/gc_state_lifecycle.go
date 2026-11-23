@@ -73,25 +73,19 @@ func (m *GCStateManager) SetEtcdClient(client *clientv3.Client) {
 	m.etcdClient = client
 }
 
-// PreparedGCLeader holds the verified migration mode for one leadership term.
-// Preparation has no background workers or cache side effects.
-type PreparedGCLeader struct {
-	manager   *GCStateManager
-	migration *starterGCMigration
-}
-
-// PrepareLeaderGeneration determines the GC mode before the cluster starts its workers.
-func (m *GCStateManager) PrepareLeaderGeneration(ctx context.Context, leadership *election.Leadership) (*PreparedGCLeader, error) {
-	prepared := &PreparedGCLeader{manager: m}
+// PrepareLeaderGeneration checks the migration marker before GC can serve requests.
+// Call the returned start function when the cluster is ready to start its workers.
+// It returns the cleanup function for that leadership term.
+func (m *GCStateManager) PrepareLeaderGeneration(ctx context.Context, leadership *election.Leadership) (start func() func(), err error) {
+	var migration *starterGCMigration
 	if m.etcdClient != nil {
 		m.nativeFollowerReads.Store(false)
-		migration, err := readStarterGCMigration(ctx, m.etcdClient, leadership)
+		migration, err = readStarterGCMigration(ctx, m.etcdClient, leadership)
 		if err != nil {
 			return nil, err
 		}
-		prepared.migration = migration
 	}
-	return prepared, nil
+	return func() func() { return m.startLeaderGeneration(migration) }, nil
 }
 
 func readStarterGCMigration(ctx context.Context, client *clientv3.Client, leadership *election.Leadership) (*starterGCMigration, error) {
@@ -133,12 +127,11 @@ func readStarterGCMigration(ctx context.Context, client *clientv3.Client, leader
 		string(leader.Kvs[0].Value) != leaderValue || leader.Kvs[0].ModRevision <= 0 {
 		return nil, errs.ErrNotLeader
 	}
-	return newStarterGCMigration(marker.CreateRevision, clusterID, leaderKey, leader.Kvs[0].ModRevision), nil
-}
-
-// Start publishes this leader's verified generation and returns its idempotent cleanup.
-func (p *PreparedGCLeader) Start() func() {
-	return p.manager.startLeaderGeneration(p.migration)
+	return &starterGCMigration{
+		markerRevision: marker.CreateRevision,
+		leaderKey:      leaderKey,
+		leaderRevision: leader.Kvs[0].ModRevision,
+	}, nil
 }
 
 func (m *GCStateManager) startLeaderGeneration(migration *starterGCMigration) func() {

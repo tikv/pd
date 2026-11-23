@@ -420,7 +420,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	if c.member != nil {
 		leadership = c.member.GetLeadership()
 	}
-	gcLeader, err := s.GetGCStateManager().PrepareLeaderGeneration(c.ctx, leadership)
+	startGC, err := s.GetGCStateManager().PrepareLeaderGeneration(c.ctx, leadership)
 	if err != nil {
 		c.cancel()
 		return err
@@ -504,7 +504,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
 
-	c.stopGCStateManager = gcLeader.Start()
+	c.stopGCStateManager = startGC()
 
 	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
 	runnersStart := time.Now()

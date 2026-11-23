@@ -189,22 +189,21 @@ func TestStarterGCMigrationAmbiguousCommit(t *testing.T) {
 	require.EqualValues(t, 2, resp.Kvs[0].Version)
 }
 
-func TestStarterGCMigrationInPlace(t *testing.T) {
-	ctx := context.Background()
-	manager, dest, _, markerRevision := newStarterGCFixture(t, 3, func(dest, _ *clientv3.Client) {
-		for _, id := range []uint32{1, 2} {
-			key := keypath.KeyspaceMetaPath(id)
-			resp, err := dest.Get(ctx, key)
-			require.NoError(t, err)
-			require.Len(t, resp.Kvs, 1)
-			var meta keyspacepb.KeyspaceMeta
-			require.NoError(t, proto.Unmarshal(resp.Kvs[0].Value, &meta))
-			delete(meta.Config, keyspace.MetaServiceGroupIDKey)
-			data, err := proto.Marshal(&meta)
-			require.NoError(t, err)
-			_, err = dest.Put(ctx, key, string(data))
-			require.NoError(t, err)
-		}
+func TestStarterGCMigrationSameBackend(t *testing.T) {
+	ctx := t.Context()
+	manager, dest, _, markerRevision := newStarterGCFixture(t, 2, func(dest, _ *clientv3.Client) {
+		// Keyspace 1 uses the default PD backend. Keyspace 2 uses an explicit group on the same etcd.
+		key := keypath.KeyspaceMetaPath(1)
+		resp, err := dest.Get(ctx, key)
+		require.NoError(t, err)
+		require.Len(t, resp.Kvs, 1)
+		var meta keyspacepb.KeyspaceMeta
+		require.NoError(t, proto.Unmarshal(resp.Kvs[0].Value, &meta))
+		delete(meta.Config, keyspace.MetaServiceGroupIDKey)
+		data, err := proto.Marshal(&meta)
+		require.NoError(t, err)
+		_, err = dest.Put(ctx, key, string(data))
+		require.NoError(t, err)
 	}, nil)
 	groups := map[string]string{"group1": strings.Join(dest.Endpoints(), ",")}
 	cfg, err := json.Marshal(&config.Config{Keyspace: config.KeyspaceConfig{MetaServiceGroups: groups}})
@@ -213,21 +212,30 @@ func TestStarterGCMigrationInPlace(t *testing.T) {
 		_, err := dest.Put(ctx, keypath.ConfigPath(), string(cfg))
 		return err
 	}, nil))
-	gen := manager.activeGeneration.Load()
-	for _, id := range []uint32{1, 3} { // default PD path and explicit group on the same etcd
-		require.NoError(t, manager.ensureMigratedTxnSafePoint(ctx, gen, id))
-		ts, rev, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
+
+	readRevision := func(id uint32) int64 {
+		t.Helper()
+		state, err := manager.GetGCState(id, true)
 		require.NoError(t, err)
-		require.EqualValues(t, 10, ts)
-		require.LessOrEqual(t, rev, markerRevision)
-		require.False(t, gen.migration.needsCheck(id, rev))
+		require.EqualValues(t, 10, state.TxnSafePoint)
+		_, revision, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
+		require.NoError(t, err)
+		return revision
 	}
-	// A compare-only confirmation must also be fenced by the election.
+	first := make(map[uint32]int64)
+	for _, id := range []uint32{1, 2} {
+		first[id] = readRevision(id)
+		require.Greater(t, first[id], markerRevision)
+	}
+
+	// The next leader must serve both values without contacting the group or writing T again.
+	require.NoError(t, manager.metaServiceGroupManager.Close())
 	_, err = dest.Put(ctx, keypath.ElectionPath(nil), "member1")
 	require.NoError(t, err)
-	err = manager.ensureMigratedTxnSafePoint(ctx, gen, 2)
-	require.ErrorIs(t, err, errs.ErrEtcdTxnConflict)
-	require.True(t, gen.migration.needsCheck(2, 0))
+	startStarterGCAPITestTerm(t, manager, dest, markerRevision)
+	for id, revision := range first {
+		require.Equal(t, revision, readRevision(id))
+	}
 }
 
 func TestStarterGCMigrationGroupConfigChangedBeforeCommit(t *testing.T) {
@@ -317,6 +325,5 @@ func TestStarterGCMigrationStaleScope(t *testing.T) {
 		_, revision, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
 		require.NoError(t, err)
 		require.LessOrEqual(t, revision, markerRev)
-		require.True(t, generation.migration.needsCheck(id, revision))
 	}
 }
