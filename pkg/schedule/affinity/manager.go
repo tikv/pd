@@ -285,13 +285,10 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	groupInfo.RangeCount = rangeCount
 }
 
-func (m *Manager) updateGroupLabelRules(changes []GroupKeyRanges, committed map[string]GroupKeyRanges, labels map[string]*labeler.LabelRule, needClear bool) {
+func (m *Manager) updateGroupLabelRules(changes []GroupKeyRanges, labels map[string]*labeler.LabelRule, needClear bool) {
 	m.Lock()
 	defer m.Unlock()
 	for _, change := range changes {
-		if _, ok := committed[change.GroupID]; !ok {
-			continue
-		}
 		if rule, ok := labels[change.GroupID]; ok {
 			m.updateGroupLabelRuleLocked(change.GroupID, rule, needClear)
 		}

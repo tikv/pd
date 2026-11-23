@@ -87,13 +87,13 @@ func (p *Plan) Apply() {
 // ApplyPrefix applies the first n changes to memory, where n is the number of
 // operations from CommitOps that have committed to storage.
 func (p *Plan) ApplyPrefix(n int) {
-	if p.err != nil || n == 0 {
+	if p.err != nil || n <= 0 {
 		return
 	}
 
 	p.labeler.Lock()
 	defer p.labeler.Unlock()
-	for _, op := range p.applyLockedOps[:n] {
+	for _, op := range p.applyLockedOps[:min(n, len(p.applyLockedOps))] {
 		op()
 	}
 }

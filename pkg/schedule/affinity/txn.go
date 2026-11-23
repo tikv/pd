@@ -522,34 +522,30 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 			zap.Int("total-groups", len(addOps)+len(removeOps)),
 			zap.Int("committed-groups", committed),
 			zap.Error(err))
-		// The plan contains one operation per nonempty update, with all adds first.
-		committedAdds := min(committed, len(orderedAdd))
-		orderedAdd = orderedAdd[:committedAdds]
-		orderedRemove = orderedRemove[:committed-committedAdds]
 	}
+	if committed == 0 {
+		return err
+	}
+	// The plan contains one operation per nonempty update, with all adds first.
+	committedAdds := min(committed, len(orderedAdd))
+	orderedAdd = orderedAdd[:committedAdds]
+	orderedRemove = orderedRemove[:committed-committedAdds]
 
 	// Step 5: Save the Group and Label information in memory.
 	plan.ApplyPrefix(committed)
 
 	for _, ops := range [][]GroupKeyRanges{orderedAdd, orderedRemove} {
 		for _, op := range ops {
-			currentRanges, ok := toAdd[op.GroupID]
-			if !ok {
-				currentRanges, ok = toRemove[op.GroupID]
-			}
-			if !ok {
-				continue
-			}
-			if len(currentRanges.KeyRanges) > 0 {
-				m.keyRanges[op.GroupID] = currentRanges
+			if len(op.KeyRanges) > 0 {
+				m.keyRanges[op.GroupID] = op
 			} else {
 				delete(m.keyRanges, op.GroupID)
 			}
 		}
 	}
 
-	m.updateGroupLabelRules(orderedAdd, toAdd, newAddedLabelRules, false)
-	m.updateGroupLabelRules(orderedRemove, toRemove, newRemovedLabelRules, true)
+	m.updateGroupLabelRules(orderedAdd, newAddedLabelRules, false)
+	m.updateGroupLabelRules(orderedRemove, newRemovedLabelRules, true)
 	return err
 }
 

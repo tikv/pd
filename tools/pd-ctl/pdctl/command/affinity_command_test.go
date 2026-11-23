@@ -103,8 +103,6 @@ func TestTiDBGroupKeyRange(t *testing.T) {
 	for _, tc := range []struct {
 		groupID, err string
 	}{
-		{"_tidb_tg_1_i0", "repair it with ADMIN REPAIR AFFINITY TABLE GROUP"},
-		{"_tidb_ks1_tg_1_i0", "repair it with ADMIN REPAIR AFFINITY TABLE GROUP"},
 		{"_tidb_pg1", "the _tidb_ prefix is reserved for TiDB"},
 		{"_tidb_x_1", "the _tidb_ prefix is reserved for TiDB"},
 		{"_tidb_t_0", "not a TiDB table or partition group"},
@@ -279,6 +277,26 @@ func (c *affinityStructuredSelectorClient) AddAffinityGroupKeyRanges(_ context.C
 func (c *affinityStructuredSelectorClient) UpdateAffinityGroupPeers(_ context.Context, groupID string, _ uint64, _ []uint64) (*pd.AffinityGroupState, error) {
 	c.calledID = groupID
 	return &pd.AffinityGroupState{ID: groupID}, nil
+}
+
+func TestAffinityCreateTiDBTableGroupRepairGuidance(t *testing.T) {
+	previous := PDCli
+	t.Cleanup(func() { PDCli = previous })
+
+	for _, groupID := range []string{"_tidb_ks1_tg_100", "_tidb_tg_100"} {
+		t.Run(groupID, func(t *testing.T) {
+			re := require.New(t)
+			client := &affinityStructuredSelectorClient{}
+			PDCli = client
+			cmd := NewAffinityCommand()
+			cmd.PersistentPreRunE = nil
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{"create", "--group-id", groupID, "--range", "0a,0b"})
+			re.ErrorContains(cmd.Execute(), "repair it with ADMIN REPAIR AFFINITY TABLE GROUP")
+			re.Empty(client.calledID)
+		})
+	}
 }
 
 func TestAffinityStructuredSelectorValidation(t *testing.T) {

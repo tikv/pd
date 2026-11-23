@@ -211,10 +211,20 @@ func affinityShowCommandFunc(cmd *cobra.Command, _ []string) error {
 }
 
 func affinityCreateCommandFunc(cmd *cobra.Command, _ []string) error {
-	groupID, err := getGroupID(cmd, false)
+	// Resolve the ID before enforcing keyspace scoping so legacy TiDB table
+	// group IDs can also direct users to the repair command.
+	groupID, err := getGroupID(cmd, true)
 	if err != nil {
 		return err
 	}
+	isLegacyTableGroup := strings.HasPrefix(groupID, tidbGroupIDPrefix+"tg_")
+	if err := affinity.ValidateGroupID(groupID); err != nil && !isLegacyTableGroup {
+		return err
+	}
+	if tidbTableGroupIDRegexp.MatchString(groupID) {
+		return errors.Errorf("group %s belongs to a TiDB affinity table group, which TiDB creates; repair it with ADMIN REPAIR AFFINITY TABLE GROUP", groupID)
+	}
+
 	rawRanges, _ := cmd.Flags().GetStringArray("range")
 	var ranges []pd.AffinityGroupKeyRange
 	switch {
@@ -466,9 +476,6 @@ func formatAffinityGroupID(tableID, partitionID uint64, keyspaceID *uint32) stri
 // or partition: all keys of its physical ID, encoded like Region keys, under
 // the transaction keyspace prefix when the ID has a keyspace.
 func tidbGroupKeyRange(groupID string) (pd.AffinityGroupKeyRange, error) {
-	if tidbTableGroupIDRegexp.MatchString(groupID) {
-		return pd.AffinityGroupKeyRange{}, errors.Errorf("group %s belongs to a TiDB affinity table group, which TiDB creates; repair it with ADMIN REPAIR AFFINITY TABLE GROUP", groupID)
-	}
 	parts := tidbObjectGroupIDRegexp.FindStringSubmatch(groupID)
 	if parts == nil {
 		return pd.AffinityGroupKeyRange{}, errors.Errorf("group %s is not a TiDB table or partition group; the %s prefix is reserved for TiDB", groupID, tidbGroupIDPrefix)
