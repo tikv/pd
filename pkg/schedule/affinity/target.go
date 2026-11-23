@@ -134,7 +134,9 @@ func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
 		m.Lock()
 		if group, ok := m.groups[stored.ID]; ok {
 			wasUnpersisted := group.targetUnpersisted
-			if changed := m.syncGroupTargetLocked(group, stored); written && !changed && (!wasUnpersisted || !group.IsAvailable()) {
+			// A retry can refresh an already persisted target once store conditions
+			// are known. Sync handles confirmation of local targets.
+			if changed := m.syncGroupTargetLocked(group, stored); written && !changed && !wasUnpersisted && m.storeConditionsKnown {
 				m.setTargetAvailabilityLocked(group)
 				m.resetCountLocked(group)
 			}

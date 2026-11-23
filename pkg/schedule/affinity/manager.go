@@ -87,10 +87,9 @@ type Manager struct {
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
-	// storeConditionsKnown is set once the availability check has recorded the
-	// store conditions. Until then, a group loaded or recreated with a target
-	// stays degraded, while a target that is written, synced or confirmed uses
-	// the conditions recorded so far. The first check sets every group.
+	// storeConditionsKnown is set when the first availability check records
+	// store conditions. Targets loaded or reapplied from storage start degraded
+	// while conditions are unknown.
 	storeConditionsKnown bool
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
@@ -573,9 +572,8 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	}
 }
 
-// syncGroupTargetLocked syncs the stored target, replacing the runtime group if it was recreated.
-// A changed target takes the availability that the store conditions known now give, as when
-// an admin sets it through PD, or a write whose result was unknown committed it.
+// syncGroupTargetLocked applies the stored target and returns whether it
+// replaced the group or reset its availability and counts.
 // Both metaMutex and the write lock of RWMutex must be held.
 func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) bool {
 	if groupInfo.CreateTimestamp != group.CreateTimestamp {
@@ -589,15 +587,18 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		return false
 	}
 
-	// Publishing a normalized target also normalizes the voter order in memory.
-	if sameStoredGroup(&groupInfo.Group, group) && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
+	// A duplicate or a healthy local confirmation preserves runtime state
+	// if the voter order also matches.
+	if (!groupInfo.targetUnpersisted || groupInfo.IsAvailable()) &&
+		sameStoredGroup(&groupInfo.Group, group) && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
 		groupInfo.targetUnpersisted = false
 		return false
 	}
 	groupInfo.Group = *group
 	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
 	groupInfo.targetUnpersisted = false
-	// A changed target gets its own grace period, even if the old target expired.
+	// Start a fresh grace period for a changed target or a newly confirmed
+	// local target that is no longer available.
 	groupInfo.availability = groupDegraded
 	groupInfo.degradedExpiredAt = newDegradedExpiredAtFromNow()
 	if m.storeConditionsKnown {

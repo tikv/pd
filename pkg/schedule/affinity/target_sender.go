@@ -108,18 +108,13 @@ func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *run
 	if !groupInfo.IsRegularSchedulingAllowed() && !slices.Equal(voterStoreIDs, groupInfo.VoterStoreIDs) {
 		return
 	}
-	if groupInfo.LeaderStoreID == target.LeaderStoreID && slices.Equal(groupInfo.VoterStoreIDs, voterStoreIDs) {
-		if !groupInfo.IsAvailable() {
-			m.setTargetAvailabilityLocked(groupInfo)
-			m.resetCountLocked(groupInfo)
-		}
+	// Store conditions can change during the request without affecting an unset group.
+	if calcGroupAvailability(m.unavailableStores, target.LeaderStoreID, voterStoreIDs) != groupAvailable {
 		return
 	}
 	groupInfo.LeaderStoreID = target.LeaderStoreID
 	groupInfo.VoterStoreIDs = voterStoreIDs
 	groupInfo.targetUnpersisted = true
-	groupInfo.availability = groupDegraded
-	groupInfo.degradedExpiredAt = newDegradedExpiredAtFromNow()
-	m.setTargetAvailabilityLocked(groupInfo)
+	groupInfo.SetAvailability(groupAvailable)
 	m.resetCountLocked(groupInfo)
 }

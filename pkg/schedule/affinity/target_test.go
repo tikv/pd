@@ -245,6 +245,69 @@ func TestChangedTargetStartsDegradedWindow(t *testing.T) {
 	}
 }
 
+func TestSyncMatchingUnavailableLocalTarget(t *testing.T) {
+	for _, availability := range []groupAvailability{groupExpired, groupDegraded} {
+		t.Run(availability.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				pdManager, store := newTargetTestManager(t)
+				m, _ := newTargetTestManager(t)
+				re.NoError(pdManager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+				m.SyncGroupFromEtcd(loadStoredGroup(re, store, "g"))
+				m.checkGroupsAvailability()
+
+				calls := 0
+				m.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []GroupTarget) ([]string, error) {
+					calls++
+					if calls == 1 {
+						return nil, ErrTargetWriterUnsupported
+					}
+					return pdManager.UpdateAffinityGroupTargets(targets)
+				}))
+				region := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
+				m.ObserveAvailableRegion(region, m.GetAffinityGroupState("g"))
+				synctest.Wait()
+				local := m.GetAffinityGroupState("g")
+				re.True(local.HasUnpersistedTarget())
+				re.True(local.AffinitySchedulingAllowed)
+
+				switch availability {
+				case groupExpired:
+					m.applyStoreConditions(map[uint64]storeCondition{2: storeDown})
+					m.applyStoreConditions(nil)
+				case groupDegraded:
+					// The scheduling service can still see the store as disconnected when PD writes the target.
+					m.applyStoreConditions(map[uint64]storeCondition{2: storeDisconnected})
+				}
+				re.Equal(availability, m.groups["g"].GetAvailability())
+				time.Sleep(time.Second) // Clear the 404 cooldown and distinguish the new deadline.
+
+				_, err := pdManager.UpdateAffinityGroupPeers("g", local.LeaderStoreID, local.VoterStoreIDs)
+				re.NoError(err)
+				admin := loadStoredGroup(re, store, "g")
+				m.SyncGroupFromEtcd(admin)
+				synced := m.GetAffinityGroupState("g")
+				re.Equal(*admin, synced.Group)
+				re.False(synced.HasUnpersistedTarget())
+
+				replacement := generateRegionForTest(20, []uint64{1, 3}, nonOverlappingRange)
+				m.ObserveAvailableRegion(replacement, synced)
+				synctest.Wait()
+				re.Equal(*admin, *loadStoredGroup(re, store, "g"), "patrol must preserve the admin target")
+				re.Equal(1, calls)
+				re.False(synced.RegularSchedulingAllowed)
+				re.Equal(availability == groupExpired, synced.AffinitySchedulingAllowed)
+				expiresAt := m.groups["g"].degradedExpiredAt
+				re.Equal(newDegradedExpiredAtFromNow(), expiresAt, "a newly persisted target gets a fresh window")
+
+				time.Sleep(time.Second)
+				m.SyncGroupFromEtcd(admin)
+				re.Equal(expiresAt, m.groups["g"].degradedExpiredAt, "duplicate syncs do not extend the window")
+			})
+		})
+	}
+}
+
 func TestTargetWriteResetsVersionOnce(t *testing.T) {
 	re := require.New(t)
 	m, _ := newTargetTestManager(t)
@@ -263,6 +326,32 @@ func TestTargetWriteResetsVersionOnce(t *testing.T) {
 	re.Equal([]string{"g"}, written)
 	re.Equal(before+1, m.GetAffinityGroupState("g").affinityVer, "an already stored result still confirms the target")
 	re.True(m.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+}
+
+func TestTargetRetryWaitsForStoreConditions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		m, _ := newTargetTestManager(t)
+		re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+		re.False(m.storeConditionsKnown)
+		target := targetFor(m, "g", 1, 1, 2)
+
+		written, err := m.UpdateAffinityGroupTargets([]GroupTarget{target})
+		re.NoError(err)
+		re.Equal([]string{"g"}, written)
+		re.Equal(groupDegraded, m.groups["g"].GetAvailability())
+		state := m.GetAffinityGroupState("g")
+		re.Equal(*target.result(), state.Group)
+
+		written, err = m.UpdateAffinityGroupTargets([]GroupTarget{target})
+		re.NoError(err)
+		re.Equal([]string{"g"}, written)
+		re.Equal(groupDegraded, m.groups["g"].GetAvailability())
+		re.Equal(state.affinityVer, m.GetAffinityGroupState("g").affinityVer)
+
+		m.checkGroupsAvailability()
+		re.True(m.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+	})
 }
 
 func TestStoredGroupFields(t *testing.T) {
@@ -459,6 +548,44 @@ func TestFirstWinLateUnsupportedReplyKeepsGroupExpired(t *testing.T) {
 				re.True(state.HasUnpersistedTarget())
 				re.Equal([]uint64{1, 2}, state.VoterStoreIDs)
 				re.Equal(blockOn, calls, "the fresh observation replaces the target during the 404 cooldown")
+			})
+		})
+	}
+}
+
+func TestFirstWinLateUnsupportedReplyRejectsUnavailableStore(t *testing.T) {
+	for _, condition := range []storeCondition{storeDisconnected, storeLowSpace, storeLeaderEvicted, storeDown} {
+		t.Run(condition.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				m, _ := newTargetTestManager(t)
+				re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+				m.checkGroupsAvailability()
+				observed := m.GetAffinityGroupState("g")
+
+				calls := 0
+				release := make(chan struct{})
+				defer close(release)
+				m.SetTargetWriter(targetWriterFunc(func(_ context.Context, _ []GroupTarget) ([]string, error) {
+					calls++
+					<-release
+					return nil, ErrTargetWriterUnsupported
+				}))
+				region := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
+				m.ObserveAvailableRegion(region, observed)
+				synctest.Wait()
+				re.Equal(1, calls)
+
+				m.applyStoreConditions(map[uint64]storeCondition{1: condition})
+				re.Equal(observed.affinityVer, m.GetAffinityGroupState("g").affinityVer, "unset groups have no voters")
+				release <- struct{}{}
+				synctest.Wait()
+
+				state := m.GetAffinityGroupState("g")
+				re.Equal(observed.Group, state.Group, "the late 404 must leave the target unset")
+				re.Equal(observed.affinityVer, state.affinityVer)
+				re.False(state.HasUnpersistedTarget())
+				re.True(state.RegularSchedulingAllowed)
 			})
 		})
 	}
