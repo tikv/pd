@@ -216,8 +216,8 @@ func TestSplitPolicyLookupDoesNotHoldSplitMutex(t *testing.T) {
 	}
 }
 
-// TestEnableSplitAfterAffinityChanges requires one recovery notification across
-// concurrent heartbeats, including when the previous policy was already cached.
+// TestEnableSplitAfterAffinityChanges requires concurrent heartbeats to send
+// one recovery notification to the new leader, even with cached affinity state.
 func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -255,7 +255,16 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			m, conf, region, streams := newSplitRecoveryTestManager(t)
 			re.False(m.CheckSplit(region, pdpb.SplitReason_LOAD, streams))
 			re.Equal(1, streams.MsgLength())
-			re.NoError(streams.Drain(1))
+			denial, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+			re.True(ok)
+			re.NotNil(denial.GetChangeSplit())
+			re.False(denial.GetChangeSplit().GetAutoSplitEnabled())
+			re.Equal(region.GetLeader(), denial.GetTargetPeer())
+
+			newLeader := region.GetStoreVoter(2)
+			re.NotNil(newLeader)
+			re.NotEqual(region.GetLeader(), newLeader)
+			region = region.Clone(core.WithLeader(newLeader))
 			// Prime the affinity cache to also exercise invalidation after changes.
 			m.GetAndCacheRegionAffinityGroupState(region)
 			m.MaybeEnableSplit(region, streams)
@@ -270,10 +279,10 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			}
 			wg.Wait()
 			re.Equal(1, streams.MsgLength(), "concurrent heartbeats send one recovery notification")
-			msg, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+			recovery, ok := streams.PopMsg().(*pdpb.RegionHeartbeatResponse)
 			re.True(ok)
-			re.NotNil(msg.GetChangeSplit())
-			re.True(msg.GetChangeSplit().GetAutoSplitEnabled())
+			re.True(recovery.GetChangeSplit().GetAutoSplitEnabled())
+			re.Equal(region.GetLeader(), recovery.GetTargetPeer())
 		})
 	}
 }

@@ -107,11 +107,20 @@ func TestHandleRegionHeartbeatAfterAffinitySplitDenial(t *testing.T) {
 	})
 	re.ErrorContains(err, "cannot split affinity region")
 	re.Equal(1, cluster.hbstreams.MsgLength(), "ChangeSplit(false)")
-	re.NoError(cluster.hbstreams.Drain(1))
+	denial, ok := cluster.hbstreams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+	re.True(ok)
+	re.NotNil(denial.GetChangeSplit())
+	re.False(denial.GetChangeSplit().GetAutoSplitEnabled())
+	re.Equal(region.GetLeader(), denial.GetTargetPeer())
+
 	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
 	re.Zero(cluster.hbstreams.MsgLength(), "still denied")
 
 	re.NoError(manager.DeleteAffinityGroups([]string{"g1"}, true))
 	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
 	re.Equal(1, cluster.hbstreams.MsgLength(), "ChangeSplit(true)")
+	recovery, ok := cluster.hbstreams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+	re.True(ok)
+	re.True(recovery.GetChangeSplit().GetAutoSplitEnabled())
+	re.Equal(region.GetLeader(), recovery.GetTargetPeer())
 }
