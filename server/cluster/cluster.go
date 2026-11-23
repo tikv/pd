@@ -2176,7 +2176,8 @@ func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (i
 	case metapb.NodeState_Removing:
 		// Region sizes may be zero after loading from storage or syncing from another PD.
 		// Only bury the store after all its Region peers have been removed.
-		needBury := c.GetStoreRegionCount(storeID) == 0
+		// Wait for cached statistics to catch up so Tombstone stores report no Regions.
+		needBury := store.GetRegionCount() == 0 && regionSize == 0 && c.GetStoreRegionCount(storeID) == 0
 		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
 			needBury = false
 		})

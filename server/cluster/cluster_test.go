@@ -573,10 +573,16 @@ func TestRemovingStoreWithZeroRegionSize(t *testing.T) {
 
 			region := cluster.GetRegion(1).Clone(core.WithRemoveStorePeer(1), core.WithLeader(meta.Peers[1]), core.WithIncConfVer())
 			cluster.PutRegion(region)
-			cluster.UpdateAllStoreStatus()
 			re.Zero(cluster.GetStoreRegionCount(1))
+			re.Equal(1, cluster.GetStore(1).GetRegionCount())
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoving())
+
+			cluster.UpdateAllStoreStatus()
 			cluster.checkStores()
 			re.True(cluster.GetStore(1).IsRemoved())
+			re.Zero(cluster.GetStore(1).GetRegionCount())
+			re.Zero(cluster.GetStore(1).GetRegionSize())
 		})
 	}
 }
@@ -1203,6 +1209,22 @@ func TestRemovingProcess(t *testing.T) {
 	re.Equal(50.0, p.CurrentSpeed)
 	// left second = 15 * 100 / 50 = 60s
 	re.Equal(30.0, p.LeftSecond)
+
+	// The Region index can become empty before cached store statistics are refreshed.
+	for _, region := range regionInStore1[5:] {
+		cluster.RemoveRegionIfExist(region.GetID())
+	}
+	re.Zero(cluster.GetStoreRegionCount(storeID))
+	re.Positive(cluster.GetStore(storeID).GetRegionCount())
+	re.Positive(cluster.GetStore(storeID).GetRegionSize())
+	cluster.checkStores()
+	re.True(cluster.GetStore(storeID).IsRemoving())
+
+	cluster.UpdateAllStoreStatus()
+	cluster.checkStores()
+	re.True(cluster.GetStore(storeID).IsRemoved())
+	re.Zero(cluster.GetStore(storeID).GetRegionCount())
+	re.Zero(cluster.GetStore(storeID).GetRegionSize())
 }
 
 func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
