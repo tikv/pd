@@ -61,6 +61,7 @@ type AffinityChecker struct {
 	splitMu          syncutil.Mutex
 	splitAttempts    map[uint64]affinitySplitAttempt
 	maxSplitAttempts int
+	nextSplitPruneAt time.Time
 	startTime        time.Time
 }
 

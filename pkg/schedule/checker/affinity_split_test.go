@@ -439,6 +439,16 @@ func TestAffinitySplitBeforeMoveReclaimsAttempts(t *testing.T) {
 				case "expired split":
 					firstSplit[0].SetStatusReachTime(operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
 				}
+				// Even a reclaimable attempt stays tracked until the cooldown ends.
+				advanceAffinitySplitTime(cluster, affinitySplitPruneInterval-time.Nanosecond)
+				limitWaits := checkerCounter.WithLabelValues(affinityChecker, "wait-split-attempt-limit")
+				before := promtestutil.ToFloat64(limitWaits)
+				for range 2 {
+					re.Empty(checker.Check(third))
+					re.Contains(attempts, first.GetID())
+				}
+				re.Equal(before+2, promtestutil.ToFloat64(limitWaits))
+				advanceAffinitySplitTime(cluster, time.Nanosecond)
 				requireAffinitySplit(t, checker.Check(third))
 				re.Len(attempts, 2)
 				re.NotContains(attempts, first.GetID())

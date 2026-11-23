@@ -37,7 +37,8 @@ const (
 	defaultAffinityUnknownSizeWait = 5 * time.Minute
 	affinitySplitMaxAttempts       = 100_000
 	// Expire idle attempts on access or under capacity pressure.
-	affinitySplitAttemptTTL = time.Hour
+	affinitySplitAttemptTTL    = time.Hour
+	affinitySplitPruneInterval = time.Second
 )
 
 var (
@@ -132,8 +133,12 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			}
 		} else if len(c.splitAttempts) >= c.maxSplitAttempts {
 			// Backpressure new attempts rather than resetting existing wait budgets.
+			if now.Before(c.nextSplitPruneAt) {
+				return wait("split-attempt-limit")
+			}
 			c.pruneSplitAttempts(now)
 			if len(c.splitAttempts) >= c.maxSplitAttempts {
+				c.nextSplitPruneAt = now.Add(affinitySplitPruneInterval)
 				return wait("split-attempt-limit")
 			}
 		}
