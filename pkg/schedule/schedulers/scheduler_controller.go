@@ -321,16 +321,6 @@ func (c *Controller) RemoveScheduler(name string) (err error) {
 		return err
 	}
 
-	// Keep the instance registered until its loop and CleanConfig have finished.
-	// Both may persist config, so deleting it before they finish can resurrect
-	// the deleted config or overwrite the config of a replacement instance.
-	s.Stop()
-	// The registered instance reserves its name, and concurrent removals join
-	// this attempt. Do not block unrelated scheduler APIs while it shuts down.
-	c.Unlock()
-	<-s.done
-	c.Lock()
-
 	// nolint:errcheck
 	// SetDisable will not work now, because the config is removed. We can't
 	// remove the config in the future, if we want to use `Disable` of independent
@@ -340,6 +330,13 @@ func (c *Controller) RemoveScheduler(name string) (err error) {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
 	}
+
+	// Stop only after config deletion succeeds. Keep the name reserved until
+	// the loop and CleanConfig finish, without blocking unrelated scheduler APIs.
+	s.Stop()
+	c.Unlock()
+	<-s.done
+	c.Lock()
 
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
@@ -458,6 +455,9 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	defer close(s.done)
+	// TODO(#11562): In MCS, let only the watcher write scheduler config.
+	// Serialize reload with instance teardown, and make CleanConfig release
+	// only the instance's runtime state without modifying watched config.
 	defer s.CleanConfig(c.cluster)
 
 	ticker := time.NewTicker(s.GetInterval())

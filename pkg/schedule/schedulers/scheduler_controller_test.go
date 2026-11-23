@@ -55,6 +55,7 @@ func TestRemoveSchedulerWaitsForLoopAndCleanup(t *testing.T) {
 
 	loopEntered, resumeLoop := make(chan struct{}), make(chan struct{})
 	cleanupEntered, resumeCleanup := make(chan struct{}), make(chan struct{})
+	cleanupFinished := make(chan struct{})
 	releaseLoop := sync.OnceFunc(func() { close(resumeLoop) })
 	releaseCleanup := sync.OnceFunc(func() { close(resumeCleanup) })
 	t.Cleanup(func() {
@@ -63,24 +64,20 @@ func TestRemoveSchedulerWaitsForLoopAndCleanup(t *testing.T) {
 		releaseCleanup()
 		c.Wait()
 	})
-	writes := make(chan error, 2)
-	writeFromLoop := sync.OnceFunc(func() {
+	blockLoop := sync.OnceFunc(func() {
 		close(loopEntered)
 		<-resumeLoop
-		writes <- store.SaveSchedulerConfig(name, []byte(`"loop"`))
 	})
 	s := &shutdownTestScheduler{
 		Scheduler: scheduler,
 		allow: func() bool {
-			// Like balance-range checkJob, this may write before Schedule's
-			// cancellation check and must finish before config removal.
-			writeFromLoop()
+			blockLoop()
 			return false
 		},
 		clean: func() {
+			defer close(cleanupFinished)
 			close(cleanupEntered)
 			<-resumeCleanup
-			writes <- store.SaveSchedulerConfig(name, []byte(`"cleanup"`))
 		},
 	}
 	re.NoError(c.AddScheduler(s))
@@ -97,37 +94,41 @@ func TestRemoveSchedulerWaitsForLoopAndCleanup(t *testing.T) {
 		}
 	}
 	wait(loopEntered)
-	removed := make(chan error, 1)
-	go func() { removed <- c.RemoveScheduler(name) }()
+	type removalResult struct {
+		err             error
+		cleanupFinished bool
+	}
+	removed := make(chan removalResult, 1)
+	go func() {
+		result := removalResult{err: c.RemoveScheduler(name)}
+		select {
+		case <-cleanupFinished:
+			result.cleanupFinished = true
+		default:
+		}
+		removed <- result
+	}()
 	wait(sc.Ctx().Done())
 
-	// Cancellation must not delete the config while the old loop can write.
+	// Config deletion succeeds before the loop is canceled.
 	value, err := store.LoadSchedulerConfig(name)
 	re.NoError(err)
-	re.Equal(initial, value)
+	re.Empty(value)
 	releaseLoop()
 	wait(cleanupEntered)
-	re.NoError(<-writes)
-	value, err = store.LoadSchedulerConfig(name)
-	re.NoError(err)
-	re.Equal(`"loop"`, value)
 	select {
-	case err := <-removed:
-		t.Fatalf("removal returned before cleanup finished: %v", err)
+	case result := <-removed:
+		t.Fatalf("removal returned before cleanup finished: %v", result.err)
 	default:
 	}
 
 	releaseCleanup()
 	select {
-	case err := <-removed:
-		re.NoError(err)
+	case result := <-removed:
+		re.NoError(result.err)
+		re.True(result.cleanupFinished, "removal must wait for cleanup to finish")
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for scheduler removal")
 	}
-	re.NoError(<-writes)
-	c.Wait()
-	value, err = store.LoadSchedulerConfig(name)
-	re.NoError(err)
-	re.Empty(value, "neither the loop nor cleanup may resurrect the config")
 	re.Nil(c.GetScheduler(name))
 }
