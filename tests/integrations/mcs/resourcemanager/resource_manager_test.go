@@ -2539,6 +2539,52 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 	}
 }
 
+func (suite *resourceManagerClientTestSuite) TestLoadResourceGroupsWithOverlappingKeyspaces() {
+	re := suite.Require()
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+	clients := make(map[uint32]pd.Client)
+	for _, keyspaceID := range []uint32{1, 10, 11} {
+		err := storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
+				Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceID},
+				Name:     fmt.Sprintf("snapshot-keyspace-%d", keyspaceID),
+			})
+		})
+		re.NoError(err)
+		cli := suite.setupKeyspaceClient(re, keyspaceID)
+		clients[keyspaceID] = cli
+		suite.T().Cleanup(cli.Close)
+		group := &rmpb.ResourceGroup{
+			Name: "snapshot-shared",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: uint64(keyspaceID)}},
+			},
+		}
+		_, err = cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		suite.T().Cleanup(func() {
+			_, err := cli.DeleteResourceGroup(suite.ctx, group.Name)
+			re.NoError(err)
+		})
+	}
+
+	for _, keyspaceID := range []uint32{1, 10, 11} {
+		groups, revision, err := clients[keyspaceID].LoadResourceGroups(suite.ctx)
+		re.NoError(err)
+		re.Positive(revision)
+		var matches int
+		for _, group := range groups {
+			re.Equal(keyspaceID, group.GetKeyspaceId().GetValue())
+			if group.Name == "snapshot-shared" {
+				matches++
+				re.Equal(uint64(keyspaceID), group.GetRUSettings().GetRU().GetSettings().GetFillRate())
+			}
+		}
+		re.Equal(1, matches)
+	}
+}
+
 func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceGroup() {
 	re := suite.Require()
 	ctx := suite.ctx
