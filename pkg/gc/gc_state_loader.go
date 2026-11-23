@@ -17,7 +17,6 @@ package gc
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/pingcap/failpoint"
 
@@ -87,31 +86,23 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 	if err != nil {
 		return gcStateLoadResult{}, err
 	}
-	// Each scope can complete independently, including when a different group
-	// is unavailable. The migration limits concurrent source reads per group.
 	if len(pending) != 0 {
-		var workers sync.WaitGroup
-		for _, i := range pending {
-			workers.Go(func() {
-				id := batch.keyspaceIDs[i]
-				err := m.ensureMigratedTxnSafePoint(ctx, generation, id)
-				m.mu.RLock()
-				defer m.mu.RUnlock()
-				pair := endpoint.GCSafePointReadResult{Err: err}
-				if err == nil {
-					pair = m.readGCStatePair(ctx, generation, id)
-				}
-				generation.mu.Lock()
-				defer generation.mu.Unlock()
-				m.finishGCStateFlight(ctx, generation, batch, i, pair)
-			})
-		}
-		workers.Wait()
+		m.migrateStarterBatch(ctx, generation, pending, func(i int, err error) {
+			m.mu.RLock()
+			defer m.mu.RUnlock()
+			pair := endpoint.GCSafePointReadResult{Err: err}
+			if err == nil {
+				pair = m.readGCStatePair(ctx, generation, batch.keyspaceIDs[i])
+			}
+			generation.mu.Lock()
+			defer generation.mu.Unlock()
+			m.finishGCStateFlight(ctx, generation, batch, i, pair)
+		})
 	}
 	return batch.result, nil
 }
 
-func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool), batch *gcStateLoadBatch) ([]int, error) {
+func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool), batch *gcStateLoadBatch) ([]starterMigrationItem, error) {
 	failpoint.InjectCall("beforeGCStateLoadManagerLock")
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -176,13 +167,13 @@ func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *g
 	}
 	generation.mu.Lock()
 	defer generation.mu.Unlock()
-	var pending []int
+	var pending []starterMigrationItem
 	for i, id := range batch.keyspaceIDs {
 		pair := endpoint.GCSafePointReadResult{Err: err}
 		if err == nil {
 			pair = values[i]
 			if pair.Err == nil && !pair.TxnSafePointEmpty && generation.migration.needsCheck(id, pair.TxnSafePointRevision) {
-				pending = append(pending, i)
+				pending = append(pending, starterMigrationItem{index: i, target: pair})
 				continue
 			}
 		}

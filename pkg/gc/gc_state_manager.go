@@ -1558,8 +1558,8 @@ func (m *GCStateManager) withGlobalTxnSafePoints(ctx context.Context, run func()
 		if !errors.As(err, &pending) {
 			return err
 		}
-		for _, id := range pending {
-			if err := m.ensureMigratedTxnSafePoint(ctx, generation, id); err != nil {
+		for batch := range slices.Chunk(pending, endpoint.MaxGCSafePointBatchSize) {
+			if err := m.migrateStarterIDs(ctx, generation, batch); err != nil {
 				return err
 			}
 		}

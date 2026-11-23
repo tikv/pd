@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -92,7 +93,8 @@ func startStarterGCAPITestTerm(t *testing.T, manager *GCStateManager, cli *clien
 func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
-	manager, destination, source, revision := newStarterGCAPIFixture(t, 6)
+	const count = endpoint.MaxGCSafePointBatchSize + 6
+	manager, destination, source, revision := newStarterGCAPIFixture(t, count)
 	now := time.Now()
 
 	_, err := manager.SetGCBarrier(1, "cdc", 80, time.Hour, now)
@@ -113,16 +115,16 @@ func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 	re.NoError(err)
 	re.Equal(uint64(105), state.TxnSafePoint)
 
-	// Scope 6 has not had any GC request. Its T still constrains this cluster-wide pin.
+	// More than a batch of untouched keyspaces still constrain this cluster-wide pin.
 	pin, updated, err := manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, keypath.NativeBRServiceSafePointID, 105, math.MaxInt64, now)
 	re.NoError(err)
 	re.False(updated)
-	re.Equal(uint64(106), pin.SafePoint)
+	re.Equal(uint64(100+count), pin.SafePoint)
 	globals, err := manager.LoadAllGlobalGCBarriers()
 	re.NoError(err)
 	re.Empty(globals)
 
-	for i := 1; i <= 6; i++ {
+	for i := 1; i <= count; i++ {
 		resp, err := destination.Get(ctx, keypath.TxnSafePointPath(uint32(i)))
 		re.NoError(err)
 		re.Len(resp.Kvs, 1)

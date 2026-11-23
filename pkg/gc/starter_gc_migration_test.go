@@ -129,29 +129,23 @@ func TestStarterGCMigrationConcurrentTakeover(t *testing.T) {
 		go func() { done <- manager.ensureMigratedTxnSafePoint(ctx, generation, id) }()
 		return done
 	}
-	readCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	first := start(readCtx, 1)
+	first := start(ctx, 1)
 	gcWarmupWait(t, reached)
-	second := start(ctx, 1)
-	cancel()
-	require.ErrorIs(t, <-first, context.Canceled)
-	// An unrelated scope can finish while the first frozen source read is paused.
+	// A competing first use can commit and advance T while this one holds a stale snapshot.
+	require.NoError(t, <-start(ctx, 1))
 	require.NoError(t, <-start(ctx, 2))
-	// Simulate another leader winning and already advancing the target before the
-	// late source reader's CAS. A retry must use that local value.
-	advanced, err := dest.Put(ctx, keypath.TxnSafePointPath(1), "350")
+	_, err := manager.AdvanceTxnSafePoint(1, 350, time.Now())
 	require.NoError(t, err)
-	// An advanced G must not turn the stale source snapshot into a data error.
-	_, err = dest.Put(ctx, keypath.GCSafePointPath(1), `{"safe_point":240}`)
+	_, _, err = manager.AdvanceGCSafePoint(1, 240)
+	require.NoError(t, err)
+	_, advancedRevision, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, 1)
 	require.NoError(t, err)
 	release()
-	require.NoError(t, <-second)
-	require.EqualValues(t, 1, calls.Load())
+	require.NoError(t, <-first)
 	txn, rev, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, 1)
 	require.NoError(t, err)
 	require.EqualValues(t, 350, txn)
-	require.Equal(t, advanced.Header.Revision, rev)
+	require.Equal(t, advancedRevision, rev)
 
 	// A different election of the same member must fence the old term even
 	// before the old process has noticed its loss of leadership.
@@ -193,17 +187,7 @@ func TestStarterGCMigrationSameBackend(t *testing.T) {
 	ctx := t.Context()
 	manager, dest, _, markerRevision := newStarterGCFixture(t, 2, func(dest, _ *clientv3.Client) {
 		// Keyspace 1 uses the default PD backend. Keyspace 2 uses an explicit group on the same etcd.
-		key := keypath.KeyspaceMetaPath(1)
-		resp, err := dest.Get(ctx, key)
-		require.NoError(t, err)
-		require.Len(t, resp.Kvs, 1)
-		var meta keyspacepb.KeyspaceMeta
-		require.NoError(t, proto.Unmarshal(resp.Kvs[0].Value, &meta))
-		delete(meta.Config, keyspace.MetaServiceGroupIDKey)
-		data, err := proto.Marshal(&meta)
-		require.NoError(t, err)
-		_, err = dest.Put(ctx, key, string(data))
-		require.NoError(t, err)
+		setStarterSourceGroup(t, dest, 1, "")
 	}, nil)
 	groups := map[string]string{"group1": strings.Join(dest.Endpoints(), ",")}
 	cfg, err := json.Marshal(&config.Config{Keyspace: config.KeyspaceConfig{MetaServiceGroups: groups}})
@@ -325,5 +309,111 @@ func TestStarterGCMigrationStaleScope(t *testing.T) {
 		_, revision, err := manager.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
 		require.NoError(t, err)
 		require.LessOrEqual(t, revision, markerRev)
+	}
+}
+
+func setStarterSourceGroup(t *testing.T, dest *clientv3.Client, id uint32, group string) {
+	t.Helper()
+	key := keypath.KeyspaceMetaPath(id)
+	resp, err := dest.Get(t.Context(), key)
+	require.NoError(t, err)
+	require.Len(t, resp.Kvs, 1)
+	var meta keyspacepb.KeyspaceMeta
+	require.NoError(t, proto.Unmarshal(resp.Kvs[0].Value, &meta))
+	if group == "" {
+		delete(meta.Config, keyspace.MetaServiceGroupIDKey)
+	} else {
+		meta.Config[keyspace.MetaServiceGroupIDKey] = group
+	}
+	data, err := proto.Marshal(&meta)
+	require.NoError(t, err)
+	_, err = dest.Put(t.Context(), key, string(data))
+	require.NoError(t, err)
+}
+
+// Observe the actual KV RPCs issued by a group's etcd client.
+type recordingStarterKV struct {
+	etcdserverpb.KVClient
+	requests   [][]string
+	beforeRead func() error
+}
+
+func (c *recordingStarterKV) Txn(ctx context.Context, req *etcdserverpb.TxnRequest, opts ...grpc.CallOption) (*etcdserverpb.TxnResponse, error) {
+	var keys []string
+	for _, op := range req.Success {
+		keys = append(keys, string(op.GetRequestRange().GetKey()))
+	}
+	c.requests = append(c.requests, keys)
+	if c.beforeRead != nil {
+		if err := c.beforeRead(); err != nil {
+			return nil, err
+		}
+	}
+	return c.KVClient.Txn(ctx, req, opts...)
+}
+
+func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
+	ctx := t.Context()
+	m, dest, source, marker := newStarterGCFixture(t, 7, func(dest, source *clientv3.Client) {
+		// Keyspaces 1 and 2 use the second group. Keyspace 7 uses the PD default.
+		setStarterSourceGroup(t, dest, 1, "group2")
+		setStarterSourceGroup(t, dest, 2, "group2")
+		setStarterSourceGroup(t, dest, 7, "")
+		_, err := source.Put(ctx, keypath.TxnSafePointPath(5), "invalid")
+		require.NoError(t, err)
+	}, nil)
+	// The first group is remote. The second uses the target etcd and will reject the batch.
+	groups := map[string]string{"group1": source.Endpoints()[0], "group2": dest.Endpoints()[0]}
+	cfg, err := json.Marshal(&config.Config{Keyspace: config.KeyspaceConfig{MetaServiceGroups: groups}})
+	require.NoError(t, err)
+	require.NoError(t, m.metaServiceGroupManager.UpdateGroupsSafely(ctx, groups, nil, func() error {
+		_, err := dest.Put(ctx, keypath.ConfigPath(), string(cfg))
+		return err
+	}, nil))
+	record := func(group string) *recordingStarterKV {
+		client, _, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, group)
+		require.NoError(t, err)
+		rpc := &recordingStarterKV{KVClient: etcdserverpb.NewKVClient(client.ActiveConnection())}
+		client.KV = clientv3.NewKVFromKVClient(rpc, client)
+		return rpc
+	}
+	healthy, unavailable := record("group1"), record("group2")
+	entered, resume := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(resume) })
+	defer unblock()
+	unavailable.beforeRead = func() error { close(entered); <-resume; return errors.New("group2 unavailable") }
+	_, err = dest.Put(ctx, keypath.TxnSafePointPath(6), "106") // confirmed before this load
+	require.NoError(t, err)
+	done := make(chan gcStateLoadResult, 1)
+	go func() {
+		r, err := m.loadGCStateBatch(ctx, m.activeGeneration.Load(), gcStateLoadCandidates(1, 2, 3, 4, 5, 6, 7))
+		if err != nil {
+			r.failed = map[uint32]error{0: err}
+		}
+		done <- r
+	}()
+	gcWarmupWait(t, entered)
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	state, err := m.getGCStateImpl(readCtx, 3, true)
+	require.NoError(t, err)
+	require.EqualValues(t, 103, state.TxnSafePoint)
+	unblock()
+	result := <-done
+	require.ElementsMatch(t, []uint32{3, 4, 6, 7}, result.completed)
+	require.Len(t, result.failed, 3)
+	for _, id := range []uint32{1, 2, 5} {
+		require.Error(t, result.failed[id])
+		_, rev, err := m.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
+		require.NoError(t, err)
+		require.LessOrEqual(t, rev, marker)
+	}
+	require.Equal(t, [][]string{{keypath.TxnSafePointPath(3), keypath.TxnSafePointPath(4), keypath.TxnSafePointPath(5)}}, healthy.requests)
+	require.Equal(t, [][]string{{keypath.TxnSafePointPath(1), keypath.TxnSafePointPath(2)}}, unavailable.requests)
+	for id, want := range map[uint32]uint64{3: 103, 4: 104, 6: 106, 7: 10} {
+		value, rev, err := m.gcMetaStorage.LoadTxnSafePointWithRevision(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, want, value)
+		require.Greater(t, rev, marker)
 	}
 }
