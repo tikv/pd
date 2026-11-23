@@ -7,7 +7,8 @@ Run after freezing v1 GC and confirming that the old default --path for
 keyspaces without a meta-service group points to the destination PD etcd.
 Keep each legacy group readable at its original backend until its keyspaces
 have been verified, including tenants that may later be re-enabled.
-Record the returned cluster IDs and revision and check them on rollout retries.
+Record the returned cluster IDs and revision on the first run. The revision is
+the creation revision of the migration cutoff key and stays the same on retries.
 """
 
 import argparse
@@ -20,15 +21,15 @@ import sys
 
 def prepare(endpoints, cluster_id):
     identity_key = "/pd/cluster_id"
-    marker_key = f"/pd/{cluster_id}/gc/starter_v2_migration"
+    cutoff_key = f"/pd/{cluster_id}/gc/migration_cutoff"
     identity = cluster_id.to_bytes(8, "big")
     # etcdctl txn parses quoted comparison operands using Go string escaping.
     quoted_identity = "".join(f"\\x{byte:02x}" for byte in identity)
     transaction = (
         f'value("{identity_key}") = "{quoted_identity}"\n'
-        f'version("{marker_key}") = "0"\n\n'
-        f"put {marker_key} 1\nget {marker_key}\n\n"
-        f"get {identity_key}\nget {marker_key}\n\n"
+        f'version("{cutoff_key}") = "0"\n\n'
+        f"put {cutoff_key} 1\nget {cutoff_key}\n\n"
+        f"get {identity_key}\nget {cutoff_key}\n\n"
     )
     env = dict(os.environ, ETCDCTL_API="3", ETCDCTL_ENDPOINTS=endpoints, ETCDCTL_WRITE_OUT="json")
     result = subprocess.run(
@@ -44,25 +45,25 @@ def prepare(endpoints, cluster_id):
 
     rows = last["Response"]["response_range"].get("kvs", [])
     if len(rows) != 1:
-        raise ValueError("expected exactly one migration marker")
-    marker = rows[0]
+        raise ValueError("expected exactly one migration cutoff key")
+    entry = rows[0]
     if (
-        base64.b64decode(marker["key"], validate=True) != marker_key.encode()
-        or base64.b64decode(marker["value"], validate=True) != b"1"
+        base64.b64decode(entry["key"], validate=True) != cutoff_key.encode()
+        or base64.b64decode(entry["value"], validate=True) != b"1"
     ):
-        raise ValueError("unexpected migration marker key or format version")
-    revision = int(marker["create_revision"])
+        raise ValueError("unexpected migration cutoff key or format version")
+    migration_cutoff = int(entry["create_revision"])
     if (
-        revision <= 0
-        or int(marker["mod_revision"]) != revision
-        or int(marker["version"]) != 1
-        or int(marker.get("lease", 0)) != 0
+        migration_cutoff <= 0
+        or int(entry["mod_revision"]) != migration_cutoff
+        or int(entry["version"]) != 1
+        or int(entry.get("lease", 0)) != 0
     ):
-        raise ValueError("expected an immutable migration marker without a lease")
+        raise ValueError("expected an immutable migration cutoff key without a lease")
     return {
         "pd_cluster_id": str(cluster_id),
         "etcd_cluster_id": str(txn["header"]["cluster_id"]),
-        "revision": str(revision),
+        "revision": str(migration_cutoff),
         "created": created,
     }
 

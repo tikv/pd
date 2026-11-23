@@ -61,22 +61,22 @@ func (g *gcStateGeneration) retire() {
 	}
 }
 
-// InitEtcdClient configures NextGen GC before the manager is published. The
-// upgrade marker, if present, was created before the first NextGen PD started.
+// InitEtcdClient configures NextGen GC before the manager is published.
+// The upgrade script creates the cutoff key before the first NextGen PD starts.
 func (m *GCStateManager) InitEtcdClient(ctx context.Context, client *clientv3.Client) error {
-	key := keypath.StarterGCMigrationPath()
+	key := keypath.GCMigrationCutoffPath()
 	resp, err := etcdutil.EtcdKVGetWithContext(ctx, client, key)
 	if err != nil {
-		return errors.Annotate(err, "read starter GC migration marker")
+		return errors.Annotate(err, "read starter GC migration cutoff")
 	}
 	if len(resp.Kvs) != 0 {
-		marker := resp.Kvs[0]
-		if string(marker.Value) != "1" || marker.Version != 1 || marker.Lease != 0 ||
-			marker.CreateRevision <= 0 || marker.CreateRevision != marker.ModRevision {
-			return errors.Errorf("invalid starter GC migration marker %s (version %d, create revision %d, mod revision %d, lease %d)",
-				key, marker.Version, marker.CreateRevision, marker.ModRevision, marker.Lease)
+		entry := resp.Kvs[0]
+		if string(entry.Value) != "1" || entry.Version != 1 || entry.Lease != 0 ||
+			entry.CreateRevision <= 0 || entry.CreateRevision != entry.ModRevision {
+			return errors.Errorf("invalid starter GC migration cutoff %s (version %d, create revision %d, mod revision %d, lease %d)",
+				key, entry.Version, entry.CreateRevision, entry.ModRevision, entry.Lease)
 		}
-		m.markerRevision = marker.CreateRevision
+		m.migrationCutoff = entry.CreateRevision
 	}
 	m.etcdClient = client
 	return nil

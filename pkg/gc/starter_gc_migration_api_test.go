@@ -34,12 +34,12 @@ import (
 )
 
 // Start without warmup so each API can be the very first consumer of a legacy T.
-func newStarterGCAPIFixture(t *testing.T, count int) (manager *GCStateManager, destination, source *clientv3.Client, markerRevision int64) {
+func newStarterGCAPIFixture(t *testing.T, count int) (manager *GCStateManager, destination, source *clientv3.Client, cutoff int64) {
 	t.Helper()
 	return newStarterGCFixture(t, count, nil, nil)
 }
 
-func newStarterGCFixture(t *testing.T, count int, beforeMarker func(destination, source *clientv3.Client), clientConfig etcdutil.CreateEtcdClientOpt) (manager *GCStateManager, destination, source *clientv3.Client, markerRevision int64) {
+func newStarterGCFixture(t *testing.T, count int, beforeCutoff func(destination, source *clientv3.Client), clientConfig etcdutil.CreateEtcdClientOpt) (manager *GCStateManager, destination, source *clientv3.Client, cutoff int64) {
 	t.Helper()
 	re := require.New(t)
 	ctx := context.Background()
@@ -57,12 +57,12 @@ func newStarterGCFixture(t *testing.T, count int, beforeMarker func(destination,
 				_, err = source.Put(ctx, key, strconv.Itoa(100+i))
 				re.NoError(err)
 			}
-			if beforeMarker != nil {
-				beforeMarker(cli, source)
+			if beforeCutoff != nil {
+				beforeCutoff(cli, source)
 			}
-			resp, err := cli.Put(ctx, keypath.StarterGCMigrationPath(), "1")
+			resp, err := cli.Put(ctx, keypath.GCMigrationCutoffPath(), "1")
 			re.NoError(err)
-			markerRevision = resp.Header.Revision
+			cutoff = resp.Header.Revision
 		},
 	}
 	opt.generateKeyspacesByCount(count)
@@ -72,14 +72,14 @@ func newStarterGCFixture(t *testing.T, count int, beforeMarker func(destination,
 	// The fixture's first generation has no warmup workers. Configure its client
 	// before handing it to the first foreground operation under test.
 	re.NoError(manager.InitEtcdClient(ctx, destination))
-	return manager, destination, source, markerRevision
+	return manager, destination, source, cutoff
 }
 
 func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	const count = 5
-	manager, destination, source, revision := newStarterGCAPIFixture(t, count)
+	manager, destination, source, cutoff := newStarterGCAPIFixture(t, count)
 	now := time.Now()
 
 	_, err := manager.SetGCBarrier(1, "cdc", 80, time.Hour, now)
@@ -104,7 +104,7 @@ func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 		resp, err := destination.Get(ctx, keypath.TxnSafePointPath(uint32(i)))
 		re.NoError(err)
 		re.Len(resp.Kvs, 1)
-		re.Greater(resp.Kvs[0].ModRevision, revision)
+		re.Greater(resp.Kvs[0].ModRevision, cutoff)
 		re.Equal(strconv.Itoa(100+i), string(resp.Kvs[0].Value))
 	}
 	// A new GC leader must serve the initialized T without consulting the old source.
@@ -119,8 +119,8 @@ func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 
 func TestStarterGCMigrationFirstWatch(t *testing.T) {
 	re := require.New(t)
-	manager, _, source, markerRevision := newStarterGCAPIFixture(t, 1)
-	// A keyspace allocated after the marker has no old T to inherit.
+	manager, _, source, cutoff := newStarterGCAPIFixture(t, 1)
+	// A keyspace allocated after the cutoff has no old T to inherit.
 	id := uint32(2)
 	_, err := manager.keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
 		ID: &id, Name: "new-tenant", CreateTime: time.Now().Unix(),
@@ -153,12 +153,12 @@ func TestStarterGCMigrationFirstWatch(t *testing.T) {
 	re.Zero(initial[id])
 	ts, rev := readStarterSafePoint(t, manager, id)
 	re.Zero(ts)
-	re.Greater(rev, markerRevision)
+	re.Greater(rev, cutoff)
 }
 
 func TestStarterGCMigrationWarmupAndReenabledTenant(t *testing.T) {
 	re := require.New(t)
-	manager, _, _, revision := newStarterGCAPIFixture(t, 2)
+	manager, _, _, cutoff := newStarterGCAPIFixture(t, 2)
 	now := time.Now()
 	_, err := manager.keyspaceManager.UpdateKeyspaceStateByID(2, keyspacepb.KeyspaceState_DISABLED, now.Unix())
 	re.NoError(err)
@@ -170,7 +170,7 @@ func TestStarterGCMigrationWarmupAndReenabledTenant(t *testing.T) {
 	re.NotContains(states, uint32(2))
 	txn, rev := readStarterSafePoint(t, manager, 2)
 	re.Equal(uint64(10), txn)
-	re.LessOrEqual(rev, revision)
+	re.LessOrEqual(rev, cutoff)
 
 	// Re-enabling a preexisting tenant changes its metadata's ModRevision.
 	// Its first legacy gc_worker request must still inherit the frozen T.
@@ -182,5 +182,5 @@ func TestStarterGCMigrationWarmupAndReenabledTenant(t *testing.T) {
 	re.Equal(uint64(102), pin.SafePoint)
 	txn, rev = readStarterSafePoint(t, manager, 2)
 	re.Equal(uint64(102), txn)
-	re.Greater(rev, revision)
+	re.Greater(rev, cutoff)
 }

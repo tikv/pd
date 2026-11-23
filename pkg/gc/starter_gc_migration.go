@@ -39,15 +39,15 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-// Only revisions in PD etcd can be compared with the upgrade marker.
+// Only revisions in PD etcd can be compared with the migration cutoff.
 func (m *GCStateManager) needsStarterCheck(id uint32, txnRevision int64) bool {
-	return m.markerRevision > 0 && id != constant.NullKeyspaceID && txnRevision <= m.markerRevision
+	return m.migrationCutoff > 0 && id != constant.NullKeyspaceID && txnRevision <= m.migrationCutoff
 }
 
 // Call outside the manager lock. Competing first uses are resolved by the
 // conditional write on T's revision.
 func (m *GCStateManager) ensureMigratedTxnSafePoint(ctx context.Context, generation *gcStateGeneration, id uint32) error {
-	if m.markerRevision == 0 {
+	if m.migrationCutoff == 0 {
 		return nil
 	}
 	if generation == nil || m.activeGeneration.Load() != generation {
@@ -112,7 +112,7 @@ func (m *GCStateManager) migrateStarterBatch(ctx context.Context, generation *gc
 
 	groups := make(map[string][]*starterMigrationItem)
 	for i, item := range pending {
-		group, err := item.route(rows[i], m.markerRevision)
+		group, err := item.route(rows[i], m.migrationCutoff)
 		item.err = err
 		groups[group] = append(groups[group], item)
 	}
@@ -227,8 +227,8 @@ func readStarterKeys(ctx context.Context, client *clientv3.Client, items []*star
 	return rows, nil
 }
 
-// An empty group selects the verified PD default or a tenant created after the marker.
-func (item *starterMigrationItem) route(row *mvccpb.KeyValue, marker int64) (string, error) {
+// An empty group selects the verified PD default or a tenant created after the cutoff.
+func (item *starterMigrationItem) route(row *mvccpb.KeyValue, cutoff int64) (string, error) {
 	if row == nil || len(row.Value) == 0 {
 		return "", errs.ErrKeyspaceNotFound
 	}
@@ -248,7 +248,7 @@ func (item *starterMigrationItem) route(row *mvccpb.KeyValue, marker int64) (str
 	}
 	item.metaRevision = row.ModRevision
 	group, hasGroup := meta.Config[keyspace.MetaServiceGroupIDKey]
-	if row.CreateRevision > marker || !hasGroup {
+	if row.CreateRevision > cutoff || !hasGroup {
 		item.txnSafePoint = item.target.TxnSafePoint
 		return "", nil
 	}

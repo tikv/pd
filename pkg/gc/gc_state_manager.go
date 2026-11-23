@@ -212,9 +212,12 @@ type GCStateManager struct {
 	// before a reset waits for mu. generation identifies the state owned under mu.
 	lifecycleMu      syncutil.Mutex
 	activeGeneration atomic.Pointer[gcStateGeneration]
-	markerRevision   int64 // Set once at startup. Zero selects native GC.
 	generation       *gcStateGeneration
 	etcdClient       *clientv3.Client
+
+	// migrationCutoff is the CreateRevision of the Starter upgrade cutoff key in PD etcd.
+	// Keyspaces with a txn safe point revision at or below the cutoff need verification. Zero disables the check.
+	migrationCutoff int64
 
 	watchers      map[uint64]*GCStateWatcher
 	nextWatcherID uint64
@@ -317,7 +320,7 @@ func gcKeyspaceScope(keyspaceID uint32, meta *keyspacepb.KeyspaceMeta, isUserAPI
 // lockForTxnSafePoint verifies a pending Starter safe point before taking the
 // manager lock, so a slow source does not block unrelated GC operations.
 func (m *GCStateManager) lockForTxnSafePoint(ctx context.Context, id uint32, lock sync.Locker) error {
-	if m.markerRevision == 0 {
+	if m.migrationCutoff == 0 {
 		lock.Lock()
 		return nil
 	}
@@ -506,7 +509,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.markerRevision != 0 && m.activeGeneration.Load() != generation {
+	if m.migrationCutoff != 0 && m.activeGeneration.Load() != generation {
 		return AdvanceTxnSafePointResult{}, errs.ErrNotLeader
 	}
 

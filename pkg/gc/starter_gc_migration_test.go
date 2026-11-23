@@ -74,7 +74,7 @@ func TestStarterGCMigrationSourceValues(t *testing.T) {
 		{"overflowing source", missing, "18446744073709551616", 0, "", "invalid transaction safe point"},
 	}
 	ctx := context.Background()
-	manager, dest, _, revision := newStarterGCFixture(t, len(cases), func(dest, source *clientv3.Client) {
+	manager, dest, _, cutoff := newStarterGCFixture(t, len(cases), func(dest, source *clientv3.Client) {
 		for i, tc := range cases {
 			id := uint32(i + 1)
 			key := keypath.TxnSafePointPath(id)
@@ -106,13 +106,13 @@ func TestStarterGCMigrationSourceValues(t *testing.T) {
 			if tc.wantError == "" {
 				require.Len(t, resp.Kvs, 1)
 				require.Equal(t, tc.want, string(resp.Kvs[0].Value))
-				require.Greater(t, resp.Kvs[0].ModRevision, revision)
+				require.Greater(t, resp.Kvs[0].ModRevision, cutoff)
 			} else if tc.destination == missing {
 				require.Empty(t, resp.Kvs)
 			} else {
 				require.Len(t, resp.Kvs, 1)
 				require.Equal(t, tc.destination, string(resp.Kvs[0].Value))
-				require.LessOrEqual(t, resp.Kvs[0].ModRevision, revision)
+				require.LessOrEqual(t, resp.Kvs[0].ModRevision, cutoff)
 			}
 		})
 	}
@@ -160,7 +160,7 @@ func TestStarterGCMigrationConcurrentTakeover(t *testing.T) {
 func TestStarterGCMigrationFullBatchAmbiguousCommit(t *testing.T) {
 	const count = endpoint.MaxGCSafePointBatchSize
 	var loseReply atomic.Bool
-	manager, dest, _, marker := newStarterGCFixture(t, count, nil, func(cfg *clientv3.Config) {
+	manager, dest, _, cutoff := newStarterGCFixture(t, count, nil, func(cfg *clientv3.Config) {
 		cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			err := invoke(ctx, method, req, reply, cc, opts...)
 			txn, ok := req.(*etcdserverpb.TxnRequest)
@@ -194,14 +194,14 @@ func TestStarterGCMigrationFullBatchAmbiguousCommit(t *testing.T) {
 		require.EqualValues(t, 2, row.Version)
 		if revision == 0 {
 			revision = row.ModRevision
-			require.Greater(t, revision, marker)
+			require.Greater(t, revision, cutoff)
 		}
 		require.Equal(t, revision, row.ModRevision)
 	}
 }
 
 func TestStarterGCMigrationBatchWithChangingRoute(t *testing.T) {
-	m, dest, _, marker := newStarterGCAPIFixture(t, 2)
+	m, dest, _, cutoff := newStarterGCAPIFixture(t, 2)
 	const hook = "github.com/tikv/pd/pkg/gc/starterGCMigrationSourceLoaded"
 	require.NoError(t, failpoint.EnableCall(hook, func(firstID uint32) {
 		if firstID == 1 {
@@ -217,15 +217,15 @@ func TestStarterGCMigrationBatchWithChangingRoute(t *testing.T) {
 	require.Equal(t, []uint32{2}, result.completed)
 	value, rev := readStarterSafePoint(t, m, 1)
 	require.EqualValues(t, 10, value)
-	require.LessOrEqual(t, rev, marker)
+	require.LessOrEqual(t, rev, cutoff)
 	value, rev = readStarterSafePoint(t, m, 2)
 	require.EqualValues(t, 102, value)
-	require.Greater(t, rev, marker)
+	require.Greater(t, rev, cutoff)
 }
 
 func TestStarterGCMigrationSameBackend(t *testing.T) {
 	ctx := t.Context()
-	manager, dest, _, markerRevision := newStarterGCFixture(t, 2, func(dest, _ *clientv3.Client) {
+	manager, dest, _, cutoff := newStarterGCFixture(t, 2, func(dest, _ *clientv3.Client) {
 		// Keyspace 1 uses the default PD backend. Keyspace 2 uses an explicit group on the same etcd.
 		setStarterSourceGroup(t, dest, 1, "")
 	}, nil)
@@ -248,7 +248,7 @@ func TestStarterGCMigrationSameBackend(t *testing.T) {
 	first := make(map[uint32]int64)
 	for _, id := range []uint32{1, 2} {
 		first[id] = readRevision(id)
-		require.Greater(t, first[id], markerRevision)
+		require.Greater(t, first[id], cutoff)
 	}
 
 	// The next leader must serve both values without contacting the group or writing T again.
@@ -261,7 +261,7 @@ func TestStarterGCMigrationSameBackend(t *testing.T) {
 
 func TestStarterGCMigrationGroupConfigChangedBeforeCommit(t *testing.T) {
 	ctx := t.Context()
-	manager, dest, source, markerRev := newStarterGCAPIFixture(t, 1)
+	manager, dest, source, cutoff := newStarterGCAPIFixture(t, 1)
 	watcher, err := manager.WatchGCStates(ctx, true)
 	require.NoError(t, err)
 	defer watcher.Close()
@@ -297,7 +297,7 @@ func TestStarterGCMigrationGroupConfigChangedBeforeCommit(t *testing.T) {
 	require.ErrorIs(t, <-done, errs.ErrEtcdTxnConflict)
 	value, revision := readStarterSafePoint(t, manager, 1)
 	require.EqualValues(t, 10, value)
-	require.LessOrEqual(t, revision, markerRev)
+	require.LessOrEqual(t, revision, cutoff)
 	_, cached := manager.gcStateCache.load(1)
 	require.False(t, cached)
 	_, published, err := watcher.receiveOne(false)
@@ -309,7 +309,7 @@ func TestStarterGCMigrationGroupConfigChangedBeforeCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 101, state.TxnSafePoint)
 	_, revision = readStarterSafePoint(t, manager, 1)
-	require.Greater(t, revision, markerRev)
+	require.Greater(t, revision, cutoff)
 
 	// A confirmed scope also survives a cache miss with its source offline.
 	require.NoError(t, manager.metaServiceGroupManager.Close())
@@ -322,7 +322,7 @@ func TestStarterGCMigrationGroupConfigChangedBeforeCommit(t *testing.T) {
 }
 
 func TestStarterGCMigrationStaleScope(t *testing.T) {
-	manager, _, _, markerRev := newStarterGCAPIFixture(t, 2)
+	manager, _, _, cutoff := newStarterGCAPIFixture(t, 2)
 	ctx, generation := t.Context(), manager.activeGeneration.Load()
 	// An index or earlier metadata snapshot already queued these two independent
 	// scopes when the control plane changed one to unified GC and retired the other.
@@ -342,7 +342,7 @@ func TestStarterGCMigrationStaleScope(t *testing.T) {
 		_, cached := manager.gcStateCache.load(id)
 		require.False(t, cached)
 		_, revision := readStarterSafePoint(t, manager, id)
-		require.LessOrEqual(t, revision, markerRev)
+		require.LessOrEqual(t, revision, cutoff)
 	}
 }
 
@@ -390,7 +390,7 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 	ctx := t.Context()
 	var localReads [][]string
 	var readsMu sync.Mutex
-	m, dest, source, marker := newStarterGCFixture(t, 8, func(dest, source *clientv3.Client) {
+	m, dest, source, cutoff := newStarterGCFixture(t, 8, func(dest, source *clientv3.Client) {
 		// Keyspaces 1 and 2 use the second group. Keyspace 7 uses the PD default.
 		setStarterSourceGroup(t, dest, 1, "group2")
 		setStarterSourceGroup(t, dest, 2, "group2")
@@ -472,13 +472,13 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 	for _, id := range []uint32{1, 2, 5, 8} {
 		require.Error(t, result.failed[id])
 		_, rev := readStarterSafePoint(t, m, id)
-		require.LessOrEqual(t, rev, marker)
+		require.LessOrEqual(t, rev, cutoff)
 	}
 	require.Equal(t, [][]string{{keypath.TxnSafePointPath(3), keypath.TxnSafePointPath(4), keypath.TxnSafePointPath(5), keypath.TxnSafePointPath(8)}}, healthy.requests)
 	require.Equal(t, [][]string{{keypath.TxnSafePointPath(1), keypath.TxnSafePointPath(2)}}, unavailable.requests)
 	for id, want := range map[uint32]uint64{3: 103, 4: 104, 6: 106, 7: 10} {
 		value, rev := readStarterSafePoint(t, m, id)
 		require.Equal(t, want, value)
-		require.Greater(t, rev, marker)
+		require.Greater(t, rev, cutoff)
 	}
 }

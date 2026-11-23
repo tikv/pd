@@ -211,7 +211,7 @@ func (m *GCStateManager) finishGCStateFlight(ctx context.Context, generation *gc
 			pair.Err = errs.ErrNotLeader
 		} else if ctx.Err() != nil {
 			pair.Err = ctx.Err()
-		} else if m.markerRevision > 0 && id != constant.NullKeyspaceID && pair.Err == nil {
+		} else if m.migrationCutoff > 0 && id != constant.NullKeyspaceID && pair.Err == nil {
 			pair.Err = validateStarterGCState(pair)
 		}
 		if pair.Err == nil {
@@ -346,7 +346,7 @@ func (m *GCStateManager) readGCStateDirect(ctx context.Context, generation *gcSt
 		return endpoint.GCSafePointReadResult{Err: err}
 	}
 	result := values[0]
-	if m.markerRevision > 0 && id != constant.NullKeyspaceID && result.Err == nil {
+	if m.migrationCutoff > 0 && id != constant.NullKeyspaceID && result.Err == nil {
 		result.Err = validateStarterGCState(result)
 	}
 	return result

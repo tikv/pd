@@ -29,13 +29,13 @@ import (
 )
 
 func TestStarterGCMigrationNativeReadCosts(t *testing.T) {
-	var markerReads, pairReads atomic.Int64
+	var cutoffReads, pairReads atomic.Int64
 	opt := newGCStateManagerForTestOptions{
 		useEnabledKeyspaceIndex: true,
 		etcdClientCfgModifier: func(cfg *clientv3.Config) {
 			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-				if r, ok := req.(*etcdserverpb.RangeRequest); ok && string(r.Key) == keypath.StarterGCMigrationPath() {
-					markerReads.Add(1)
+				if r, ok := req.(*etcdserverpb.RangeRequest); ok && string(r.Key) == keypath.GCMigrationCutoffPath() {
+					cutoffReads.Add(1)
 				}
 				if gcWarmupRead(req) != nil {
 					pairReads.Add(1)
@@ -62,7 +62,7 @@ func TestStarterGCMigrationNativeReadCosts(t *testing.T) {
 		require.Equal(t, reads+1, pairReads.Load())
 		stop()
 	}
-	require.EqualValues(t, 1, markerReads.Load())
+	require.EqualValues(t, 1, cutoffReads.Load())
 }
 
 func TestStarterGCMigrationStartup(t *testing.T) {
@@ -76,27 +76,27 @@ func TestStarterGCMigrationStartup(t *testing.T) {
 	canceled, cancelRead := context.WithCancel(ctx)
 	cancelRead()
 	require.Error(t, upgraded.InitEtcdClient(canceled, client))
-	key := keypath.StarterGCMigrationPath()
+	key := keypath.GCMigrationCutoffPath()
 	_, err := client.Put(ctx, key, "unknown")
 	require.NoError(t, err)
-	require.ErrorContains(t, upgraded.InitEtcdClient(ctx, client), "invalid starter GC migration marker")
-	// An overwrite loses the original boundary, even if it restores the v1 format.
+	require.ErrorContains(t, upgraded.InitEtcdClient(ctx, client), "invalid starter GC migration cutoff")
+	// Rewriting the cutoff key violates its create-once contract even with a valid value.
 	_, err = client.Put(ctx, key, "1")
 	require.NoError(t, err)
-	require.ErrorContains(t, upgraded.InitEtcdClient(ctx, client), "invalid starter GC migration marker")
+	require.ErrorContains(t, upgraded.InitEtcdClient(ctx, client), "invalid starter GC migration cutoff")
 	_, err = client.Delete(ctx, key)
 	require.NoError(t, err)
 	lease, err := client.Grant(ctx, 60)
 	require.NoError(t, err)
 	_, err = client.Put(ctx, key, "1", clientv3.WithLease(lease.ID))
 	require.NoError(t, err)
-	require.ErrorContains(t, upgraded.InitEtcdClient(ctx, client), "invalid starter GC migration marker")
+	require.ErrorContains(t, upgraded.InitEtcdClient(ctx, client), "invalid starter GC migration cutoff")
 	_, err = client.Delete(ctx, key)
 	require.NoError(t, err)
 
 	_, err = client.Put(ctx, keypath.TxnSafePointPath(2), "42")
 	require.NoError(t, err)
-	marker, err := client.Put(ctx, key, "1")
+	put, err := client.Put(ctx, key, "1")
 	require.NoError(t, err)
 	require.NoError(t, upgraded.InitEtcdClient(ctx, client))
 	_, err = upgraded.GetGCState(2, true)
@@ -107,7 +107,7 @@ func TestStarterGCMigrationStartup(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 42, state.TxnSafePoint)
 	_, revision := readStarterSafePoint(t, upgraded, 2)
-	require.Greater(t, revision, marker.Header.Revision)
+	require.Greater(t, revision, put.Header.Revision)
 	stop()
 	_, err = upgraded.GetGCState(2, true)
 	require.ErrorIs(t, err, errs.ErrNotLeader)
