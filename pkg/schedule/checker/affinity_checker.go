@@ -157,7 +157,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 			if targetRegion == nil || witnessDisplaced ||
 				(hasConflictingLearner && c.targetVotersRejected(targetRegion, fit)) ||
 				(!hasConflictingLearner && !c.isRegionPlacementRuleSatisfiedWithBestLocation(targetRegion, false /* isExistingRegion */)) {
-				if targetRegion != nil && hasWitness && c.witnessTargetAllowed(region, group, fit, targetRegion.Clone()) {
+				if targetRegion != nil && hasWitness && c.witnessTargetMayBeValid(region, group, fit, targetRegion.Clone()) {
 					return nil
 				}
 				expired, ok := c.affinityManager.ExpireAffinityGroupIf(group)
@@ -201,7 +201,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if relearn {
 		if targetRegion := cloneRegionWithReplacePeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...); targetRegion != nil &&
 			slices.ContainsFunc(region.GetVoters(), (*metapb.Peer).GetIsWitness) &&
-			c.witnessTargetAllowed(region, group, fit, targetRegion.Clone()) {
+			c.witnessTargetMayBeValid(region, group, fit, targetRegion.Clone()) {
 			return nil
 		}
 		// Local learner placement is a heuristic. Relearn from this healthy
@@ -561,8 +561,8 @@ func (c *AffinityChecker) targetVotersRejected(target *core.RegionInfo, fit *pla
 	return false
 }
 
-// witnessTargetAllowed probes at most 16 witness layouts on a private target.
-func (c *AffinityChecker) witnessTargetAllowed(region *core.RegionInfo, group *affinity.GroupState, fit *placement.RegionFit, target *core.RegionInfo) bool {
+// witnessTargetMayBeValid probes at most 16 witness layouts on a private target.
+func (c *AffinityChecker) witnessTargetMayBeValid(region *core.RegionInfo, group *affinity.GroupState, fit *placement.RegionFit, target *core.RegionInfo) bool {
 	if target == nil {
 		return false
 	}
