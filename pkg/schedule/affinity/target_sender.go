@@ -29,13 +29,13 @@ import (
 // sendObservedTarget permits one outstanding first-win write per Manager. Busy
 // observations are discarded. A 404 pauses HTTP attempts but lets groups
 // without an available target use a fresh observation locally. Caller holds metaMutex.
-func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64, persistOnly bool) {
+func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64, observedModRevision int64, persistOnly bool) {
 	m.targetWriteMutex.Lock()
 	now := time.Now()
 	if now.Before(m.targetEndpointUnsupportedUntil) {
 		m.targetWriteMutex.Unlock()
 		if !persistOnly && m.ctx.Err() == nil {
-			m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
+			m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer, observedModRevision)
 		}
 		return
 	}
@@ -55,7 +55,7 @@ func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGr
 		if unsupported && !persistOnly {
 			m.metaMutex.Lock()
 			if m.ctx.Err() == nil {
-				m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
+				m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer, observedModRevision)
 			}
 			m.metaMutex.Unlock()
 		}
@@ -80,7 +80,7 @@ func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGr
 // applyLocalObservedTarget applies a healthy observation without a write when it
 // matches the current or stored target, or PD does not implement the target
 // endpoint. Caller holds metaMutex.
-func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64) {
+func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64, observedModRevision int64) {
 	voterStoreIDs := sortedStoreIDs(target.VoterStoreIDs)
 	if target.LeaderStoreID == 0 || len(voterStoreIDs) == 0 {
 		return
@@ -92,6 +92,10 @@ func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *run
 	groupInfo, ok := m.groups[target.Expected.ID]
 	// A recreated group can have the same creation timestamp and affinity version.
 	if !ok || groupInfo != groupInfoPtr || groupInfo.AffinityVer != affinityVer {
+		return
+	}
+	// A same-peers write can advance the revision without changing the affinity version.
+	if m.groupModRevisions[target.Expected.ID] != observedModRevision {
 		return
 	}
 	stored := groupInfo.storedGroup()

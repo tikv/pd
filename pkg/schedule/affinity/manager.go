@@ -566,12 +566,19 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 	switch {
 	case !exists:
 		m.initGroupLocked(group)
-	case matchesStored:
+	case matchesStored && groupInfo.persistedGroup != nil:
 		// A newer etcd write can reassert the stored peers after a local replacement.
 		// Apply it and invalidate observations made before the write.
 		m.applyGroupTargetLocked(groupInfo, group)
 	default:
-		m.syncGroupTargetLocked(groupInfo, group)
+		changed := m.syncGroupTargetLocked(groupInfo, group)
+		if !changed && matchesStored && groupInfo.IsExpired() && m.storeConditionsKnown {
+			// A newer write can restore a healthy target after the group has expired.
+			m.setTargetAvailabilityLocked(groupInfo)
+			if groupInfo.IsAvailable() {
+				m.resetCountLocked(groupInfo)
+			}
+		}
 	}
 	if modRevision > 0 {
 		m.groupModRevisions[group.ID] = modRevision

@@ -348,6 +348,7 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 			expected := group.Group
 			m.RLock()
 			conditionsKnown := m.storeConditionsKnown
+			observedModRevision := m.groupModRevisions[groupID]
 			if group.targetUnpersisted {
 				expected = m.groups[groupID].storedGroup()
 				expected.VoterStoreIDs = slices.Clone(expected.VoterStoreIDs)
@@ -361,10 +362,10 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 			result := target.result()
 			matchesStored := sameStoredGroup(&target.Expected, result)
 			if !group.AffinitySchedulingAllowed && (matchesStored || sameStoredGroup(&group.Group, result)) {
-				m.applyLocalObservedTarget(target, observed.groupInfoPtr, observed.affinityVer)
+				m.applyLocalObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, observedModRevision)
 			}
 			if !matchesStored {
-				m.sendObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, persistOnly)
+				m.sendObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, observedModRevision, persistOnly)
 			}
 			return m.GetAffinityGroupState(groupID), nil
 		}

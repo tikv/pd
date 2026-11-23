@@ -111,7 +111,7 @@ func TestSyncRecreatedAffinityGroup(t *testing.T) {
 			re := require.New(t)
 			m, store := newTargetTestManager(t)
 			old := &Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-			m.SyncGroupFromEtcd(old)
+			m.SyncGroupFromEtcdWithRevision(old, 1)
 			re.NoError(m.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: old.ID, KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}}, nil))
 			m.RestoreAffinityGroup(old.ID)
 			_, cached := m.GetAndCacheRegionAffinityGroupState(generateRegionForTest(10, old.VoterStoreIDs, nonOverlappingRange))
@@ -120,7 +120,7 @@ func TestSyncRecreatedAffinityGroup(t *testing.T) {
 			recreated.CreateTimestamp++
 			re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, old.ID, &recreated) }))
 			if path == "watcher" {
-				m.SyncGroupFromEtcd(&recreated)
+				m.SyncGroupFromEtcdWithRevision(&recreated, 2)
 			} else {
 				target := targetFor(m, old.ID, 2, 1, 2, 3)
 				if path == "written" {
@@ -206,14 +206,14 @@ func TestChangedTargetStartsDegradedWindow(t *testing.T) {
 				re := require.New(t)
 				m, store := newTargetTestManager(t)
 				group := &Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
-				m.SyncGroupFromEtcd(group)
+				m.SyncGroupFromEtcdWithRevision(group, 1)
 				m.applyStoreConditions(map[uint64]storeCondition{2: storeBusy})
 				m.ExpireAffinityGroup("g")
 				stale := targetFor(m, "g", 1, 1, 3)
 				group.LeaderStoreID = 2
 				re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, group.ID, group) }))
 				if source == "watcher" {
-					m.SyncGroupFromEtcd(group)
+					m.SyncGroupFromEtcdWithRevision(group, 2)
 				} else {
 					written, err := m.UpdateAffinityGroupTargets([]GroupTarget{stale})
 					re.NoError(err)
@@ -235,14 +235,44 @@ func TestChangedTargetStartsDegradedWindow(t *testing.T) {
 				re.Zero(calls)
 				re.Equal(*group, *loadStoredGroup(re, store, "g"))
 				time.Sleep(time.Second)
-				m.SyncGroupFromEtcd(group)
+				m.SyncGroupFromEtcdWithRevision(group, 3)
+				re.Equal(expiresAt, m.groups["g"].degradedExpiredAt, "duplicate targets do not extend the window")
+				re.Equal(state, m.GetAffinityGroupState("g"))
 				written, err := m.updateGroupTarget(targetFor(m, "g", 2, 1, 2))
 				re.NoError(err)
 				re.True(written)
-				re.Equal(expiresAt, m.groups["g"].degradedExpiredAt, "duplicate targets do not extend the window")
+				re.Equal(expiresAt, m.groups["g"].degradedExpiredAt, "confirming the stored target does not extend the window")
 			})
 		})
 	}
+}
+
+func TestSyncDuplicateTargetPreservesAvailableGroup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		m, _ := newTargetTestManager(t)
+		group := &Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
+		m.SyncGroupFromEtcdWithRevision(group, 1)
+		re.NoError(m.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: group.ID, KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}}, nil))
+		m.RestoreAffinityGroup(group.ID)
+		_, isAffinity := m.GetAndCacheRegionAffinityGroupState(generateRegionForTest(10, group.VoterStoreIDs, nonOverlappingRange))
+		re.True(isAffinity)
+		before := m.GetAffinityGroupState(group.ID)
+		re.False(before.HasUnpersistedTarget())
+		re.Equal(PhaseStable, before.Phase)
+		expiresAt := m.groups[group.ID].degradedExpiredAt
+
+		time.Sleep(time.Second)
+		m.SyncGroupFromEtcdWithRevision(group, 3)
+		re.True(m.groups[group.ID].IsAvailable())
+		re.Equal(expiresAt, m.groups[group.ID].degradedExpiredAt)
+		re.Equal(before, m.GetAffinityGroupState(group.ID))
+
+		stale := *group
+		stale.LeaderStoreID = 2
+		m.SyncGroupFromEtcdWithRevision(&stale, 2)
+		re.Equal(before, m.GetAffinityGroupState(group.ID), "the duplicate PUT must advance the last seen revision")
+	})
 }
 
 func TestSyncMatchingUnavailableLocalTarget(t *testing.T) {
@@ -937,7 +967,10 @@ func TestFirstWinStoredTargetAfterLocalReplacement(t *testing.T) {
 				case "admin reassertion":
 					_, isAffinity := m.GetAndCacheRegionAffinityGroupState(region)
 					re.True(isAffinity)
-					re.Equal(1, m.GetAffinityGroupState(stored.ID).AffinityRegionCount)
+					cached := m.GetAffinityGroupState(stored.ID)
+					re.Equal(1, cached.AffinityRegionCount)
+					m.SyncGroupFromEtcdWithRevision(&stored, 1)
+					re.Equal(cached, m.GetAffinityGroupState(stored.ID), "reloading the same revision must keep the local replacement")
 					m.applyStoreConditions(nil)
 					m.SyncGroupFromEtcdWithRevision(&want, 2)
 					_, isAffinity = m.GetRegionAffinityGroupState(region)
@@ -1003,6 +1036,27 @@ func TestFirstWinLateUnsupportedReplyAfterSamePeersWrite(t *testing.T) {
 		re.True(after.AffinitySchedulingAllowed)
 		re.False(after.HasUnpersistedTarget())
 		re.Greater(after.affinityVer, before.affinityVer)
+	})
+}
+
+func TestFirstWinLateUnsupportedReplyAfterSamePeersWriteWithStoreDown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		m, _ := newTargetTestManager(t)
+		stored := Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2}}
+		m.SyncGroupFromEtcdWithRevision(&stored, 1)
+		m.applyStoreConditions(map[uint64]storeCondition{2: storeDown})
+		m.SetTargetWriter(targetWriterFunc(func(context.Context, []GroupTarget) ([]string, error) {
+			// The scheduling service can still see a store as down after PD accepts the PUT.
+			m.SyncGroupFromEtcdWithRevision(&stored, 2)
+			return nil, ErrTargetWriterUnsupported
+		}))
+
+		before := m.GetAffinityGroupState(stored.ID)
+		m.ObserveAvailableRegion(generateRegionForTest(10, []uint64{1, 3}, nonOverlappingRange), before)
+		synctest.Wait()
+		re.Equal(int64(2), m.groupModRevisions[stored.ID])
+		re.Equal(before, m.GetAffinityGroupState(stored.ID))
 	})
 }
 
