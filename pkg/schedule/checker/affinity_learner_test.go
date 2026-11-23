@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func newLearnerConflictController(t *testing.T) (*Controller, *mockcluster.Cluster, *operator.Controller) {
@@ -42,8 +43,8 @@ func newLearnerConflictController(t *testing.T) (*Controller, *mockcluster.Clust
 	for id := uint64(1); id <= 5; id++ {
 		tc.AddRegionStore(id, 10)
 	}
-	tc.AddLeaderRegionWithRange(1, "a", "b", 1, 2, 3)
-	tc.PutRegion(tc.GetRegion(1).Clone(core.SetApproximateSize(1)))
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.PutRegion(region.Clone(withAffinityTestRange("a", "b"), core.SetApproximateSize(1)))
 	stream := hbstream.NewTestHeartbeatStreams(t.Context(), tc, false)
 	t.Cleanup(stream.Close)
 	oc := operator.NewController(t.Context(), tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
@@ -167,7 +168,7 @@ func TestAffinityCheckerLearnerSwap(t *testing.T) {
 			const id = "learner-swap"
 			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
 				ID: id, LeaderStoreID: target.leader, VoterStoreIDs: []uint64{1, 2, 4},
-			}, region.GetStartKey(), region.GetEndKey()))
+			}, keyutil.KeyRange{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}))
 			moves := promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter)
 			conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
 
@@ -216,7 +217,7 @@ func TestAffinityCheckerLearnerSwapIsolation(t *testing.T) {
 	const id = "learner-swap-isolation"
 	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
 		ID: id, LeaderStoreID: 2, VoterStoreIDs: []uint64{2, 4, 6},
-	}, region.GetStartKey(), region.GetEndKey()))
+	}, keyutil.KeyRange{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}))
 	moves := promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter)
 	conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
 
@@ -246,7 +247,7 @@ func TestAffinityCheckerLearnerSwapFallback(t *testing.T) {
 	const id = "learner-swap-fallback"
 	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
 		ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 4, 5},
-	}, region.GetStartKey(), region.GetEndKey()))
+	}, keyutil.KeyRange{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}))
 	re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
 	re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(cloneRegionWithReplacePeerStores(region, 1, 1, 4, 5), false))
 
@@ -322,7 +323,7 @@ func TestAffinityCheckerLearnerMoveToRuleStore(t *testing.T) {
 			const id = "learner-move"
 			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
 				ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4},
-			}, region.GetStartKey(), region.GetEndKey()))
+			}, keyutil.KeyRange{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}))
 			if len(learnerStores) > 1 {
 				re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
 				re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(cloneRegionWithReplacePeerStores(region, 1, 1, 2, 4), false))
@@ -387,7 +388,7 @@ func TestAffinityCheckerLearnerBusyAndPinned(t *testing.T) {
 			const id = "learner-busy-pinned"
 			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
 				ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 4, 5},
-			}, region.GetStartKey(), region.GetEndKey()))
+			}, keyutil.KeyRange{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}))
 			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
 			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(cloneRegionWithReplacePeerStores(region, 1, 1, 4, 5), false))
 			tc.SetStoreBusy(6, true)
@@ -487,7 +488,7 @@ func TestAffinityCheckerLearnerRelearn(t *testing.T) {
 				learnerStores = append(learnerStores, 6)
 			}
 			a := putLearners(tc, 1, learnerStores...)
-			b := regionWithRoles(a, 1, otherRoles).Clone(core.WithNewRegionID(2), core.WithStartKey([]byte("b")), core.WithEndKey([]byte("c")))
+			b := regionWithRoles(a, 1, otherRoles).Clone(core.WithNewRegionID(2), withAffinityTestRange("b", "c"))
 			peerIDs := make([]uint64, len(b.GetPeers()))
 			for i := range peerIDs {
 				peerIDs[i] = uint64(1001 + i)
@@ -500,7 +501,7 @@ func TestAffinityCheckerLearnerRelearn(t *testing.T) {
 				re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(cloneRegionWithReplacePeerStores(region, 1, initialTarget...), false))
 			}
 			manager := tc.GetAffinityManager()
-			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: kind, LeaderStoreID: 1, VoterStoreIDs: initialTarget}, []byte("a"), []byte("c")))
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: kind, LeaderStoreID: 1, VoterStoreIDs: initialTarget}, affinityTestRange("a", "c")))
 			conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
 			moves := promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter)
 			wantTarget, operatorRegion := []uint64{1, 2, 3}, uint64(2)
@@ -567,12 +568,13 @@ func TestAffinityCheckerScatteredLearners(t *testing.T) {
 	c, tc, _ := newLearnerConflictController(t)
 	tc.SetStoreOffline(5)
 	re.NoError(tc.GetRuleManager().SetRule(newLearnerRule()))
-	tc.AddLeaderRegionWithRange(2, "b", "c", 1, 2, 4)
+	region := tc.AddLeaderRegion(2, 1, 2, 4)
+	tc.PutRegion(region.Clone(withAffinityTestRange("b", "c")))
 	putLearners(tc, 1, 4)
 	putLearners(tc, 2, 3)
 	manager := tc.GetAffinityManager()
 	const id = "learner-scattered"
-	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: id}, []byte("a"), []byte("c")))
+	re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: id}, affinityTestRange("a", "c")))
 	conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
 
 	for range 3 {
@@ -625,7 +627,7 @@ func TestAffinityCheckerLearnerNotMoved(t *testing.T) {
 			region := tc.GetRegion(1)
 			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
 				ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4},
-			}, region.GetStartKey(), region.GetEndKey()))
+			}, keyutil.KeyRange{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}))
 			before := manager.GetAffinityGroupState(id).Group
 			moves := promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter)
 			conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)

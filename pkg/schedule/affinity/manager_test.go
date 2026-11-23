@@ -350,8 +350,8 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 func TestLookupRacingWithLabelRuleChange(t *testing.T) {
 	const lookupHook = "github.com/tikv/pd/pkg/schedule/affinity/afterRegionLabelLookup"
 	const groupID = "g"
-	oldRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
-	otherRange := keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}
+	oldRange := keyutil.KeyRange{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("b"))}
+	otherRange := keyutil.KeyRange{StartKey: keyForTest([]byte("c")), EndKey: keyForTest([]byte("d"))}
 	testCases := []struct {
 		name   string
 		ranges []keyutil.KeyRange
@@ -416,8 +416,10 @@ func TestLookupRacingWithLabelRuleChange(t *testing.T) {
 			manager.GetAndCacheRegionAffinityGroupState(region)
 			re.True(changed)
 
-			cache, _ := manager.getCache(region)
-			re.Nil(cache, "the outdated lookup result must not be cached")
+			manager.RLock()
+			_, cached := manager.regions[region.GetID()]
+			manager.RUnlock()
+			re.False(cached, "the outdated lookup result must not be cached")
 			group := manager.GetAffinityGroupState(groupID)
 			re.Zero(group.RegionCount)
 			re.Zero(group.AffinityRegionCount)
@@ -431,8 +433,8 @@ func TestLookupRacingWithLabelRuleChange(t *testing.T) {
 // service applies a label rule change to the Manager and the region labeler, in either order.
 func TestInvalidCacheByLabelRules(t *testing.T) {
 	const groupID = "g"
-	oldRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
-	otherRange := keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}
+	oldRange := keyutil.KeyRange{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("b"))}
+	otherRange := keyutil.KeyRange{StartKey: keyForTest([]byte("c")), EndKey: keyForTest([]byte("d"))}
 	testCases := []struct {
 		name         string
 		managerFirst bool
@@ -489,8 +491,10 @@ func TestInvalidCacheByLabelRules(t *testing.T) {
 				re.Nil(state)
 				syncManager(otherRange)
 			}
-			cache, _ := manager.getCache(region)
-			re.Nil(cache)
+			manager.RLock()
+			_, cached := manager.regions[region.GetID()]
+			manager.RUnlock()
+			re.False(cached)
 			group = manager.GetAffinityGroupState(groupID)
 			re.Zero(group.RegionCount)
 			re.Zero(group.AffinityRegionCount)

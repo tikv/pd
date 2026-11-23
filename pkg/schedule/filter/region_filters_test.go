@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestRegionPendingFilter(t *testing.T) {
@@ -165,11 +166,8 @@ func TestAffinitySelect(t *testing.T) {
 func createAffinityGroup(re *require.Assertions, cluster *mockcluster.Cluster, groupID string, startKey, endKey string) {
 	manager := cluster.GetAffinityManager()
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-		GroupID: groupID,
-		KeyRanges: []keyutil.KeyRange{{
-			StartKey: []byte(startKey),
-			EndKey:   []byte(endKey),
-		}},
+		GroupID:   groupID,
+		KeyRanges: []keyutil.KeyRange{testutil.TxnKeyspaceRange([]byte(startKey), []byte(endKey))},
 	}}))
 	_, err := manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
 	re.NoError(err)
@@ -180,10 +178,11 @@ func newRegionWithPeers(id uint64, startKey, endKey string, peers []uint64, opts
 	for i, storeID := range peers {
 		metaPeers[i] = &metapb.Peer{Id: id*10 + uint64(i), StoreId: storeID}
 	}
+	keyRange := testutil.TxnKeyspaceRange([]byte(startKey), []byte(endKey))
 	return core.NewRegionInfo(&metapb.Region{
 		Id:       id,
-		StartKey: []byte(startKey),
-		EndKey:   []byte(endKey),
+		StartKey: keyRange.StartKey,
+		EndKey:   keyRange.EndKey,
 		Peers:    metaPeers,
 	}, metaPeers[0], opts...)
 }

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"testing"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func checkOperator(re *require.Assertions, op *operator.Operator, sourceScore string, targetScore string) {
@@ -270,14 +272,15 @@ func TestSkipAffinityRegions(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		tc.AddLeaderStore(uint64(i), 0)
 	}
-	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
-	tc.AddLeaderRegionWithRange(2, "110", "120", 1, 2, 3)
-	tc.AddLeaderRegionWithRange(3, "120", "140", 1, 2, 3)
-	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
-	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
+	key := func(raw string) string { return string(testutil.TxnKeyspaceKey([]byte(raw))) }
+	tc.AddLeaderRegionWithRange(1, key("100"), key("110"), 1, 2, 3)
+	tc.AddLeaderRegionWithRange(2, key("110"), key("120"), 1, 2, 3)
+	tc.AddLeaderRegionWithRange(3, key("120"), key("140"), 1, 2, 3)
+	tc.AddLeaderRegionWithRange(4, key("140"), key("160"), 2, 1, 3)
+	tc.AddLeaderRegionWithRange(5, key("160"), key("180"), 2, 1, 3)
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
-			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
+			[]string{"leader-scatter", "tikv", "1h", "test", url.QueryEscape(key("100")), url.QueryEscape(key("300"))}))
 	re.NoError(err)
 
 	// All regions in the range belong to an affinity group, so none of them should be scheduled.
@@ -285,7 +288,7 @@ func TestSkipAffinityRegions(t *testing.T) {
 	groupID := "test_group"
 	re.NoError(affinityManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
 		GroupID:   groupID,
-		KeyRanges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "300")},
+		KeyRanges: []keyutil.KeyRange{keyutil.NewKeyRange(key("100"), key("300"))},
 	}}))
 	_, err = affinityManager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
 	re.NoError(err)

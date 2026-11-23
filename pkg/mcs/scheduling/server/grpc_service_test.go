@@ -110,7 +110,7 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 		{
 			GroupID: "g1",
 			KeyRanges: []keyutil.KeyRange{
-				{StartKey: []byte("a"), EndKey: []byte("z")},
+				testutil.TxnKeyspaceRange([]byte("a"), []byte("z")),
 			},
 		},
 	})
@@ -234,8 +234,8 @@ func newAffinitySplitTestRegion() *core.RegionInfo {
 	}
 	return core.NewRegionInfo(&metapb.Region{
 		Id:          100,
-		StartKey:    []byte("b"),
-		EndKey:      []byte("y"),
+		StartKey:    testutil.TxnKeyspaceKey([]byte("b")),
+		EndKey:      testutil.TxnKeyspaceKey([]byte("y")),
 		Peers:       peers,
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}, peers[0],
