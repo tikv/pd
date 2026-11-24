@@ -839,6 +839,9 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Reset(100 * time.Millisecond)
 	})
+	failpoint.Inject("highFrequencyNodeStateCheck", func() {
+		ticker.Reset(100 * time.Millisecond)
+	})
 	defer ticker.Stop()
 
 	for {
