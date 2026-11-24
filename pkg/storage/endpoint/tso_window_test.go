@@ -172,6 +172,44 @@ func TestDeleteTimestampRetainsWindowOnConflict(t *testing.T) {
 	re.Equal(tsoutil.ComposeTS(2, 0), floor)
 }
 
+func TestDeleteTimestampRejectsStaleSourceWindow(t *testing.T) {
+	re := require.New(t)
+	const groupID = 1
+	groupKey, retiredKey := keypath.TimestampPath(groupID), keypath.RetiredTSOWindowPath()
+	newWindow := string(typeutil.Uint64ToBytes(uint64(2 * time.Millisecond)))
+	var se *StorageEndpoint
+	advanceWindow := sync.OnceValue(func() error { return se.Save(groupKey, newWindow) })
+	se = newGCBatchTestStorage(t, func(ctx context.Context, method string, req, reply any,
+		cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		txn, _ := req.(*etcdserverpb.TxnRequest)
+		for _, op := range txn.GetSuccess() {
+			if string(op.GetRequestDeleteRange().GetKey()) == groupKey {
+				// Advance the source after DeleteTimestamp's reads and before etcd evaluates its comparisons.
+				if err := advanceWindow(); err != nil {
+					return err
+				}
+			}
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	})
+	checkWindows := func(presentKey, absentKey string) {
+		t.Helper()
+		value, err := se.Load(presentKey)
+		re.NoError(err)
+		re.Equal(newWindow, value)
+		keys, _, err := se.LoadRange(absentKey, absentKey+"\x00", 1)
+		re.NoError(err)
+		re.Empty(keys)
+	}
+
+	re.NoError(se.Save(groupKey, string(typeutil.Uint64ToBytes(uint64(time.Millisecond)))))
+	re.ErrorIs(se.DeleteTimestamp(t.Context(), groupID), errs.ErrEtcdTxnConflict)
+	checkWindows(groupKey, retiredKey)
+
+	re.NoError(se.DeleteTimestamp(t.Context(), groupID))
+	checkWindows(retiredKey, groupKey)
+}
+
 func TestDeleteTimestampRejectsInvalidWindow(t *testing.T) {
 	se, clean := newEtcdStorageEndpoint(t)
 	defer clean()
