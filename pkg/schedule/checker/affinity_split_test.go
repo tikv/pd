@@ -475,62 +475,59 @@ func TestAffinitySplitBeforeMoveReclaimsAttempts(t *testing.T) {
 }
 
 func TestAffinitySplitBeforeMoveFallbackAfterSplitStarts(t *testing.T) {
-	originalTimeout := affinitySplitTimeout
-	// A minimal positive budget exposes premature fallback before a split starts.
-	affinitySplitTimeout = time.Nanosecond
-	t.Cleanup(func() { affinitySplitTimeout = originalTimeout })
-
-	re := require.New(t)
-	cluster, controller, opController := newAffinitySplitControllerTest(t)
-	checker := controller.GetAffinityChecker()
-	region := cluster.GetRegion(1)
-	cfg := cluster.GetScheduleConfig().Clone()
-	waitingLimit := cfg.SchedulerMaxWaitingOperator
-	cfg.SchedulerMaxWaitingOperator = 0
-	cluster.SetScheduleConfig(cfg)
-	for range 2 {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		cluster, controller, opController := newAffinitySplitControllerTest(t)
+		checker := controller.GetAffinityChecker()
+		region := cluster.GetRegion(1)
+		cfg := cluster.GetScheduleConfig().Clone()
+		waitingLimit := cfg.SchedulerMaxWaitingOperator
+		cfg.SchedulerMaxWaitingOperator = 0
+		cluster.SetScheduleConfig(cfg)
+		for range 2 {
+			ops := checker.Check(region)
+			requireAffinitySplit(t, ops)
+			re.Zero(opController.AddWaitingOperator(ops...))
+			re.Equal(operator.CANCELED, ops[0].Status())
+			re.True(ops[0].GetStartTime().IsZero())
+			re.Nil(opController.GetOperator(region.GetID()))
+		}
+		cfg = cluster.GetScheduleConfig().Clone()
+		cfg.SchedulerMaxWaitingOperator = waitingLimit
+		cluster.SetScheduleConfig(cfg)
 		ops := checker.Check(region)
 		requireAffinitySplit(t, ops)
-		re.Zero(opController.AddWaitingOperator(ops...))
-		re.Equal(operator.CANCELED, ops[0].Status())
-		re.True(ops[0].GetStartTime().IsZero())
-		re.Nil(opController.GetOperator(region.GetID()))
-	}
-	cfg = cluster.GetScheduleConfig().Clone()
-	cfg.SchedulerMaxWaitingOperator = waitingLimit
-	cluster.SetScheduleConfig(cfg)
-	ops := checker.Check(region)
-	requireAffinitySplit(t, ops)
-	re.Empty(checker.Check(region), "overlapping checks must retain the unstarted split")
-	// A caller may skip admission after a store-limit check.
-	ops[0].SetStatusReachTime(operator.CREATED, time.Now().Add(-operator.OperatorExpireTime-time.Second))
-	group := cluster.GetAffinityManager().GetAffinityGroupState("split_before_move")
-	roles := map[uint64]placement.PeerRoleType{1: placement.Leader, 2: placement.Voter, 3: placement.Voter}
-	prepared := make(chan *operator.Operator, 32)
-	start := make(chan struct{})
-	for range cap(prepared) {
-		go func() {
-			<-start
-			op, _ := checker.prepareAffinityPeerMove(region, group, roles)
-			prepared <- op
-		}()
-	}
-	close(start)
-	var retry []*operator.Operator
-	for range cap(prepared) {
-		if op := <-prepared; op != nil {
-			retry = append(retry, op)
+		re.Empty(checker.Check(region), "overlapping checks must retain the unstarted split")
+		// A split that never starts must not consume the wait budget.
+		advanceAffinitySplitTime(cluster, affinitySplitTimeout)
+		group := cluster.GetAffinityManager().GetAffinityGroupState("split_before_move")
+		roles := map[uint64]placement.PeerRoleType{1: placement.Leader, 2: placement.Voter, 3: placement.Voter}
+		prepared := make(chan *operator.Operator, 32)
+		start := make(chan struct{})
+		for range cap(prepared) {
+			go func() {
+				<-start
+				op, _ := checker.prepareAffinityPeerMove(region, group, roles)
+				prepared <- op
+			}()
 		}
-	}
-	re.Equal(operator.EXPIRED, ops[0].Status())
-	ops = retry
-	requireAffinitySplit(t, ops)
-	re.Equal(1, opController.AddWaitingOperator(ops...))
-	re.False(ops[0].GetStartTime().IsZero())
-	ops[0].SetStatusReachTime(operator.STARTED, time.Now().Add(-affinitySplitTimeout-time.Second))
-	opController.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
-	re.Nil(opController.GetOperator(region.GetID()))
-	requireAffinityMove(t, checker.Check(region))
+		close(start)
+		var retry []*operator.Operator
+		for range cap(prepared) {
+			if op := <-prepared; op != nil {
+				retry = append(retry, op)
+			}
+		}
+		re.Equal(operator.EXPIRED, ops[0].Status())
+		ops = retry
+		requireAffinitySplit(t, ops)
+		re.Equal(1, opController.AddWaitingOperator(ops...))
+		re.False(ops[0].GetStartTime().IsZero())
+		advanceAffinitySplitTime(cluster, affinitySplitTimeout)
+		opController.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
+		re.Nil(opController.GetOperator(region.GetID()))
+		requireAffinityMove(t, checker.Check(region))
+	})
 }
 
 func TestAffinitySplitBeforeMoveOverlappingChecks(t *testing.T) {

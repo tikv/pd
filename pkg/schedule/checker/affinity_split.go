@@ -32,7 +32,7 @@ import (
 
 const (
 	// A SCAN split has 30s (about three Region heartbeats) from its first start.
-	defaultAffinitySplitTimeout = 30 * time.Second
+	affinitySplitTimeout = 30 * time.Second
 	// Waiting for size statistics is passive and does not use an operator slot.
 	defaultAffinityUnknownSizeWait = 5 * time.Minute
 	affinitySplitMaxAttempts       = 100_000
@@ -41,10 +41,7 @@ const (
 	affinitySplitPruneInterval = time.Second
 )
 
-var (
-	affinitySplitTimeout    = defaultAffinitySplitTimeout
-	affinityUnknownSizeWait = defaultAffinityUnknownSizeWait
-)
+var affinityUnknownSizeWait = defaultAffinityUnknownSizeWait
 
 type affinitySplitAttempt struct {
 	version       uint64
