@@ -15,11 +15,13 @@
 package checker
 
 import (
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -428,6 +430,23 @@ func TestAffinitySplitBeforeLearnerMove(t *testing.T) {
 	}
 }
 
+type affinitySplitTestCluster struct {
+	*mockcluster.Cluster
+	once              sync.Once
+	onFirstGetRegion1 func()
+}
+
+func (cluster *affinitySplitTestCluster) GetRegion(regionID uint64) *core.RegionInfo {
+	if regionID == 1 {
+		first := false
+		cluster.once.Do(func() { first = true })
+		if first {
+			cluster.onFirstGetRegion1()
+		}
+	}
+	return cluster.Cluster.GetRegion(regionID)
+}
+
 func TestAffinitySplitBeforeMoveStaleSize(t *testing.T) {
 	t.Run("scan split", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
@@ -460,6 +479,40 @@ func TestAffinitySplitBeforeMoveStaleSize(t *testing.T) {
 			require.Equal(t, attempt, checker.splitAttempts[1])
 			requireAffinityMove(t, checker.Check(small))
 			requireAffinityMove(t, controller.CheckRegion(large))
+		})
+	})
+	t.Run("target update during cleanup", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			cluster, controller, ops := newAffinitySplitTest(t)
+			checker := controller.GetAffinityChecker()
+			manager := cluster.GetAffinityManager()
+			atTargetA := cluster.GetRegion(1).Clone(core.WithIncConfVer(), core.WithReplacePeerStore(4, 3))
+			cluster.PutRegion(atTargetA)
+			_, aligned := manager.GetRegionAffinityGroupState(atTargetA)
+			require.True(t, aligned)
+
+			checker.cluster = &affinitySplitTestCluster{
+				Cluster: cluster,
+				onFirstGetRegion1: func() {
+					_, err := manager.UpdateAffinityGroupPeers("split", 1, []uint64{1, 2, 4})
+					require.NoError(t, err)
+					controller.tryAddOperators(atTargetA)
+				},
+			}
+			require.Empty(t, checker.Check(atTargetA))
+			split := requireAffinitySplit(t, []*operator.Operator{ops.GetOperator(1)})
+			assert.Same(t, split, checker.splitAttempts[1].split)
+
+			advanceAffinitySplitTime(cluster, affinitySplitTimeout)
+			ops.Dispatch(atTargetA, operator.DispatchFromHeartBeat, func(uint64) {})
+			require.Equal(t, operator.TIMEOUT, split.Status())
+			requireAffinityMove(t, controller.CheckRegion(atTargetA))
+			require.Contains(t, checker.splitAttempts, uint64(1))
+
+			atTargetB := atTargetA.Clone(core.WithIncConfVer(), core.WithReplacePeerStore(3, 4))
+			cluster.PutRegion(atTargetB)
+			require.Empty(t, checker.Check(atTargetB))
+			require.NotContains(t, checker.splitAttempts, uint64(1))
 		})
 	})
 	t.Run("unknown size", func(t *testing.T) {

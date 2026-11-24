@@ -56,6 +56,35 @@ type affinitySplitAttempt struct {
 	fallbackRecorded bool
 }
 
+func (c *AffinityChecker) clearCompletedSplitAttempt(region, current *core.RegionInfo) {
+	epoch, currentEpoch := region.GetRegionEpoch(), current.GetRegionEpoch()
+	if epoch.GetVersion() < currentEpoch.GetVersion() || epoch.GetConfVer() < currentEpoch.GetConfVer() {
+		return
+	}
+
+	c.splitMu.Lock()
+	defer c.splitMu.Unlock()
+
+	regionID := region.GetID()
+	attempt, tracked := c.splitAttempts[regionID]
+	if !tracked {
+		return
+	}
+	latest := c.cluster.GetRegion(regionID)
+	if latest == nil {
+		delete(c.splitAttempts, regionID)
+		return
+	}
+	latestEpoch := latest.GetRegionEpoch()
+	if epoch.GetVersion() < latestEpoch.GetVersion() || epoch.GetConfVer() < latestEpoch.GetConfVer() ||
+		latestEpoch.GetVersion() < attempt.version {
+		return
+	}
+	if _, stillAffinity := c.affinityManager.GetRegionAffinityGroupState(latest); stillAffinity {
+		delete(c.splitAttempts, regionID)
+	}
+}
+
 // pruneSplitAttempts reclaims idle attempts and operators that never started.
 // The caller holds splitMu.
 func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {

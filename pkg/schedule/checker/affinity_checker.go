@@ -206,13 +206,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
-		// A current snapshot confirms the move is done, so a later move tries to split again.
-		epoch, currentEpoch := region.GetRegionEpoch(), current.GetRegionEpoch()
-		if epoch.GetVersion() >= currentEpoch.GetVersion() && epoch.GetConfVer() >= currentEpoch.GetConfVer() {
-			c.splitMu.Lock()
-			delete(c.splitAttempts, region.GetID())
-			c.splitMu.Unlock()
-		}
+		c.clearCompletedSplitAttempt(region, current)
 		return c.mergeCheck(region, group)
 	}
 
