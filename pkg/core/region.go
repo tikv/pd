@@ -1088,8 +1088,9 @@ type RegionsInfo struct {
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 	// This tree is used to check the overlaps among all the subtrees.
 	overlapTree *regionTree
-	// Serialize preparation scans. Writers only record topology changes
-	// while a scan is active, under their own tree's lock.
+	// preparationMu serializes scans. Changing preparationChecking requires
+	// both tree locks; writers read it and append to their journal under their
+	// own tree's lock. The invalid flags are also read outside those locks.
 	preparationMu          syncutil.Mutex
 	preparationChecking    bool
 	preparationRootChanges []uint64
@@ -1316,7 +1317,7 @@ func (r *RegionsInfo) preUpdateSubTreeLocked(
 		// a flow-only update leaves the live region stuck at ref 1 while it is
 		// still present in the subtree.
 		r.overlapTree.updateRef(origin, region)
-		originItem.setRegionInfo(region)
+		originItem.setRegionInfoLocked(region)
 		// Range and peers are unchanged here; only a source transition can
 		// affect preparation. Avoid repeating the topology comparison.
 		if r.preparationChecking && origin.LoadedFromStorage() != region.LoadedFromStorage() {
@@ -1446,12 +1447,12 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			}
 			r.tree.remove(origin)
 			// Update the RegionInfo in the regionItem.
-			item.setRegionInfo(region)
+			item.setRegionInfoLocked(region)
 		} else {
 			// If the range is not changed, only the statistical on the regionTree needs to be updated.
 			r.tree.updateStat(origin, region)
 			// Update the RegionInfo in the regionItem.
-			item.setRegionInfo(region)
+			item.setRegionInfoLocked(region)
 			r.updateRegionPreparation(origin, region, true)
 			return origin, nil, rangeChanged
 		}
