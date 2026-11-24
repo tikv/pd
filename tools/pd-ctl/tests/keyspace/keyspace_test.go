@@ -914,7 +914,7 @@ func (suite *keyspaceTestSuite) TestGCModePolicy() {
 		re.Contains(string(output), "400")
 	}
 	// Repeat a grandfathered mode and reject the reverse conversion as well.
-	historical, err := pdTests.CreateKeyspaceWithHistoricalGCMode(suite.cluster.GetLeaderServer().GetServer(), &keyspace.CreateKeyspaceRequest{Name: "gc_history", Config: map[string]string{keyspace.GCManagementType: opposite}})
+	historical, err := pdTests.CreateKeyspaceWithHistoricalGCMode(suite.ctx, suite.cluster.GetLeaderServer().GetServer(), &keyspace.CreateKeyspaceRequest{Name: "gc_history", Config: map[string]string{keyspace.GCManagementType: opposite}})
 	re.NoError(err)
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "keyspace", "update-config", historical.Name, "--update", "gc_management_type="+opposite)
 	re.NoError(err)

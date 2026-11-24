@@ -821,7 +821,7 @@ func NewResourceManagerTestServer(ctx context.Context, cfg *rm.Config) (*rm.Serv
 // CreateKeyspaceWithHistoricalGCMode creates a test fixture with a persisted GC
 // configuration that may predate the current write policy. Public creation still
 // validates the initial metadata; only test storage writes model historical modes.
-func CreateKeyspaceWithHistoricalGCMode(srv *server.Server, req *keyspace.CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
+func CreateKeyspaceWithHistoricalGCMode(ctx context.Context, srv *server.Server, req *keyspace.CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	requestCopy := *req
 	requestCopy.Config = maps.Clone(req.Config)
 	delete(requestCopy.Config, keyspace.GCManagementType)
@@ -840,6 +840,6 @@ func CreateKeyspaceWithHistoricalGCMode(srv *server.Server, req *keyspace.Create
 		meta.Config["safe_point_version"] = legacy
 	}
 	storage := srv.GetStorage()
-	err = storage.RunInTxn(context.Background(), func(txn kv.Txn) error { return storage.SaveKeyspaceMeta(txn, meta) })
+	err = storage.RunInTxn(ctx, func(txn kv.Txn) error { return storage.SaveKeyspaceMeta(txn, meta) })
 	return meta, err
 }

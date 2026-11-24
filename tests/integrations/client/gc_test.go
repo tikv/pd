@@ -46,7 +46,7 @@ func TestServiceSafePointV2Operations(t *testing.T) {
 	re.NotNil(leaderServer)
 	re.NoError(leaderServer.BootstrapCluster())
 
-	ks1, err := tests.CreateKeyspaceWithHistoricalGCMode(leaderServer.GetServer(), &keyspace.CreateKeyspaceRequest{
+	ks1, err := tests.CreateKeyspaceWithHistoricalGCMode(ctx, leaderServer.GetServer(), &keyspace.CreateKeyspaceRequest{
 		Name:       "ks1",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),

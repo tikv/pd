@@ -55,18 +55,20 @@ func putGCConfigDiagnosticMetas(t *testing.T, client *clientv3.Client, metas []*
 	return revision
 }
 
-func captureGCConfigDiagnostics(t *testing.T) *observer.ObservedLogs {
+func captureGCConfigDiagnostics(t *testing.T) func() []observer.LoggedEntry {
 	t.Helper()
 	core, logs := observer.New(zap.ErrorLevel)
 	restore := log.ReplaceGlobals(zap.New(core), nil)
 	t.Cleanup(restore)
-	return logs
+	return func() []observer.LoggedEntry {
+		return logs.FilterMessage("GC keyspace configuration violations found during full load").All()
+	}
 }
 
 func TestGCConfigLoadDiagnosticsDetailsAndReload(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
-	logs := captureGCConfigDiagnostics(t)
+	diagnostics := captureGCConfigDiagnostics(t)
 	configs := []map[string]string{
 		nil,
 		{keyspace.GCManagementType: keyspace.UnifiedGC},
@@ -101,12 +103,13 @@ func TestGCConfigLoadDiagnosticsDetailsAndReload(t *testing.T) {
 			1: {id: 1, gcManagementType: keyspace.UnifiedGC},
 			5: {id: 5, gcManagementType: keyspace.UnifiedGC},
 		}, entries)
+		summaries := diagnostics()
 		if !kerneltype.IsNextGen() {
-			require.Empty(t, logs.All(), "Classic must not collect configuration diagnostics")
+			require.Empty(t, summaries, "Classic must not collect configuration diagnostics")
 			continue
 		}
-		require.Len(t, logs.All(), attempt+1, "each successful load must emit exactly one summary")
-		fields := logs.All()[attempt].ContextMap()
+		require.Len(t, summaries, attempt+1, "each successful load must emit exactly one summary")
+		fields := summaries[attempt].ContextMap()
 		require.Equal(t, revision, fields["revision"])
 		require.EqualValues(t, 5, fields["violation-count"])
 		require.EqualValues(t, 0, fields["omitted-count"])
@@ -139,7 +142,7 @@ func TestGCConfigLoadDiagnosticsDetailsAndReload(t *testing.T) {
 func TestGCConfigLoadDiagnosticsBoundParallelPages(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
-	logs := captureGCConfigDiagnostics(t)
+	diagnostics := captureGCConfigDiagnostics(t)
 	// A healthy first page forces all violations into concurrently loaded ranges.
 	putEnabledKeyspaceTestIDs(t, client, enabledKeyspaceTestIDs(256))
 	metas := make([]*keyspacepb.KeyspaceMeta, 0, 30)
@@ -157,12 +160,13 @@ func TestGCConfigLoadDiagnosticsBoundParallelPages(t *testing.T) {
 	entries, revision, err := index.load(context.Background(), nil)
 	require.NoError(t, err)
 	require.Len(t, entries, 256)
+	summaries := diagnostics()
 	if !kerneltype.IsNextGen() {
-		require.Empty(t, logs.All())
+		require.Empty(t, summaries)
 		return
 	}
-	require.Len(t, logs.All(), 1)
-	fields := logs.All()[0].ContextMap()
+	require.Len(t, summaries, 1)
+	fields := summaries[0].ContextMap()
 	require.Equal(t, revision, fields["revision"])
 	require.EqualValues(t, 30, fields["violation-count"])
 	require.EqualValues(t, 10, fields["omitted-count"])
@@ -192,7 +196,7 @@ func TestGCConfigLoadDiagnosticsDiscardFailedAttempt(t *testing.T) {
 	putGCConfigDiagnosticMetas(t, client, metas)
 	for _, mode := range []string{"read-error", "decode-error"} {
 		t.Run(mode, func(t *testing.T) {
-			logs := captureGCConfigDiagnostics(t)
+			diagnostics := captureGCConfigDiagnostics(t)
 			injected := errors.New("injected metadata read error")
 			inject := true
 			intercepted := newEnabledKeyspaceInterceptClient(t, client, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
@@ -223,17 +227,18 @@ func TestGCConfigLoadDiagnosticsDiscardFailedAttempt(t *testing.T) {
 			case "decode-error":
 				require.ErrorContains(t, err, "decode keyspace metadata")
 			}
-			require.Empty(t, logs.All(), "a partial failed load must not emit configuration diagnostics")
+			require.Empty(t, diagnostics(), "a partial failed load must not emit configuration diagnostics")
 			inject = false
 			entries, revision, err = index.load(context.Background(), nil)
 			require.NoError(t, err)
 			require.Len(t, entries, 258)
+			summaries := diagnostics()
 			if !kerneltype.IsNextGen() {
-				require.Empty(t, logs.All())
+				require.Empty(t, summaries)
 				return
 			}
-			require.Len(t, logs.All(), 1)
-			fields := logs.All()[0].ContextMap()
+			require.Len(t, summaries, 1)
+			fields := summaries[0].ContextMap()
 			require.Equal(t, revision, fields["revision"])
 			require.EqualValues(t, 258, fields["violation-count"])
 			require.EqualValues(t, 238, fields["omitted-count"])
@@ -245,7 +250,7 @@ func TestGCConfigLoadDiagnosticsDiscardFailedAttempt(t *testing.T) {
 func TestGCConfigLoadDiagnosticsCancelSinglePage(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
-	logs := captureGCConfigDiagnostics(t)
+	diagnostics := captureGCConfigDiagnostics(t)
 	putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_ENABLED, "invalid")
 	index := newEnabledKeyspaceIndex(client, enabledKeyspaceTestPrefix)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -254,19 +259,19 @@ func TestGCConfigLoadDiagnosticsCancelSinglePage(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, entries)
 	require.Zero(t, revision)
-	require.Empty(t, logs.All(), "cancellation must also suppress a completed single-page scan")
+	require.Empty(t, diagnostics(), "cancellation must also suppress a completed single-page scan")
 }
 
 func TestGCConfigLoadDiagnosticsHealthyAndWatchSilent(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)
-	logs := captureGCConfigDiagnostics(t)
+	diagnostics := captureGCConfigDiagnostics(t)
 	putEnabledKeyspaceTestMeta(t, client, 1, keyspacepb.KeyspaceState_ENABLED, keyspace.KeyspaceLevelGC)
 	index := startEnabledKeyspaceTestIndex(t, client)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	require.NoError(t, index.waitReady(ctx))
-	require.Empty(t, logs.All(), "a healthy snapshot needs no diagnostic")
+	require.Empty(t, diagnostics(), "a healthy snapshot needs no diagnostic")
 	for _, state := range []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED, keyspacepb.KeyspaceState_ARCHIVED} {
 		revision := putEnabledKeyspaceTestMeta(t, client, 1, state, "invalid")
 		entries, _, err := index.snapshotAtLeast(ctx, revision)
@@ -276,6 +281,6 @@ func TestGCConfigLoadDiagnosticsHealthyAndWatchSilent(t *testing.T) {
 		} else {
 			require.Empty(t, entries)
 		}
-		require.Empty(t, logs.All(), "incremental watch updates must not report configuration diagnostics")
+		require.Empty(t, diagnostics(), "incremental watch updates must not report configuration diagnostics")
 	}
 }

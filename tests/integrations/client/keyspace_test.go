@@ -219,7 +219,7 @@ func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
 		{map[string]string{keyspace.GCManagementType: "", "safe_point_version": "v2"}, false},
 		{map[string]string{keyspace.GCManagementType: "invalid", "safe_point_version": "v2"}, false},
 	} {
-		meta, err := tests.CreateKeyspaceWithHistoricalGCMode(s.srv, &keyspace.CreateKeyspaceRequest{Name: fmt.Sprintf("history_%d", index), Config: tc.config, CreateTime: time.Now().Unix()})
+		meta, err := tests.CreateKeyspaceWithHistoricalGCMode(s.ctx, s.srv, &keyspace.CreateKeyspaceRequest{Name: fmt.Sprintf("history_%d", index), Config: tc.config, CreateTime: time.Now().Unix()})
 		re.NoError(err)
 		loaded, err := s.client.LoadKeyspace(s.ctx, meta.Name)
 		re.NoError(err)
