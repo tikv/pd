@@ -22,16 +22,13 @@ import (
 	"testing"
 	"time"
 
-<<<<<<< HEAD
-=======
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/suite"
 
->>>>>>> ec06f1a26a (schedulers: avoid recreating gauges for removed stores (#11631))
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	sche "github.com/tikv/pd/pkg/schedule/core"

@@ -20,17 +20,14 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-<<<<<<< HEAD
-=======
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
->>>>>>> ec06f1a26a (schedulers: avoid recreating gauges for removed stores (#11631))
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/core"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -39,8 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -213,12 +208,6 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 		return
 	}
 	storeIDStr := strconv.FormatUint(oldID, 10)
-<<<<<<< HEAD
-	if store := cluster.GetStore(oldID); store == nil || store.IsRemoved() {
-		storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeIDStr})
-	} else {
-		storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), storeIDStr).Set(0)
-=======
 	// The store's address may have changed since we reported its eviction.
 	storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeIDStr})
 	if store := cluster.GetStore(oldID); store != nil && !store.IsRemoved() {
@@ -228,7 +217,6 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 		if current := cluster.GetStore(oldID); current == nil || current.IsRemoved() {
 			storeSlowTrendEvictedStatusGauge.DeleteLabelValues(address, storeIDStr)
 		}
->>>>>>> ec06f1a26a (schedulers: avoid recreating gauges for removed stores (#11631))
 	}
 	conf.Lock()
 	defer conf.Unlock()
@@ -382,12 +370,7 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 		storeSlowTrendEvictedStatusGauge.DeleteLabelValues(address, storeIDStr)
 		return nil
 	}
-<<<<<<< HEAD
-	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
 	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf)
-=======
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
->>>>>>> ec06f1a26a (schedulers: avoid recreating gauges for removed stores (#11631))
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
