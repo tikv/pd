@@ -67,7 +67,6 @@ require (
 	golang.org/x/time v0.12.0
 	golang.org/x/tools v0.52.0
 	google.golang.org/grpc v1.83.2
-	google.golang.org/protobuf v1.36.11
 	gotest.tools/gotestsum v1.7.0
 )
 
@@ -251,6 +250,7 @@ require (
 	google.golang.org/genproto v0.0.0-20240401170217-c3f982113cda // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

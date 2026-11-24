@@ -32,7 +32,6 @@ import (
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -59,29 +58,34 @@ const (
 	CollectFactor = 0.9
 	// MaxBatchSplitCount bounds per-region allocations and bookkeeping, including
 	// requests with few peers whose encoded responses would allow more splits.
+	// This is a work budget, independent of the TSO logical capacity.
 	// ValidateBatchSplitRequest also applies a peer-dependent response size limit.
 	MaxBatchSplitCount = 1 << 17
 	// MaxBatchSplitResponseSize bounds the encoded response and the region/peer
 	// ID work needed to construct it. Forwarding RPCs must accept this size.
+	// It accommodates MaxBatchSplitCount splits with the default three peers,
+	// even when every ID needs its maximum encoded width.
 	// Clients must also configure a receive limit of at least this size. The Go
 	// gRPC default and older PD forwarders may still limit responses to 4 MiB;
 	// upgrade forwarding PD nodes before issuing larger batches through them.
 	MaxBatchSplitResponseSize = 8 * units.MiB
 )
 
-// ValidateBatchSplitCount checks the supported batch size before allocating IDs
-// or response slices. Zero retains the existing empty-batch behavior.
-func ValidateBatchSplitCount(splitCount uint32) error {
-	if splitCount > MaxBatchSplitCount {
-		return errors.Errorf("split count %d exceeds maximum %d", splitCount, MaxBatchSplitCount)
-	}
-	return nil
-}
+// Derive fixed wire sizes once from generated messages. Validation only sizes
+// the variable packed payload and length prefixes, without allocating slices.
+var (
+	batchSplitHeaderSize = (&pdpb.AskBatchSplitResponse{Header: &pdpb.ResponseHeader{ClusterId: math.MaxUint64}}).Size()
+	splitRegionIDSize    = (&pdpb.SplitID{NewRegionId: math.MaxUint64}).Size()
+	// A packed field consists of its tag, length prefix, and payload.
+	splitPeerIDsTagSize = (&pdpb.SplitID{NewPeerIds: []uint64{math.MaxUint64}}).Size() - proto.SizeVarint(binary.MaxVarintLen64) - binary.MaxVarintLen64
+	// An empty SplitID contributes only its tag and a zero-length prefix.
+	splitEntryTagSize = (&pdpb.AskBatchSplitResponse{Ids: []*pdpb.SplitID{{}}}).Size() - proto.SizeVarint(0)
+)
 
 // ValidateBatchSplitRequest bounds response construction using the requested peer count.
 func ValidateBatchSplitRequest(splitCount uint32, region *metapb.Region) error {
-	if err := ValidateBatchSplitCount(splitCount); err != nil {
-		return err
+	if splitCount > MaxBatchSplitCount {
+		return errors.Errorf("split count %d exceeds maximum %d", splitCount, MaxBatchSplitCount)
 	}
 	if splitCount == 0 {
 		return nil
@@ -90,21 +94,14 @@ func ValidateBatchSplitRequest(splitCount uint32, region *metapb.Region) error {
 	if peers > MaxBatchSplitResponseSize/binary.MaxVarintLen64 {
 		return errors.Errorf("split response exceeds maximum %d bytes", MaxBatchSplitResponseSize)
 	}
-	const (
-		// Field numbers from pdpb.SplitID and pdpb.AskBatchSplitResponse.
-		newPeerIDsFieldNumber = 2
-		splitIDsFieldNumber   = 2
-	)
 	// IDs are unknown until allocation, so budget their maximum varint width.
-	// Calculate length prefixes from the payload sizes without constructing arrays.
-	splitSize := (&pdpb.SplitID{NewRegionId: math.MaxUint64}).Size()
+	splitSize := splitRegionIDSize
 	if peers > 0 {
 		peerIDsSize := peers * binary.MaxVarintLen64
-		splitSize += protowire.SizeTag(newPeerIDsFieldNumber) + protowire.SizeBytes(peerIDsSize)
+		splitSize += splitPeerIDsTagSize + proto.SizeVarint(uint64(peerIDsSize)) + peerIDsSize
 	}
-	splitSize = protowire.SizeTag(splitIDsFieldNumber) + protowire.SizeBytes(splitSize)
-	headerSize := (&pdpb.AskBatchSplitResponse{Header: &pdpb.ResponseHeader{ClusterId: math.MaxUint64}}).Size()
-	if uint64(splitCount) > uint64((MaxBatchSplitResponseSize-headerSize)/splitSize) {
+	entrySize := splitEntryTagSize + proto.SizeVarint(uint64(splitSize)) + splitSize
+	if uint64(splitCount) > uint64((MaxBatchSplitResponseSize-batchSplitHeaderSize)/entrySize) {
 		return errors.Errorf("split response exceeds maximum %d bytes", MaxBatchSplitResponseSize)
 	}
 
