@@ -48,6 +48,13 @@ type freeIDBitmapStore interface {
 // share a bucket; a 64-byte bucket covers 512 IDs. Only IDs whose reclamation
 // has completed belong in this index.
 //
+// Keeping a separate free-ID index lets reclamation remove old keyspace
+// metadata and name bindings before reuse. Retaining TOMBSTONE records is
+// another option, but keeps one metadata record per candidate and requires
+// rebuilding the candidate index from those records. The bitmap supports
+// gradual loading from compact buckets, at the cost of an extra bucket
+// CAS/write in the metadata transaction and a persisted layout.
+//
 // Buckets are persisted in etcd and loaded gradually into an in-memory cache.
 // Reclamation sets an ID's bit; claiming it for a new keyspace clears the bit.
 // update commits the bit change and the caller's keyspace metadata changes in
