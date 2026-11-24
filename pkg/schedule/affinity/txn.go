@@ -301,9 +301,9 @@ func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64,
 	return m.updateAffinityGroupPeersWithState(groupID, nil, leaderStoreID, voterStoreIDs)
 }
 
-// updateAffinityGroupPeersWithState updates the leader and voter stores and marks the group available.
-// An observation must still match the runtime group and its version. Only an
-// expired group can change voters. A nil observation indicates an admin update.
+// updateAffinityGroupPeersWithState updates the leader and voter stores of an affinity group and marks it available.
+// A nil observed state indicates an admin update. Otherwise the runtime group and version must match,
+// and the observation can change the voter stores only if the group is expired.
 func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *GroupState, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
@@ -330,8 +330,8 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 
 	voterStoreIDs = slices.Clone(voterStoreIDs)
 	slices.Sort(voterStoreIDs)
-	// Note: if the check fails, no changes are applied. The existing Group is returned as-is without error.
 	if observed != nil {
+		// A recreated group can reuse the observed version.
 		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer {
 			return group, nil
 		}
