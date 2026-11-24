@@ -24,6 +24,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/pingcap/log"
 
@@ -58,7 +59,8 @@ type Sequence struct {
 	before bool
 }
 
-// ProcessBeforeHandler is used to identify whether this backend should execute before handler
+// ProcessBeforeHandler selects the preferred execution phase. The HTTP pipeline
+// defers before-handler backends when it must capture the consumed request body.
 func (s *Sequence) ProcessBeforeHandler() bool {
 	return s.before
 }
@@ -131,10 +133,24 @@ func NewLocalLogBackend(before bool) Backend {
 }
 
 // ProcessHTTPRequest is used to implement audit.Backend
-func (*LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
+func (b *LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
+	return b.writeHTTPRequest(r, log.L().Check(zap.InfoLevel, "audit log"))
+}
+
+func (b *LocalLogBackend) prepareHTTPRequest() func(*http.Request) bool {
+	// The handler may change the global log level. Preserve the decision and
+	// destination from before it runs, while filling body fields after it returns.
+	entry := log.L().Check(zap.InfoLevel, "audit log")
+	return func(r *http.Request) bool { return b.writeHTTPRequest(r, entry) }
+}
+
+func (*LocalLogBackend) writeHTTPRequest(r *http.Request, entry *zapcore.CheckedEntry) bool {
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
 		return false
+	}
+	if entry == nil {
+		return true
 	}
 	clientCN := ""
 	if r.TLS != nil && len(r.TLS.VerifiedChains) > 0 && len(r.TLS.VerifiedChains[0]) > 0 {
@@ -144,7 +160,7 @@ func (*LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
 	// Keep the transport peer and verified certificate identity in separate fields
 	// so a caller cannot replace them with forwarding headers. Behind a proxy,
 	// these fields identify the proxy connection, not the original client.
-	log.Info("audit log",
+	entry.Write(
 		zap.String("service-info", requestInfo.String()),
 		zap.String("remote-addr", r.RemoteAddr),
 		zap.String("tls-client-cn", clientCN))
@@ -173,6 +189,7 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 	// Keep ingress identity even if downstream routing rewrites the request.
 	auditRequest := r.WithContext(ctx)
 	r = r.WithContext(ctx)
+	var deferredBackends []func(*http.Request) bool
 	hasAfterBackend := false
 	for _, backend := range backends {
 		if !backend.Match(labels) {
@@ -181,6 +198,12 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 		if backend.ProcessBeforeHandler() {
 			if body == nil {
 				backend.ProcessHTTPRequest(auditRequest)
+			} else {
+				process := backend.ProcessHTTPRequest
+				if local, ok := backend.(*LocalLogBackend); ok {
+					process = local.prepareHTTPRequest()
+				}
+				deferredBackends = append(deferredBackends, process)
 			}
 		} else {
 			hasAfterBackend = true
@@ -191,10 +214,8 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 		if body != nil {
 			info.BodyParam = body.String()
 			auditRequest = auditRequest.WithContext(requestutil.WithRequestInfo(auditRequest.Context(), info))
-			for _, backend := range backends {
-				if backend.ProcessBeforeHandler() && backend.Match(labels) {
-					backend.ProcessHTTPRequest(auditRequest)
-				}
+			for _, process := range deferredBackends {
+				process(auditRequest)
 			}
 		}
 

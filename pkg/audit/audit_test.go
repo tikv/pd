@@ -188,6 +188,57 @@ func captureAuditJSON(t *testing.T) *bytes.Buffer {
 	return output
 }
 
+func TestHTTPAuditLogLevelChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		initial zapcore.Level
+		updated zapcore.Level
+		panic   bool
+	}{
+		{name: "raise", initial: zap.InfoLevel, updated: zap.ErrorLevel},
+		{name: "lower", initial: zap.ErrorLevel, updated: zap.InfoLevel},
+		{name: "unchanged info", initial: zap.InfoLevel, updated: zap.InfoLevel},
+		{name: "unchanged error", initial: zap.ErrorLevel, updated: zap.ErrorLevel},
+		{name: "raise and panic", initial: zap.InfoLevel, updated: zap.ErrorLevel, panic: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			output := captureAuditJSON(t)
+			log.SetLevel(tc.initial)
+			request := httptest.NewRequest(http.MethodPost, "/selected", strings.NewReader("request-body"))
+			recorder := httptest.NewRecorder()
+			serve := func() {
+				ProcessHTTPRequest(recorder, request, &BackendLabels{Labels: []string{LocalLogLabel}},
+					[]Backend{NewLocalLogBackend(true)}, func(w http.ResponseWriter, r *http.Request) {
+						data, err := io.ReadAll(r.Body)
+						re.NoError(err)
+						re.Equal("request-body", string(data))
+						log.SetLevel(tc.updated)
+						if tc.panic {
+							panic("handler failed")
+						}
+						w.WriteHeader(http.StatusNoContent)
+					})
+			}
+			if tc.panic {
+				re.PanicsWithValue("handler failed", serve)
+			} else {
+				serve()
+				re.Equal(http.StatusNoContent, recorder.Code)
+			}
+			re.Equal(tc.updated, log.GetLevel())
+			if tc.initial == zap.ErrorLevel {
+				re.Empty(output.String())
+				return
+			}
+			var entry map[string]any
+			re.NoError(json.Unmarshal(output.Bytes(), &entry))
+			re.Equal("audit log", entry["message"])
+			re.Contains(entry["service-info"], "BodyParam:request-body")
+		})
+	}
+}
+
 func TestLocalLogBackendConnectionOrigin(t *testing.T) {
 	certificate := &x509.Certificate{Subject: pkix.Name{CommonName: "component-client"}}
 	for _, testCase := range []struct {
