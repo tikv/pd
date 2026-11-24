@@ -295,7 +295,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 
 func TestStoreConditionsWithoutGroups(t *testing.T) {
 	re := require.New(t)
-	manager, _ := newTargetTestManager(t)
+	manager := newTargetTest(t).Manager
 	stores := manager.storeSetInformer.(*core.StoresInfo)
 	for _, evicted := range []bool{true, false, true} {
 		change := core.ResumeLeaderTransfer(constant.In)
@@ -516,7 +516,7 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 // a new store that is still Preparing can initialize a group.
 func TestObserveAvailableRegionOnPreparingStore(t *testing.T) {
 	re := require.New(t)
-	manager, _ := newTargetTestManager(t)
+	manager := newTargetTest(t).Manager
 	stores := manager.storeSetInformer.(*core.StoresInfo)
 	stores.PutStore(stores.GetStore(2).Clone(core.SetNodeState(metapb.NodeState_Preparing)))
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))

@@ -401,85 +401,92 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 	re := require.New(t)
 	ctx, client, clean := prepare(t)
 	defer clean()
-
 	const checkInterval = "github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval"
 	re.NoError(failpoint.Enable(checkInterval, "return(true)"))
 	defer func() { re.NoError(failpoint.Disable(checkInterval)) }()
+
 	stores := core.NewStoresInfo()
 	for id := uint64(1); id <= 2; id++ {
-		stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, NodeState: metapb.NodeState_Serving},
-			core.SetLastHeartbeatTS(time.Now())))
+		stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, NodeState: metapb.NodeState_Serving}, core.SetLastHeartbeatTS(time.Now())))
 	}
 	newManager := func(store *endpoint.StorageEndpoint) *affinity.Manager {
-		regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Hour)
+		labels, err := labeler.NewRegionLabeler(ctx, store, time.Hour)
 		re.NoError(err)
-		manager, err := affinity.NewManager(ctx, store, stores, mockconfig.NewTestOptions(), regionLabeler)
+		manager, err := affinity.NewManager(ctx, store, stores, mockconfig.NewTestOptions(), labels)
 		re.NoError(err)
 		return manager
 	}
-	pdManager := newManager(endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil))
-	m := newManager(endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil))
+	pd := newManager(endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil))
+	manager := newManager(endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil))
 	const reloadID, adminID = "reload-target", "admin-target"
-	re.NoError(pdManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: reloadID}, {GroupID: adminID}}))
-	for _, id := range []string{reloadID, adminID} {
-		_, err := pdManager.UpdateAffinityGroupPeers(id, 2, []uint64{1, 2})
-		re.NoError(err)
-	}
-	readGroup := func(id string) *mvccpb.KeyValue {
+	re.NoError(pd.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: reloadID}, {GroupID: adminID}}))
+	read := func(id string) *mvccpb.KeyValue {
 		resp, err := client.Get(ctx, keypath.AffinityGroupPath(id))
 		re.NoError(err)
 		re.Len(resp.Kvs, 1)
 		return resp.Kvs[0]
 	}
-	reloadKV := readGroup(reloadID)
-	adminKV := readGroup(adminID)
-	reload := pdManager.GetAffinityGroupState(reloadID).Group
-	admin := pdManager.GetAffinityGroupState(adminID).Group
+	initial := make(map[string]*mvccpb.KeyValue)
+	expected := make(map[string]affinity.GroupTarget)
+	for _, id := range []string{reloadID, adminID} {
+		_, err := pd.UpdateAffinityGroupPeers(id, 2, []uint64{1, 2})
+		re.NoError(err)
+		initial[id] = read(id)
+		expected[id] = affinity.GroupTarget{
+			Expected: pd.GetAffinityGroupState(id).Group, ExpectedModRevision: initial[id].ModRevision,
+			LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2},
+		}
+	}
 
 	var upgraded atomic.Bool
-	sent := make(chan affinity.GroupTarget, 1)
-	adminRetry := make(chan affinity.GroupTarget, 1)
+	sent := make(chan affinity.GroupTarget, 2)
 	allowAdminRetry := make(chan struct{})
 	type writeResult struct {
 		written []string
 		err     error
 	}
 	adminResult := make(chan writeResult, 1)
-	m.SetTargetWriter(targetWriterFunc(func(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	manager.SetTargetWriter(targetWriterFunc(func(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
 		if !upgraded.Load() {
 			return nil, affinity.ErrTargetWriterUnsupported
 		}
-		if targets[0].Expected.ID == adminID {
-			adminRetry <- targets[0]
-			select {
-			case <-allowAdminRetry:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-			written, err := pdManager.UpdateAffinityGroupTargets(targets)
-			adminResult <- writeResult{written: written, err: err}
-			return written, err
+		target := targets[0]
+		select {
+		case sent <- target:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if target.Expected.ID != adminID {
+			return pd.UpdateAffinityGroupTargets(targets)
 		}
 		select {
-		case sent <- targets[0]:
-		default:
+		case <-allowAdminRetry:
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
-		return pdManager.UpdateAffinityGroupTargets(targets)
+		written, err := pd.UpdateAffinityGroupTargets(targets)
+		adminResult <- writeResult{written: written, err: err}
+		return written, err
 	}))
-	watcher, err := NewWatcher(ctx, client, m)
-	re.NoError(err)
+	startWatcher := func() *Watcher {
+		watcher, err := NewWatcher(ctx, client, manager)
+		re.NoError(err)
+		return watcher
+	}
+	watcher := startWatcher()
 	defer watcher.Close()
-	testutil.Eventually(re, func() bool { return m.GetAffinityGroupState(reloadID).AffinitySchedulingAllowed })
-
+	state := manager.GetAffinityGroupState
+	testutil.Eventually(re, func() bool { return state(reloadID).AffinitySchedulingAllowed })
 	store2 := stores.GetStore(2)
 	stores.PutStore(store2.Clone(core.PauseLeaderTransfer(constant.In)))
-	voters := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
-	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: voters}, voters[0])
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	observe := func(id string) { manager.ObserveAvailableRegion(region, state(id)) }
 	for _, id := range []string{reloadID, adminID} {
 		testutil.Eventually(re, func() bool {
-			m.ObserveAvailableRegion(region, m.GetAffinityGroupState(id))
-			state := m.GetAffinityGroupState(id)
-			return state.HasUnpersistedTarget() && state.LeaderStoreID == 1
+			observe(id)
+			group := state(id)
+			return group.HasUnpersistedTarget() && group.LeaderStoreID == 1
 		})
 	}
 
@@ -489,78 +496,61 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 	re.NoError(err)
 	_, err = client.Compact(ctx, marker.Header.Revision)
 	re.NoError(err)
-	watcher, err = NewWatcher(ctx, client, m)
-	re.NoError(err)
+	watcher = startWatcher()
 	defer watcher.Close()
-	local := m.GetAffinityGroupState(reloadID)
+	local := state(reloadID)
 	re.True(local.HasUnpersistedTarget())
 	re.Equal(uint64(1), local.LeaderStoreID)
 
-	// Hold the upgrade retry until the admin's same-peers PUT reaches the watcher.
+	// Hold the upgrade retry until the same-peers PUT reaches the watcher.
 	upgraded.Store(true)
 	var retry affinity.GroupTarget
 	testutil.Eventually(re, func() bool {
-		m.ObserveAvailableRegion(region, m.GetAffinityGroupState(adminID))
+		observe(adminID)
 		select {
-		case retry = <-adminRetry:
+		case retry = <-sent:
 			return true
 		default:
 			return false
 		}
 	})
-	re.Equal(affinity.GroupTarget{
-		Expected:            admin,
-		ExpectedModRevision: adminKV.ModRevision,
-		LeaderStoreID:       1,
-		VoterStoreIDs:       admin.VoterStoreIDs,
-	}, retry)
+	re.Equal(expected[adminID], retry)
+	admin := expected[adminID].Expected
 	stores.PutStore(store2)
 	testutil.Eventually(re, func() bool {
-		_, err := pdManager.UpdateAffinityGroupPeers(adminID, admin.LeaderStoreID, admin.VoterStoreIDs)
+		_, err := pd.UpdateAffinityGroupPeers(adminID, admin.LeaderStoreID, admin.VoterStoreIDs)
 		return err == nil
 	})
-	reasserted := readGroup(adminID)
-	re.Equal(adminKV.Value, reasserted.Value)
-	re.Greater(reasserted.ModRevision, adminKV.ModRevision)
+	reasserted := read(adminID)
+	re.Equal(initial[adminID].Value, reasserted.Value)
+	re.Greater(reasserted.ModRevision, initial[adminID].ModRevision)
 	testutil.Eventually(re, func() bool {
-		state := m.GetAffinityGroupState(adminID)
-		return !state.HasUnpersistedTarget() && state.AffinitySchedulingAllowed && state.LeaderStoreID == admin.LeaderStoreID
+		group := state(adminID)
+		return !group.HasUnpersistedTarget() && group.AffinitySchedulingAllowed && group.LeaderStoreID == admin.LeaderStoreID
 	})
 	close(allowAdminRetry)
-	var result writeResult
-	testutil.Eventually(re, func() bool {
-		select {
-		case result = <-adminResult:
-			return true
-		default:
-			return false
-		}
-	})
-	re.NoError(result.err)
-	re.Empty(result.written, "the in-flight retry must not overwrite the admin target")
+	select {
+	case result := <-adminResult:
+		re.NoError(result.err)
+		re.Empty(result.written, "the in-flight retry must not overwrite the admin target")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for in-flight retry")
+	}
 
 	testutil.Eventually(re, func() bool {
-		// Patrol both groups after the upgrade. Only the reload group should still retry.
-		m.ObserveAvailableRegion(region, m.GetAffinityGroupState(adminID))
-		m.ObserveAvailableRegion(region, m.GetAffinityGroupState(reloadID))
-		return !m.GetAffinityGroupState(reloadID).HasUnpersistedTarget()
+		observe(adminID)
+		observe(reloadID)
+		return !state(reloadID).HasUnpersistedTarget()
 	})
-	re.Len(sent, 1, "the reload group must have sent a retry after upgrade")
-	re.Equal(affinity.GroupTarget{
-		Expected:            reload,
-		ExpectedModRevision: reloadKV.ModRevision,
-		LeaderStoreID:       local.LeaderStoreID,
-		VoterStoreIDs:       local.VoterStoreIDs,
-	}, <-sent)
-	persisted := readGroup(reloadID)
-	re.Greater(persisted.ModRevision, reloadKV.ModRevision)
-	var persistedGroup affinity.Group
-	re.NoError(json.Unmarshal(persisted.Value, &persistedGroup))
-	re.Equal(local.Group, persistedGroup)
-	re.Equal(admin, m.GetAffinityGroupState(adminID).Group)
-	stillAdmin := readGroup(adminID)
-	re.Equal(reasserted.ModRevision, stillAdmin.ModRevision)
-	re.Equal(reasserted.Value, stillAdmin.Value)
+	re.Len(sent, 1, "only the reload group must retry after upgrade")
+	re.Equal(expected[reloadID], <-sent)
+	persisted := read(reloadID)
+	re.Greater(persisted.ModRevision, initial[reloadID].ModRevision)
+	var group affinity.Group
+	re.NoError(json.Unmarshal(persisted.Value, &group))
+	re.Equal(local.Group, group)
+	re.Equal(admin, state(adminID).Group)
+	re.Equal(reasserted, read(adminID))
 }
 
 // TestConcurrentLabelRuleUpdates tests multiple label rule updates happening concurrently.

@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,8 +25,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
@@ -79,16 +78,10 @@ func TestTargetWriterFailures(t *testing.T) {
 			re.ErrorContains(err, tc.wantError)
 			re.Empty(written)
 			re.Equal(1, failures)
+			re.Equal(tc.name == "no leader", errors.Is(err, affinity.ErrTargetWriterNotReady))
+			re.Equal(tc.status == http.StatusNotFound, errors.Is(err, affinity.ErrTargetWriterUnsupported))
 			if tc.name == "no leader" {
-				re.ErrorIs(err, affinity.ErrTargetWriterNotReady)
 				re.Zero(requests.Load())
-			} else {
-				re.NotErrorIs(err, affinity.ErrTargetWriterNotReady)
-			}
-			if tc.status == http.StatusNotFound {
-				re.ErrorIs(err, affinity.ErrTargetWriterUnsupported)
-			} else {
-				re.NotErrorIs(err, affinity.ErrTargetWriterUnsupported)
 			}
 		})
 	}
