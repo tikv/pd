@@ -34,7 +34,6 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -438,11 +437,11 @@ func (suite *keyspaceTestSuite) TestGCModePolicy() {
 	}
 	// Existing independent and unified modes remain usable under either kernel.
 	for index, mode := range []string{"unified", "keyspace_level"} {
-		meta, err := suite.server.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{Name: fmt.Sprintf("history_%d", index)})
+		meta, err := tests.CreateKeyspaceWithHistoricalGCMode(suite.T().Context(), suite.server.GetServer(), &keyspace.CreateKeyspaceRequest{
+			Name:   fmt.Sprintf("history_%d", index),
+			Config: map[string]string{keyspace.GCManagementType: mode},
+		})
 		re.NoError(err)
-		meta.Config[keyspace.GCManagementType] = mode
-		storage := suite.server.GetServer().GetStorage()
-		re.NoError(storage.RunInTxn(context.Background(), func(txn kv.Txn) error { return storage.SaveKeyspaceMeta(txn, meta) }))
 		status, body, updated := tryUpdateKeyspaceConfig(re, suite.server, meta.Name, &handlers.UpdateConfigParams{Config: map[string]*string{keyspace.GCManagementType: &mode}})
 		re.Equal(http.StatusOK, status, body)
 		re.Equal(mode, updated.Config[keyspace.GCManagementType])

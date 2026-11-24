@@ -347,18 +347,13 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	mutations := getMutations(configParams.Config)
-
-	// Check if the update is supported.
-	for _, mutation := range mutations {
-		if mutation.Key == keyspace.RegionBoundType {
-			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("region bound type")
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
+	if _, present := configParams.Config[keyspace.RegionBoundType]; present {
+		err = errs.ErrUnsupportedOperationInKeyspace.FastGen("region bound type")
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
 	}
 
-	meta, err := manager.UpdateKeyspaceConfigWithPreconditions(name, mutations, configParams.Preconditions)
+	meta, err := manager.UpdateKeyspaceConfigWithPreconditions(name, getMutations(configParams.Config), configParams.Preconditions)
 	if err != nil {
 		c.AbortWithStatusJSON(keyspaceConfigErrorStatus(err), err.Error())
 		return

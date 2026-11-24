@@ -218,10 +218,15 @@ func (i *enabledKeyspaceIndex) decodePage(kvs []*mvccpb.KeyValue, more bool, rev
 		if err != nil {
 			return nil, 0, err
 		}
-		diagnostics.observe(meta)
 		lastID = meta.GetId()
-		if meta.State == keyspacepb.KeyspaceState_ENABLED {
-			page = append(page, enabledKeyspace{id: lastID, gcManagementType: keyspace.EffectiveGCManagementType(meta.Config)})
+		enabled := meta.State == keyspacepb.KeyspaceState_ENABLED
+		if !enabled && diagnostics == nil {
+			continue
+		}
+		mode := keyspace.EffectiveGCManagementType(meta.Config)
+		diagnostics.observe(meta, mode)
+		if enabled {
+			page = append(page, enabledKeyspace{id: lastID, gcManagementType: mode})
 		}
 	}
 	return page, lastID, nil

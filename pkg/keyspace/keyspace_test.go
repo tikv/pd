@@ -1139,9 +1139,8 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	// No groups available: assign=true (stale pre-check) must not fail creation.
 	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{}, nil)
 	managerNoGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, emptyMgm)
-	cfg := map[string]string{}
-	ks := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 100}, Name: "ks-stale-precheck", Config: cfg}
-	re.NoError(managerNoGroup.assignGroupAndSaveKeyspace(true, &cfg, ks))
+	ks := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 100}, Name: "ks-stale-precheck", Config: map[string]string{}}
+	re.NoError(managerNoGroup.assignGroupAndSaveKeyspace(true, ks))
 	re.NotContains(ks.GetConfig(), MetaServiceGroupIDKey)
 	loaded, err := managerNoGroup.LoadKeyspace("ks-stale-precheck")
 	re.NoError(err)
@@ -1153,18 +1152,16 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	enabled := true
 	re.NoError(mgm.PatchStatus(ctx, "g1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
-	cfg2 := map[string]string{}
-	ks2 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101}, Name: "ks-with-group", Config: cfg2}
-	re.NoError(managerWithGroup.assignGroupAndSaveKeyspace(true, &cfg2, ks2))
+	ks2 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101}, Name: "ks-with-group", Config: map[string]string{}}
+	re.NoError(managerWithGroup.assignGroupAndSaveKeyspace(true, ks2))
 	re.Equal("g1", ks2.GetConfig()[MetaServiceGroupIDKey])
 
 	// A group that exists but is disabled must not fail creation: the keyspace is
 	// created without a meta-service group assignment instead.
 	disabledMgm := NewMetaServiceGroupManager(store, map[string]string{"g2": "addr2"}, nil)
 	managerDisabled := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, disabledMgm)
-	cfg3 := map[string]string{}
-	ks3 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 102}, Name: "ks-disabled-group", Config: cfg3}
-	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
+	ks3 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 102}, Name: "ks-disabled-group", Config: map[string]string{}}
+	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, ks3))
 	re.NotContains(ks3.GetConfig(), MetaServiceGroupIDKey)
 }
 

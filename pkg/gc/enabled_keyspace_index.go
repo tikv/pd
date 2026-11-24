@@ -318,17 +318,6 @@ func (i *enabledKeyspaceIndex) watch(ctx context.Context, nextRevision int64) er
 				clear(pending)
 				continue
 			}
-			if len(resp.Events) == 0 {
-				continue
-			}
-			// Decode the complete clientv3 response before changing the working
-			// set. clientv3 merges fragmented watch responses before delivery.
-			type change struct {
-				id      uint32
-				entry   enabledKeyspace
-				enabled bool
-			}
-			changes := make([]change, 0, len(resp.Events))
 			for _, event := range resp.Events {
 				if event.Kv == nil || event.Kv.ModRevision <= publishedRevision {
 					return fmt.Errorf("keyspace metadata watch received stale or missing event at revision %d", publishedRevision)
@@ -340,24 +329,20 @@ func (i *enabledKeyspaceIndex) watch(ctx context.Context, nextRevision int64) er
 					if err != nil {
 						return err
 					}
-					entry := enabledKeyspace{id: meta.GetId(), gcManagementType: keyspace.EffectiveGCManagementType(meta.Config)}
-					changes = append(changes, change{id: entry.id, entry: entry, enabled: meta.State == keyspacepb.KeyspaceState_ENABLED})
+					id := meta.GetId()
+					if meta.State == keyspacepb.KeyspaceState_ENABLED {
+						pending[id] = &enabledKeyspace{id: id, gcManagementType: keyspace.EffectiveGCManagementType(meta.Config)}
+					} else {
+						pending[id] = nil
+					}
 				case mvccpb.DELETE:
 					id, err := i.parseKeyspaceID(event.Kv.Key)
 					if err != nil {
 						return fmt.Errorf("invalid deleted keyspace metadata: %w", err)
 					}
-					changes = append(changes, change{id: id})
+					pending[id] = nil
 				default:
 					return fmt.Errorf("unexpected keyspace metadata event type %v", event.Type)
-				}
-			}
-			for _, change := range changes {
-				if change.enabled {
-					entry := change.entry
-					pending[change.id] = &entry
-				} else {
-					pending[change.id] = nil
 				}
 			}
 		}

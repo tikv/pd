@@ -47,14 +47,8 @@ type gcConfigDiagnostic struct {
 	reason        string
 }
 
-func (d *gcConfigLoadDiagnostics) observe(meta *keyspacepb.KeyspaceMeta) {
-	if d == nil || meta.GetId() == constant.NullKeyspaceID {
-		return
-	}
-	mode, present := meta.Config[keyspace.GCManagementType]
-	effective := keyspace.EffectiveGCManagementType(meta.Config)
-	malformed := present && mode != keyspace.UnifiedGC && mode != keyspace.KeyspaceLevelGC
-	if !malformed && effective == keyspace.KeyspaceLevelGC {
+func (d *gcConfigLoadDiagnostics) observe(meta *keyspacepb.KeyspaceMeta, effective string) {
+	if d == nil || effective == keyspace.KeyspaceLevelGC || meta.GetId() == constant.NullKeyspaceID {
 		return
 	}
 	d.mu.Lock()
@@ -63,9 +57,10 @@ func (d *gcConfigLoadDiagnostics) observe(meta *keyspacepb.KeyspaceMeta) {
 	if d.count > len(d.details) {
 		return
 	}
+	mode, present := meta.Config[keyspace.GCManagementType]
 	legacyVersion, legacyPresent := meta.Config["safe_point_version"]
 	reason := "effective gc mode does not match kernel"
-	if malformed {
+	if present && mode != effective {
 		reason = "malformed gc_management_type; " + reason
 	}
 	d.details[d.count-1] = gcConfigDiagnostic{

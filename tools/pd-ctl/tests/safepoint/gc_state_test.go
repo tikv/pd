@@ -131,12 +131,9 @@ func TestGCState(t *testing.T) {
 
 	var unifiedKeyspaceID uint32
 	if !kerneltype.IsNextGen() {
-		unified, err := pdTests.CreateKeyspaceWithHistoricalGCMode(ctx, leaderServer.GetServer(),
+		unified, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
 			&keyspace.CreateKeyspaceRequest{
-				Name: "gc_state_unified",
-				Config: map[string]string{
-					keyspace.GCManagementType: keyspace.UnifiedGC,
-				},
+				Name:       "gc_state_unified",
 				CreateTime: time.Now().Unix(),
 			},
 		)

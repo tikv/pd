@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -172,20 +173,11 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 
 	// The bootstrap keyspace (DefaultKeyspaceID or SystemKeyspaceID) exists automatically after bootstrapping.
 	if opt.specifyInitialKeyspaces == nil {
-		// These fixtures model historical GC modes, including Classic independent GC.
-		var ks1Config map[string]string
-		if kerneltype.IsNextGen() {
-			ks1Config = map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC}
-		} else {
-			ks1Config = map[string]string{keyspace.GCManagementType: keyspace.UnifiedGC}
-		}
-
 		id := new(uint32)
 		*id = 1
-		ks1, err := createHistoricalGCKeyspaceByID(t, s, keyspaceManager, &keyspace.CreateKeyspaceByIDRequest{
+		ks1, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
 			ID:         id,
 			Name:       "ks1",
-			Config:     ks1Config,
 			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
@@ -202,20 +194,18 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.Equal(uint32(2), ks2.GetId())
 
 		*id = 3
-		ks3, err := createHistoricalGCKeyspaceByID(t, s, keyspaceManager, &keyspace.CreateKeyspaceByIDRequest{
+		ks3, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
 			ID:         id,
 			Name:       "ks3",
-			Config:     map[string]string{},
 			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
 		re.Equal(uint32(3), ks3.GetId())
 
 		*id = 4
-		ks4, err := createHistoricalGCKeyspaceByID(t, s, keyspaceManager, &keyspace.CreateKeyspaceByIDRequest{
+		ks4, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
 			ID:         id,
 			Name:       "ks4",
-			Config:     map[string]string{},
 			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
@@ -247,12 +237,9 @@ func createHistoricalGCKeyspaceByID(t testing.TB, storage endpoint.KeyspaceStora
 	t.Helper()
 	original := req.Config
 	requestCopy := *req
-	requestCopy.Config = make(map[string]string, len(original))
-	for k, v := range original {
-		if k != keyspace.GCManagementType && k != "safe_point_version" {
-			requestCopy.Config[k] = v
-		}
-	}
+	requestCopy.Config = maps.Clone(original)
+	delete(requestCopy.Config, keyspace.GCManagementType)
+	delete(requestCopy.Config, "safe_point_version")
 	meta, err := manager.CreateKeyspaceByID(&requestCopy)
 	if err != nil {
 		return nil, err
@@ -266,8 +253,8 @@ func createHistoricalGCKeyspaceByID(t testing.TB, storage endpoint.KeyspaceStora
 		}
 		meta.Config["safe_point_version"] = legacy
 	}
-	persistHistoricalGCKeyspace(t, storage, meta)
-	return meta, nil
+	err = storage.RunInTxn(t.Context(), func(txn kv.Txn) error { return storage.SaveKeyspaceMeta(txn, meta) })
+	return meta, err
 }
 
 // persistHistoricalGCKeyspace models metadata written before GC mode validation.
