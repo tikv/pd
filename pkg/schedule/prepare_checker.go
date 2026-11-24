@@ -48,7 +48,6 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		return true
 	}
 	if time.Since(checker.start) > CollectTimeout {
-		c.UpdateAllStoreStatus()
 		checker.prepared = true
 		return true
 	}
@@ -68,17 +67,21 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	if !areStoreRegionsCollected(c, 1) {
 		return false
 	}
-	// Scan for missing leaders and stale subtrees only after the cheaper count
-	// checks pass. Synced metadata can be complete without all leaders known.
+	// Synced metadata can be complete while some leaders are still unknown.
 	if !c.IsRegionLeaderPrepared() {
 		return false
 	}
-	// Store heartbeats can reveal more Regions while the snapshot is scanned.
-	if !areStoreRegionsCollected(c, 1) {
-		return false
+	// Wait for the background refresher to publish the collected Region and
+	// leader counts. Size and flow updates can continue during preparation.
+	for _, store := range c.GetStores() {
+		if store.IsRemoved() {
+			continue
+		}
+		leaders, regions, _, _, _, _, _ := c.GetStoreStats(store.GetID())
+		if store.GetLeaderCount() != leaders || store.GetRegionCount() != regions {
+			return false
+		}
 	}
-	// Schedulers score StoreInfo snapshots rather than the Region subtrees.
-	c.UpdateAllStoreStatus()
 	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionCount))
 	checker.prepared = true
 	return true

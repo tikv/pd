@@ -4716,6 +4716,7 @@ func TestShouldRun(t *testing.T) {
 		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
 		re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), nr))
+		tc.UpdateAllStoreStatus()
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
@@ -4760,6 +4761,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
 		re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), nr))
+		tc.UpdateAllStoreStatus()
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
@@ -5039,6 +5041,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(newOpt.Persist(storage))
 	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 
+	tc.UpdateAllStoreStatus()
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	controller = co.GetSchedulersController()
@@ -5134,6 +5137,7 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(newOpt.Reload(tc.storage))
 	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.UpdateAllStoreStatus()
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	re.Empty(controller.GetSchedulerNames())
@@ -5174,6 +5178,7 @@ func TestRestart(t *testing.T) {
 	co.GetWaitGroup().Wait()
 
 	// Recreate coordinator then add another replica on store 3.
+	tc.UpdateAllStoreStatus()
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	re.NoError(dispatchHeartbeat(co, region, stream))
@@ -5637,6 +5642,7 @@ func TestCheckStoresWithPartialRegionCollection(t *testing.T) {
 					re.Equal(100, cluster.GetStoreRegionCount(1))
 					re.Equal(tc.collected, cluster.GetNotFromStorageRegionsCntByStore(1))
 					schedulerPrepared := tc.schedulerPrepared || tc.collected == 100
+					cluster.UpdateAllStoreStatus()
 					re.Equal(schedulerPrepared, cluster.coordinator.ShouldRun())
 					re.Less(cluster.GetStore(2).GetUptime(), opt.GetMaxStorePreparingTime())
 					cluster.checkStores()
