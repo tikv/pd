@@ -79,6 +79,8 @@ type Manager struct {
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
+	// A new or updated target can require a check even when store conditions are unchanged.
+	groupAvailabilityCheckPending bool
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -178,6 +180,9 @@ func (m *Manager) initGroupLocked(group *Group) {
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	if group.LeaderStoreID != 0 && len(group.VoterStoreIDs) > 0 {
+		m.groupAvailabilityCheckPending = true
+	}
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -229,6 +234,11 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 	groupInfo.SetAvailability(groupAvailable)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
+	groupInfo.availabilityChecked = true
+	if len(m.unavailableStores) > 0 && calcGroupAvailability(m.unavailableStores, leaderStoreID, voterStoreIDs) > groupAvailable {
+		groupInfo.availabilityChecked = false
+		m.groupAvailabilityCheckPending = true
+	}
 	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil
@@ -574,6 +584,8 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		}
 
 		if changed {
+			groupInfo.availabilityChecked = false
+			m.groupAvailabilityCheckPending = true
 			m.resetCountLocked(groupInfo)
 		}
 	}

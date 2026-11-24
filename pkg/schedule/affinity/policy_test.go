@@ -401,6 +401,36 @@ func TestStoreHealthCheck(t *testing.T) {
 	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
 }
 
+func TestAvailabilityCheckWithUnchangedTombstone(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	now := time.Now()
+	for _, id := range []uint64{1, 3} {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, NodeState: metapb.NodeState_Serving},
+			core.SetLastHeartbeatTS(now)))
+	}
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 2}, core.SetStoreState(metapb.StoreState_Tombstone)))
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	// Cache the tombstone before any groups are synced.
+	manager.checkGroupsAvailability()
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3}})
+	manager.checkGroupsAvailability()
+	re.True(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
+	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
+
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}})
+	manager.checkGroupsAvailability()
+	re.True(manager.GetAffinityGroupState("g").RegularSchedulingAllowed)
+	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
+}
+
 func TestAvailabilityCheckWithoutGroups(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()

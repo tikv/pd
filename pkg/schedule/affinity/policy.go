@@ -206,19 +206,8 @@ func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 }
 
 func (m *Manager) applyStoreConditions(unavailableStores map[uint64]storeCondition) bool {
-	// Newly synced groups may target stores that are already unavailable.
 	m.RLock()
-	needUpdate := !maps.Equal(unavailableStores, m.unavailableStores)
-	if !needUpdate && len(unavailableStores) > 0 {
-		for _, groupInfo := range m.groups {
-			availability := groupInfo.GetAvailability()
-			if availability != groupExpired &&
-				calcGroupAvailability(unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs) > availability {
-				needUpdate = true
-				break
-			}
-		}
-	}
+	needUpdate := m.groupAvailabilityCheckPending || !maps.Equal(unavailableStores, m.unavailableStores)
 	m.RUnlock()
 	if !needUpdate {
 		return false
@@ -227,17 +216,28 @@ func (m *Manager) applyStoreConditions(unavailableStores map[uint64]storeConditi
 	// Group targets may have changed since the read lock was released.
 	m.Lock()
 	isUnavailableStoresChanged := !maps.Equal(unavailableStores, m.unavailableStores)
+	if !isUnavailableStoresChanged && !m.groupAvailabilityCheckPending {
+		m.Unlock()
+		return false
+	}
 	m.unavailableStores = unavailableStores
+	m.groupAvailabilityCheckPending = false
 	groupChanged := false
+	groupInvalidated := false
 	availableGroupCount := 0
 	unavailableGroupCount := 0
 	for _, groupInfo := range m.groups {
 		availability := groupInfo.GetAvailability()
 		if availability != groupExpired {
+			wasChecked := groupInfo.availabilityChecked
+			groupInfo.availabilityChecked = true
 			newAvailability := calcGroupAvailability(unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
-			// Restore degraded groups only when store conditions change.
-			if (isUnavailableStoresChanged && availability != newAvailability) || newAvailability > availability {
+			// Promote a degraded group only on its first check for this target or when store conditions change.
+			if ((!wasChecked || isUnavailableStoresChanged) && availability != newAvailability) || newAvailability > availability {
 				m.updateGroupAvailabilityLocked(groupInfo.ID, newAvailability)
+				if newAvailability > availability {
+					groupInvalidated = true
+				}
 				availability = newAvailability
 				groupChanged = true
 			}
@@ -251,7 +251,7 @@ func (m *Manager) applyStoreConditions(unavailableStores map[uint64]storeConditi
 	m.Unlock()
 
 	applied := isUnavailableStoresChanged || groupChanged
-	if applied && len(unavailableStores) > 0 && availableGroupCount+unavailableGroupCount > 0 {
+	if (isUnavailableStoresChanged || groupInvalidated) && len(unavailableStores) > 0 && availableGroupCount+unavailableGroupCount > 0 {
 		log.Warn("affinity groups invalidated due to unavailable stores",
 			zap.Int("unavailable-store-count", len(unavailableStores)),
 			zap.Int("unavailable-group-count", unavailableGroupCount),
