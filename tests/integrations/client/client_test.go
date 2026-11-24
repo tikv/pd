@@ -1283,6 +1283,7 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	re := suite.Require()
 	cluster := suite.srv.GetRaftCluster()
 	re.NotNil(cluster)
+	storeCount := len(stores)
 	// Use stores[3]: this test destructively transitions it through
 	// offline -> tombstone, and stores[0..2] are the ones other tests in
 	// this suite heartbeat regions through (peers[0..2]) and expect to
@@ -1303,8 +1304,7 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 
 	actualStores, err := suite.client.GetAllStores(context.Background())
 	re.NoError(err)
-	re.Len(actualStores, len(stores))
-	stores = actualStores
+	re.Len(actualStores, storeCount)
 
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId(), false)
@@ -1320,9 +1320,9 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 
 	// Should return offline stores.
 	contains := false
-	stores, err = suite.client.GetAllStores(context.Background())
+	actualStores, err = suite.client.GetAllStores(context.Background())
 	re.NoError(err)
-	for _, store := range stores {
+	for _, store := range actualStores {
 		if store.GetId() == offlineStore.GetId() {
 			contains = true
 			re.Equal(offlineStore, store)
@@ -1345,9 +1345,9 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	}
 	// Should return tombstone stores.
 	contains = false
-	stores, err = suite.client.GetAllStores(context.Background())
+	actualStores, err = suite.client.GetAllStores(context.Background())
 	re.NoError(err)
-	for _, store := range stores {
+	for _, store := range actualStores {
 		if store.GetId() == physicallyDestroyedStoreID {
 			contains = true
 			re.NotEqual(metapb.StoreState_Up, store.GetState())
@@ -1357,14 +1357,15 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	re.True(contains)
 
 	// Should not return tombstone stores.
-	stores, err = suite.client.GetAllStores(context.Background(), opt.WithExcludeTombstone())
+	// Bury the store explicitly so this check does not depend on the background job.
+	re.NoError(cluster.BuryStore(physicallyDestroyedStoreID, false))
+	actualStores, err = suite.client.GetAllStores(context.Background(), opt.WithExcludeTombstone())
 	re.NoError(err)
-	for _, store := range stores {
-		if store.GetId() == physicallyDestroyedStoreID {
-			re.Equal(metapb.StoreState_Offline, store.GetState())
-			re.True(store.PhysicallyDestroyed)
-		}
+	re.Len(actualStores, storeCount-1)
+	for _, store := range actualStores {
+		re.NotEqual(physicallyDestroyedStoreID, store.GetId())
 	}
+	re.Len(stores, storeCount)
 }
 
 func (suite *clientStatelessTestSuite) TestScatterRegion() {
