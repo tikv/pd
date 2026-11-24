@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -47,6 +49,11 @@ var (
 	defaultJobTimeout = 30 * time.Minute
 	reserveDuration   = 7 * 24 * time.Hour
 	reportInterval    = 10 * time.Second
+)
+
+const (
+	minJobStatusRetryInterval = 100 * time.Millisecond
+	maxJobStatusRetryInterval = 5 * time.Second
 )
 
 type balanceRangeSchedulerHandler struct {
@@ -180,14 +187,24 @@ func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r 
 // because the scheduling service can't write the scheduler config to etcd by itself.
 func (handler *balanceRangeSchedulerHandler) updateJobStatus(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		JobID  *uint64 `json:"job-id"`
-		Status string  `json:"status"`
+		JobID  *uint64          `json:"job-id"`
+		Create *json.RawMessage `json:"create"`
+		Status string           `json:"status"`
 	}
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	if input.JobID == nil {
 		handler.rd.JSON(w, http.StatusBadRequest, "job-id is required")
+		return
+	}
+	if input.Create == nil {
+		handler.rd.JSON(w, http.StatusBadRequest, "create is required")
+		return
+	}
+	var create time.Time
+	if err := json.Unmarshal(*input.Create, &create); err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, "create must be an RFC3339 timestamp")
 		return
 	}
 	var status JobStatus
@@ -200,7 +217,7 @@ func (handler *balanceRangeSchedulerHandler) updateJobStatus(w http.ResponseWrit
 		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("status:%s must be running or finished", input.Status))
 		return
 	}
-	err := handler.config.updateJobStatus(*input.JobID, status)
+	err := handler.config.updateJobStatus(*input.JobID, create, status)
 	switch {
 	case err == nil:
 		handler.rd.JSON(w, http.StatusOK, nil)
@@ -215,7 +232,7 @@ func (handler *balanceRangeSchedulerHandler) updateJobStatus(w http.ResponseWrit
 // balanceRangeJobStatusUpdater persists the job status somewhere else instead of the local storage.
 // It's implemented by the cluster of the scheduling service, whose storage is only in memory.
 type balanceRangeJobStatusUpdater interface {
-	UpdateBalanceRangeJobStatus(jobID uint64, status string) error
+	UpdateBalanceRangeJobStatus(jobID uint64, create time.Time, status string) error
 }
 
 var errJobStatusConflict = errors.New("job status conflict")
@@ -227,12 +244,23 @@ var ErrBalanceRangeJobStatusUnsupported = errors.New("updating balance range job
 type balanceRangeSchedulerConfig struct {
 	schedulerConfig
 	syncutil.Mutex
-	jobs []*balanceRangeSchedulerJob
+	storage endpoint.ConfigStorage
+	jobs    []*balanceRangeSchedulerJob
+}
+
+func (conf *balanceRangeSchedulerConfig) init(name string, storage endpoint.ConfigStorage, data any) {
+	conf.schedulerConfig.init(name, storage, data)
+	conf.storage = storage
 }
 
 func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) error {
 	conf.Lock()
 	defer conf.Unlock()
+	// In MCS mode an idle queue produces no status updates to trigger GC.
+	// Remove expired history before persisting another job and growing the config.
+	if err := conf.gcLocked(); err != nil {
+		return err
+	}
 	for _, c := range conf.jobs {
 		if c.isComplete() {
 			continue
@@ -274,7 +302,7 @@ func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
 	return errs.ErrScheduleConfigNotExist.FastGenByArgs(jobID)
 }
 
-func (conf *balanceRangeSchedulerConfig) updateJobStatus(jobID uint64, status JobStatus) error {
+func (conf *balanceRangeSchedulerConfig) updateJobStatus(jobID uint64, create time.Time, status JobStatus) error {
 	conf.Lock()
 	defer conf.Unlock()
 	if err := conf.gcLocked(); err != nil {
@@ -284,12 +312,16 @@ func (conf *balanceRangeSchedulerConfig) updateJobStatus(jobID uint64, status Jo
 		if job.JobID != jobID {
 			continue
 		}
+		// Scheduler recreation can reuse a job ID. Fence delayed requests from
+		// the previous scheduler before accepting even an idempotent transition.
+		if !job.Create.Equal(create) {
+			return errors.Annotatef(errJobStatusConflict, "the job:%d has a different creation time", jobID)
+		}
 		// The request may be retried after the status has been persisted.
 		if job.Status == status {
 			return nil
 		}
-		// The status may skip running, e.g. the job is started by the scheduling service when the
-		// PD doesn't support this API, but it can never move backward.
+		// The status can never move backward.
 		if status.rank() <= job.Status.rank() {
 			return errors.Annotatef(errJobStatusConflict, "the job:%d is %s, can't be %s", jobID, job.Status.String(), status.String())
 		}
@@ -366,6 +398,11 @@ func (conf *balanceRangeSchedulerConfig) finishLocked(index int, updater balance
 
 // setStatusLocked persists the status by the updater if it's not nil, otherwise by the local storage.
 func (conf *balanceRangeSchedulerConfig) setStatusLocked(job *balanceRangeSchedulerJob, status JobStatus, updater balanceRangeJobStatusUpdater) error {
+	if updater != nil {
+		// Only the config watcher can update jobs in the scheduling service. A successful
+		// request acknowledges persistence by PD, not publication into this cache.
+		return updater.UpdateBalanceRangeJobStatus(job.JobID, job.Create, status.String())
+	}
 	updateFn := func() {
 		now := time.Now()
 		switch status {
@@ -379,57 +416,18 @@ func (conf *balanceRangeSchedulerConfig) setStatusLocked(job *balanceRangeSchedu
 		}
 		job.Status = status
 	}
-	if updater != nil {
-		err := updater.UpdateBalanceRangeJobStatus(job.JobID, status.String())
-		if err == nil {
-			// The persisted time will be synced back by the config watcher.
-			updateFn()
-			return nil
-		}
-		if errors.Cause(err) != ErrBalanceRangeJobStatusUnsupported {
-			return err
-		}
-		// Fall back to the local storage, the status will be persisted by the PD after it's upgraded.
-		log.Warn("the PD doesn't support updating balance range job status, fall back to the local storage",
-			zap.Uint64("job-id", job.JobID), zap.String("status", status.String()))
-	}
 	return conf.persistLocked(updateFn)
 }
 
-// mergeLocked merges the jobs loaded from the storage into the current jobs. It keeps the
-// identity of the existing jobs and never moves the status backward, because the loaded
-// jobs may be older than the current ones, e.g. the watcher replays a stale event.
+// mergeLocked applies the complete snapshot published by the config watcher. Job IDs
+// can be reused after scheduler recreation, so cached jobs must not override this snapshot.
 func (conf *balanceRangeSchedulerConfig) mergeLocked(loaded []*balanceRangeSchedulerJob) {
-	current := make(map[uint64]*balanceRangeSchedulerJob, len(conf.jobs))
-	for _, job := range conf.jobs {
-		current[job.JobID] = job
-	}
-	jobs := make([]*balanceRangeSchedulerJob, 0, len(loaded))
-	for _, job := range loaded {
-		old, ok := current[job.JobID]
-		if !ok {
-			jobs = append(jobs, job)
-			continue
-		}
-		if job.Status.rank() >= old.Status.rank() {
-			old.Status = job.Status
-			old.Start = job.Start
-			old.Finish = job.Finish
-		}
-		jobs = append(jobs, old)
-	}
-	conf.jobs = jobs
+	conf.jobs = loaded
 }
 
-// containsLocked checks whether the job is still in the jobs. The identity of the jobs is kept
-// by mergeLocked, so a removed or replaced job can be found by the pointer.
+// containsLocked checks whether the job still belongs to the current snapshot.
 func (conf *balanceRangeSchedulerConfig) containsLocked(job *balanceRangeSchedulerJob) bool {
-	for _, j := range conf.jobs {
-		if j == job {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(conf.jobs, job)
 }
 
 func (conf *balanceRangeSchedulerConfig) peekLocked() (int, *balanceRangeSchedulerJob) {
@@ -516,9 +514,16 @@ func (s *balanceRangeScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
-	if err := s.conf.load(&jobs); err != nil {
+	data, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
 		return err
+	}
+	var jobs []*balanceRangeSchedulerJob
+	// A deleted config is an empty snapshot, not a JSON decoding error.
+	if len(data) != 0 {
+		if err := DecodeConfig([]byte(data), &jobs); err != nil {
+			return err
+		}
 	}
 	s.conf.mergeLocked(jobs)
 	return nil
@@ -538,7 +543,13 @@ type balanceRangeScheduler struct {
 	expectScoreMap map[uint64]float64
 	job            *balanceRangeSchedulerJob
 	// rangeJob is the job whose key ranges have been appended to the key range manager.
-	rangeJob       *balanceRangeSchedulerJob
+	rangeJob *balanceRangeSchedulerJob
+	// requestedJob is the snapshot for which PD acknowledged a status update.
+	// It only suppresses duplicate requests while waiting for the next watch snapshot.
+	requestedJob   *balanceRangeSchedulerJob
+	retryJob       *balanceRangeSchedulerJob
+	retryInterval  time.Duration
+	nextRetry      time.Time
 	solver         *solver
 	lastReportTime time.Time
 }
@@ -613,12 +624,31 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 		balanceRangeNoJobCounter.Inc()
 		return false
 	}
+	if updater != nil && s.requestedJob == job {
+		return false
+	}
+	if s.retryJob != job {
+		s.retryJob = nil
+		s.retryInterval = 0
+		s.nextRetry = time.Time{}
+	}
+	if updater != nil && time.Now().Before(s.nextRetry) {
+		return false
+	}
 
 	if job.Status == pending {
 		if err := s.conf.beginLocked(index, updater); err != nil {
+			if updater != nil {
+				s.deferJobStatusRetry(job, time.Now())
+			}
 			balancePersistFailedCounter.Inc()
 			log.Warn("failed to begin balance key range job", zap.Uint64("job-id", job.JobID), errs.ZapError(err))
 			return false
+		}
+		if updater != nil {
+			s.retryInterval = 0
+			s.requestedJob = job
+			return false // Wait for the watcher to publish running and its start time.
 		}
 	}
 	// The job may be running before this scheduler is created, e.g. the primary of the scheduling service changes.
@@ -631,12 +661,20 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 	}
 	if job.shouldFinished() {
 		if err := s.conf.finishLocked(index, updater); err != nil {
+			if updater != nil {
+				s.deferJobStatusRetry(job, time.Now())
+			}
 			balancePersistFailedCounter.Inc()
 			return false
 		}
-		s.cleanJobStatus(cluster, job)
 		balanceRangeExpiredCounter.Inc()
 		log.Info("balance key range job finished due to timeout", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+		if updater != nil {
+			s.retryInterval = 0
+			s.requestedJob = job
+			return false // Keep the reservation until completion is observed by the watcher.
+		}
+		s.cleanJobStatus(cluster, job)
 		return false
 	}
 
@@ -648,15 +686,35 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 	}
 	if s.isBalanced() {
 		if err = s.conf.finishLocked(index, updater); err != nil {
+			if updater != nil {
+				s.deferJobStatusRetry(job, time.Now())
+			}
 			balancePersistFailedCounter.Inc()
 			return false
 		}
-		s.cleanJobStatus(cluster, job)
 		balanceRangeBalancedCounter.Inc()
 		log.Info("balance key range job finished due to balanced", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+		if updater != nil {
+			s.retryInterval = 0
+			s.requestedJob = job
+			return false
+		}
+		s.cleanJobStatus(cluster, job)
 		return false
 	}
 	return true
+}
+
+// deferJobStatusRetry backs off HTTP failures without changing the watched jobs
+// or sleeping in the scheduling loop, so watch-driven cleanup can still proceed.
+func (s *balanceRangeScheduler) deferJobStatusRetry(job *balanceRangeSchedulerJob, now time.Time) {
+	s.retryJob = job
+	if s.retryInterval == 0 {
+		s.retryInterval = minJobStatusRetryInterval
+	} else {
+		s.retryInterval = min(2*s.retryInterval, maxJobStatusRetryInterval)
+	}
+	s.nextRetry = now.Add(s.retryInterval)
 }
 
 func (s *balanceRangeScheduler) cleanJobStatus(cluster sche.SchedulerCluster, job *balanceRangeSchedulerJob) {
@@ -711,6 +769,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 		filter.NewRegionDownFilter(),
 		filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium),
 		filter.NewRegionPendingFilter(),
+		filter.NewAffinityFilter(cluster),
 		replicaFilter,
 	}
 

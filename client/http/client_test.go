@@ -113,8 +113,7 @@ func TestWithCallerID(t *testing.T) {
 
 func TestWithBackoffer(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	c := newClientWithMockServiceDiscovery("test-with-backoffer", []string{"http://127.0.0.1"})
 	defer c.Close()
 
@@ -139,8 +138,7 @@ func TestWithBackoffer(t *testing.T) {
 
 func TestWithTargetURL(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	c := newClientWithMockServiceDiscovery("test-with-target-url", []string{"http://127.0.0.1", "http://127.0.0.2", "http://127.0.0.3"})
 	defer c.Close()
 

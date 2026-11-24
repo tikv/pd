@@ -30,9 +30,13 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -55,6 +59,8 @@ type Watcher struct {
 	configWatcher          *etcdutil.LoopWatcher
 	ttlConfigWatcher       *etcdutil.LoopWatcher
 	schedulerConfigWatcher *etcdutil.LoopWatcher
+
+	basicCluster *core.BasicCluster
 
 	// Some data, like the global schedule config, should be loaded into `PersistConfig`.
 	*PersistConfig
@@ -98,6 +104,7 @@ func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
 	persistConfig *PersistConfig,
+	basicCluster *core.BasicCluster,
 	storage storage.Storage,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
@@ -108,6 +115,7 @@ func NewWatcher(
 		schedulerConfigPathPrefix: keypath.SchedulerConfigPathPrefix(),
 		etcdClient:                etcdClient,
 		PersistConfig:             persistConfig,
+		basicCluster:              basicCluster,
 		storage:                   storage,
 	}
 	err := cw.initializeConfigWatcher()
@@ -157,6 +165,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
 		cw.SetStoreConfig(&cfg.Store)
+		cw.refreshStoreRateLimits(&cfg.Schedule)
 		return nil
 	}
 	deleteFn := func(*mvccpb.KeyValue) error {
@@ -176,6 +185,23 @@ func (cw *Watcher) initializeConfigWatcher() error {
 	cw.configWatcher.SetReloadOnCompaction()
 	cw.configWatcher.StartWatchLoop()
 	return cw.configWatcher.WaitLoad()
+}
+
+func (cw *Watcher) refreshStoreRateLimits(cfg *sc.ScheduleConfig) {
+	for _, store := range cw.basicCluster.GetStores() {
+		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+		if !ok {
+			continue
+		}
+		// Read without recreating missing entries, including tombstoned stores.
+		storeLimit, ok := cfg.StoreLimit[store.GetID()]
+		if !ok {
+			storeLimit = cfg.GetDefaultStoreLimit()
+		}
+		limit.Reset(storeLimit.AddPeer/operator.StoreBalanceBaseTime, storelimit.AddPeer)
+		limit.Reset(storeLimit.RemovePeer/operator.StoreBalanceBaseTime, storelimit.RemovePeer)
+		limit.Reset(storeLimit.TransferLeaderIn/operator.StoreBalanceBaseTime, storelimit.TransferLeaderIn)
+	}
 }
 
 func (cw *Watcher) initializeTTLConfigWatcher() error {
@@ -242,9 +268,21 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Info("remove scheduler config", zap.String("key", key))
-		return cw.storage.RemoveSchedulerConfig(
-			strings.TrimPrefix(key, cw.schedulerConfigPathPrefix),
-		)
+		name := strings.TrimPrefix(key, cw.schedulerConfigPathPrefix)
+		if err := cw.storage.RemoveSchedulerConfig(name); err != nil {
+			return err
+		}
+		// Clear running jobs even if the scheduler-list watcher has not removed the
+		// scheduler yet. Other schedulers do not support reloading a deleted config.
+		if name == types.BalanceRangeScheduler.String() {
+			if sc := cw.getSchedulersController(); sc != nil {
+				err := sc.ReloadSchedulerConfig(name)
+				if !errors.Is(err, errs.ErrSchedulerNotFound) {
+					return err
+				}
+			}
+		}
+		return nil
 	}
 	cw.schedulerConfigWatcher = etcdutil.NewLoopWatcher(
 		cw.ctx, &cw.wg,

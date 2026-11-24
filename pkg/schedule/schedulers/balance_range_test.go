@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -259,6 +260,48 @@ func TestTIKVEngine(t *testing.T) {
 	checkOperator(re, op, "3.00", "0.00")
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
 	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
+}
+
+func TestSkipAffinityRegions(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// store-1: 3 leader regions
+	// store-2: 2 leader regions
+	// store-3: 0 leader regions
+	for i := 1; i <= 3; i++ {
+		tc.AddLeaderStore(uint64(i), 0)
+	}
+	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(2, "110", "120", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(3, "120", "140", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
+	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
+	re.NoError(err)
+
+	// All regions in the range belong to an affinity group, so none of them should be scheduled.
+	affinityManager := tc.GetAffinityManager()
+	groupID := "test_group"
+	re.NoError(affinityManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID:   groupID,
+		KeyRanges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "300")},
+	}}))
+	_, err = affinityManager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.True(scheduler.IsScheduleAllowed(tc))
+	ops, _ := scheduler.Schedule(tc, true)
+	re.Empty(ops)
+
+	// The regions can be scheduled again after the affinity group is removed.
+	re.NoError(affinityManager.DeleteAffinityGroups([]string{groupID}, true))
+	re.True(scheduler.IsScheduleAllowed(tc))
+	ops, _ = scheduler.Schedule(tc, true)
+	re.Len(ops, 1)
+	re.Contains(ops[0].Brief(), "transfer leader: store 1 to 3")
 }
 
 func TestLocationLabel(t *testing.T) {
@@ -493,10 +536,12 @@ func TestJobGC(t *testing.T) {
 	re.Len(conf.jobs, 1)
 
 	// the job id never goes backward after gc
+	conf.jobs[0].Finish = &now
 	re.NoError(conf.addJob(&balanceRangeSchedulerJob{Alias: "job-1"}))
 	re.NoError(conf.addJob(&balanceRangeSchedulerJob{Alias: "job-2"}))
 	re.NoError(conf.deleteJob(1))
 	re.NoError(conf.deleteJob(2))
+	conf.jobs[0].Finish = &expiredTime
 	conf.jobs[1].Finish = &expiredTime
 	conf.jobs[2].Finish = &expiredTime
 	re.NoError(conf.gcLocked())
@@ -505,6 +550,32 @@ func TestJobGC(t *testing.T) {
 	newJob := &balanceRangeSchedulerJob{Alias: "job-3"}
 	re.NoError(conf.addJob(newJob))
 	re.Equal(uint64(3), newJob.JobID)
+}
+
+func TestAddBalanceRangeJobCollectsExpiredHistory(t *testing.T) {
+	re := require.New(t)
+	expired := time.Now().Add(-reserveDuration - time.Hour)
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs: []*balanceRangeSchedulerJob{
+			{JobID: 10, Alias: "old-10", Status: finished, Finish: &expired},
+			{JobID: 11, Alias: "old-11", Status: cancelled, Finish: &expired},
+			{JobID: 12, Alias: "old-12", Status: finished, Finish: &expired},
+		},
+	}
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	re.NoError(conf.save())
+	job := &balanceRangeSchedulerJob{Alias: "new"}
+	re.NoError(conf.addJob(job))
+	re.Equal(uint64(13), job.JobID)
+	re.Len(conf.jobs, 2)
+	re.Equal(uint64(12), conf.jobs[0].JobID)
+	var persisted []*balanceRangeSchedulerJob
+	re.NoError(conf.load(&persisted))
+	re.Len(persisted, 2)
+	re.Equal(uint64(12), persisted[0].JobID)
+	re.Equal(uint64(13), persisted[1].JobID)
+	re.Equal(pending, persisted[1].Status)
 }
 
 func TestPersistFail(t *testing.T) {
@@ -549,6 +620,11 @@ func TestPersistFail(t *testing.T) {
 	conf.jobs = append(conf.jobs, &balanceRangeSchedulerJob{JobID: 2, Status: pending})
 	re.ErrorContains(conf.gcLocked(), errMsg)
 	re.Len(conf.jobs, 2)
+	// GC failure must prevent adding a new job and leave the queue unchanged.
+	re.ErrorContains(conf.addJob(&balanceRangeSchedulerJob{Alias: "after-gc"}), errMsg)
+	re.Len(conf.jobs, 2)
+	re.Equal(uint64(1), conf.jobs[0].JobID)
+	re.Equal(uint64(2), conf.jobs[1].JobID)
 }
 
 func TestAddBalanceRangeJobWithInvalidFieldType(t *testing.T) {
@@ -629,11 +705,13 @@ func TestAddBalanceRangeJobWithInvalidFieldType(t *testing.T) {
 
 func TestBalanceRangeUpdateJobStatus(t *testing.T) {
 	re := require.New(t)
+	create := time.Date(2026, time.November, 11, 1, 2, 3, 123456789, time.UTC)
 	conf := &balanceRangeSchedulerConfig{
 		schedulerConfig: &baseSchedulerConfig{},
 		jobs: []*balanceRangeSchedulerJob{{
 			JobID:  1,
 			Alias:  "test",
+			Create: create,
 			Rule:   core.LeaderScatter,
 			Engine: core.EngineTiKV,
 			Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("a", "b")},
@@ -655,41 +733,60 @@ func TestBalanceRangeUpdateJobStatus(t *testing.T) {
 		handler.ServeHTTP(w, req)
 		return w.Code
 	}
+	putStatus := func(jobID uint64, status string, create time.Time) int {
+		body, err := json.Marshal(map[string]any{"job-id": jobID, "status": status, "create": create})
+		re.NoError(err)
+		return put(string(body))
+	}
 
-	re.Equal(http.StatusOK, put(`{"job-id":1,"status":"running"}`))
+	re.Equal(http.StatusBadRequest, put(`{"job-id":1,"status":"running"}`))
+	re.Equal(http.StatusBadRequest, put(`{"job-id":1,"create":null,"status":"running"}`))
+	re.Equal(http.StatusBadRequest, put(`{"job-id":1,"create":"invalid","status":"running"}`))
+	re.Equal(pending, conf.jobs[0].Status)
+	re.Equal(http.StatusOK, putStatus(1, "running", create))
 	re.Equal(running, conf.jobs[0].Status)
 	re.Equal(running, loadStatus())
 	start := conf.jobs[0].Start
 	re.NotNil(start)
 	// retry is idempotent
-	re.Equal(http.StatusOK, put(`{"job-id":1,"status":"running"}`))
+	re.Equal(http.StatusOK, putStatus(1, "running", create))
+	re.Same(start, conf.jobs[0].Start)
+	// Identity is checked even when the requested status is already current.
+	re.Equal(http.StatusConflict, putStatus(1, "running", create.Add(-time.Nanosecond)))
 	re.Same(start, conf.jobs[0].Start)
 
-	re.Equal(http.StatusOK, put(`{"job-id":1,"status":"finished"}`))
+	re.Equal(http.StatusOK, putStatus(1, "finished", create))
 	re.Equal(finished, conf.jobs[0].Status)
 	re.Equal(finished, loadStatus())
 	re.NotNil(conf.jobs[0].Finish)
 
 	// the status can't move backward
-	re.Equal(http.StatusConflict, put(`{"job-id":1,"status":"running"}`))
-	re.Equal(errJobStatusConflict, errors.Cause(conf.updateJobStatus(1, running)))
+	re.Equal(http.StatusConflict, putStatus(1, "running", create))
+	re.Equal(errJobStatusConflict, errors.Cause(conf.updateJobStatus(1, create, running)))
 	re.Equal(finished, loadStatus())
 	// a cancelled job can't be finished
 	conf.jobs[0].Status = cancelled
-	re.Equal(http.StatusConflict, put(`{"job-id":1,"status":"finished"}`))
+	re.Equal(http.StatusConflict, putStatus(1, "finished", create))
 
 	// 404 is reserved for the PD that doesn't support this API
-	re.Equal(http.StatusConflict, put(`{"job-id":2,"status":"running"}`))
-	re.True(errs.ErrScheduleConfigNotExist.Equal(conf.updateJobStatus(2, running)))
+	re.Equal(http.StatusConflict, putStatus(2, "running", create))
+	re.True(errs.ErrScheduleConfigNotExist.Equal(conf.updateJobStatus(2, create, running)))
 	re.Equal(http.StatusBadRequest, put(`{"status":"running"}`))
-	re.Equal(http.StatusBadRequest, put(`{"job-id":1,"status":"cancelled"}`))
-	re.Equal(http.StatusBadRequest, put(`{"job-id":1,"status":"pending"}`))
+	re.Equal(http.StatusBadRequest, putStatus(1, "cancelled", create))
+	re.Equal(http.StatusBadRequest, putStatus(1, "pending", create))
 
-	// the job may be started when the PD doesn't support this API, so it can be finished from pending
+	// A delayed completion must not finish a recreated job with the same ID and alias.
 	conf.jobs[0].Status = pending
 	conf.jobs[0].Start = nil
 	conf.jobs[0].Finish = nil
-	re.Equal(http.StatusOK, put(`{"job-id":1,"status":"finished"}`))
+	conf.jobs[0].Create = create.Add(time.Nanosecond)
+	re.NoError(conf.save())
+	re.Equal(http.StatusConflict, putStatus(1, "finished", create))
+	re.Equal(pending, loadStatus())
+	re.Nil(conf.jobs[0].Start)
+	re.Nil(conf.jobs[0].Finish)
+	// Matching creation times remain valid after a JSON round trip and in another timezone.
+	re.Equal(http.StatusOK, putStatus(1, "finished", conf.jobs[0].Create.In(time.FixedZone("offset", 3600))))
 	re.Equal(finished, conf.jobs[0].Status)
 	re.Equal(finished, loadStatus())
 	re.NotNil(conf.jobs[0].Start)
@@ -708,7 +805,7 @@ func TestBalanceRangeMergeJobs(t *testing.T) {
 		jobs: []*balanceRangeSchedulerJob{finished3, running0, pending1, running2},
 	}
 	conf.mergeLocked([]*balanceRangeSchedulerJob{
-		// stale status is ignored
+		// the watched snapshot is authoritative, even if its status ranks lower
 		{JobID: 0, Status: pending},
 		// newer status is applied
 		{JobID: 1, Status: running, Start: &later},
@@ -718,32 +815,75 @@ func TestBalanceRangeMergeJobs(t *testing.T) {
 		{JobID: 4, Status: pending},
 	})
 	re.Len(conf.jobs, 4)
-	// the identity of the existing jobs is kept
-	re.Same(running0, conf.jobs[0])
+	re.NotSame(running0, conf.jobs[0])
+	re.Equal(pending, conf.jobs[0].Status)
+	re.Equal(running, conf.jobs[1].Status)
+	re.Same(&later, conf.jobs[1].Start)
+	re.Equal(cancelled, conf.jobs[2].Status)
+	re.Same(&later, conf.jobs[2].Finish)
+	// Publishing a snapshot never mutates jobs held by a running scheduling round.
 	re.Equal(running, running0.Status)
-	re.Same(&now, running0.Start)
-	re.Same(pending1, conf.jobs[1])
-	re.Equal(running, pending1.Status)
-	re.Same(&later, pending1.Start)
-	re.Same(running2, conf.jobs[2])
-	re.Equal(cancelled, running2.Status)
-	re.Same(&later, running2.Finish)
+	re.Equal(pending, pending1.Status)
+	re.Equal(running, running2.Status)
 	re.Equal(uint64(4), conf.jobs[3].JobID)
 	re.Equal(pending, conf.jobs[3].Status)
 }
 
 type mockJobStatusUpdater struct {
 	*mockcluster.Cluster
-	err     error
-	updates []string
+	err      error
+	updates  []string
+	attempts int
 }
 
-func (m *mockJobStatusUpdater) UpdateBalanceRangeJobStatus(jobID uint64, status string) error {
+func (m *mockJobStatusUpdater) UpdateBalanceRangeJobStatus(jobID uint64, _ time.Time, status string) error {
+	m.attempts++
 	if m.err != nil {
 		return m.err
 	}
 	m.updates = append(m.updates, fmt.Sprintf("%d:%s", jobID, status))
 	return nil
+}
+
+func TestBalanceRangeJobStatusRetryBackoff(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	cluster := &mockJobStatusUpdater{Cluster: tc, err: errors.New("PD is unavailable")}
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
+	re.NoError(err)
+	sc := scheduler.(*balanceRangeScheduler)
+	for i := range 10 {
+		// Expire the previous deadline without sleeping.
+		sc.nextRetry = time.Time{}
+		re.False(sc.IsScheduleAllowed(cluster))
+		re.Equal(i+1, cluster.attempts)
+		expected := min(minJobStatusRetryInterval*time.Duration(1<<i), maxJobStatusRetryInterval)
+		re.Equal(expected, sc.retryInterval)
+		re.True(sc.nextRetry.After(time.Now()))
+		re.False(sc.IsScheduleAllowed(cluster))
+		re.Equal(i+1, cluster.attempts)
+		re.Equal(pending, sc.conf.jobs[0].Status)
+	}
+	// Recovery clears the failure budget but still waits for watch publication.
+	cluster.err = nil
+	sc.nextRetry = time.Time{}
+	re.False(sc.IsScheduleAllowed(cluster))
+	re.Zero(sc.retryInterval)
+	re.Equal(pending, sc.conf.jobs[0].Status)
+	// A new watch snapshot bypasses the old request/retirement deadline.
+	cluster.err = errors.New("PD is unavailable")
+	sc.conf.mergeLocked(sc.conf.cloneLocked())
+	re.False(sc.IsScheduleAllowed(cluster))
+	re.Equal(minJobStatusRetryInterval, sc.retryInterval)
+	// Watch-driven deletion and range cleanup must not wait for HTTP retry.
+	job := sc.conf.jobs[0]
+	tc.GetKeyRangeManager().Append(job.Ranges)
+	sc.rangeJob = job
+	sc.conf.mergeLocked(nil)
+	re.False(sc.IsScheduleAllowed(cluster))
+	re.True(tc.GetKeyRangeManager().IsEmpty())
 }
 
 func TestBalanceRangeJobStatusUpdater(t *testing.T) {
@@ -764,18 +904,35 @@ func TestBalanceRangeJobStatusUpdater(t *testing.T) {
 	re.True(km.IsEmpty())
 	re.Empty(cluster.updates)
 
-	// the status is persisted by the updater instead of the local storage
+	// A successful request does not change either cache before the watcher runs.
 	cluster.err = nil
-	sc.IsScheduleAllowed(cluster)
+	sc.nextRetry = time.Time{}
+	re.False(sc.IsScheduleAllowed(cluster))
 	re.Equal([]string{"0:running"}, cluster.updates)
-	re.Equal(running, sc.conf.jobs[0].Status)
-	re.False(km.IsEmpty())
+	re.Equal(pending, sc.conf.jobs[0].Status)
+	re.Nil(sc.conf.jobs[0].Start)
+	re.True(km.IsEmpty())
+	re.False(sc.IsScheduleAllowed(cluster))
+	re.Equal([]string{"0:running"}, cluster.updates)
 	data, err := s.LoadSchedulerConfig(types.BalanceRangeScheduler.String())
 	re.NoError(err)
 	re.Empty(data)
 
+	// Publish PD's persisted state as the config watcher does.
+	jobs := sc.conf.cloneLocked()
+	start := time.Now()
+	jobs[0].Status = running
+	jobs[0].Start = &start
+	encoded, err := EncodeConfig(jobs)
+	re.NoError(err)
+	re.NoError(s.SaveSchedulerConfig(types.BalanceRangeScheduler.String(), encoded))
+	re.NoError(sc.ReloadConfig())
+	sc.IsScheduleAllowed(cluster)
+	re.Equal(running, sc.conf.jobs[0].Status)
+	re.False(km.IsEmpty())
+
 	// a new scheduler, e.g. after the primary changes, appends the key ranges of the running job again
-	encoded, err := sc.EncodeConfig()
+	encoded, err = sc.EncodeConfig()
 	re.NoError(err)
 	km.Delete(sc.conf.jobs[0].Ranges)
 	re.True(km.IsEmpty())
@@ -787,7 +944,6 @@ func TestBalanceRangeJobStatusUpdater(t *testing.T) {
 	re.False(km.IsEmpty())
 
 	// the job is cancelled by the PD and synced by the watcher, its key ranges must be cleaned
-	start := *sc.conf.jobs[0].Start
 	sc.conf.mergeLocked([]*balanceRangeSchedulerJob{{JobID: 0, Status: cancelled, Start: &start, Finish: &start}})
 	re.False(sc.IsScheduleAllowed(cluster))
 	re.True(km.IsEmpty())
@@ -825,7 +981,7 @@ func TestBalanceRangeJobFinishedByOthers(t *testing.T) {
 	re.False(km.IsEmpty())
 
 	// the job is finished through the API instead of the scheduler itself
-	re.NoError(sc.conf.updateJobStatus(0, finished))
+	re.NoError(sc.conf.updateJobStatus(0, sc.conf.jobs[0].Create, finished))
 	re.False(sc.IsScheduleAllowed(tc))
 	re.True(km.IsEmpty())
 }
@@ -842,23 +998,30 @@ func TestBalanceRangeJobStatusUnsupported(t *testing.T) {
 	re.NoError(err)
 	sc := scheduler.(*balanceRangeScheduler)
 
-	// the job is started and persisted by the local storage if the PD doesn't support the API
-	sc.IsScheduleAllowed(cluster)
-	re.Equal(running, sc.conf.jobs[0].Status)
-	re.False(km.IsEmpty())
-	var jobs []*balanceRangeSchedulerJob
-	re.NoError(sc.conf.load(&jobs))
-	re.Len(jobs, 1)
-	re.Equal(running, jobs[0].Status)
+	// An unsupported PD API must not fall back to writing either local cache.
+	for range 2 {
+		re.False(sc.IsScheduleAllowed(cluster))
+		re.Equal(pending, sc.conf.jobs[0].Status)
+		re.Nil(sc.conf.jobs[0].Start)
+		re.True(km.IsEmpty())
+		data, err := s.LoadSchedulerConfig(types.BalanceRangeScheduler.String())
+		re.NoError(err)
+		re.Empty(data)
+	}
 
-	// the job can be finished by the local storage too
-	sc.conf.Lock()
-	re.NoError(sc.conf.finishLocked(0, cluster))
-	sc.conf.Unlock()
+	// The same rule applies to completion of an already running job.
+	jobs := sc.conf.cloneLocked()
+	start := time.Now().Add(-2 * time.Hour)
+	jobs[0].Status = running
+	jobs[0].Start = &start
+	sc.conf.mergeLocked(jobs)
 	re.False(sc.IsScheduleAllowed(cluster))
-	re.True(km.IsEmpty())
-	re.NoError(sc.conf.load(&jobs))
-	re.Equal(finished, jobs[0].Status)
+	re.Equal(running, sc.conf.jobs[0].Status)
+	re.Nil(sc.conf.jobs[0].Finish)
+	re.False(km.IsEmpty())
+	data, err := s.LoadSchedulerConfig(types.BalanceRangeScheduler.String())
+	re.NoError(err)
+	re.Empty(data)
 }
 
 func TestBalanceRangeJobRemovedByOthers(t *testing.T) {
@@ -898,4 +1061,117 @@ func TestBalanceRangeJobRemovedByOthers(t *testing.T) {
 	re.Equal(uint64(1), sc.rangeJob.JobID)
 	re.False(km.IsEmpty())
 	re.Equal([]keyutil.KeyRange{oldRange}, km.GetNonOverlappingKeyRanges(&oldRange))
+}
+
+func TestBalanceRangeWaitForWatchedCompletion(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expired=%t", expired), func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest()
+			defer cancel()
+			cluster := &mockJobStatusUpdater{Cluster: tc}
+			s := storage.NewStorageWithMemoryBackend()
+			scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, s,
+				ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
+			re.NoError(err)
+			sc := scheduler.(*balanceRangeScheduler)
+			// A single region is balanced across these stores.
+			for i := uint64(1); i <= 3; i++ {
+				tc.AddLeaderStore(i, 0)
+			}
+			tc.AddLeaderRegionWithRange(1, "100", "200", 1, 2, 3)
+			jobs := sc.conf.cloneLocked()
+			start := time.Now()
+			if expired {
+				start = start.Add(-2 * time.Hour)
+			}
+			jobs[0].Status = running
+			jobs[0].Start = &start
+			encoded, err := EncodeConfig(jobs)
+			re.NoError(err)
+			re.NoError(s.SaveSchedulerConfig(sc.GetName(), encoded))
+			re.NoError(sc.ReloadConfig())
+
+			// Even after PD acknowledges completion, the watched job stays running
+			// and the range remains reserved until the watcher publishes finished.
+			cluster.err = errors.New("PD is unavailable")
+			re.False(sc.IsScheduleAllowed(cluster))
+			re.Equal(1, cluster.attempts)
+			re.Equal(minJobStatusRetryInterval, sc.retryInterval)
+			re.False(sc.IsScheduleAllowed(cluster))
+			re.Equal(1, cluster.attempts)
+			re.False(tc.GetKeyRangeManager().IsEmpty())
+			cluster.err = nil
+			sc.nextRetry = time.Time{}
+			re.False(sc.IsScheduleAllowed(cluster))
+			re.Equal([]string{"0:finished"}, cluster.updates)
+			re.Equal(running, sc.conf.jobs[0].Status)
+			re.Nil(sc.conf.jobs[0].Finish)
+			re.False(tc.GetKeyRangeManager().IsEmpty())
+			data, err := s.LoadSchedulerConfig(sc.GetName())
+			re.NoError(err)
+			re.Equal(string(encoded), data)
+			re.False(sc.IsScheduleAllowed(cluster))
+			re.Equal([]string{"0:finished"}, cluster.updates)
+			re.False(tc.GetKeyRangeManager().IsEmpty())
+
+			finish := time.Now()
+			jobs[0].Status = finished
+			jobs[0].Finish = &finish
+			encoded, err = EncodeConfig(jobs)
+			re.NoError(err)
+			re.NoError(s.SaveSchedulerConfig(sc.GetName(), encoded))
+			re.NoError(sc.ReloadConfig())
+			re.False(sc.IsScheduleAllowed(cluster))
+			re.Equal(finished, sc.conf.jobs[0].Status)
+			re.True(tc.GetKeyRangeManager().IsEmpty())
+		})
+	}
+}
+
+func TestBalanceRangeReloadReplacementAndDeletion(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	cluster := &mockJobStatusUpdater{Cluster: tc}
+	s := storage.NewStorageWithMemoryBackend()
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, s,
+		ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader-scatter", "tikv", "1h", "old", "100", "200"}))
+	re.NoError(err)
+	sc := scheduler.(*balanceRangeScheduler)
+	jobs := sc.conf.cloneLocked()
+	start := time.Now()
+	jobs[0].Status = running
+	jobs[0].Start = &start
+	encoded, err := EncodeConfig(jobs)
+	re.NoError(err)
+	re.NoError(s.SaveSchedulerConfig(sc.GetName(), encoded))
+	re.NoError(sc.ReloadConfig())
+	sc.IsScheduleAllowed(cluster)
+	old := sc.conf.jobs[0]
+	re.False(tc.GetKeyRangeManager().IsEmpty())
+
+	// A recreated scheduler may reuse ID 0 with a different alias and range.
+	jobs = []*balanceRangeSchedulerJob{{
+		JobID: 0, Alias: "replacement", Engine: core.EngineTiKV, Rule: core.LeaderScatter,
+		Timeout: time.Hour, Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("300", "400")}, Status: pending,
+	}}
+	encoded, err = EncodeConfig(jobs)
+	re.NoError(err)
+	re.NoError(s.SaveSchedulerConfig(sc.GetName(), encoded))
+	re.NoError(sc.ReloadConfig())
+	re.False(sc.IsScheduleAllowed(cluster))
+	re.NotSame(old, sc.conf.jobs[0])
+	re.Equal("replacement", sc.conf.jobs[0].Alias)
+	re.Equal(jobs[0].Ranges, sc.conf.jobs[0].Ranges)
+	re.Equal(pending, sc.conf.jobs[0].Status)
+	re.Equal([]string{"0:running"}, cluster.updates)
+	re.True(tc.GetKeyRangeManager().IsEmpty())
+
+	// The config watcher must also be able to publish a deleted config.
+	re.NoError(s.RemoveSchedulerConfig(sc.GetName()))
+	re.NoError(sc.ReloadConfig())
+	re.Empty(sc.conf.jobs)
+	re.False(sc.IsScheduleAllowed(cluster))
+	re.True(tc.GetKeyRangeManager().IsEmpty())
 }

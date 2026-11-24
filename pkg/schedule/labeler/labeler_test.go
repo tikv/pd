@@ -15,29 +15,38 @@
 package labeler
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
+	// Pooled timers cannot cross synctest bubble boundaries.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -102,8 +111,7 @@ func TestAdjustRule2(t *testing.T) {
 func TestGetSetRule(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	assertLabelerCounts := func(ruleCount, keyRangeCount int) {
@@ -168,8 +176,7 @@ func TestTxnWithEtcd(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	store := storage.NewStorageWithEtcdBackend(client)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	// test patch rules in batch
@@ -235,8 +242,7 @@ func TestTxnWithEtcd(t *testing.T) {
 func TestIndex(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
@@ -281,8 +287,7 @@ func TestIndex(t *testing.T) {
 func TestSaveLoadRule(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
@@ -294,13 +299,86 @@ func TestSaveLoadRule(t *testing.T) {
 		err := labeler.SetLabelRule(r)
 		re.NoError(err)
 	}
-	ctx1, cancel1 := context.WithCancel(context.Background())
-	defer cancel1()
+	ctx1 := t.Context()
 	labeler, err = NewRegionLabeler(ctx1, store, time.Millisecond*100)
 	re.NoError(err)
 	for _, r := range rules {
 		r2 := labeler.GetLabelRule(r.ID)
 		expectSameRules(re, r2, r)
+	}
+}
+
+func TestLoadRulesLogRedact(t *testing.T) {
+	const startKey, endKey = "7480000000000000ff", "7480000000000001ff"
+	rule := &LabelRule{
+		ID: "valid", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: KeyRange, Data: MakeKeyRanges(startKey, endKey),
+	}
+	validJSON, err := json.Marshal(rule)
+	require.NoError(t, err)
+	invalidRule := *rule
+	invalidRule.ID, invalidRule.Labels = "invalid", nil
+	invalidJSON, err := json.Marshal(&invalidRule)
+	require.NoError(t, err)
+
+	for _, mode := range []struct {
+		name string
+		typ  logutil.RedactInfoLogType
+	}{
+		{"off", logutil.RedactInfoLogOFF},
+		{"on", logutil.RedactInfoLogON},
+		{"marker", logutil.RedactInfoLogMarker},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			re := require.New(t)
+			fname := testutil.InitTempFileLogger(t, "info")
+			var (
+				lg    *zap.Logger
+				props *log.ZapProperties
+			)
+			re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+			t.Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+			})
+
+			memory := kv.NewMemoryKV()
+			store := endpoint.NewStorageEndpoint(memory, nil)
+			for key, value := range map[string]string{
+				"valid": string(validJSON), "invalid": string(invalidJSON), "malformed": string(validJSON[:len(validJSON)-1]),
+			} {
+				re.NoError(memory.Save(keypath.RegionLabelKeyPath(key), value))
+			}
+			labeler := &RegionLabeler{storage: store, ctx: t.Context()}
+			re.NoError(labeler.loadRules())
+
+			output, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.Contains(string(output), "failed to adjust label rule")
+			re.Contains(string(output), "failed to unmarshal label rule value")
+			if mode.typ == logutil.RedactInfoLogON {
+				re.NotContains(string(output), startKey)
+				re.NotContains(string(output), endKey)
+				re.Equal(2, strings.Count(string(output), "[rule-value=?]"))
+			} else {
+				re.Contains(string(output), startKey)
+				re.Contains(string(output), endKey)
+				if mode.typ == logutil.RedactInfoLogMarker {
+					re.Equal(2, strings.Count(string(output), `[rule-value="‹{`))
+				}
+			}
+
+			re.Len(labeler.GetAllLabelRules(), 1)
+			loaded := labeler.GetLabelRule(rule.ID)
+			re.NotNil(loaded)
+			re.Equal(rule.ID, loaded.ID)
+			for _, key := range []string{"invalid", "malformed"} {
+				value, err := memory.Load(keypath.RegionLabelKeyPath(key))
+				re.NoError(err)
+				re.Empty(value)
+			}
+			value, err := memory.Load(keypath.RegionLabelKeyPath(rule.ID))
+			re.NoError(err)
+			re.JSONEq(string(validJSON), value)
+		})
 	}
 }
 
@@ -332,8 +410,7 @@ func expectSameRules(re *require.Assertions, r1, r2 *LabelRule) {
 func TestKeyRange(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
@@ -377,8 +454,7 @@ func TestKeyRange(t *testing.T) {
 func TestLabelerRuleTTL(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, store, time.Minute)
 	re.NoError(err)
 	assertLabelerCounts := func(ruleCount, keyRangeCount int) {
@@ -451,8 +527,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 
 func TestExpiredRuleRemovalPublishesRangeIndex(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	labeler, err := NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
 	re.NoError(err)
 	re.NoError(labeler.SetLabelRule(&LabelRule{
@@ -485,52 +560,53 @@ func checkRuleInMemoryAndStorage(re *require.Assertions, labeler *RegionLabeler,
 }
 
 func TestGC(t *testing.T) {
-	re := require.New(t)
-	// set gcInterval to 1 hour.
-	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	labeler, err := NewRegionLabeler(ctx, store, time.Hour)
-	re.NoError(err)
-	ttls := []string{"1ms", "1ms", "1ms", "5ms", "5ms", "10ms", "1h", "24h"}
-	start, err := hex.DecodeString("1234")
-	re.NoError(err)
-	end, err := hex.DecodeString("5678")
-	re.NoError(err)
-	region := core.NewTestRegionInfo(1, 1, start, end)
-	// the region has no label rule at the beginning.
-	re.Empty(labeler.GetRegionLabels(region))
-
-	labels := make([]RegionLabel, 0, len(ttls))
-	for id, ttl := range ttls {
-		labels = append(labels, RegionLabel{Key: fmt.Sprintf("k%d", id), Value: fmt.Sprintf("v%d", id), TTL: ttl})
-		rule := &LabelRule{
-			ID:       fmt.Sprintf("rule%d", id),
-			Labels:   labels,
-			RuleType: "key-range",
-			Data:     MakeKeyRanges("1234", "5678")}
-		err := labeler.SetLabelRule(rule)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		// set gcInterval to 1 hour.
+		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+		ctx := t.Context()
+		labeler, err := NewRegionLabeler(ctx, store, time.Hour)
 		re.NoError(err)
-	}
+		ttls := []string{"1ms", "1ms", "1ms", "5ms", "5ms", "10ms", "1h", "24h"}
+		start, err := hex.DecodeString("1234")
+		re.NoError(err)
+		end, err := hex.DecodeString("5678")
+		re.NoError(err)
+		region := core.NewTestRegionInfo(1, 1, start, end)
+		// the region has no label rule at the beginning.
+		re.Empty(labeler.GetRegionLabels(region))
 
-	re.Len(labeler.ruleIndex.rules, len(ttls))
-
-	// check all rules until some rule expired.
-	for {
-		time.Sleep(time.Millisecond * 5)
-		labels := labeler.GetRegionLabels(region)
-		if len(labels) != len(ttls) {
-			break
+		labels := make([]RegionLabel, 0, len(ttls))
+		for id, ttl := range ttls {
+			labels = append(labels, RegionLabel{Key: fmt.Sprintf("k%d", id), Value: fmt.Sprintf("v%d", id), TTL: ttl})
+			rule := &LabelRule{
+				ID:       fmt.Sprintf("rule%d", id),
+				Labels:   labels,
+				RuleType: "key-range",
+				Data:     MakeKeyRanges("1234", "5678")}
+			err := labeler.SetLabelRule(rule)
+			re.NoError(err)
 		}
-	}
 
-	// no rule was cleared because the gc interval is big.
-	re.Len(labeler.ruleIndex.rules, len(ttls))
+		re.Len(labeler.ruleIndex.rules, len(ttls))
 
-	labeler.checkAndClearExpiredLabels()
+		// check all rules until some rule expired.
+		for {
+			synctest.Sleep(time.Millisecond * 5)
+			labels := labeler.GetRegionLabels(region)
+			if len(labels) != len(ttls) {
+				break
+			}
+		}
 
-	labeler.RLock()
-	currentRuleLen := len(labeler.ruleIndex.rules)
-	labeler.RUnlock()
-	re.LessOrEqual(currentRuleLen, 5)
+		// no rule was cleared because the gc interval is big.
+		re.Len(labeler.ruleIndex.rules, len(ttls))
+
+		labeler.checkAndClearExpiredLabels()
+
+		labeler.RLock()
+		currentRuleLen := len(labeler.ruleIndex.rules)
+		labeler.RUnlock()
+		re.LessOrEqual(currentRuleLen, 5)
+	})
 }

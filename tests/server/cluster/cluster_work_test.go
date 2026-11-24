@@ -15,7 +15,7 @@
 package cluster_test
 
 import (
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -27,6 +27,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -131,8 +132,7 @@ func (s *raftClusterTestSuite) checkAskSplit(cluster *tests.TestCluster) {
 	_, err = rc.HandleAskBatchSplit(req1)
 	re.ErrorIs(err, errs.ErrSchedulerTiKVSplitDisabled)
 	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]any{"schedule.enable-tikv-split-region": 0}, 0))
-	// wait ttl config takes effect
-	time.Sleep(time.Second)
+	testutil.Eventually(re, leaderServer.GetPersistOptions().IsTikvRegionSplitEnabled)
 
 	_, err = rc.HandleAskSplit(req)
 	re.NoError(err)
@@ -196,8 +196,8 @@ func (s *raftClusterTestSuite) checkPendingProcessedRegions(cluster *tests.TestC
 	res, err := rc.HandleAskBatchSplit(req)
 	re.NoError(err)
 	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	pendingProcessedRegions := rc.GetPendingProcessedRegions()
-	sort.Slice(pendingProcessedRegions, func(i, j int) bool { return pendingProcessedRegions[i] < pendingProcessedRegions[j] })
+	slices.Sort(pendingProcessedRegions)
 	re.Equal(ids, pendingProcessedRegions)
 }

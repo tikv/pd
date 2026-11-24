@@ -16,9 +16,9 @@ package labeler
 
 import (
 	"bytes"
-	"context"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"testing"
@@ -169,9 +169,9 @@ func TestKeyspaceRuleIndexMatchesIncompletePrefix(t *testing.T) {
 
 	b256 := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, 256)
 	b257 := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, 257)
-	below256 := append([]byte(nil), b256...)
+	below256 := slices.Clone(b256)
 	below256[len(below256)-1]--
-	above256Malformed := append([]byte(nil), b256...)
+	above256Malformed := slices.Clone(b256)
 	above256Malformed[4] = 1
 	above256Malformed[len(above256Malformed)-1]--
 	inside256 := codec.EncodeBytes([]byte{codec.TxnKeyspaceModePrefix, 0, 1, 0, 'a'})
@@ -253,14 +253,14 @@ func TestKeyspaceBoundaryBoundMatchesBinarySearch(t *testing.T) {
 		keys = append(keys, []byte{mode}, []byte{mode, 1}, []byte{mode + 1})
 		for _, id := range []uint32{0, 1, 63, 64, 1023, 1024, constant.MaxValidKeyspaceID, constant.MaxValidKeyspaceID + 1} {
 			boundary := keyspaceBoundary(mode, id)
-			exact := append([]byte(nil), boundary[:]...)
-			before := append([]byte(nil), boundary[:]...)
+			exact := slices.Clone(boundary[:])
+			before := slices.Clone(boundary[:])
 			before[len(before)-1]--
-			after := append([]byte(nil), boundary[:]...)
+			after := slices.Clone(boundary[:])
 			after[len(after)-1]++
 			keys = append(keys, exact, before, after)
 			for length := 1; length < len(boundary); length++ {
-				keys = append(keys, append([]byte(nil), boundary[:length]...))
+				keys = append(keys, slices.Clone(boundary[:length]))
 			}
 		}
 	}
@@ -396,8 +396,7 @@ func getLegacyRegionLabels(list rangelist.List, region *core.RegionInfo) map[str
 func TestKeyspaceRuleIndexPreservesLegacyResults(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	regionLabeler, err := NewRegionLabeler(ctx, store, time.Hour)
 	re.NoError(err)
 
@@ -479,8 +478,7 @@ func TestKeyspaceRuleIndexPreservesLegacyResults(t *testing.T) {
 func TestRegionLabelerUpdatesKeyspaceRulesIncrementally(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	regionLabeler, err := NewRegionLabeler(ctx, store, time.Hour)
 	re.NoError(err)
 
@@ -542,8 +540,7 @@ func TestRegionLabelerUpdatesKeyspaceRulesIncrementally(t *testing.T) {
 func TestRegionLabelerUpdatesMutatedKeyspaceRule(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	regionLabeler, err := NewRegionLabeler(ctx, store, time.Hour)
 	re.NoError(err)
 
@@ -590,7 +587,7 @@ func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
 
 	b.Run("add-one", func(b *testing.B) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			var index keyspaceRuleIndex
 			if !index.Add(rule) {
 				b.Fatal("failed to add keyspace rule")
@@ -603,7 +600,7 @@ func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
 		require.True(b, index.Add(rule))
 		b.ReportAllocs()
 		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			if keys := index.GetSplitKeys(nil, nil); len(keys) != 2 {
 				b.Fatalf("expected 2 split keys, got %d", len(keys))
 			}
@@ -619,7 +616,7 @@ func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
 		end := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, constant.MaxValidKeyspaceID)
 		b.ReportAllocs()
 		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			if keys := index.GetSplitKeys(start, end); len(keys) != 0 {
 				b.Fatalf("expected no split keys, got %d", len(keys))
 			}
@@ -641,8 +638,7 @@ func BenchmarkRegionLabelerNegativeLookup(b *testing.B) {
 		{name: "sparse-high-classic-gap", withHighRule: true, region: classicRegion},
 	} {
 		b.Run(testCase.name, func(b *testing.B) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := b.Context()
 			regionLabeler, err := NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
 			require.NoError(b, err)
 			if testCase.withHighRule {
@@ -651,7 +647,7 @@ func BenchmarkRegionLabelerNegativeLookup(b *testing.B) {
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				if value := regionLabeler.GetRegionLabel(testCase.region, constant.RegionLabelKey); value != "" {
 					b.Fatalf("unexpected label %q", value)
 				}
@@ -667,7 +663,7 @@ func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
 	for _, count := range []int{100_000, 1_000_000} {
 		b.Run(fmt.Sprintf("startup/%d", count), func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				rules := make(map[string]*LabelRule, count)
 				for id := range count {
 					rule := makeKeyspaceRuleForTest(uint32(id), codec.TxnKeyspaceModePrefix)
@@ -691,7 +687,7 @@ func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
 			target := rules[len(rules)/2]
 			b.ReportAllocs()
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				regionLabeler.Lock()
 				regionLabeler.ruleIndex.set(target)
 				regionLabeler.Unlock()
@@ -709,7 +705,7 @@ func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
 			region := makeRegionForKeyspace(uint32(count/2), codec.TxnKeyspaceModePrefix)
 			b.ReportAllocs()
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				if value := regionLabeler.GetRegionLabel(region, constant.RegionLabelKey); value == "" {
 					b.Fatal("keyspace label not found")
 				}

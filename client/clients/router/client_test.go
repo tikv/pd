@@ -16,16 +16,23 @@ package router
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/routerpb"
 
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/batch"
+	cctx "github.com/tikv/pd/client/pkg/connectionctx"
+	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
 func TestMain(m *testing.M) {
@@ -97,7 +104,7 @@ func TestRequestFinisherNoDataRace(t *testing.T) {
 	}
 
 	// Get the finisher function.
-	finisher := requestFinisher(resp)
+	finisher := requestFinisher(resp, nil)
 
 	// Simulate finishing the batch – call the finisher for each request.
 	for idx, req := range requests {
@@ -137,7 +144,7 @@ func TestRequestFinisherClearsUnrequestedBuckets(t *testing.T) {
 	reqWithoutBuckets := newTestRequest(ctx)
 	reqWithoutBuckets.id = 2
 
-	finisher := requestFinisher(resp)
+	finisher := requestFinisher(resp, nil)
 	finisher(0, reqWithBuckets, nil)
 	re.NoError(<-reqWithBuckets.done)
 	finisher(1, reqWithoutBuckets, nil)
@@ -153,7 +160,7 @@ func TestRequestFinisherWithZeroRegionID(t *testing.T) {
 	re := require.New(t)
 	req := newTestRequest(context.Background())
 
-	finisher := requestFinisher(&pdpb.QueryRegionResponse{})
+	finisher := requestFinisher(&pdpb.QueryRegionResponse{}, nil)
 	finisher(0, req, nil)
 
 	re.NoError(<-req.done)
@@ -188,4 +195,351 @@ func TestBuildQueryRegionRequest(t *testing.T) {
 	re.Empty(queryReq.GetPrevKeys()[0])
 	re.Equal([]uint64{0, math.MaxUint64}, queryReq.GetIds())
 	re.True(queryReq.GetNeedBuckets())
+}
+
+type queryRegionTestStream struct {
+	grpc.ClientStream
+	response   *pdpb.QueryRegionResponse
+	requests   []*pdpb.QueryRegionRequest
+	beforeRecv func()
+	sendErr    error
+	recvErr    error
+}
+
+func (s *queryRegionTestStream) Send(req *pdpb.QueryRegionRequest) error {
+	s.requests = append(s.requests, req)
+	return s.sendErr
+}
+
+func (s *queryRegionTestStream) Recv() (*pdpb.QueryRegionResponse, error) {
+	if s.beforeRecv != nil {
+		s.beforeRecv()
+	}
+	return s.response, s.recvErr
+}
+
+const queryRegionTestLeaderURL = "leader"
+
+func newQueryRegionTestClient(
+	t *testing.T,
+	requests []*Request,
+) *Cli {
+	t.Helper()
+	controller := batch.NewController[*Request](len(requests), requestFinisher(nil, nil), nil)
+	requestCh := make(chan *Request, len(requests))
+	for _, req := range requests {
+		requestCh <- req
+	}
+	require.NoError(t, controller.FetchPendingRequests(context.Background(), requestCh, nil, 0))
+
+	client := &Cli{
+		svcDiscovery:    sd.NewMockServiceDiscovery(nil, nil),
+		batchController: controller,
+	}
+	return client
+}
+
+func TestProcessRequestsRetriesOnlyMissingRegions(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	keyFound := newTestRequest(ctx)
+	keyFound.key = []byte("key-found")
+	idFound := newTestRequest(ctx)
+	idFound.id = 3
+	prevKeyFound := newTestRequest(ctx)
+	prevKeyFound.prevKey = []byte("prev-key-found")
+	keyMissing := newTestRequest(ctx)
+	keyMissing.key = []byte("key-missing")
+	idMissing := newTestRequest(ctx)
+	idMissing.id = 4
+	prevKeyMissing := newTestRequest(ctx)
+	prevKeyMissing.prevKey = []byte("prev-key-missing")
+	requests := []*Request{
+		keyFound,
+		idFound,
+		prevKeyFound,
+		keyMissing,
+		idMissing,
+		prevKeyMissing,
+	}
+
+	followerStream := &queryRegionTestStream{
+		response: &pdpb.QueryRegionResponse{
+			Header:       &pdpb.ResponseHeader{},
+			KeyIdMap:     []uint64{1, 0},
+			PrevKeyIdMap: []uint64{2, 0},
+			RegionsById: map[uint64]*pdpb.RegionResponse{
+				1: newMockRegionResponse(1),
+				2: newMockRegionResponse(2),
+				3: newMockRegionResponse(3),
+				4: nil,
+			},
+		},
+	}
+	leaderStream := &queryRegionTestStream{
+		response: &pdpb.QueryRegionResponse{
+			Header:       &pdpb.ResponseHeader{},
+			KeyIdMap:     []uint64{5},
+			PrevKeyIdMap: []uint64{6},
+			RegionsById: map[uint64]*pdpb.RegionResponse{
+				4: newMockRegionResponse(4),
+				5: newMockRegionResponse(5),
+				6: newMockRegionResponse(6),
+			},
+		},
+		beforeRecv: func() {
+			re.Len(keyFound.done, 1)
+			re.Len(idFound.done, 1)
+			re.Len(prevKeyFound.done, 1)
+			re.Empty(keyMissing.done)
+			re.Empty(idMissing.done)
+			re.Empty(prevKeyMissing.done)
+		},
+	}
+	client := newQueryRegionTestClient(t, requests)
+
+	retryRequests, err := client.processRequestsInner(
+		followerStream.Send,
+		followerStream.Recv,
+		true,
+		false,
+	)
+	re.NoError(err)
+
+	re.Equal([]*Request{keyMissing, idMissing, prevKeyMissing}, retryRequests)
+
+	retryCh := make(chan *Request, len(retryRequests))
+	for _, req := range retryRequests {
+		retryCh <- req
+	}
+	re.NoError(client.batchController.FetchPendingRequests(ctx, retryCh, nil, 0))
+	retryRequests, err = client.processRequestsInner(
+		leaderStream.Send,
+		leaderStream.Recv,
+		false,
+		true,
+	)
+	re.NoError(err)
+	re.Empty(retryRequests)
+	re.Len(leaderStream.requests, 1)
+	re.Equal([][]byte{keyMissing.key}, leaderStream.requests[0].GetKeys())
+	re.Equal([][]byte{prevKeyMissing.prevKey}, leaderStream.requests[0].GetPrevKeys())
+	re.Equal([]uint64{4}, leaderStream.requests[0].GetIds())
+
+	for req, expectedID := range map[*Request]uint64{
+		keyFound:       1,
+		idFound:        3,
+		prevKeyFound:   2,
+		keyMissing:     5,
+		idMissing:      4,
+		prevKeyMissing: 6,
+	} {
+		re.NoError(<-req.done)
+		re.Equal(expectedID, req.region.Meta.GetId())
+	}
+}
+
+func TestProcessRequestsHeaderErrorRetryMatchesUnary(t *testing.T) {
+	// Unary Region APIs use ServiceClient.NeedRetry only for the first
+	// attempt: any follower header error retries, no leader header error does.
+	// Even if discovery changes the selected role, a fallback is final.
+	testCases := []struct {
+		name               string
+		isFollower         bool
+		isLeaderRetryBatch bool
+		wantRetry          bool
+	}{
+		{name: "PD leader"},
+		{name: "follower", isFollower: true, wantRetry: true},
+		{name: "leader fallback", isLeaderRetryBatch: true},
+		{name: "fallback after role change", isFollower: true, isLeaderRetryBatch: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			for _, errorType := range []pdpb.ErrorType{
+				pdpb.ErrorType_REGION_NOT_FOUND,
+				pdpb.ErrorType_NOT_BOOTSTRAPPED,
+				pdpb.ErrorType_UNKNOWN,
+			} {
+				t.Run(errorType.String(), func(t *testing.T) {
+					re := require.New(t)
+					headerErr := &pdpb.Error{Type: errorType}
+					found := newTestRequest(context.Background())
+					found.id = 1
+					missing := newTestRequest(context.Background())
+					missing.id = 2
+					stream := &queryRegionTestStream{
+						response: &pdpb.QueryRegionResponse{
+							Header: &pdpb.ResponseHeader{Error: headerErr},
+							RegionsById: map[uint64]*pdpb.RegionResponse{
+								1: newMockRegionResponse(1),
+							},
+						},
+					}
+					client := newQueryRegionTestClient(t, []*Request{found, missing})
+
+					retryRequests, err := client.processRequestsInner(
+						stream.Send,
+						stream.Recv,
+						testCase.isFollower,
+						testCase.isLeaderRetryBatch,
+					)
+					re.Len(stream.requests, 1)
+					if testCase.wantRetry {
+						re.NoError(err)
+						re.Equal([]*Request{found, missing}, retryRequests)
+						re.Empty(found.done)
+						re.Empty(missing.done)
+						return
+					}
+					re.EqualError(err, headerErr.String())
+					re.Empty(retryRequests)
+					// The dispatcher completes every request with the original error;
+					// data in an error response must not be exposed as a successful hit.
+					client.cancelCollectedRequests(err)
+					for _, req := range []*Request{found, missing} {
+						re.Len(req.done, 1)
+						re.ErrorIs(<-req.done, err)
+						re.Nil(req.region)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestLeaderRetryBatchDoesNotRetryAgain(t *testing.T) {
+	re := require.New(t)
+	req := newTestRequest(context.Background())
+	req.id = 1
+	leaderStream := &queryRegionTestStream{
+		response: &pdpb.QueryRegionResponse{Header: &pdpb.ResponseHeader{}},
+	}
+	client := newQueryRegionTestClient(t, []*Request{req})
+
+	retryRequests, err := client.processRequestsInner(
+		leaderStream.Send,
+		leaderStream.Recv,
+		false,
+		true,
+	)
+	re.NoError(err)
+	re.Empty(retryRequests)
+	re.NoError(<-req.done)
+	re.Nil(req.region)
+	re.Len(leaderStream.requests, 1)
+}
+
+func TestDispatcherIsolatesLeaderRetryBatch(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	followerHit := newTestRequest(ctx, opt.WithAllowFollowerHandle())
+	followerHit.id = 1
+	followerMiss := newTestRequest(ctx, opt.WithAllowFollowerHandle())
+	followerMiss.id = 2
+	routerRequest := newTestRequest(ctx, opt.WithAllowRouterServiceHandle())
+	routerRequest.id = 3
+
+	leaderStreamErr := errors.New("leader stream failed")
+	leaderStream := &queryRegionTestStream{
+		sendErr: leaderStreamErr,
+	}
+	routerStream := &queryRegionTestStream{
+		response: &pdpb.QueryRegionResponse{
+			Header: &pdpb.ResponseHeader{},
+			RegionsById: map[uint64]*pdpb.RegionResponse{
+				3: newMockRegionResponse(3),
+			},
+		},
+	}
+	option := opt.NewOption()
+	option.SetEnableFollowerHandle(true)
+	client := &Cli{
+		ctx:             ctx,
+		cancel:          cancel,
+		option:          option,
+		svcDiscovery:    sd.NewMockServiceDiscovery(nil, nil),
+		conCtxMgr:       cctx.NewManager[pdpb.PD_QueryRegionClient](),
+		msConCtxMgr:     cctx.NewManager[routerpb.Router_QueryRegionClient](),
+		requestCh:       make(chan *Request, 3),
+		batchController: batch.NewController[*Request](3, requestFinisher(nil, nil), nil),
+	}
+	client.leaderURL.Store(queryRegionTestLeaderURL)
+
+	followerStream := &queryRegionTestStream{
+		response: &pdpb.QueryRegionResponse{
+			Header: &pdpb.ResponseHeader{},
+			RegionsById: map[uint64]*pdpb.RegionResponse{
+				1: newMockRegionResponse(1),
+				2: nil,
+			},
+		},
+		beforeRecv: func() {
+			leaderCtx, leaderCancel := context.WithCancel(ctx)
+			if !client.conCtxMgr.CleanAllAndStore(
+				leaderCtx,
+				leaderCancel,
+				queryRegionTestLeaderURL,
+				leaderStream,
+			) {
+				leaderCancel()
+			}
+			routerCtx, routerCancel := context.WithCancel(ctx)
+			if !client.msConCtxMgr.Store(
+				routerCtx,
+				routerCancel,
+				"router-service",
+				routerStream,
+			) {
+				routerCancel()
+			}
+			// Queue a fresh Router Service request while the follower batch is in flight.
+			client.requestCh <- routerRequest
+		},
+	}
+	followerCtx, followerCancel := context.WithCancel(ctx)
+	re.True(client.conCtxMgr.Store(
+		followerCtx,
+		followerCancel,
+		"follower",
+		followerStream,
+	))
+
+	client.requestCh <- followerHit
+	client.requestCh <- followerMiss
+	client.wg.Add(1)
+	go client.dispatcher()
+	t.Cleanup(func() {
+		cancel()
+		client.wg.Wait()
+		client.conCtxMgr.ReleaseAll()
+		client.msConCtxMgr.ReleaseAll()
+	})
+
+	waitRequest := func(name string, req *Request) error {
+		t.Helper()
+		select {
+		case err := <-req.done:
+			return err
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %s", name)
+			return nil
+		}
+	}
+	re.NoError(waitRequest("follower hit", followerHit))
+	re.Equal(uint64(1), followerHit.region.Meta.GetId())
+	re.ErrorIs(waitRequest("leader retry", followerMiss), leaderStreamErr)
+	re.Nil(followerMiss.region)
+	re.NoError(waitRequest("queued router request", routerRequest))
+	re.Equal(uint64(3), routerRequest.region.Meta.GetId())
+	cancel()
+	client.wg.Wait()
+
+	re.Len(followerStream.requests, 1)
+	re.Equal([]uint64{1, 2}, followerStream.requests[0].GetIds())
+	re.Len(leaderStream.requests, 1)
+	re.Equal([]uint64{2}, leaderStream.requests[0].GetIds())
+	re.Len(routerStream.requests, 1)
+	re.Equal([]uint64{3}, routerStream.requests[0].GetIds())
 }

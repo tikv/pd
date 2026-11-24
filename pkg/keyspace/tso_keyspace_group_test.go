@@ -157,7 +157,7 @@ func BenchmarkKeyspaceGroupReconcileHealthyPath(b *testing.B) {
 
 	b.Run("legacy-full-storage-load", func(b *testing.B) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 			if err != nil || len(groups) != 1 {
 				b.Fatalf("unexpected load result: groups=%d, err=%v", len(groups), err)
@@ -166,7 +166,7 @@ func BenchmarkKeyspaceGroupReconcileHealthyPath(b *testing.B) {
 	})
 	b.Run("indexed-healthy-selection", func(b *testing.B) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			tsoNodes := uniqueTSONodes(manager.nodesBalancer.GetAll())
 			if groupIDs := state.groupsNeedingAllocation(tsoNodes); len(groupIDs) != 0 {
 				b.Fatalf("healthy group needs allocation: %v", groupIDs)
@@ -200,7 +200,7 @@ func BenchmarkKeyspaceGroupReconcileSelection4096(b *testing.B) {
 
 	run := func(b *testing.B, state *keyspaceGroupReconcileState, expected int) {
 		b.ReportAllocs()
-		for range b.N {
+		for b.Loop() {
 			tsoNodes := uniqueTSONodes(manager.nodesBalancer.GetAll())
 			groupIDs := state.groupsNeedingAllocation(tsoNodes)
 			if len(groupIDs) != expected {
@@ -690,8 +690,7 @@ func TestRemoveKeyspacesFromGroupRejectsInvalidExecutionContext(t *testing.T) {
 
 func TestRemoveKeyspacesFromGroupStaysWithinEtcdLimits(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
 		ServerCfgModifier: func(cfg *embed.Config) {
 			cfg.MaxTxnOps = etcdutil.MaxEtcdTxnOps

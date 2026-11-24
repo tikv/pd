@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
-	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -76,12 +75,12 @@ func NewService(svr bs.Server) registry.RegistrableService {
 // occurs on Send() or Recv(), both endpoints will be closed.
 type heartbeatServer struct {
 	stream schedulingpb.Scheduling_RegionHeartbeatServer
-	closed int32
+	closed atomic.Int32
 }
 
 // Send implements the HeartbeatStream interface.
 func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
-	if atomic.LoadInt32(&s.closed) == 1 {
+	if s.closed.Load() == 1 {
 		return io.EOF
 	}
 	done := make(chan error, 1)
@@ -94,22 +93,22 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			atomic.StoreInt32(&s.closed, 1)
+			s.closed.Store(1)
 		}
 		return errors.WithStack(err)
 	case <-timer.C:
-		atomic.StoreInt32(&s.closed, 1)
+		s.closed.Store(1)
 		return errs.ErrSendHeartbeatTimeout
 	}
 }
 
 func (s *heartbeatServer) recv() (*schedulingpb.RegionHeartbeatRequest, error) {
-	if atomic.LoadInt32(&s.closed) == 1 {
+	if s.closed.Load() == 1 {
 		return nil, io.EOF
 	}
 	req, err := s.stream.Recv()
 	if err != nil {
-		atomic.StoreInt32(&s.closed, 1)
+		s.closed.Store(1)
 		return nil, errors.WithStack(err)
 	}
 	return req, nil
@@ -402,8 +401,8 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 		}, nil
 	}
 	region := c.GetRegion(reqRegion.GetId())
-	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.AllowSplit(region, request.GetReason()) {
-		c.GetCoordinator().GetHeartbeatStreams().SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+	// Unlike c.GetHeartbeatStreams, the coordinator's streams stay set after the cluster stops.
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.CheckSplit(region, request.GetReason(), c.GetCoordinator().GetHeartbeatStreams()) {
 		return &schedulingpb.AskBatchSplitResponse{
 			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "cannot split affinity region"),
 		}, nil
@@ -428,7 +427,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 				return nil, err
 			}
 			peerIDs := make([]uint64, len(request.Region.Peers))
-			for i := 0; i < len(peerIDs); i++ {
+			for i := range peerIDs {
 				peerIDs[i], _, err = c.AllocID(1)
 				if err != nil {
 					return nil, err
@@ -449,7 +448,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 			curID++
 
 			peerIDs := make([]uint64, len(request.Region.Peers))
-			for j := 0; j < len(peerIDs); j++ {
+			for j := range peerIDs {
 				peerIDs[j] = curID
 				curID++
 			}

@@ -17,25 +17,130 @@ package affinity
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestNextGenTiDBGroupOperations(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
+	// Seed legacy groups to exercise validation before skip-existing shortcuts.
+	legacy := []string{"_tidb_t_1001", "_tidb_pt_1001_p3"}
+	for _, id := range legacy {
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
+		_, err := manager.UpdateAffinityGroupPeers(id, 1, []uint64{1})
+		re.NoError(err)
+		_, err = manager.CheckAndGetAffinityGroupState(id)
+		re.NoError(err)
+		op := []GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}}
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(op, nil))
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, op))
+		re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
+	}
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "custom_group"}}))
+	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+	snapshot := func() string {
+		persisted := make(map[string]string)
+		re.NoError(store.LoadAllAffinityGroups(func(k, v string) { persisted[k] = v }))
+		data, err := json.Marshal([]any{persisted, manager.keyRanges})
+		re.NoError(err)
+		return string(data)
+	}
+	before := snapshot()
+	for _, id := range legacy {
+		for _, create := range []func([]GroupKeyRanges) error{manager.CreateAffinityGroups, manager.CreateAffinityGroupsIfNotExists} {
+			re.ErrorContains(create([]GroupKeyRanges{{GroupID: "new_group"}, {GroupID: id}}), "pd-ctl --keyspace-id")
+			re.False(manager.IsGroupExist("new_group"))
+		}
+		for _, force := range []bool{false, true} {
+			re.ErrorContains(manager.DeleteAffinityGroups([]string{"custom_group", id}, force), "pd-ctl --keyspace-id")
+			re.ErrorContains(manager.DeleteAffinityGroups([]string{id + "_missing"}, force), "pd-ctl --keyspace-id")
+		}
+		_, err := manager.UpdateAffinityGroupPeers(id, 1, []uint64{1})
+		re.ErrorContains(err, "pd-ctl --keyspace-id")
+		_, err = manager.CheckAndGetAffinityGroupState(id)
+		re.ErrorContains(err, "pd-ctl --keyspace-id")
+		_, err = CollectGroupStates(manager, []string{"custom_group", id})
+		re.ErrorContains(err, "pd-ctl --keyspace-id")
+		for _, ranges := range [][]keyutil.KeyRange{nil, {{StartKey: []byte("a"), EndKey: []byte("b")}}} {
+			op := []GroupKeyRanges{{GroupID: id, KeyRanges: ranges}}
+			re.ErrorContains(manager.UpdateAffinityGroupKeyRanges(op, nil), "pd-ctl --keyspace-id")
+			re.ErrorContains(manager.UpdateAffinityGroupKeyRanges(nil, op), "pd-ctl --keyspace-id")
+		}
+		re.Equal(before, snapshot(), "rejected requests must not change persistent groups or ranges")
+	}
+	// Identical table IDs remain independent across keyspaces, including both bounds.
+	for _, keyspaceID := range []uint32{0, 42, 43, 16777215} {
+		id := fmt.Sprintf("_tidb_ks%d_t_1001", keyspaceID)
+		rangeForKeyspace := func(tableID int64) keyutil.KeyRange {
+			prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
+			return keyutil.KeyRange{
+				StartKey: codec.EncodeBytes(append(prefix, codec.GenerateTableKey(tableID)...)),
+				EndKey:   codec.EncodeBytes(append(prefix, codec.GenerateTableKey(tableID+1)...)),
+			}
+		}
+		group := GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{rangeForKeyspace(1001)}}
+		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{group}))
+		_, err := manager.UpdateAffinityGroupPeers(id, 1, []uint64{1})
+		re.NoError(err)
+		state, err := manager.CheckAndGetAffinityGroupState(id)
+		re.NoError(err)
+		re.Equal(uint64(1), state.LeaderStoreID)
+		op := []GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{rangeForKeyspace(1002)}}}
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(op, nil))
+		re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, op))
+		wrongRange := GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}}
+		before := snapshot()
+		re.Error(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{wrongRange}))
+		re.Error(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{wrongRange}, nil))
+		re.Error(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{wrongRange}))
+		re.Equal(before, snapshot())
+	}
+	re.NoError(manager.DeleteAffinityGroups([]string{"_tidb_ks42_t_1001"}, true))
+	for _, id := range []string{"_tidb_ks0_t_1001", "_tidb_ks43_t_1001", "_tidb_ks16777215_t_1001"} {
+		state, err := manager.CheckAndGetAffinityGroupState(id)
+		re.NoError(err)
+		re.Equal(uint64(1), state.LeaderStoreID)
+		re.Len(manager.keyRanges[id].KeyRanges, 1)
+	}
+}
 
 func TestKeyRangeOverlapValidation(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -113,8 +218,7 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 // Note: Full labeler integration test requires proper JSON serialization handling
 func TestKeyRangeOverlapRebuild(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -159,6 +263,99 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 	re.True(manager2.IsGroupExist("group2"))
 }
 
+func testKeyRanges(bounds ...string) []keyutil.KeyRange {
+	ranges := make([]keyutil.KeyRange, 0, len(bounds)/2)
+	for pair := range slices.Chunk(bounds, 2) {
+		ranges = append(ranges, keyutil.KeyRange{StartKey: []byte(pair[0]), EndKey: []byte(pair[1])})
+	}
+	return ranges
+}
+
+func newTestAffinityManager(t *testing.T, store storage.Storage, stores *core.StoresInfo) *Manager {
+	t.Helper()
+	regionLabeler, err := labeler.NewRegionLabeler(t.Context(), store, 5*time.Second)
+	require.NoError(t, err)
+	manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
+	require.NoError(t, err)
+	return manager
+}
+
+// Persist pairs directly to model legacy data that would fail write validation.
+func saveTestAffinityGroups(t *testing.T, store storage.Storage, groups []GroupKeyRanges) {
+	t.Helper()
+	require.NoError(t, store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		for _, group := range groups {
+			id := group.GroupID
+			require.NoError(t, store.SaveAffinityGroup(txn, id, &Group{ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}))
+			require.NoError(t, store.SaveRegionRule(txn, GetLabelRuleID(id), MakeLabelRule(group)))
+		}
+		return nil
+	}))
+}
+
+func TestLoadOverlappingAffinityRanges(t *testing.T) {
+	group := func(id string, bounds ...string) GroupKeyRanges {
+		return GroupKeyRanges{GroupID: id, KeyRanges: testKeyRanges(bounds...)}
+	}
+	for _, tc := range []struct {
+		name   string
+		groups []GroupKeyRanges
+	}{
+		{"within group", []GroupKeyRanges{group("self", "a", "d", "b", "c")}},
+		{"same start", []GroupKeyRanges{group("self", "a", "z", "a", "b")}},
+		{"nested ranges", []GroupKeyRanges{group("outer", "a", "g", "m", "n"), group("inner", "b", "c"), group("later", "d", "e")}},
+		{"unbounded ranges", []GroupKeyRanges{group("whole", "", ""), group("inner", "b", "c")}},
+		{"later unbounded range", []GroupKeyRanges{group("unbounded", "b", ""), group("earlier", "a", "c"), group("later", "d", "e")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			store := storage.NewStorageWithMemoryBackend()
+			saveTestAffinityGroups(t, store, tc.groups)
+			keys, values, err := store.LoadRange("", "\xff", 0)
+			re.NoError(err)
+			logFile := testutil.InitTempFileLogger(t, "warn")
+			manager := newTestAffinityManager(t, store, core.NewStoresInfo())
+			afterKeys, afterValues, err := store.LoadRange("", "\xff", 0)
+			re.NoError(err)
+			re.Equal(keys, afterKeys)
+			re.Equal(values, afterValues, "loading must not repair persisted data")
+			logs, err := os.ReadFile(logFile)
+			re.NoError(err)
+			const warning = "overlapping affinity key ranges"
+			re.Equal(1, strings.Count(string(logs), warning))
+			re.Regexp(`\[WARN\][^\n]*`+warning, string(logs))
+			for _, change := range tc.groups {
+				re.Contains(string(logs), change.GroupID)
+				manager.RestoreAffinityGroup(change.GroupID)
+				state := manager.GetAffinityGroupState(change.GroupID)
+				re.Equal(PhasePending, state.Phase)
+				re.False(state.AffinitySchedulingAllowed)
+				re.True(state.RegularSchedulingAllowed)
+				re.Equal(len(change.KeyRanges), state.RangeCount)
+				for _, kr := range change.KeyRanges {
+					group, _ := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1}, kr))
+					re.Nil(group)
+				}
+			}
+			probe := testKeyRanges("b", "c")
+			re.ErrorContains(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "new-overlap", KeyRanges: probe}}), "overlap")
+			first := tc.groups[0]
+			if len(tc.groups) == 1 {
+				re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: first.GroupID, KeyRanges: first.KeyRanges[1:]}}))
+				re.Equal(first.KeyRanges[:1], manager.keyRanges[first.GroupID].KeyRanges)
+				rule := manager.regionLabeler.GetLabelRule(GetLabelRuleID(first.GroupID))
+				stored, err := extractKeyRangesFromLabelRule(rule)
+				re.NoError(err)
+				re.Equal(first.KeyRanges[:1], stored.KeyRanges)
+			} else {
+				re.NoError(manager.DeleteAffinityGroups([]string{first.GroupID}, true))
+			}
+			_, isAffinity := manager.GetRegionAffinityGroupState(generateRegionForTest(1, []uint64{1}, probe[0]))
+			re.True(isAffinity)
+		})
+	}
+}
+
 func TestParseKeyRangesFromDataInvalidHex(t *testing.T) {
 	re := require.New(t)
 	_, err := parseKeyRangesFromData([]*labeler.KeyRangeRule{
@@ -170,8 +367,7 @@ func TestParseKeyRangesFromDataInvalidHex(t *testing.T) {
 
 func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -226,8 +422,7 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 
 func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -239,7 +434,7 @@ func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 	plan := regionLabeler.NewPlan()
 	rule := &labeler.LabelRule{
 		ID:       GetLabelRuleID("ghost"),
-		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: "ghost"}},
+		Labels:   []labeler.RegionLabel{{Key: AffinityLabelKey, Value: "ghost"}},
 		RuleType: labeler.KeyRange,
 		Data: []any{
 			map[string]any{"start_key": hex.EncodeToString([]byte{0x01}), "end_key": hex.EncodeToString([]byte{0x02})},
@@ -269,8 +464,7 @@ func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 // Note: Full integration with JSON serialization requires additional handling
 func TestLabelRuleIntegration(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -306,12 +500,119 @@ func TestLabelRuleIntegration(t *testing.T) {
 	re.False(manager.IsGroupExist("group_no_label"))
 }
 
+type failingAffinityStorage struct {
+	storage.Storage
+	remaining int
+}
+
+var errAffinityTxn = errors.New("injected affinity transaction failure")
+
+func (s *failingAffinityStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	s.remaining--
+	if s.remaining == 0 {
+		return errAffinityTxn
+	}
+	return s.Storage.RunInTxn(ctx, f)
+}
+
+func TestAffinityGroupsBatchFailure(t *testing.T) {
+	const limit = etcdutil.MaxEtcdTxnOps
+	for _, tc := range []struct {
+		name string
+		adds int
+	}{{"create and delete", 0}, {"update adds", limit + 1}, {"update removes", 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			store, stores := storage.NewStorageWithMemoryBackend(), core.NewStoresInfo()
+			stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}, core.SetLastHeartbeatTS(time.Now())))
+			failing := &failingAffinityStorage{Storage: store}
+			manager := newTestAffinityManager(t, failing, stores)
+			changes := make([]GroupKeyRanges, limit+3)
+			ids := make([]string, len(changes))
+			for i := range changes {
+				ids[i] = fmt.Sprintf("batch-%04d", i)
+				changes[i] = GroupKeyRanges{GroupID: ids[i], KeyRanges: testKeyRanges(ids[i]+"a", ids[i]+"b")}
+			}
+			verify := func(want []GroupKeyRanges) {
+				t.Helper()
+				reloaded := newTestAffinityManager(t, store, stores)
+				re.Equal(reloaded.keyRanges, manager.keyRanges)
+				re.ElementsMatch(reloaded.regionLabeler.GetAllLabelRules(), manager.regionLabeler.GetAllLabelRules())
+				for i, id := range ids {
+					for _, m := range []*Manager{reloaded, manager} {
+						state := m.GetAffinityGroupState(id)
+						if want[i].GroupID == "" {
+							re.Nil(state, id)
+						} else {
+							re.Equal(len(want[i].KeyRanges), state.RangeCount, id)
+						}
+					}
+					re.Equal(len(want[i].KeyRanges) > 0, reloaded.regionLabeler.GetLabelRule(GetLabelRuleID(id)) != nil, id)
+				}
+			}
+			if tc.adds == 0 {
+				// The first group has no rule, so cutting exactly at the limit
+				// would separate the last group in the transaction from its rule.
+				changes[0].KeyRanges = nil
+				want := slices.Clone(changes)
+				probe := []GroupKeyRanges{{GroupID: "overlap", KeyRanges: changes[1].KeyRanges}}
+				failing.remaining = 2
+				re.ErrorIs(manager.CreateAffinityGroups(changes), errAffinityTxn)
+				clear(want[limit/2:])
+				verify(want)
+				re.ErrorContains(manager.CreateAffinityGroups(probe), "overlap")
+				re.ErrorContains(manager.CreateAffinityGroups(changes), "already exists")
+				re.NoError(manager.CreateAffinityGroupsIfNotExists(changes))
+				failing.remaining = 2
+				re.ErrorIs(manager.DeleteAffinityGroups(ids, true), errAffinityTxn)
+				clear(want[:limit/2])
+				copy(want[limit/2:], changes[limit/2:])
+				verify(want)
+				re.NoError(manager.CreateAffinityGroups(probe))
+				return
+			}
+			adds := tc.adds
+			initial := slices.Clone(changes)
+			for i := range initial {
+				if i < adds {
+					initial[i].KeyRanges = nil
+				} else if i%2 == 0 {
+					initial[i].KeyRanges = testKeyRanges(ids[i]+"a", ids[i]+"b", ids[i]+"b", ids[i]+"c")
+				}
+			}
+			re.NoError(manager.CreateAffinityGroups(initial))
+			last := len(changes) - 1
+			for _, i := range []int{adds, last} {
+				_, err := manager.UpdateAffinityGroupPeers(ids[i], 1, []uint64{1})
+				re.NoError(err)
+				_, matched := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(uint64(i+1), []uint64{1}, changes[i].KeyRanges[0]))
+				re.True(matched)
+			}
+			failing.remaining = 1
+			re.NoError(manager.UpdateAffinityGroupKeyRanges(initial[:1], []GroupKeyRanges{{GroupID: ids[last]}}))
+			re.ErrorIs(manager.UpdateAffinityGroupKeyRanges(changes[:adds], changes[adds:]), errAffinityTxn)
+			verify(initial)
+			failing.remaining = 2
+			re.ErrorIs(manager.UpdateAffinityGroupKeyRanges(changes[:adds], changes[adds:]), errAffinityTxn)
+			copy(initial[:min(limit, adds)], changes)
+			for i := min(limit, adds); i < limit; i++ {
+				initial[i].KeyRanges = initial[i].KeyRanges[1:]
+			}
+			verify(initial)
+			if adds < limit {
+				re.Zero(manager.GetAffinityGroupState(ids[adds]).RegionCount)
+			}
+			re.Equal(1, manager.GetAffinityGroupState(ids[last]).RegionCount)
+			re.ErrorContains(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "overlap", KeyRanges: changes[0].KeyRanges}}), "overlap")
+		})
+	}
+}
+
 // TestUpdateAffinityGroupKeyRangesAddToEmptyGroup documents the current failure
 // when adding key ranges to a group created without initial ranges.
 func TestUpdateAffinityGroupKeyRangesAddToEmptyGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -345,8 +646,7 @@ func TestUpdateAffinityGroupKeyRangesAddToEmptyGroup(t *testing.T) {
 
 func TestDuplicateRangeAdd(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -377,8 +677,7 @@ func TestDuplicateRangeAdd(t *testing.T) {
 // TestDeleteAffinityGroupsForceMissing verifies force deletion tolerates missing IDs.
 func TestDeleteAffinityGroupsForceMissing(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -411,8 +710,7 @@ func TestDeleteAffinityGroupsForceMissing(t *testing.T) {
 // TestSameGroupNonOverlappingAdd ensures adding disjoint ranges to the same group is allowed.
 func TestSameGroupNonOverlappingAdd(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -447,8 +745,7 @@ func TestSameGroupNonOverlappingAdd(t *testing.T) {
 // Current logic reports overlap (expected current design).
 func TestOverlapDuringMigration(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -476,8 +773,7 @@ func TestOverlapDuringMigration(t *testing.T) {
 // Scenario: existing [0,10), request removes [0,10) and adds [0,5) for the same group. Current design forbids mixed add/remove same group.
 func TestPartialOverlapSameGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
@@ -509,8 +805,7 @@ func TestPartialOverlapSameGroup(t *testing.T) {
 // vs group B's existing ranges were not being checked.
 func TestNewGroupOverlapWithExistingGroup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()

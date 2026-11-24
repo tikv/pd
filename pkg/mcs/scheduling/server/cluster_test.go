@@ -19,7 +19,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -49,16 +51,38 @@ func TestUpdateBalanceRangeJobStatus(t *testing.T) {
 	defer cancel()
 	c := &Cluster{ctx: ctx, httpClient: pd.Client(), backendAddress: pd.URL}
 
-	re.NoError(c.UpdateBalanceRangeJobStatus(1, "running"))
-	re.Equal(map[string]any{"job-id": float64(1), "status": "running"}, body)
+	create := time.Date(2026, time.November, 11, 1, 2, 3, 123456789, time.UTC)
+	re.NoError(c.UpdateBalanceRangeJobStatus(1, create, "running"))
+	re.Equal(map[string]any{"job-id": float64(1), "create": create.Format(time.RFC3339Nano), "status": "running"}, body)
 
 	// the PD hasn't registered the API, e.g. it hasn't been upgraded yet
 	code = http.StatusNotFound
-	err := c.UpdateBalanceRangeJobStatus(1, "finished")
+	err := c.UpdateBalanceRangeJobStatus(1, create, "finished")
 	re.Equal(schedulers.ErrBalanceRangeJobStatusUnsupported, errors.Cause(err))
 
 	code = http.StatusConflict
-	err = c.UpdateBalanceRangeJobStatus(1, "finished")
+	err = c.UpdateBalanceRangeJobStatus(1, create, "finished")
 	re.Error(err)
 	re.NotEqual(schedulers.ErrBalanceRangeJobStatusUnsupported, errors.Cause(err))
+}
+
+func TestBalanceRangeJobStatusBackendRotation(t *testing.T) {
+	re := require.New(t)
+	failed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer failed.Close()
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthy.Close()
+	c := &Cluster{ctx: t.Context(), httpClient: healthy.Client(), backendAddress: strings.Join([]string{failed.URL, healthy.URL}, ",")}
+	created := time.Now()
+	re.Error(c.UpdateBalanceRangeJobStatus(1, created, "running"))
+	re.NoError(c.UpdateBalanceRangeJobStatus(1, created, "running"))
+	// A failed transport also rotates on the next call, rather than sticking to
+	// a member that is no longer serving HTTP.
+	failed.Close()
+	re.Error(c.UpdateBalanceRangeJobStatus(1, created, "running"))
+	re.NoError(c.UpdateBalanceRangeJobStatus(1, created, "running"))
 }

@@ -15,7 +15,6 @@
 package safepoint_test
 
 import (
-	"context"
 	"encoding/json"
 	"math"
 	"sort"
@@ -34,8 +33,7 @@ import (
 
 func TestSafepoint(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tc, err := pdTests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer tc.Destroy()

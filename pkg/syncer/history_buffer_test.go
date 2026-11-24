@@ -15,7 +15,10 @@
 package syncer
 
 import (
+	"fmt"
+	"runtime"
 	"testing"
+	"weak"
 
 	"github.com/stretchr/testify/require"
 
@@ -141,6 +144,66 @@ func TestHistoryBufferPersistsNextIndexOnly(t *testing.T) {
 	s, err := h2.kv.Load(historyKey)
 	re.NoError(err)
 	re.Equal("3", s)
+}
+
+func TestHistoryBufferResetReleasesRecords(t *testing.T) {
+	for _, expanded := range []bool{false, true} {
+		for _, persist := range []bool{false, true} {
+			for _, scenario := range []string{"empty", "partial", "full", "wrapped", "wrapped-head-zero"} {
+				t.Run(fmt.Sprintf("expanded-%t/persist-%t/%s", expanded, persist, scenario), func(t *testing.T) {
+					re := require.New(t)
+					h := newTestHistoryBuffer(8)
+					if expanded {
+						h.observeRequiredWindow(3)
+					}
+					writes := 0
+					switch scenario {
+					case "partial":
+						writes = 1
+					case "full":
+						writes = h.capacity()
+					case "wrapped":
+						writes = 2*h.size + 1
+					case "wrapped-head-zero":
+						// Head zero can also mean a full ring has wrapped back to zero.
+						writes = 2*h.size - 1
+					}
+					refs := func() []weak.Pointer[core.RegionInfo] {
+						refs := make([]weak.Pointer[core.RegionInfo], 0, writes)
+						for id := range writes {
+							region := newHistoryBufferTestRegion(uint64(id + 1))
+							h.record(region)
+							refs = append(refs, weak.Make(region))
+						}
+						return refs
+					}()
+					re.Equal(min(writes, h.capacity()), h.len())
+					if persist {
+						h.resetWithIndexAndPersist(100)
+						index, err := h.kv.Load(historyKey)
+						re.NoError(err)
+						re.Equal("100", index)
+					} else {
+						h.resetWithIndex(100)
+					}
+					re.Zero(h.len())
+					re.Equal(h.baseCapacity, h.capacity())
+					re.Equal(uint64(100), h.getFirstIndex())
+					re.Equal(uint64(100), h.getNextIndex())
+					runtime.GC()
+					for _, ref := range refs {
+						re.Nil(ref.Value(), "reset history must release old regions")
+					}
+					runtime.KeepAlive(h)
+
+					region := newHistoryBufferTestRegion(1000)
+					h.record(region)
+					re.Same(region, h.get(100))
+					re.Equal(uint64(101), h.getNextIndex())
+				})
+			}
+		}
+	}
 }
 
 func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {

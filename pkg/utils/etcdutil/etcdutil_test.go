@@ -38,10 +38,13 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -95,6 +98,103 @@ func TestMemberHelpers(t *testing.T) {
 	re.Equal(uint64(etcd1.Server.ID()), listResp3.Members[0].ID)
 }
 
+type fakeMaintenance struct {
+	clientv3.Maintenance
+	status func(ctx context.Context, endpoint string) (*clientv3.StatusResponse, error)
+}
+
+func (f *fakeMaintenance) Status(ctx context.Context, endpoint string) (*clientv3.StatusResponse, error) {
+	return f.status(ctx, endpoint)
+}
+
+func newMember(id uint64, urls ...string) *etcdserverpb.Member {
+	return &etcdserverpb.Member{ID: id, ClientURLs: urls}
+}
+
+func TestScanEtcdLeaderSkipsStalledMember(t *testing.T) {
+	re := require.New(t)
+	// Like an etcd client waiting for a stopped member, the first member never
+	// answers until its request context ends.
+	maintenance := &fakeMaintenance{status: func(ctx context.Context, endpoint string) (*clientv3.StatusResponse, error) {
+		if endpoint == "stopped" {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return &clientv3.StatusResponse{Leader: 2}, nil
+	}}
+	members := []*etcdserverpb.Member{newMember(1, "stopped"), newMember(2, "alive")}
+
+	// The outer context is much longer than the timeout, so the scan can only
+	// reach the second member if the first probe is bounded by the timeout.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	var found []uint64
+	ScanEtcdLeader(ctx, maintenance, members, 50*time.Millisecond,
+		func(member *etcdserverpb.Member, _ *clientv3.StatusResponse) bool {
+			found = append(found, member.ID)
+			return true
+		})
+	re.Equal([]uint64{2}, found)
+	re.Less(time.Since(start), 5*time.Second)
+}
+
+func TestScanEtcdLeaderSkipsUnusableMembers(t *testing.T) {
+	re := require.New(t)
+	maintenance := &fakeMaintenance{status: func(_ context.Context, endpoint string) (*clientv3.StatusResponse, error) {
+		if endpoint == "broken" {
+			return nil, errors.New("unreachable")
+		}
+		return &clientv3.StatusResponse{Leader: 4}, nil
+	}}
+	members := []*etcdserverpb.Member{
+		newMember(1), // not started yet
+		newMember(2, "broken"),
+		newMember(3, "follower"),
+		newMember(4, "leader"),
+	}
+
+	var found []uint64
+	ScanEtcdLeader(t.Context(), maintenance, members, time.Second,
+		func(member *etcdserverpb.Member, status *clientv3.StatusResponse) bool {
+			found = append(found, member.ID)
+			re.Equal(member.ID, status.Leader)
+			return true
+		})
+	re.Equal([]uint64{4}, found)
+}
+
+func TestScanEtcdLeaderCallbackControlsScan(t *testing.T) {
+	re := require.New(t)
+	var probed []string
+	maintenance := &fakeMaintenance{status: func(_ context.Context, endpoint string) (*clientv3.StatusResponse, error) {
+		probed = append(probed, endpoint)
+		// Both members claim to be the leader, as a stale old leader may.
+		if endpoint == "a" {
+			return &clientv3.StatusResponse{Leader: 1}, nil
+		}
+		return &clientv3.StatusResponse{Leader: 2}, nil
+	}}
+	members := []*etcdserverpb.Member{newMember(1, "a"), newMember(2, "b")}
+
+	var found []uint64
+	ScanEtcdLeader(t.Context(), maintenance, members, time.Second,
+		func(member *etcdserverpb.Member, _ *clientv3.StatusResponse) bool {
+			found = append(found, member.ID)
+			return member.ID == 2
+		})
+	re.Equal([]uint64{1, 2}, found)
+
+	probed, found = nil, nil
+	ScanEtcdLeader(t.Context(), maintenance, members, time.Second,
+		func(member *etcdserverpb.Member, _ *clientv3.StatusResponse) bool {
+			found = append(found, member.ID)
+			return true
+		})
+	re.Equal([]uint64{1}, found)
+	re.Equal([]string{"a"}, probed)
+}
+
 func TestEtcdKVGet(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := NewTestEtcdCluster(t, 1, nil)
@@ -143,7 +243,10 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	_, err = EtcdKVPutWithTTL(context.TODO(), client, "test/ttl2", "val2", 4)
 	re.NoError(err)
 
-	time.Sleep(3 * time.Second)
+	testutil.Eventually(re, func() bool {
+		resp, err := EtcdKVGet(client, "test/ttl1")
+		return err == nil && resp.Count == 0
+	})
 	// test/ttl1 is outdated
 	resp, err := EtcdKVGet(client, "test/ttl1")
 	re.NoError(err)
@@ -153,7 +256,10 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	re.NoError(err)
 	re.Equal("val2", string(resp.Kvs[0].Value))
 
-	time.Sleep(2 * time.Second)
+	testutil.Eventually(re, func() bool {
+		resp, err := EtcdKVGet(client, "test/ttl2")
+		return err == nil && resp.Count == 0
+	})
 
 	// test/ttl2 is also outdated
 	resp, err = EtcdKVGet(client, "test/ttl2")
@@ -630,6 +736,73 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
 	})
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherLoadLogRedact() {
+	const payload = `{"start_key":"736563726574","end_key":"7a"}`
+	callbackErr := errors.New("put callback failed")
+	for _, consistent := range []bool{false, true} {
+		for _, mode := range []struct {
+			name string
+			typ  logutil.RedactInfoLogType
+		}{
+			{"off", logutil.RedactInfoLogOFF},
+			{"on", logutil.RedactInfoLogON},
+			{"marker", logutil.RedactInfoLogMarker},
+		} {
+			suite.Run(fmt.Sprintf("consistent-%t/%s", consistent, mode.name), func() {
+				re := suite.Require()
+				prefix := suite.T().Name() + "/"
+				suite.put(re, prefix+"a", payload)
+				suite.put(re, prefix+"b", payload)
+				values := make([]string, 0, 2)
+				watcher := NewLoopWatcher(
+					suite.ctx, &suite.wg, suite.client, "redact", prefix,
+					func([]*clientv3.Event) error { return nil },
+					func(kv *mvccpb.KeyValue) error {
+						values = append(values, string(kv.Value))
+						if string(kv.Key) == prefix+"b" {
+							return callbackErr
+						}
+						return nil
+					},
+					func(*mvccpb.KeyValue) error { return nil },
+					func([]*clientv3.Event) error { return nil },
+					true, /* withPrefix */
+				)
+				if consistent {
+					watcher.SetConsistentLoad()
+				}
+				fname := testutil.InitTempFileLogger(suite.T(), "debug")
+				var (
+					lg    *zap.Logger
+					props *log.ZapProperties
+				)
+				re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, mode.typ))
+				suite.T().Cleanup(func() {
+					re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+				})
+
+				_, err := watcher.load(suite.ctx)
+				re.Same(callbackErr, err)
+				re.Equal([]string{payload, payload}, values)
+				output, err := os.ReadFile(fname)
+				re.NoError(err)
+				re.Contains(string(output), "put successfully in watch loop when loading")
+				re.Contains(string(output), "put failed in watch loop when loading")
+				re.Contains(string(output), `[error="put callback failed"]`)
+				if mode.typ == logutil.RedactInfoLogON {
+					re.Equal(2, strings.Count(string(output), "[value=?]"))
+					re.NotContains(string(output), "736563726574")
+				} else {
+					re.Contains(string(output), "736563726574")
+					if mode.typ == logutil.RedactInfoLogMarker {
+						re.Equal(2, strings.Count(string(output), `[value="‹`))
+					}
+				}
+			})
+		}
+	}
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultCallbackSemantics() {
 	preErr := errors.New("pre callback failed")
 	firstPutErr := errors.New("first put callback failed")
@@ -787,7 +960,11 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	for i := range 10 {
 		suite.put(re, fmt.Sprintf("TestCallBack%d", i), "")
 	}
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		cache.RLock()
+		defer cache.RUnlock()
+		return len(cache.data) == 10
+	})
 	cache.RLock()
 	re.Len(cache.data, 10)
 	cache.RUnlock()
@@ -798,7 +975,11 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 		_, err = suite.client.Delete(ctx, key)
 		re.NoError(err)
 	}
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		cache.RLock()
+		defer cache.RUnlock()
+		return len(cache.data) == 0
+	})
 	cache.RLock()
 	re.Empty(cache.data)
 	cache.RUnlock()

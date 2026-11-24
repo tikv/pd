@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -36,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server"
@@ -451,7 +451,7 @@ func (h *schedulerHandler) isSchedulerExist(scheduler types.CheckerSchedulerType
 		return ok, nil
 	}
 	schedulers := rc.GetSchedulers()
-	if slice.Contains(schedulers, scheduler.String()) {
+	if slices.Contains(schedulers, scheduler.String()) {
 		return !rc.GetSchedulerConfig().IsSchedulerDisabled(scheduler), nil
 	}
 	return false, nil

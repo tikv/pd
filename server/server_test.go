@@ -144,7 +144,7 @@ func TestConcurrentPartialScheduleConfigUpdatesDoNotConflict(t *testing.T) {
 		go func(value int) {
 			defer wg.Done()
 			<-start
-			errCh <- s.PatchScheduleConfig([]byte(fmt.Sprintf(`{"max-snapshot-count":%d}`, value+1)))
+			errCh <- s.PatchScheduleConfig(fmt.Appendf(nil, `{"max-snapshot-count":%d}`, value+1))
 		}(i)
 		go func(value int) {
 			defer wg.Done()

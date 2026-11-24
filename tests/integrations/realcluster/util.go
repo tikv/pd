@@ -45,7 +45,12 @@ func ExtractPhysical(ts uint64) int64 {
 }
 
 func runCommandWithOutput(cmdStr string) (string, error) {
+	return runCommandWithOutputInDir(cmdStr, "")
+}
+
+func runCommandWithOutputInDir(cmdStr, dir string) (string, error) {
 	cmd := exec.Command("sh", "-c", cmdStr)
+	cmd.Dir = dir
 	log.Info(cmd.String())
 	bytes, err := cmd.Output()
 	if err != nil {
@@ -82,7 +87,7 @@ func getPDEndpoints(re *require.Assertions) []string {
 	output, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
 	re.NoError(err)
 	var pdAddrs []string
-	for _, addr := range strings.Split(strings.TrimSpace(output), "\n") {
+	for addr := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
 		// length of addr is less than 5 means it must not be a valid address
 		if len(addr) < 5 {
 			continue

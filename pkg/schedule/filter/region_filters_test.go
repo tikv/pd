@@ -15,7 +15,6 @@
 package filter
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -65,8 +64,7 @@ func TestRegionDownFilter(t *testing.T) {
 
 func TestRegionReplicatedFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	opt.SetMaxReplicas(3)
@@ -87,8 +85,7 @@ func TestRegionReplicatedFilter(t *testing.T) {
 
 func TestRegionEmptyFilter(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	opt.SetMaxReplicas(3)
@@ -107,8 +104,8 @@ func TestRegionEmptyFilter(t *testing.T) {
 			Id: i,
 			Peers: []*metapb.Peer{
 				{StoreId: i + 1, Id: i + 1}},
-			StartKey: []byte(fmt.Sprintf("%3da", i+1)),
-			EndKey:   []byte(fmt.Sprintf("%3dz", i+1)),
+			StartKey: fmt.Appendf(nil, "%3da", i+1),
+			EndKey:   fmt.Appendf(nil, "%3dz", i+1),
 		}, &metapb.Peer{StoreId: i + 1, Id: i + 1}))
 	}
 	re.Equal(filter.Select(region), statusRegionEmpty)
@@ -138,8 +135,7 @@ func TestRegionWitnessFilter(t *testing.T) {
 
 func TestAffinitySelect(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	cfg := opt.GetScheduleConfig().Clone()

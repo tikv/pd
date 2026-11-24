@@ -267,7 +267,7 @@ func deleteAffinityGroups(c *gin.Context) {
 // BatchModifyAffinityGroups batch modifies key ranges for multiple affinity groups.
 //
 //	@Tags		affinity-groups
-//	@Summary	Batch modify key ranges for affinity groups. Remove operations are executed before add operations.
+//	@Summary	Batch modify key ranges for affinity groups. Add operations are persisted before remove operations; a partial failure keeps the committed prefix in this order.
 //	@Param		body	body	BatchModifyAffinityGroupsRequest	true	"Batch modify request with add and remove operations"
 //	@Produce	json
 //	@Success	200	{object}	AffinityGroupsResponse	"Updated affinity groups"
@@ -485,6 +485,7 @@ func GetAllAffinityGroups(c *gin.Context) {
 //	@Param		group_id	path	string	true	"The group id of the affinity group"
 //	@Produce	json
 //	@Success	200	{object}	*affinity.GroupState
+//	@Failure	400	{string}	string	"Invalid affinity group ID."
 //	@Failure	404	{string}	string	"Affinity group not found."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/affinity-groups/{group_id} [get]

@@ -219,10 +219,7 @@ func (c *localTTLRemainingCollector) Collect(ch chan<- prometheus.Metric) {
 	c.mu.Unlock()
 	now := time.Now()
 	for purpose, l := range snapshot {
-		remaining := l.loadExpireTime().Sub(now).Seconds()
-		if remaining < 0 {
-			remaining = 0
-		}
+		remaining := max(l.loadExpireTime().Sub(now).Seconds(), 0)
 		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, remaining, purpose)
 	}
 }

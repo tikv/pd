@@ -121,12 +121,10 @@ func CheckMultiKeyspacesTSO(
 		return
 	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer cancel()
 		parallelAct()
-	}()
+	})
 
 	wg.Wait()
 }

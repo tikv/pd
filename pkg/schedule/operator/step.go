@@ -118,10 +118,8 @@ func (tl TransferLeader) String() string {
 
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
-	for _, storeID := range tl.ToStores {
-		if region.GetLeader().GetStoreId() == storeID {
-			return true
-		}
+	if slices.Contains(tl.ToStores, region.GetLeader().GetStoreId()) {
+		return true
 	}
 	return region.GetLeader().GetStoreId() == tl.ToStore
 }
@@ -184,13 +182,31 @@ func (TransferLeader) Timeout(regionSize int64) time.Duration {
 
 // GetCmd returns the schedule command for heartbeat response.
 func (tl TransferLeader) GetCmd(region *core.RegionInfo, _ bool) *hbstream.Operation {
+	// Filter each send without changing the targets so pending peers can recover
+	// and an in-flight transfer can still complete the original operator.
+	getNonPendingPeer := func(storeID uint64) *metapb.Peer {
+		peer := region.GetStorePeer(storeID)
+		if peer == nil || region.GetPendingPeer(peer.GetId()) != nil {
+			return nil
+		}
+		return peer
+	}
+	peer := getNonPendingPeer(tl.ToStore)
 	peers := make([]*metapb.Peer, 0, len(tl.ToStores))
 	for _, storeID := range tl.ToStores {
-		peers = append(peers, region.GetStorePeer(storeID))
+		if candidate := getNonPendingPeer(storeID); candidate != nil {
+			peers = append(peers, candidate)
+		}
+	}
+	if peer == nil {
+		if len(peers) == 0 {
+			return nil
+		}
+		peer = peers[0]
 	}
 	return &hbstream.Operation{
 		TransferLeader: &pdpb.TransferLeader{
-			Peer:  region.GetStorePeer(tl.ToStore),
+			Peer:  peer,
 			Peers: peers,
 		},
 	}
@@ -1165,19 +1181,13 @@ func validateStore(ci *core.BasicCluster, config config.SharedConfigProvider, id
 
 func slowStepWaitDuration(regionSize int64) time.Duration {
 	seconds := DefaultSlowExecutorRate * regionSize
-	wait := time.Duration(seconds) * time.Second
-	if wait < SlowStepWaitTime {
-		wait = SlowStepWaitTime
-	}
+	wait := max(time.Duration(seconds)*time.Second, SlowStepWaitTime)
 	return wait
 }
 
 func fastStepWaitDuration(regionSize int64) time.Duration {
 	seconds := int64(DefaultFastExecutorRate * float64(regionSize))
-	wait := time.Duration(seconds) * time.Second
-	if wait < FastStepWaitTime {
-		wait = FastStepWaitTime
-	}
+	wait := max(time.Duration(seconds)*time.Second, FastStepWaitTime)
 	return wait
 }
 

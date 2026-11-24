@@ -22,8 +22,10 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -50,6 +52,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -277,8 +281,7 @@ func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores,
 
 func TestStoreLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -310,8 +313,7 @@ func TestStoreLimit(t *testing.T) {
 
 func TestScatterCheck(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -359,8 +361,7 @@ func TestScatterCheck(t *testing.T) {
 // TestSomeStoresFilteredScatterGroupInConcurrency is used to test #5317 panic and won't test scatter result
 func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -387,11 +388,9 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 	var wg sync.WaitGroup
 	for j := range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			scatterOnce(re, tc, scatterer, fmt.Sprintf("group-%v", j))
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -407,8 +406,7 @@ func scatterOnce(re *require.Assertions, tc *mockcluster.Cluster, scatter *Regio
 
 func TestScatterGroupInConcurrency(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -480,8 +478,7 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 
 func TestScatterForManyRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -585,35 +582,36 @@ func TestScattersGroup(t *testing.T) {
 }
 
 func TestSelectedStoreGC(t *testing.T) {
-	re := require.New(t)
-	originalGCInterval := gcInterval
-	originalGCTTL := gcTTL
-	gcInterval = time.Second
-	gcTTL = time.Second * 3
-	defer func() {
-		gcInterval = originalGCInterval
-		gcTTL = originalGCTTL
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		originalGCInterval := gcInterval
+		originalGCTTL := gcTTL
+		gcInterval = time.Second
+		gcTTL = time.Second * 3
+		defer func() {
+			gcInterval = originalGCInterval
+			gcTTL = originalGCTTL
+		}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stores := newSelectedStores(ctx)
-	stores.Put(1, "testgroup")
-	_, ok := stores.GetGroupDistribution("testgroup")
-	re.True(ok)
-	_, ok = stores.GetGroupDistribution("testgroup")
-	re.True(ok)
-	time.Sleep(gcTTL)
-	_, ok = stores.GetGroupDistribution("testgroup")
-	re.False(ok)
-	_, ok = stores.GetGroupDistribution("testgroup")
-	re.False(ok)
+		ctx := t.Context()
+		stores := newSelectedStores(ctx)
+		stores.Put(1, "testgroup")
+		_, ok := stores.GetGroupDistribution("testgroup")
+		re.True(ok)
+		_, ok = stores.GetGroupDistribution("testgroup")
+		re.True(ok)
+		// A TTL entry expires strictly after its deadline.
+		synctest.Sleep(gcTTL + time.Nanosecond)
+		_, ok = stores.GetGroupDistribution("testgroup")
+		re.False(ok)
+		_, ok = stores.GetGroupDistribution("testgroup")
+		re.False(ok)
+	})
 }
 
 func TestRegionHasLearner(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	group := "group"
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -703,8 +701,7 @@ func TestRegionHasLearner(t *testing.T) {
 // Ref https://github.com/tikv/pd/issues/4565
 func TestSelectedStoresTooFewPeers(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -744,8 +741,7 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 
 func TestSeedGroupDistributionByRange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -865,8 +861,7 @@ func TestInternalScatterBalancedReadCPUDoesNotBlockSameLeader(t *testing.T) {
 
 func TestSeedGroupDistributionByRangeAppliesNetChange(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -929,8 +924,7 @@ func TestSeedGroupDistributionByRangeAppliesNetChange(t *testing.T) {
 
 func TestSeededDistributionSkipsUpdateWhenAddOperatorRejected(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -981,8 +975,7 @@ func TestSeededDistributionSkipsUpdateWhenAddOperatorRejected(t *testing.T) {
 
 func TestCreateScatterRegionOperatorFailureAccountsCurrentPlacement(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -1046,8 +1039,7 @@ func removeZeroCountEntries(distribution map[uint64]uint64) {
 // Ref https://github.com/tikv/pd/issues/5909
 func TestSelectedStoresTooManyPeers(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -1083,8 +1075,7 @@ func TestSelectedStoresTooManyPeers(t *testing.T) {
 // TestBalanceLeader only tests whether region leaders are balanced after scatter.
 func TestBalanceLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -1113,8 +1104,7 @@ func TestBalanceLeader(t *testing.T) {
 // ref https://github.com/tikv/pd/issues/6017
 func TestBalanceRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	opt.SetLocationLabels([]string{"host"})
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1164,8 +1154,7 @@ func isPeerCountChanged(op *operator.Operator) bool {
 
 func TestRemoveStoreLimit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -1199,8 +1188,7 @@ func TestRemoveStoreLimit(t *testing.T) {
 
 func TestScatterReplace(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -1264,8 +1252,7 @@ func TestScatterReplace(t *testing.T) {
 
 func TestScatterWithAffinity(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
@@ -1315,8 +1302,7 @@ func TestScatterWithAffinity(t *testing.T) {
 
 func TestScatterSkipsHotRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -2102,9 +2088,7 @@ func TestScatterConcurrentPlacementViews(t *testing.T) {
 	results := make(chan error, len(regions))
 	var workers sync.WaitGroup
 	for worker := range 8 {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			for i := worker; i < len(regions); i += 8 {
 				region := regions[i]
 				original := region.Clone()
@@ -2136,7 +2120,7 @@ func TestScatterConcurrentPlacementViews(t *testing.T) {
 				}
 				results <- nil
 			}
-		}()
+		})
 	}
 	workers.Wait()
 	close(results)

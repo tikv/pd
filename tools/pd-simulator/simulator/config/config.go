@@ -129,7 +129,7 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustDuration(&sc.ServerConfig.ElectionInterval, defaultElectionInterval)
 	configutil.AdjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
-	return sc.ServerConfig.Adjust(meta, false)
+	return sc.ServerConfig.AdjustWithMetadata(configutil.NewConfigMetadata(meta).Child("server"), false)
 }
 
 // Speed returns the tick speed of the simulator.

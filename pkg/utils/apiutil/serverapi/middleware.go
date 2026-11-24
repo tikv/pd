@@ -18,6 +18,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +30,6 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
@@ -62,10 +62,8 @@ func IsServiceAllowed(s *server.Server, group apiutil.APIServiceGroup) bool {
 	opt := s.GetServerOption()
 	cfg := opt.GetPDServerConfig()
 	if cfg != nil {
-		for _, allow := range cfg.RuntimeServices {
-			if group.Name == allow {
-				return true
-			}
+		if slices.Contains(cfg.RuntimeServices, group.Name) {
+			return true
 		}
 	}
 
@@ -148,7 +146,7 @@ func MatchMicroserviceRedirect(
 		if rule.TargetServiceName == constant.SchedulingServiceName && !isServiceIndependent(constant.SchedulingServiceName) {
 			continue
 		}
-		if !strings.HasPrefix(r.URL.Path, rule.MatchPath) || !slice.Contains(rule.MatchMethods, r.Method) {
+		if !strings.HasPrefix(r.URL.Path, rule.MatchPath) || !slices.Contains(rule.MatchMethods, r.Method) {
 			continue
 		}
 		if rule.Filter != nil && !rule.Filter(r) {

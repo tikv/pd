@@ -21,6 +21,7 @@ package metering
 
 import (
 	"context"
+	"maps"
 	"math"
 	"slices"
 	"sync"
@@ -305,8 +306,6 @@ func (mw *Writer) GetCollectors() map[string]Collector {
 	mw.RLock()
 	defer mw.RUnlock()
 	collectors := make(map[string]Collector, len(mw.collectors))
-	for k, v := range mw.collectors {
-		collectors[k] = v
-	}
+	maps.Copy(collectors, mw.collectors)
 	return collectors
 }

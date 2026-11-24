@@ -20,6 +20,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,10 +43,42 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
-func TestSecurity(t *testing.T) {
+func TestRedactInfoLogDefault(t *testing.T) {
 	re := require.New(t)
-	cfg := NewConfig()
-	re.Equal(logutil.RedactInfoLogOFF, cfg.Security.RedactInfoLog)
+	for _, tc := range []struct {
+		data     string
+		expected logutil.RedactInfoLogType
+	}{
+		{"", logutil.RedactInfoLogON},
+		{"[security]\nredact-info-log = false", logutil.RedactInfoLogOFF},
+	} {
+		cfg := NewConfig()
+		meta, err := toml.Decode(tc.data, cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta, false))
+		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
+	}
+}
+
+func TestGRPCGatewayDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		setting  string
+		expected bool
+	}{
+		{name: "default"},
+		{name: "enabled", setting: "enable-grpc-gateway = true", expected: true},
+		{name: "disabled", setting: "enable-grpc-gateway = false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			meta, err := toml.Decode(tc.setting, cfg)
+			re.NoError(err)
+			re.NoError(cfg.Adjust(&meta, false))
+			re.Equal(tc.expected, cfg.EnableGRPCGateway)
+		})
+	}
 }
 
 func TestTLS(t *testing.T) {
@@ -54,6 +87,89 @@ func TestTLS(t *testing.T) {
 	tls, err := cfg.Security.ToClientTLSConfig()
 	re.NoError(err)
 	re.Nil(tls)
+}
+
+func TestClientCertAllowedCNValidation(t *testing.T) {
+	testCases := []struct {
+		name          string
+		clientURLs    string
+		clientCNs     string
+		legacyCNs     string
+		gateway       bool
+		omitGateway   bool
+		missing       string
+		wantErr       string
+		wantClientCNs []string
+		wantPeerCNs   []string
+	}{
+		{name: "https", clientURLs: "https://127.0.0.1:2379", wantClientCNs: []string{"pd-server"}},
+		{name: "default gateway disabled", clientURLs: "https://127.0.0.1:2379", omitGateway: true, wantClientCNs: []string{"pd-server"}},
+		{name: "multiple client CNs", clientURLs: "https://127.0.0.1:2379", clientCNs: `["pd-server", "tidb"]`, wantClientCNs: []string{"pd-server", "tidb"}},
+		{
+			name: "empty allowlist with legacy single CN", clientURLs: "https://127.0.0.1:2379",
+			clientCNs: `[]`, legacyCNs: `["pd-server"]`, wantPeerCNs: []string{"pd-server"},
+		},
+		{
+			name: "empty allowlist with legacy multiple CNs", clientURLs: "https://127.0.0.1:2379",
+			clientCNs: `[]`, legacyCNs: `["pd-server", "tidb"]`,
+			wantClientCNs: []string{"pd-server", "tidb"}, wantPeerCNs: []string{"pd-server", "tidb"},
+		},
+		{
+			name: "client allowlist overrides legacy CNs", clientURLs: "https://127.0.0.1:2379",
+			legacyCNs:     `["pd-server", "client"]`,
+			wantClientCNs: []string{"pd-server"}, wantPeerCNs: []string{"pd-server", "client"},
+		},
+		{name: "gateway enabled", clientURLs: "https://127.0.0.1:2379", gateway: true, wantErr: "requires enable-grpc-gateway = false"},
+		{name: "gateway enabled with multiple CNs", clientURLs: "https://127.0.0.1:2379", clientCNs: `["pd-server", "tidb"]`, gateway: true, wantErr: "requires enable-grpc-gateway = false"},
+		{name: "empty allowlist with gateway enabled", clientURLs: "https://127.0.0.1:2379", clientCNs: `[]`, gateway: true},
+		{name: "empty allowlist with gateway disabled", clientURLs: "https://127.0.0.1:2379", clientCNs: `[]`},
+		{name: "empty CN", clientURLs: "https://127.0.0.1:2379", clientCNs: `[""]`, wantErr: "must not contain empty CNs"},
+		{name: "mixed empty CN", clientURLs: "https://127.0.0.1:2379", clientCNs: `["pd-server", ""]`, wantErr: "must not contain empty CNs"},
+		{name: "missing ca", clientURLs: "https://127.0.0.1:2379", missing: "cacert-path", wantErr: "requires cacert-path, cert-path and key-path"},
+		{name: "missing certificate", clientURLs: "https://127.0.0.1:2379", missing: "cert-path", wantErr: "requires cacert-path, cert-path and key-path"},
+		{name: "missing key", clientURLs: "https://127.0.0.1:2379", missing: "key-path", wantErr: "requires cacert-path, cert-path and key-path"},
+		{name: "http", clientURLs: "http://127.0.0.1:2379", wantErr: "requires HTTPS client URLs"},
+		{name: "mixed protocols", clientURLs: "https://127.0.0.1:2379,http://127.0.0.1:2381", wantErr: "requires HTTPS client URLs"},
+		{name: "default http", wantErr: "requires HTTPS client URLs"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			clientCNs := testCase.clientCNs
+			if clientCNs == "" {
+				clientCNs = `["pd-server"]`
+			}
+			text := []string{fmt.Sprintf("client-urls = %q\n", testCase.clientURLs)}
+			if !testCase.omitGateway {
+				text = append(text, fmt.Sprintf("enable-grpc-gateway = %t\n", testCase.gateway))
+			}
+			text = append(text, fmt.Sprintf("[security]\nclient-cert-allowed-cn = %s\n", clientCNs))
+			if testCase.legacyCNs != "" {
+				text = append(text, fmt.Sprintf("cert-allowed-cn = %s\n", testCase.legacyCNs))
+			}
+			for _, key := range []string{"cacert-path", "cert-path", "key-path"} {
+				if key != testCase.missing {
+					text = append(text, fmt.Sprintf("%s = %q\n", key, "test.pem"))
+				}
+			}
+			cfg := NewConfig()
+			meta, err := toml.Decode(strings.Join(text, ""), cfg)
+			re.NoError(err)
+			re.Empty(meta.Undecoded())
+			err = cfg.Adjust(&meta, false)
+			if testCase.wantErr != "" {
+				re.ErrorContains(err, testCase.wantErr)
+				return
+			}
+			re.NoError(err)
+			re.NoError(logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog))
+			etcdCfg, err := cfg.GenEmbedEtcdConfig()
+			re.NoError(err)
+			re.Equal(testCase.gateway, etcdCfg.EnableGRPCGateway)
+			re.Equal(testCase.wantClientCNs, etcdCfg.ClientTLSInfo.AllowedCNs)
+			re.Equal(testCase.wantPeerCNs, etcdCfg.PeerTLSInfo.AllowedCNs)
+		})
+	}
 }
 
 func TestBadFormatJoinAddr(t *testing.T) {
@@ -776,6 +892,76 @@ dashboard-address = "foo"
 		re.Equal(test.hasErr, err != nil)
 		if !test.hasErr {
 			re.Equal(test.dashboardAddress, cfg.PDServerCfg.DashboardAddress)
+		}
+	}
+}
+
+func TestGCConcurrencyConfig(t *testing.T) {
+	cfg := NewConfig()
+	require.NoError(t, cfg.Adjust(nil, false))
+	require.Equal(t, 4, cfg.PDServerCfg.GCKeyspaceIndexLoadConcurrency)
+	require.Equal(t, 4, cfg.PDServerCfg.GCStateCacheWarmupConcurrency)
+	for _, name := range []string{"gc-keyspace-index-load-concurrency", "gc-state-cache-warmup-concurrency"} {
+		for _, value := range []int{-1, 0, 1, 2, 4, 16, 17, 128, math.MaxInt} {
+			t.Run(fmt.Sprintf("%s/%d", name, value), func(t *testing.T) {
+				cfg := NewConfig()
+				meta, err := toml.Decode(fmt.Sprintf("[pd-server]\n%s = %d\n", name, value), cfg)
+				require.NoError(t, err)
+				err = cfg.Adjust(&meta, false)
+				if value < 1 || value > 16 {
+					require.ErrorContains(t, err, name)
+					return
+				}
+				require.NoError(t, err)
+				data, err := json.Marshal(cfg.PDServerCfg)
+				require.NoError(t, err)
+				var fields map[string]any
+				require.NoError(t, json.Unmarshal(data, &fields))
+				require.Equal(t, float64(value), fields[name])
+			})
+		}
+	}
+}
+
+func TestGCConcurrencyConfigReload(t *testing.T) {
+	for _, values := range []map[string]int{
+		{},
+		{"gc-keyspace-index-load-concurrency": 1, "gc-state-cache-warmup-concurrency": 2},
+		{"gc-keyspace-index-load-concurrency": 16, "gc-state-cache-warmup-concurrency": 16},
+	} {
+		store := storage.NewStorageWithMemoryBackend()
+		require.NoError(t, store.SaveConfig(map[string]any{"pd-server": values}))
+		opt, err := newTestScheduleOption()
+		require.NoError(t, err)
+		require.NoError(t, opt.Reload(store))
+		data, err := json.Marshal(opt.GetPDServerConfig())
+		require.NoError(t, err)
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(data, &fields))
+		for _, name := range []string{"gc-keyspace-index-load-concurrency", "gc-state-cache-warmup-concurrency"} {
+			want := 4
+			if value, ok := values[name]; ok {
+				want = value
+			}
+			require.Equal(t, float64(want), fields[name])
+		}
+	}
+}
+
+func TestGCConcurrencyConfigReloadRejectsInvalid(t *testing.T) {
+	for _, name := range []string{"gc-keyspace-index-load-concurrency", "gc-state-cache-warmup-concurrency"} {
+		for _, value := range []int{-1, 0, 17, 128, math.MaxInt} {
+			t.Run(fmt.Sprintf("%s/%d", name, value), func(t *testing.T) {
+				store := storage.NewStorageWithMemoryBackend()
+				require.NoError(t, store.SaveConfig(map[string]any{
+					"pd-server": map[string]int{name: value},
+				}))
+				opt, err := newTestScheduleOption()
+				require.NoError(t, err)
+				previous := opt.GetPDServerConfig().Clone()
+				require.ErrorContains(t, opt.Reload(store), name)
+				require.Equal(t, previous, opt.GetPDServerConfig())
+			})
 		}
 	}
 }

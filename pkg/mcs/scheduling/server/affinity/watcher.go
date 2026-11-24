@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 // Watcher is used to watch the affinity group and label rule changes from PD.
@@ -108,9 +109,10 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 		strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "/"),
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
-		func([]*clientv3.Event) error { return nil },
+		w.reconcileRangeConflicts,
 		true, /* withPrefix */
 	)
+	w.groupWatcher.SetReconcileDeletedKeys()
 	w.groupWatcher.StartWatchLoop()
 	return w.groupWatcher.WaitLoad()
 }
@@ -118,12 +120,9 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 // initializeAffinityLabelWatcher initializes the watcher for affinity label rule changes.
 // It watches the region_label path but only processes rules with affinity group prefix.
 func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
-	// Note: labelWatcher does not need preEventsFn/postEventsFn locking
-	// because the sync methods will handle locking internally
-
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		log.Info("update affinity label rule", zap.String("key", key), zap.String("value", string(kv.Value)))
+		log.Info("update affinity label rule", zap.String("key", key), logutil.ZapRedactByteString("value", kv.Value))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			log.Warn("failed to unmarshal affinity label rule", zap.String("key", key), zap.Error(err))
@@ -145,13 +144,28 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		w.etcdClient,
 		"scheduling-affinity-label-watcher",
 		strings.TrimSuffix(keypath.RegionLabelKeyPath(affinity.LabelRuleIDPrefix), "/"), // Filter: only process affinity group label rules
-		func([]*clientv3.Event) error { return nil },
+		func([]*clientv3.Event) error {
+			w.affinityManager.SetLabelRuleBatchInProgress(true)
+			return nil
+		},
 		putFn, deleteFn,
-		func([]*clientv3.Event) error { return nil },
+		func(events []*clientv3.Event) error {
+			w.affinityManager.SetLabelRuleBatchInProgress(false)
+			return w.reconcileRangeConflicts(events)
+		},
 		true, /* withPrefix */
 	)
+	w.labelWatcher.SetReconcileDeletedKeys()
 	w.labelWatcher.StartWatchLoop()
 	return w.labelWatcher.WaitLoad()
+}
+
+// reconcileRangeConflicts is the postEventsFn of both watchers. It runs after
+// the events of each watch response and after each full load, so range
+// conflicts are recomputed once per batch instead of once per event.
+func (w *Watcher) reconcileRangeConflicts([]*clientv3.Event) error {
+	w.affinityManager.ReconcileRangeConflicts()
+	return nil
 }
 
 // Close closes the watcher.

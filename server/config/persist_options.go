@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -130,7 +131,10 @@ func (o *PersistOptions) UpdateScheduleConfig(
 // SetSchedulers replaces only the scheduler list on the latest schedule config.
 func (o *PersistOptions) SetSchedulers(schedulers sc.SchedulerConfigs) {
 	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
+		next.Schedulers = slices.Clone(schedulers)
+		if len(next.Schedulers) == 0 {
+			next.Schedulers = nil
+		}
 	})
 }
 
@@ -324,12 +328,7 @@ var supportedTTLConfigs = []string{
 
 // IsSupportedTTLConfig checks whether a key is a supported config item with ttl
 func IsSupportedTTLConfig(key string) bool {
-	for _, supportedConfig := range supportedTTLConfigs {
-		if key == supportedConfig {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(supportedTTLConfigs, key)
 }
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
@@ -785,7 +784,7 @@ func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
 					schedulerCfg.Disable = true
 					next.Schedulers[i] = schedulerCfg
 				} else {
-					next.Schedulers = append(next.Schedulers[:i], next.Schedulers[i+1:]...)
+					next.Schedulers = slices.Delete(next.Schedulers, i, i+1)
 				}
 				return
 			}
@@ -893,6 +892,9 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
+		return err
+	}
+	if err := cfg.PDServerCfg.validateGCConcurrency(); err != nil {
 		return err
 	}
 	adjustScheduleCfg(&cfg.Schedule)

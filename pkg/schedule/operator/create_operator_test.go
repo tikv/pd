@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -1081,6 +1082,58 @@ func (suite *createOperatorTestSuite) TestCreateMoveRegionOperator() {
 	}
 }
 
+func (suite *createOperatorTestSuite) TestCreateMoveRegionOperatorPreservesWitness() {
+	suite.cluster.SetEnablePlacementRules(false)
+	for _, joint := range []bool{false, true} {
+		suite.cluster.SetEnableUseJointConsensus(joint)
+		for _, tt := range []struct {
+			name   string
+			voters []uint64
+		}{
+			{"retained", []uint64{4, 2, 5}},
+			{"removed", []uint64{4, 3, 5}},
+		} {
+			suite.Run(fmt.Sprintf("%s/joint=%t", tt.name, joint), func() {
+				re := suite.Require()
+				peers := []*metapb.Peer{
+					{Id: 1, StoreId: 1},
+					{Id: 2, StoreId: 2, IsWitness: true},
+					{Id: 3, StoreId: 3},
+					{Id: 10, StoreId: 10, Role: metapb.PeerRole_Learner},
+				}
+				region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+				roles := map[uint64]placement.PeerRoleType{10: placement.Learner}
+				for _, storeID := range tt.voters {
+					roles[storeID] = placement.Voter
+				}
+				roles[4] = placement.Leader
+				// Repeated builds expose witness assignment based on map iteration order.
+				for range 50 {
+					op, err := CreateMoveRegionOperator("test", suite.cluster, region, OpAdmin, roles)
+					re.NoError(err)
+					re.NotNil(op)
+					for i := range op.Len() {
+						switch step := op.Step(i).(type) {
+						case BecomeWitness, BecomeNonWitness, BatchSwitchWitness:
+							suite.T().Fatalf("unexpected witness change: %s", step)
+						case AddLearner:
+							re.False(step.IsWitness, "new peer on store %d", step.ToStore)
+						case PromoteLearner:
+							re.False(step.IsWitness, "new voter on store %d", step.ToStore)
+						case ChangePeerV2Enter:
+							for _, peer := range step.PromoteLearners {
+								re.False(peer.IsWitness, "new voter on store %d", peer.ToStore)
+							}
+						case RemovePeer:
+							re.NotContains(roles, step.FromStore, "retained peers must stay on their stores")
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
 func (suite *createOperatorTestSuite) TestMoveRegionWithoutJointConsensus() {
 	re := suite.Require()
 	type testCase struct {
@@ -1274,8 +1327,7 @@ func (suite *createOperatorTestSuite) TestNonAdminScatterDoesNotForceTargetLeade
 // Ref https://github.com/tikv/pd/issues/5401
 func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)

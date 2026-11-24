@@ -15,10 +15,17 @@
 package audit
 
 import (
+	"bytes"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -28,7 +35,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -65,10 +78,11 @@ func TestPrometheusBackend(t *testing.T) {
 			Help:      "Total number of service requests for audit test",
 		}, []string{"service", "method", "caller_id"})
 
-	prometheus.MustRegister(serviceAuditHistogramTest)
-	prometheus.MustRegister(serviceAuditCounterTest)
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(serviceAuditHistogramTest)
+	registry.MustRegister(serviceAuditCounterTest)
 
-	ts := httptest.NewServer(promhttp.Handler())
+	ts := httptest.NewServer(promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 	defer ts.Close()
 
 	backend := NewPrometheusBackend(serviceAuditHistogramTest, serviceAuditCounterTest, true)
@@ -91,8 +105,6 @@ func TestPrometheusBackend(t *testing.T) {
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.True(backend.ProcessHTTPRequest(req))
 
-	// For test, sleep time needs longer than the push interval
-	time.Sleep(time.Second)
 	req, err = http.NewRequest(http.MethodGet, ts.URL, http.NoBody)
 	re.NoError(err)
 	resp, err := http.DefaultClient.Do(req)
@@ -120,20 +132,141 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 	output := strings.SplitN(string(b), "]", 4)
 	re.Equal(
 		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, CallerID:anonymous, IP:, Port:, "+
-			"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
+			"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"] [remote-addr=] [tls-client-cn=]\n",
 			time.Unix(info.StartTimeStamp, 0).String()),
 		output[3],
 	)
 }
 
+func TestLocalLogBackendRedact(t *testing.T) {
+	re := require.New(t)
+	var (
+		lg    *zap.Logger
+		props *log.ZapProperties
+	)
+	re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogON))
+	defer func() {
+		re.NoError(logutil.SetupLogger(&log.Config{}, &lg, &props, logutil.RedactInfoLogOFF))
+	}()
+	backend := NewLocalLogBackend(true)
+	fname := testutil.InitTempFileLogger(t, "info")
+	body := `{"id":"test","data":[{"start_key":"7480000000000000ff","end_key":"7480000000000001ff"}]}`
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:2379/test?key=7480000000000000ff", strings.NewReader(body))
+	re.NoError(err)
+	info := requestutil.GetRequestInfo(req)
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	re.True(backend.ProcessHTTPRequest(req))
+	b, err := os.ReadFile(fname)
+	re.NoError(err)
+	output := strings.SplitN(string(b), "]", 4)
+	re.Equal(
+		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/POST:/test, CallerID:anonymous, IP:, Port:, "+
+			"StartTime:%s, URLParam:?, BodyParam:?}\"] [remote-addr=] [tls-client-cn=]\n",
+			time.Unix(info.StartTimeStamp, 0).String()),
+		output[3],
+	)
+	re.NotContains(string(b), "7480000000000000ff")
+}
+
+func captureAuditJSON(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	output := &bytes.Buffer{}
+	syncer := zapcore.Lock(zapcore.AddSync(output))
+	logger, props, err := log.InitLoggerWithWriteSyncer(&log.Config{Format: "json"}, syncer, syncer)
+	require.NoError(t, err)
+	t.Cleanup(log.ReplaceGlobals(logger, props))
+	return output
+}
+
+func TestLocalLogBackendConnectionOrigin(t *testing.T) {
+	certificate := &x509.Certificate{Subject: pkix.Name{CommonName: "component-client"}}
+	for _, testCase := range []struct {
+		name       string
+		remoteAddr string
+		tlsState   *tls.ConnectionState
+		clientCN   string
+	}{
+		{name: "plain HTTP", remoteAddr: "192.0.2.10:12345"},
+		{name: "IPv6", remoteAddr: "[2001:db8::10]:12345"},
+		{name: "no peer address"},
+		{
+			name:       "unverified certificate",
+			remoteAddr: "192.0.2.10:12345",
+			tlsState:   &tls.ConnectionState{PeerCertificates: []*x509.Certificate{certificate}},
+		},
+		{
+			name:       "verified certificate",
+			remoteAddr: "192.0.2.10:12345",
+			tlsState: &tls.ConnectionState{
+				PeerCertificates: []*x509.Certificate{certificate},
+				VerifiedChains:   [][]*x509.Certificate{{certificate}},
+			},
+			clientCN: "component-client",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			output := captureAuditJSON(t)
+			req := httptest.NewRequest(http.MethodGet, "http://pd/test", http.NoBody)
+			req.RemoteAddr, req.TLS = testCase.remoteAddr, testCase.tlsState
+			req.Header.Set(apiutil.XForwardedForHeader, "203.0.113.99, 203.0.113.100")
+			req.Header.Set(apiutil.XRealIPHeader, "203.0.113.101")
+			req.Header.Set(apiutil.XCallerIDHeader, `forged","remote-addr":"attacker","tls-client-cn":"admin`)
+			info := requestutil.GetRequestInfo(req)
+			re.Equal("203.0.113.99", info.IP)
+			req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+			re.True(NewLocalLogBackend(true).ProcessHTTPRequest(req))
+			var entry map[string]any
+			re.NoError(json.Unmarshal(output.Bytes(), &entry))
+			re.Equal(testCase.remoteAddr, entry["remote-addr"])
+			re.Equal(testCase.clientCN, entry["tls-client-cn"])
+			re.Contains(entry["service-info"], "IP:203.0.113.99")
+		})
+	}
+}
+
+func TestLocalLogBackendForwardedConnection(t *testing.T) {
+	re := require.New(t)
+	output := captureAuditJSON(t)
+	peer := make(chan string, 1)
+	backend := NewLocalLogBackend(true)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		info := requestutil.GetRequestInfo(r)
+		r = r.WithContext(requestutil.WithRequestInfo(r.Context(), info))
+		if !backend.ProcessHTTPRequest(r) {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		peer <- r.RemoteAddr
+	}))
+	defer target.Close()
+	targetURL, err := url.Parse(target.URL)
+	re.NoError(err)
+	proxy := httptest.NewServer(httputil.NewSingleHostReverseProxy(targetURL))
+	defer proxy.Close()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, proxy.URL, http.NoBody)
+	re.NoError(err)
+	req.Header.Set(apiutil.XForwardedForHeader, "203.0.113.99")
+	resp, err := proxy.Client().Do(req)
+	re.NoError(err)
+	re.NoError(resp.Body.Close())
+	re.Equal(http.StatusOK, resp.StatusCode)
+	var entry map[string]any
+	re.NoError(json.Unmarshal(output.Bytes(), &entry))
+	re.Equal(<-peer, entry["remote-addr"])
+	re.NotEmpty(entry["remote-addr"])
+	re.NotEqual("203.0.113.99", entry["remote-addr"])
+	re.Contains(entry["service-info"], "IP:203.0.113.99")
+}
+
 func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	backend := NewLocalLogBackend(true)
 	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.NoError(err)
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)
@@ -142,13 +275,13 @@ func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 
 func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	re := require.New(b)
-	b.StopTimer()
+
 	backend := NewLocalLogBackend(true)
 	testutil.InitTempFileLogger(b, "info")
 	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.NoError(err)
-	b.StartTimer()
-	for range b.N {
+
+	for b.Loop() {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		re.True(backend.ProcessHTTPRequest(req))

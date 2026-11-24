@@ -90,6 +90,30 @@ func TestReloadSchedulerConfigWithoutSchedulerDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestGetSchedulerHandlersSnapshot(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers["old-scheduler"] = nil
+
+	handlers := c.GetSchedulerHandlers()
+	delete(handlers, "old-scheduler")
+	handlers["caller-scheduler"] = nil
+	re.Contains(c.GetSchedulerHandlers(), "old-scheduler")
+	re.NotContains(c.GetSchedulerHandlers(), "caller-scheduler")
+
+	// Controller updates must not change a previously returned snapshot either.
+	snapshot := c.GetSchedulerHandlers()
+	c.Lock()
+	delete(c.schedulerHandlers, "old-scheduler")
+	c.schedulerHandlers["new-scheduler"] = nil
+	c.Unlock()
+	re.Contains(snapshot, "old-scheduler")
+	re.NotContains(snapshot, "new-scheduler")
+	re.Contains(c.GetSchedulerHandlers(), "new-scheduler")
+}
+
 func TestShuffleLeader(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()

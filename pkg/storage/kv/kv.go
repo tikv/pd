@@ -35,6 +35,7 @@ const (
 	RawTxnCmpGreater
 	RawTxnCmpExists
 	RawTxnCmpNotExists
+	RawTxnCmpModRevisionEqual
 )
 
 // nolint:revive
@@ -49,8 +50,10 @@ const (
 type RawTxnCondition struct {
 	Key     string
 	CmpType RawTxnCmpType
-	// The value to compare with. It's not used when CmpType is RawTxnCmpExists or RawTxnCmpNotExists.
+	// The value to compare with for value comparisons.
 	Value string
+	// The key modification revision to compare with when CmpType is RawTxnCmpModRevisionEqual.
+	ModRevision int64
 }
 
 // RawTxnOp represents an operation in a RawTxn's `Then` or `Else` branch and will be executed according to
@@ -67,8 +70,9 @@ type RawTxnOp struct {
 
 // KeyValuePair represents a pair of key and value.
 type KeyValuePair struct {
-	Key   string
-	Value string
+	Key         string
+	Value       string
+	ModRevision int64
 }
 
 // RawTxnResponseItem represents a single result of a read operation in a RawTxn.
@@ -104,6 +108,12 @@ type RawTxn interface {
 // RawTxnCapable is implemented by KV backends that support creating raw transactions.
 type RawTxnCapable interface {
 	CreateRawTxn() RawTxn
+}
+
+// RawTxnWithContextCapable is implemented by KV backends that support creating
+// raw transactions bound to a caller's context.
+type RawTxnWithContextCapable interface {
+	CreateRawTxnWithContext(context.Context) RawTxn
 }
 
 // BaseReadWrite is the API set, shared by Base and Txn interfaces, that provides basic KV read and write operations.

@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
@@ -35,8 +36,7 @@ import (
 
 func TestSimpleJoin(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -62,7 +62,7 @@ func TestSimpleJoin(t *testing.T) {
 	re.Len(members.Members, 2)
 
 	// Wait for all nodes becoming healthy.
-	time.Sleep(time.Second * 5)
+	waitForHealthyMembers(t, cluster)
 
 	// Join another PD.
 	pd3, err := cluster.Join(ctx)
@@ -79,8 +79,7 @@ func TestSimpleJoin(t *testing.T) {
 // during its downtime.
 func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	server.EtcdStartTimeout = 10 * time.Second
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
@@ -90,7 +89,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	// Wait for all nodes becoming healthy.
-	time.Sleep(time.Second * 5)
+	waitForHealthyMembers(t, cluster)
 
 	pd3 := cluster.GetServer("pd3")
 	err = pd3.Stop()
@@ -112,8 +111,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 // A deleted PD joins the previous cluster.
 func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	server.EtcdStartTimeout = 10 * time.Second
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
@@ -123,7 +121,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	// Wait for all nodes becoming healthy.
-	time.Sleep(time.Second * 5)
+	waitForHealthyMembers(t, cluster)
 
 	pd3 := cluster.GetServer("pd3")
 	client := cluster.GetServer("pd1").GetEtcdClient()
@@ -144,8 +142,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 
 func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -170,8 +167,7 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 // trigger.
 func TestJoinWithDuplicateClientURL(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -205,8 +201,7 @@ func TestJoinWithDuplicateClientURL(t *testing.T) {
 // non-linearizable member list so recovery is never blocked on quorum.
 func TestFailedStartRecoveryRejectsDuplicateClientURL(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -236,8 +231,7 @@ func TestFailedStartRecoveryRejectsDuplicateClientURL(t *testing.T) {
 // A PD joins itself.
 func TestPDJoinsItself(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -249,4 +243,23 @@ func TestPDJoinsItself(t *testing.T) {
 	re.NoError(err)
 	serverCfg.Join = serverCfg.AdvertiseClientUrls
 	re.Error(join.PrepareJoinCluster(serverCfg))
+}
+
+func waitForHealthyMembers(t *testing.T, cluster *tests.TestCluster) {
+	t.Helper()
+	var healthySince time.Time
+	testutil.Eventually(require.New(t), func() bool {
+		for _, server := range cluster.GetServers() {
+			client := server.GetEtcdClient()
+			if client == nil || !etcdutil.IsHealthy(t.Context(), client) {
+				healthySince = time.Time{}
+				return false
+			}
+		}
+		if healthySince.IsZero() {
+			healthySince = time.Now()
+		}
+		// Keep the existing health window required before another membership change.
+		return time.Since(healthySince) >= 5*time.Second
+	})
 }

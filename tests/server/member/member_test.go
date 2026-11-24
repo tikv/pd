@@ -48,8 +48,7 @@ func TestMain(m *testing.M) {
 
 func TestMemberDelete(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -89,17 +88,12 @@ func TestMemberDelete(t *testing.T) {
 			defer res.Body.Close()
 			// Check by status.
 			if table.status != 0 {
-				if res.StatusCode != table.status {
-					time.Sleep(time.Second)
-					return false
-				}
-				return true
+				return res.StatusCode == table.status
 			}
 			// Check by member list.
 			re.NotEmpty(cluster.WaitLeader())
 			if err = checkMemberList(re, leader.GetConfig().ClientUrls, table.members); err != nil {
 				t.Logf("check member fail: %v", err)
-				time.Sleep(time.Second)
 				return false
 			}
 			return true
@@ -136,8 +130,7 @@ func checkMemberList(re *require.Assertions, clientURL string, configs []*config
 
 func TestLeaderPriority(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.LeaderPriorityCheckInterval = typeutil.NewDuration(time.Second)
 	})
@@ -206,8 +199,7 @@ func waitEtcdLeaderChange(re *require.Assertions, server *tests.TestServer, old 
 
 func TestLeaderResign(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -230,8 +222,7 @@ func TestLeaderResign(t *testing.T) {
 
 func TestLeaderResignWithBlock(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -253,8 +244,7 @@ func TestLeaderResignWithBlock(t *testing.T) {
 
 func TestPDLeaderLostWhileEtcdLeaderIntact(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -290,8 +280,7 @@ func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old st
 
 func TestMoveLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -323,10 +312,69 @@ func TestMoveLeader(t *testing.T) {
 	})
 }
 
+func TestResignLeaderWithRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		resetPDLeader   bool
+		transferFailure string
+		wantError       bool
+	}{
+		{name: "transfer succeeds"},
+		{name: "PD cache reset", resetPDLeader: true},
+		{name: "retry succeeds", transferFailure: "1*return(true)"},
+		{name: "transfer fails", transferFailure: "return(true)", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cluster, err := tests.NewTestCluster(t.Context(), 2)
+			re.NoError(err)
+			defer cluster.Destroy()
+			re.NoError(cluster.RunInitialServers())
+			leaderName := cluster.WaitLeader()
+			re.NotEmpty(leaderName)
+			leader := cluster.GetServer(leaderName)
+			member := leader.GetServer().GetMember()
+
+			// Prevent re-campaigning from repopulating the PD cache after Resign.
+			const fp = "github.com/tikv/pd/server/leaderLoopCheckAgain"
+			re.NoError(failpoint.Enable(fp, fmt.Sprintf(`return("%d")`, member.ID())))
+			defer func() { re.NoError(failpoint.Disable(fp)) }()
+			if tc.resetPDLeader {
+				leader.ResetPDLeader()
+				re.False(leader.IsLeader())
+			}
+			re.Equal(member.ID(), member.GetEtcdLeader())
+			if tc.transferFailure != "" {
+				const transferFP = "github.com/tikv/pd/tests/resignLeaderError"
+				re.NoError(failpoint.Enable(transferFP, tc.transferFailure))
+				defer func() { re.NoError(failpoint.Disable(transferFP)) }()
+			}
+
+			err = leader.ResignLeaderWithRetry()
+			if tc.wantError {
+				re.EqualError(err, "injected leader transfer failure")
+				re.Equal(member.ID(), member.GetEtcdLeader())
+				return
+			}
+
+			re.NoError(err)
+			re.NotZero(member.GetEtcdLeader())
+			re.NotEqual(member.ID(), member.GetEtcdLeader())
+			re.NoError(failpoint.Disable(fp))
+			newLeader := cluster.WaitLeader()
+			re.NotEmpty(newLeader)
+			re.NotEqual(leaderName, newLeader)
+			cachedLeader := leader.GetLeader()
+			re.NotNil(cachedLeader)
+			re.NoError(leader.ResignLeaderWithRetry())
+			re.Same(cachedLeader, leader.GetLeader())
+		})
+	}
+}
+
 func TestCampaignLeaderFrequently(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -354,8 +402,7 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 
 func TestGrantLeaseFailed(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 5)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -379,8 +426,7 @@ func TestGrantLeaseFailed(t *testing.T) {
 
 func TestGetLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -398,17 +444,21 @@ func TestGetLeader(t *testing.T) {
 	re.NotNil(leaderServer)
 
 	// Send requests after server has started.
-	go sendRequest(re, wg, done, leaderServer.GetAddr())
-	time.Sleep(100 * time.Millisecond)
+	requestDone := make(chan struct{})
+	go sendRequest(re, wg, done, requestDone, leaderServer.GetAddr())
+	defer func() { close(done); wg.Wait() }()
+	select {
+	case <-requestDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("leader request did not complete")
+	}
 
 	re.NotNil(leaderServer.GetLeader())
-
-	done <- true
-	wg.Wait()
 }
 
-func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, addr string) {
+func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, requestDone chan struct{}, addr string) {
 	defer wg.Done()
+	notifyRequestDone := sync.OnceFunc(func() { close(requestDone) })
 
 	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(0)}
 
@@ -427,6 +477,7 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 				conn.Close()
 			}
 		}
+		notifyRequestDone()
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -439,8 +490,7 @@ func TestElectionClientStaysOnLocalMember(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -460,8 +510,7 @@ func TestElectionClientStaysOnLocalMember(t *testing.T) {
 
 func TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -494,7 +543,9 @@ func TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView(t *testing.T) {
 	})
 
 	// Negative control: a stale view alone must not end a term with a valid lease.
-	time.Sleep(2 * time.Second)
+	re.Never(func() bool {
+		return !oldLeader.IsServing() || cluster.GetLeader() != oldLeaderName
+	}, 2*time.Second, 10*time.Millisecond)
 	re.True(oldLeader.IsServing())
 	re.Equal(oldLeaderName, cluster.GetLeader())
 
@@ -513,8 +564,7 @@ func TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView(t *testing.T) {
 
 func TestPDLeaderStepsDownWhenRenewalsFail(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -578,8 +628,7 @@ func pauseLeaseClose(t *testing.T, lease *election.Lease) (wait, resume func()) 
 // otherwise keep answering as the leader for as long as a storage stall lasts.
 func TestPDLeaderClearsIdentityBeforeBlockingCleanup(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	// One member is enough: everything asserted below is this member's own
 	// in-memory state, and no peer has to take over for the assertions to mean
 	// what they say.
@@ -631,8 +680,7 @@ func TestPDLeaderClearsIdentityBeforeBlockingCleanup(t *testing.T) {
 // still be answering as the leader.
 func TestPDLeaderResignsBeforeLoggingStepDown(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -697,8 +745,7 @@ func TestPDLeaderResignsBeforeLoggingStepDown(t *testing.T) {
 // path running yet. blockReadyToServe stands in for the blocked write.
 func TestPDLeaderPublishesIdentityLastOnStepUp(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -754,8 +801,7 @@ func TestPDLeaderPublishesIdentityLastOnStepUp(t *testing.T) {
 // disk by the time the resign has cleared the leader.
 func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()

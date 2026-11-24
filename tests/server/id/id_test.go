@@ -79,12 +79,11 @@ func (s *idAllocatorTestSuite) checkID(cluster *tests.TestCluster) {
 	var m syncutil.Mutex
 	ids := make(map[uint64]struct{})
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 200 {
 				id, _, err := leaderServer.GetAllocator().Alloc(1)
-				if !as.NoError(err) {
+				if err != nil {
+					s.T().Errorf("allocate ID: %v", err)
 					return
 				}
 				m.Lock()
@@ -95,7 +94,7 @@ func (s *idAllocatorTestSuite) checkID(cluster *tests.TestCluster) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -170,13 +169,12 @@ func (s *idAllocatorTestSuite) checkBatchAllocID(cluster *tests.TestCluster) {
 	var m syncutil.Mutex
 	ids := make(map[uint64]struct{})
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 200 {
 				id, count, err := leaderServer.GetAllocator().Alloc(10)
 				curID := id - uint64(count)
-				if !as.NoError(err) {
+				if err != nil {
+					s.T().Errorf("allocate ID batch: %v", err)
 					return
 				}
 				m.Lock()
@@ -191,7 +189,7 @@ func (s *idAllocatorTestSuite) checkBatchAllocID(cluster *tests.TestCluster) {
 				}
 				m.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -204,8 +202,7 @@ func TestMonotonicID(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
 	defer cluster.Destroy()

@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -228,18 +229,24 @@ func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
 	s.server.GetMember().Resign()
+	failpoint.Inject("resignLeaderError", func() {
+		failpoint.Return(errors.New("injected leader transfer failure"))
+	})
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
 // ResignLeaderWithRetry resigns the leader of the server with retry.
 func (s *TestServer) ResignLeaderWithRetry() (err error) {
-	if !s.IsLeader() {
-		return
-	}
 	// The default timeout of moving an etcd leader is 5 seconds,
 	// set the retry times to 3 will get a maximum of ~15 seconds of trying.
 	const retryCount = 3
+	member := s.GetServer().GetMember()
 	for retry := range retryCount {
+		// Resign clears the PD leader cache before transferring etcd leadership.
+		// Only a different, known etcd leader confirms that the transfer completed.
+		if leaderID := member.GetEtcdLeader(); leaderID != 0 && leaderID != member.ID() {
+			return nil
+		}
 		err = s.ResignLeader()
 		if err == nil {
 			return
@@ -785,10 +792,7 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 			}
 
 			// Wait before retry
-			backoff := time.Duration(i+1) * 500 * time.Millisecond
-			if backoff > 3*time.Second {
-				backoff = 3 * time.Second
-			}
+			backoff := min(time.Duration(i+1)*500*time.Millisecond, 3*time.Second)
 			time.Sleep(backoff)
 			continue
 		case startServersRetryCurrent:

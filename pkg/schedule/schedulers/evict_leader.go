@@ -16,8 +16,10 @@ package schedulers
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -210,9 +212,7 @@ func (conf *evictLeaderSchedulerConfig) applyStoreIDs(ids []uint64, explicitRang
 			delete(conf.StoreIDWithRanges, id)
 			conf.cluster.ResumeLeaderTransfer(id, constant.In)
 		}
-		for id, ranges := range prevRanges {
-			conf.StoreIDWithRanges[id] = ranges
-		}
+		maps.Copy(conf.StoreIDWithRanges, prevRanges)
 	}
 
 	for _, id := range ids {
@@ -224,7 +224,7 @@ func (conf *evictLeaderSchedulerConfig) applyStoreIDs(ids []uint64, explicitRang
 			}
 			pausedIDs = append(pausedIDs, id)
 			if hasExplicitRanges {
-				conf.StoreIDWithRanges[id] = append([]keyutil.KeyRange(nil), explicitRanges...)
+				conf.StoreIDWithRanges[id] = slices.Clone(explicitRanges)
 			} else {
 				conf.StoreIDWithRanges[id] = []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 			}
@@ -235,7 +235,7 @@ func (conf *evictLeaderSchedulerConfig) applyStoreIDs(ids []uint64, explicitRang
 			continue
 		}
 		prevRanges[id] = old
-		conf.StoreIDWithRanges[id] = append([]keyutil.KeyRange(nil), explicitRanges...)
+		conf.StoreIDWithRanges[id] = slices.Clone(explicitRanges)
 	}
 	conf.Batch = batch
 

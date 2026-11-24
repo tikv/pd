@@ -15,7 +15,6 @@
 package cluster
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,13 +23,37 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
+
+func TestHandleAskBatchSplitRejectsExpiredAffinity(t *testing.T) {
+	re := require.New(t)
+	cluster, _ := newSplitScatterTestCluster(t)
+	cluster.opt.SetAffinityScheduleLimit(4)
+	var err error
+	cluster.affinityManager, err = affinity.NewManager(t.Context(), cluster.storage, cluster, cluster.opt, cluster.regionLabeler)
+	re.NoError(err)
+	cluster.hbstreams = cluster.GetCoordinator().GetHeartbeatStreams()
+	region := cluster.GetRegion(100)
+	re.NoError(cluster.affinityManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+	}}))
+	_, err = cluster.affinityManager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	// The group keeps its target after expiration, so the split is still rejected.
+	cluster.affinityManager.ExpireAffinityGroup("g1")
+	_, err = cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
+		Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_LOAD,
+	})
+	re.ErrorContains(err, "cannot split affinity region")
+	re.Equal(1, cluster.hbstreams.MsgLength())
+}
 
 func TestReportSplit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -45,8 +68,7 @@ func TestReportSplit(t *testing.T) {
 
 func TestReportBatchSplit(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -59,4 +81,46 @@ func TestReportBatchSplit(t *testing.T) {
 	}
 	_, err = cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
 	re.NoError(err)
+}
+
+// TestHandleRegionHeartbeatAfterAffinitySplitDenial recovers on unchanged heartbeats.
+func TestHandleRegionHeartbeatAfterAffinitySplitDenial(t *testing.T) {
+	re := require.New(t)
+	cluster, _ := newSplitScatterTestCluster(t)
+	cluster.opt.SetAffinityScheduleLimit(4)
+	var err error
+	cluster.affinityManager, err = affinity.NewManager(t.Context(), cluster.storage, cluster, cluster.opt, cluster.regionLabeler)
+	re.NoError(err)
+	// The test streams do not run, so sent messages stay queued. The Region has
+	// no operator, so a heartbeat can only queue a ChangeSplit message.
+	cluster.hbstreams = cluster.GetCoordinator().GetHeartbeatStreams()
+	region := cluster.GetRegion(100)
+	manager := cluster.GetAffinityManager()
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+	}}))
+	_, err = manager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+
+	_, err = cluster.HandleAskBatchSplit(&pdpb.AskBatchSplitRequest{
+		Region: region.GetMeta(), SplitCount: 1, Reason: pdpb.SplitReason_SIZE,
+	})
+	re.ErrorContains(err, "cannot split affinity region")
+	re.Equal(1, cluster.hbstreams.MsgLength(), "ChangeSplit(false)")
+	denial, ok := cluster.hbstreams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+	re.True(ok)
+	re.NotNil(denial.GetChangeSplit())
+	re.False(denial.GetChangeSplit().GetAutoSplitEnabled())
+	re.Equal(region.GetLeader(), denial.GetTargetPeer())
+
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	re.Zero(cluster.hbstreams.MsgLength(), "still denied")
+
+	re.NoError(manager.DeleteAffinityGroups([]string{"g1"}, true))
+	re.NoError(cluster.HandleRegionHeartbeat(region.Clone()))
+	re.Equal(1, cluster.hbstreams.MsgLength(), "ChangeSplit(true)")
+	recovery, ok := cluster.hbstreams.PopMsg().(*pdpb.RegionHeartbeatResponse)
+	re.True(ok)
+	re.True(recovery.GetChangeSplit().GetAutoSplitEnabled())
+	re.Equal(region.GetLeader(), recovery.GetTargetPeer())
 }

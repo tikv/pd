@@ -102,6 +102,7 @@ type Cluster struct {
 	running           atomic.Bool
 
 	backendAddress string
+	backendIndex   atomic.Uint64
 	httpClient     *http.Client
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
@@ -689,11 +690,8 @@ func (c *Cluster) GetPrepareRegionCount() (int, error) {
 
 func (c *Cluster) getBackendAddress() string {
 	backendAddresses := strings.Split(c.backendAddress, ",")
-	var backendAddress string
-	if len(backendAddresses) >= 1 {
-		backendAddress = backendAddresses[0]
-	}
-	return backendAddress
+	index := c.backendIndex.Add(1) - 1
+	return backendAddresses[index%uint64(len(backendAddresses))]
 }
 
 func (c *Cluster) getPrepareRegionCountFromPD() (int, error) {
@@ -723,9 +721,10 @@ func (c *Cluster) getPrepareRegionCountFromPD() (int, error) {
 
 // UpdateBalanceRangeJobStatus persists the status of the balance range job through the PD,
 // because the storage of the scheduling service is only in memory.
-func (c *Cluster) UpdateBalanceRangeJobStatus(jobID uint64, status string) error {
+func (c *Cluster) UpdateBalanceRangeJobStatus(jobID uint64, create time.Time, status string) error {
 	data, err := json.Marshal(map[string]any{
 		"job-id": jobID,
+		"create": create,
 		"status": status,
 	})
 	if err != nil {
@@ -915,6 +914,12 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 	tracer.OnAllStageFinished()
+	// PD drops scheduling heartbeat responses during a halt. Keep pending split
+	// recoveries for heartbeats after scheduling resumes.
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !c.IsSchedulingHalted() {
+		// Unlike GetHeartbeatStreams, the coordinator's streams stay set after the cluster stops.
+		affinityManager.MaybeEnableSplit(region, c.coordinator.GetHeartbeatStreams())
+	}
 	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
 	return nil
 }
@@ -928,7 +933,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		return err
 	}
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
-	cluster.HandleStatsAsync(c, region)
+	cluster.HandleStatsWithOriginAsync(c, region, origin)
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.

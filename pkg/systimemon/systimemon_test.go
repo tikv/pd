@@ -15,9 +15,9 @@
 package systimemon
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"go.uber.org/goleak"
@@ -28,26 +28,27 @@ func TestMain(m *testing.M) {
 }
 
 func TestSystimeMonitor(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var jumpForward int32
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		var jumpForward atomic.Int32
 
-	triggered := false
-	go StartMonitor(ctx,
-		func() time.Time {
-			if !triggered {
-				triggered = true
-				return time.Now()
-			}
+		triggered := false
+		go StartMonitor(ctx,
+			func() time.Time {
+				if !triggered {
+					triggered = true
+					return time.Now()
+				}
 
-			return time.Now().Add(-2 * time.Second)
-		}, func() {
-			atomic.StoreInt32(&jumpForward, 1)
-		})
+				return time.Now().Add(-2 * time.Second)
+			}, func() {
+				jumpForward.Store(1)
+			})
 
-	time.Sleep(time.Second)
+		synctest.Sleep(time.Second)
 
-	if atomic.LoadInt32(&jumpForward) != 1 {
-		t.Error("should detect time error")
-	}
+		if jumpForward.Load() != 1 {
+			t.Error("should detect time error")
+		}
+	})
 }

@@ -90,8 +90,7 @@ func TestFinishCollectedRequests(t *testing.T) {
 }
 
 func TestFetchPendingRequests(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	re := require.New(t)
 	bc := NewController[int](testMaxBatchSize, nil, nil)

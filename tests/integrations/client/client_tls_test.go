@@ -16,6 +16,7 @@ package client_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -55,8 +56,7 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 	testTLSInfoExpired := buildTLSInfo(certExpiredPath, "pd-server")
 	testClientTLSInfo := buildTLSInfo(certPath, "client")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tmpDir := t.TempDir()
 	re.NoError(os.RemoveAll(tmpDir))
 
@@ -276,8 +276,7 @@ func TestMultiCN(t *testing.T) {
 	testClientTLSInfo := buildTLSInfo(certPath, "client")
 	testTiDBClientTLSInfo := buildTLSInfo(certPath, "tidb-client")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Security.TLSConfig = grpcutil.TLSConfig{
@@ -309,6 +308,131 @@ func TestMultiCN(t *testing.T) {
 
 	// cn client is not allowed
 	re.Error(testAllowedCN(ctx, endpoints, testClientTLSInfo))
+}
+
+func TestClientCertAllowedCN(t *testing.T) {
+	re := require.New(t)
+	certPath := t.TempDir()
+	generateCerts(re, certPath)
+	serverTLSInfo := buildTLSInfo(certPath, "pd-server")
+
+	testCases := []struct {
+		name          string
+		legacyCNs     []string
+		clientCNs     []string
+		allowClient   bool
+		allowTiDB     bool
+		enableGateway bool
+	}{
+		{name: "legacy unrestricted", allowClient: true, allowTiDB: true, enableGateway: true},
+		{name: "legacy gateway disabled", allowClient: true, allowTiDB: true},
+		{name: "explicit empty list", clientCNs: []string{}, allowClient: true, allowTiDB: true, enableGateway: true},
+		{name: "legacy single CN", legacyCNs: []string{"pd-server"}, allowClient: true, allowTiDB: true, enableGateway: true},
+		{name: "legacy multiple CNs", legacyCNs: []string{"pd-server", "tidb"}, allowTiDB: true},
+		{name: "explicit single CN", clientCNs: []string{"pd-server"}},
+		{name: "explicit overrides legacy", legacyCNs: []string{"pd-server", "client"}, clientCNs: []string{"pd-server"}},
+		{name: "explicit multiple CNs", legacyCNs: []string{"pd-server"}, clientCNs: []string{"pd-server", "tidb"}, allowTiDB: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+				conf.Security.TLSConfig = grpcutil.TLSConfig{
+					KeyPath:        serverTLSInfo.KeyFile,
+					CertPath:       serverTLSInfo.CertFile,
+					CAPath:         serverTLSInfo.TrustedCAFile,
+					CertAllowedCNs: testCase.legacyCNs,
+				}
+				conf.Security.ClientCertAllowedCNs = testCase.clientCNs
+				conf.EnableGRPCGateway = testCase.enableGateway
+				conf.AdvertiseClientUrls = strings.ReplaceAll(conf.AdvertiseClientUrls, "http", "https")
+				conf.ClientUrls = strings.ReplaceAll(conf.ClientUrls, "http", "https")
+				conf.AdvertisePeerUrls = strings.ReplaceAll(conf.AdvertisePeerUrls, "http", "https")
+				conf.PeerUrls = strings.ReplaceAll(conf.PeerUrls, "http", "https")
+				conf.InitialCluster = strings.ReplaceAll(conf.InitialCluster, "http", "https")
+			})
+			re.NoError(err)
+			defer clus.Destroy()
+			var endpoints []string
+			for _, server := range clus.GetServers() {
+				endpoints = append(endpoints, server.GetConfig().AdvertiseClientUrls)
+			}
+			re.NoError(clus.RunInitialServers())
+			clus.WaitLeader()
+
+			for _, phase := range []string{"initial", "restarted"} {
+				if phase == "restarted" {
+					server := clus.GetLeaderServer()
+					re.NoError(server.Stop())
+					re.NoError(server.Run())
+					clus.WaitLeader()
+				}
+				for _, client := range []struct {
+					name    string
+					allowed bool
+				}{
+					{name: "pd-server", allowed: true},
+					{name: "client", allowed: testCase.allowClient},
+					{name: "tidb-client", allowed: testCase.allowTiDB},
+				} {
+					t.Run(phase+"/"+client.name, func(t *testing.T) {
+						re := require.New(t)
+						clientTLSInfo := buildTLSInfo(certPath, client.name)
+						err := testAllowedCN(ctx, endpoints, clientTLSInfo)
+						if client.allowed {
+							re.NoError(err)
+						} else {
+							re.Error(err)
+						}
+
+						tlsConfig, err := clientTLSInfo.ClientConfig()
+						re.NoError(err)
+						transport := &http.Transport{TLSClientConfig: tlsConfig}
+						t.Cleanup(transport.CloseIdleConnections)
+						httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
+						for _, requestCase := range []struct {
+							method string
+							path   string
+							body   string
+						}{
+							{method: http.MethodGet, path: "/health"},
+							{method: http.MethodPost, path: "/v3/kv/range", body: `{"key":"Zm9v"}`},
+							{method: http.MethodPost, path: "/v3/cluster/member/list", body: `{}`},
+							{method: http.MethodPost, path: "/v3/maintenance/status", body: `{}`},
+						} {
+							request, err := http.NewRequestWithContext(ctx, requestCase.method, endpoints[0]+requestCase.path, strings.NewReader(requestCase.body))
+							re.NoError(err)
+							response, err := httpClient.Do(request)
+							if !client.allowed {
+								if response != nil {
+									re.NoError(response.Body.Close())
+								}
+								re.Error(err, requestCase.path)
+								continue
+							}
+							re.NoError(err, requestCase.path)
+							body, err := io.ReadAll(response.Body)
+							re.NoError(response.Body.Close())
+							re.NoError(err)
+							if !testCase.enableGateway && requestCase.path != "/health" {
+								re.Equal(http.StatusNotFound, response.StatusCode)
+								continue
+							}
+							re.Equal(http.StatusOK, response.StatusCode, "%s: %s", requestCase.path, body)
+							if requestCase.path != "/health" {
+								var result struct {
+									Header json.RawMessage `json:"header"`
+								}
+								re.NoError(json.Unmarshal(body, &result))
+								re.NotEmpty(result.Header)
+							}
+						}
+					})
+				}
+			}
+		})
+	}
 }
 
 func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInfo) error {

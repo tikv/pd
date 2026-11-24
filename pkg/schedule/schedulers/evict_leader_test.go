@@ -495,8 +495,8 @@ func BenchmarkEvictLeaderScheduleBatch(b *testing.B) {
 	tc, _, sl := prepareEvictLeaderBatchScenario(b, 0)
 
 	totalOps := 0
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		ops, _ := sl.Schedule(tc, false)
 		if len(ops) == 0 {
 			b.Fatal("expected evict leader operators")

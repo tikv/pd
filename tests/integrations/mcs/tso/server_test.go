@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
@@ -51,6 +53,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -133,6 +136,43 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	err = testutil.CheckPostJSON(tests.TestDialClient, suite.backendEndpoints+"/pd/api/v1/admin/reset-ts", input,
 		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"))
 	re.NoError(err)
+}
+
+// TestTSOStreamWhenPrimaryCloses checks that while the TSO primary closes, a TSO stream to it
+// fails with the leader-change error rather than "server not started", so that the client
+// looks for the new primary instead of reconnecting to the closing server.
+func (suite *tsoServerTestSuite) TestTSOStreamWhenPrimaryCloses() {
+	re := suite.Require()
+	s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanup()
+	testutil.Eventually(re, s.IsServing)
+
+	cc, err := grpc.NewClient(strings.TrimPrefix(s.GetAddr(), "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	re.NoError(err)
+	defer cc.Close()
+	stream, err := tsopb.NewTSOClient(cc).Tso(suite.ctx)
+	re.NoError(err)
+	req := &tsopb.TsoRequest{Header: &tsopb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: 1}
+	re.NoError(stream.Send(req))
+	_, err = stream.Recv()
+	re.NoError(err)
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		s.Close()
+	}()
+	// The stream keeps the gRPC server from stopping gracefully until it fails, so the
+	// requests reach the server through all of Close until the first error.
+	for err == nil {
+		// Once the stream fails, Send only reports io.EOF, and Recv returns its status.
+		_ = stream.Send(req)
+		_, err = stream.Recv()
+	}
+	re.NotContains(err.Error(), "server not started")
+	re.Contains(err.Error(), "not leader")
+	<-closed
+	re.True(s.IsClosed())
 }
 
 func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
@@ -317,9 +357,12 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
-	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
 	tc.WaitForDefaultPrimaryServing(re)
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	var primary string
+	testutil.Eventually(re, func() bool {
+		primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+		return exist && primary != oldPrimary
+	})
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -334,10 +377,33 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 		}
 	}
 	tc.WaitForDefaultPrimaryServing(re)
-	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
-	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	testutil.Eventually(re, func() bool {
+		primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+		return exist && primary == oldPrimary
+	})
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
+	suite.checkAvailableTSO(re)
+}
+
+func TestForwardTSOWhenPrimaryAddrMissing(t *testing.T) {
+	re := require.New(t)
+	suite := NewPDServiceForward(re)
+	defer suite.ShutDown()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	re.True(exist)
+
+	// Simulate the watcher missing the PUT of the primary: the cached address is gone
+	// and no watch event will bring it back.
+	suite.pdLeader.GetServer().DeleteServicePrimaryAddr(mcs.TSOServiceName)
+	addr, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
+	re.True(exist)
+	re.Equal(primary, addr)
 	suite.checkAvailableTSO(re)
 }
 
@@ -365,6 +431,88 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 		}
 		re.NoError(err)
 		suite.checkAvailableTSO(re)
+	}
+}
+
+// TestGetTSAfterTSOPrimaryChanged checks that a client discovering TSO servers directly
+// resumes soon after the primary changes. The old primary rejects requests or closes its
+// streams before the new one is elected, so the client must not wait a full retry interval
+// after its first attempt misses the new primary.
+func TestGetTSAfterTSOPrimaryChanged(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	pdLeader := cluster.GetServer(cluster.WaitLeader())
+	re.NoError(pdLeader.BootstrapCluster())
+	tc, err := tests.NewTestTSOCluster(ctx, 3, pdLeader.GetAddr())
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	client := utils.SetupClientWithKeyspaceID(ctx, re, constant.DefaultKeyspaceID, []string{pdLeader.GetAddr()})
+	defer client.Close()
+	utils.WaitForTSOServiceAvailable(ctx, re, client)
+
+	// Measure the longest gap between two successful GetTS calls across the primary change.
+	checkMaxGap := func(changePrimary func()) {
+		var (
+			maxGap      time.Duration
+			lastSuccess time.Time
+			stoppedAt   time.Time
+			// Stop between calls instead of canceling an in-flight GetTS, whose request
+			// may be put back to the pool while the dispatcher still holds it.
+			stopped atomic.Bool
+		)
+		started := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for !stopped.Load() {
+				if _, _, err := client.GetTS(ctx); err != nil {
+					continue
+				}
+				now := time.Now()
+				if lastSuccess.IsZero() {
+					close(started)
+				} else {
+					maxGap = max(maxGap, now.Sub(lastSuccess))
+				}
+				lastSuccess = now
+			}
+			stoppedAt = time.Now()
+		}()
+		defer func() {
+			stopped.Store(true)
+			<-done
+		}()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			re.FailNow("GetTS does not succeed before the primary change")
+		}
+		changedAt := time.Now()
+		changePrimary()
+		tc.WaitForDefaultPrimaryServing(re)
+		time.Sleep(time.Second)
+		stopped.Store(true)
+		<-done
+		// End the open gap in the worker so observer scheduling after it exits is excluded.
+		re.True(lastSuccess.After(changedAt))
+		re.Less(max(maxGap, stoppedAt.Sub(lastSuccess)), 400*time.Millisecond)
+	}
+	for range 3 {
+		checkMaxGap(func() {
+			re.NoError(tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID))
+		})
+	}
+	// Shut down the primary as a rolling upgrade does, leaving the last server as the primary.
+	for range 2 {
+		checkMaxGap(func() {
+			tc.DestroyServer(tc.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID).GetAddr())
+		})
 	}
 }
 
@@ -524,15 +672,17 @@ func TestForwardTsoConcurrently(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	for i := range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			pdClient, err := pd.NewClientWithContext(
 				context.Background(),
 				caller.TestComponent,
 				[]string{suite.backendEndpoints},
 				pd.SecurityOption{})
-			if !as.NoError(err) || !as.NotNil(pdClient) {
+			if err != nil {
+				t.Errorf("create PD client: %v", err)
+				return
+			}
+			if !as.NotNil(pdClient) {
 				return
 			}
 			defer pdClient.Close()
@@ -544,7 +694,7 @@ func TestForwardTsoConcurrently(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -579,18 +729,20 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
 			wg := sync.WaitGroup{}
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				for i, client := range clients {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
+					wg.Go(func() {
 						for range 1000 {
 							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1) //nolint:staticcheck
-							if !as.NoError(err) || !as.Equal(uint64(0), min) {
+							if err != nil {
+								b.Errorf("update service GC safe point: %v", err)
+								return
+							}
+							if !as.Equal(uint64(0), min) {
 								return
 							}
 						}
-					}()
+					})
 				}
 			}
 			wg.Wait()
@@ -641,17 +793,13 @@ func (suite *CommonTestSuite) SetupSuite() {
 
 func (suite *CommonTestSuite) TearDownSuite() {
 	re := suite.Require()
+	defer suite.cancel()
+	defer suite.cluster.Destroy()
 	suite.tsoCluster.Destroy()
 	etcdClient := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
 	re.NoError(err)
-	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, mcs.TSOServiceName)
-		re.NoError(err)
-		re.Empty(endpoints)
-	}
-	suite.cluster.Destroy()
-	suite.cancel()
+	re.Empty(endpoints)
 }
 
 func (suite *CommonTestSuite) TestAdvertiseAddr() {
@@ -689,14 +837,14 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	re.NoError(err)
 	re.NoError(s.Run())
 
-	// transfer leader to the new server
-	err = suite.pdLeader.ResignLeader()
-	re.NoError(err)
-	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
-	check()
-	err = suite.pdLeader.ResignLeader()
-	re.NoError(err)
-	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+	for range 2 {
+		oldLeader := suite.pdLeader.GetConfig().Name
+		re.NoError(suite.pdLeader.ResignLeaderWithRetry())
+		newLeader := suite.cluster.WaitLeaderChange(oldLeader)
+		re.NotEmpty(newLeader)
+		suite.pdLeader = suite.cluster.GetServer(newLeader)
+		check()
+	}
 }
 
 // TestTSOServiceSwitch tests the behavior of TSO service switching when `EnableTSODynamicSwitching` is enabled.
@@ -706,8 +854,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 func TestTSOServiceSwitch(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1,
 		func(conf *config.Config, _ string) {
@@ -772,8 +919,11 @@ func TestTSOServiceSwitch(t *testing.T) {
 	err = pdLeader.GetServer().SetMicroserviceConfig(*cfg)
 	re.NoError(err)
 
-	// Wait for PD to detect the change
-	time.Sleep(300 * time.Millisecond)
+	// Wait for PD to initialize its allocator after the configuration change.
+	testutil.Eventually(re, func() bool {
+		return pdLeader.GetServer().GetTSOAllocator().IsInitialize()
+	})
+	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing
 	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
@@ -785,8 +935,7 @@ const modeSwitchPDModeKeyspaceName = "mode_switch_pd_ks"
 
 func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
 	t.Cleanup(func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
@@ -1072,7 +1221,7 @@ func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *ui
 		}
 		ts := (uint64(physical) << 18) + uint64(logical)
 		if ts <= *globalLastTS {
-			return fmt.Errorf("TSO is not globally increasing: last %d, current %d", globalLastTS, ts)
+			return fmt.Errorf("TSO is not globally increasing: last %d, current %d", *globalLastTS, ts)
 		}
 		*globalLastTS = ts
 	}

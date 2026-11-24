@@ -301,9 +301,7 @@ const (
 // Start starts ResourceGroupController service.
 func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		if c.ruConfig.DegradedModeWaitDuration > 0 {
 			c.run.responseDeadline = time.NewTimer(c.ruConfig.DegradedModeWaitDuration)
 			c.run.responseDeadline.Stop()
@@ -508,7 +506,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
 			}
 		}
-	}()
+	})
 }
 
 // Stop stops ResourceGroupController service.
@@ -667,7 +665,8 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	}
 	if !isUseDegradedResourceGroup {
 		// Check again to prevent initializing the same resource group concurrently.
-		_, loaded := c.loadOrStoreGroupController(name, gc)
+		var loaded bool
+		gc, loaded = c.loadOrStoreGroupController(name, gc)
 		if !loaded {
 			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
@@ -714,6 +713,8 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		return
 	}
 	gc.tombstone.Store(true)
+	// Tombstones do not report an RU timeline.
+	gc.ruTimeline = nil
 	c.groupsController.Store(name, gc)
 	// Its metrics will be deleted in the cleanup process.
 	metrics.ResourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
@@ -779,22 +780,28 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 
 func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, typ selectType, notifyMsg notifyMsg) {
 	c.run.currentRequests = make([]*rmpb.TokenBucketRequest, 0)
+	var reports []ruTimelineReport
 	c.groupsController.Range(func(_, value any) bool {
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
 			request.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.keyspaceID}}
+			report := ruTimelineReport{timeline: gc.ruTimeline}
+			request.ConsumptionSinceLastRequest.RuBySecond, report.gen = gc.ruTimeline.snapshot()
 			c.run.currentRequests = append(c.run.currentRequests, request)
+			reports = append(reports, report)
 			gc.metrics.tokenRequestCounter.Inc()
 		}
 		return true
 	})
 	if len(c.run.currentRequests) > 0 {
-		c.sendTokenBucketRequests(ctx, c.run.currentRequests, source, notifyMsg)
+		trimRUTimelines(c.run.currentRequests, ruTimelineRequestBudget)
+		c.sendTokenBucketRequests(ctx, c.run.currentRequests, reports, source, notifyMsg)
 	}
 }
 
-func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, source string, notifyMsg notifyMsg) {
+// sendTokenBucketRequests sends requests[i], whose RU timeline is reports[i].
+func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, reports []ruTimelineReport, source string, notifyMsg notifyMsg) {
 	now := time.Now()
 	req := &rmpb.TokenBucketsRequest{
 		Requests:              requests,
@@ -818,6 +825,13 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
 			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
+			// The resource manager has received these seconds through the
+			// report's coverage watermark, including the implicit zeros.
+			for i, report := range reports {
+				if seconds := requests[i].GetConsumptionSinceLastRequest().GetRuBySecond(); seconds != nil {
+					report.timeline.ack(seconds.GetEndUnixSec(), report.gen)
+				}
+			}
 		}
 		if !notifyMsg.startTime.IsZero() && time.Since(notifyMsg.startTime) > slowNotifyFilterDuration {
 			log.Warn("[resource group controller] slow token bucket request", zap.String("source", source), zap.Duration("cost", time.Since(notifyMsg.startTime)))
@@ -890,8 +904,8 @@ func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, 
 		return false
 	}
 
-	if idx := strings.LastIndex(requestResource, "_"); idx != -1 {
-		return slices.Contains(bg.JobTypes, requestResource[idx+1:])
+	if _, after, ok := strings.CutLast(requestResource, "_"); ok {
+		return slices.Contains(bg.JobTypes, after)
 	}
 
 	return false

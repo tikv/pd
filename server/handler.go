@@ -333,7 +333,9 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 			func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 				w.WriteHeader(http.StatusConflict)
-				_ = json.NewEncoder(w).Encode(errs.ErrSchedulerNotFound.FastGenByArgs().Error())
+				if err := json.NewEncoder(w).Encode(errs.ErrSchedulerNotFound.FastGenByArgs().Error()); err != nil {
+					log.Error("failed to encode scheduler not found response", errs.ZapError(err))
+				}
 			})
 	}
 	return mux, nil

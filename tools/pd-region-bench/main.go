@@ -229,9 +229,7 @@ func (s *benchmarkSuite) createHeartbeatStream(ctx context.Context, pdCli pdpb.P
 		log.Fatal("create heartbeat stream error", zap.Error(err))
 	}
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -240,7 +238,7 @@ func (s *benchmarkSuite) createHeartbeatStream(ctx context.Context, pdCli pdpb.P
 			}
 			_, _ = stream.Recv()
 		}
-	}()
+	})
 
 	return stream
 }

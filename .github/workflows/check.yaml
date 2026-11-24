@@ -10,12 +10,26 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-go
+        id: go
         with:
-          go-version: '1.26'
-          check-latest: true
+          cache-scope: check
+      - name: Restore linter cache
+        id: lint-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('Makefile', 'tools.go', '**/go.mod', '**/go.sum', '**/.golangci.*') }}
+          restore-keys: |
+            golangci-lint-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('Makefile', 'tools.go', '**/go.mod', '**/go.sum', '**/.golangci.*') }}-
       - name: Make Check
         run: |
           SWAGGER=1 make build
           make tools
           make check
+      - name: Save linter cache on push
+        if: github.event_name == 'push' && steps.lint-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: ${{ steps.lint-cache.outputs.cache-primary-key }}

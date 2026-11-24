@@ -16,6 +16,7 @@ package server
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"time"
 
@@ -149,9 +150,7 @@ func (p *RUVersionPolicy) Clone() *RUVersionPolicy {
 	clone := &RUVersionPolicy{Default: p.Default}
 	if p.Overrides != nil {
 		clone.Overrides = make(map[uint32]RUVersion, len(p.Overrides))
-		for keyspaceID, version := range p.Overrides {
-			clone.Overrides[keyspaceID] = version
-		}
+		maps.Copy(clone.Overrides, p.Overrides)
 	}
 	return clone
 }
@@ -319,7 +318,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	c.adjustLog(configMetaData.Child("log"))
-	if err := c.Security.Encryption.Adjust(); err != nil {
+	if err := c.Security.Adjust(configMetaData.Child("security")); err != nil {
 		return err
 	}
 

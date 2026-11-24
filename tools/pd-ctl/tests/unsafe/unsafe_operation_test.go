@@ -15,7 +15,6 @@
 package unsafe_operation_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,8 +26,7 @@ import (
 
 func TestRemoveFailedStores(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -40,15 +38,21 @@ func TestRemoveFailedStores(t *testing.T) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
+	// Store 1 is up and connected and stores 2 and 3 don't exist, so the server
+	// rejects these requests and the error is returned to the caller. Which
+	// store gets reported depends on map iteration order.
 	args := []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3"}
 	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	re.ErrorContains(err, "ErrUnsafeRecoveryInvalidInput")
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--timeout", "3600"}
 	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	re.ErrorContains(err, "ErrUnsafeRecoveryInvalidInput")
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--plan-execution-timeout", "600", "--disable-paranoid-check"}
 	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	re.ErrorContains(err, "ErrUnsafeRecoveryInvalidInput")
+	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1", "2"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.ErrorContains(err, "more arguments than expected")
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--timeout", "abc"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.Error(err)
@@ -58,7 +62,8 @@ func TestRemoveFailedStores(t *testing.T) {
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "show"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	// "history" is not a subcommand, so it is parsed as a store id.
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "history"}
 	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	re.ErrorContains(err, "invalid store id")
 }

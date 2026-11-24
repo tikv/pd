@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/log"
 
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 type clusterSuite struct {
@@ -158,19 +157,18 @@ func (c *cluster) stop() {
 
 func (c *cluster) deploy() {
 	re := c.re
-	curPath, err := os.Getwd()
+	repoRoot, err := filepath.Abs("../../..")
 	re.NoError(err)
-	re.NoError(os.Chdir("../../.."))
 
-	if !fileExists("third_bin") || !fileExists("third_bin/tikv-server") || !fileExists("third_bin/tidb-server") || !fileExists("third_bin/tiflash") {
+	if !fileExists(filepath.Join(repoRoot, "third_bin/tikv-server")) || !fileExists(filepath.Join(repoRoot, "third_bin/tidb-server")) || !fileExists(filepath.Join(repoRoot, "third_bin/tiflash")) {
 		log.Info("downloading binaries...")
 		log.Info("this may take a few minutes, you can also download them manually and put them in the bin directory.")
-		_, err := runCommandWithOutput("./tests/integrations/realcluster/download_integration_test_binaries.sh")
+		_, err := runCommandWithOutputInDir("./tests/integrations/realcluster/download_integration_test_binaries.sh", repoRoot)
 		re.NoError(err)
 	}
-	if !fileExists("bin") || !fileExists("bin/pd-server") {
+	if !fileExists(filepath.Join(repoRoot, "bin/pd-server")) {
 		log.Info("compile pd binaries...")
-		_, err := runCommandWithOutput("make pd-server")
+		_, err := runCommandWithOutputInDir("make pd-server", repoRoot)
 		re.NoError(err)
 	}
 
@@ -195,39 +193,31 @@ func (c *cluster) deploy() {
 		tiflashCount = defaultTiFlashCount
 	}
 
-	// nolint:errcheck
-	go func() {
-		defer logutil.LogPanic()
-		playgroundOpts := []string{
-			fmt.Sprintf("--kv %d", kvCount),
-			fmt.Sprintf("--tiflash %d", tiflashCount),
-			fmt.Sprintf("--db %d", dbCount),
-			fmt.Sprintf("--pd %d", pdCount),
-			"--without-monitor",
-			fmt.Sprintf("--tag %s", c.tag),
-		}
+	playgroundOpts := []string{
+		fmt.Sprintf("--kv %d", kvCount),
+		fmt.Sprintf("--tiflash %d", tiflashCount),
+		fmt.Sprintf("--db %d", dbCount),
+		fmt.Sprintf("--pd %d", pdCount),
+		"--without-monitor",
+		fmt.Sprintf("--tag %s", c.tag),
+	}
 
-		if c.mode == "ms" {
-			playgroundOpts = append(playgroundOpts,
-				"--pd.mode ms",
-				"--tso 1",
-				"--scheduling 1",
-			)
-		}
-
-		cmd := fmt.Sprintf(`%s playground nightly %s %s > %s 2>&1 & `,
-			tiupBin,
-			strings.Join(playgroundOpts, " "),
-			buildBinPathsOpts(c.mode == "ms"),
-			filepath.Join(playgroundLogDir, c.tag+".log"),
+	if c.mode == "ms" {
+		playgroundOpts = append(playgroundOpts,
+			"--pd.mode ms",
+			"--tso 1",
+			"--scheduling 1",
 		)
-		_, err := runCommandWithOutput(cmd)
-		re.NoError(err)
-	}()
+	}
 
-	// Avoid to change the dir before execute `tiup playground`.
-	time.Sleep(10 * time.Second)
-	re.NoError(os.Chdir(curPath))
+	cmd := fmt.Sprintf(`%s playground nightly %s %s > %s 2>&1 & `,
+		tiupBin,
+		strings.Join(playgroundOpts, " "),
+		buildBinPathsOpts(c.mode == "ms"),
+		filepath.Join(playgroundLogDir, c.tag+".log"),
+	)
+	_, err = runCommandWithOutputInDir(cmd, repoRoot)
+	re.NoError(err)
 }
 
 // collectPids will collect the pids of the processes.
@@ -237,7 +227,7 @@ func (c *cluster) collectPids() error {
 		return fmt.Errorf("failed to collect pids: %v", err)
 	}
 
-	for _, pidStr := range strings.Split(strings.TrimSpace(output), "\n") {
+	for pidStr := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
 		if pid, err := strconv.Atoi(pidStr); err == nil {
 			c.pids = append(c.pids, pid)
 		}
@@ -248,7 +238,7 @@ func (c *cluster) collectPids() error {
 func (c *cluster) waitReady() {
 	re := c.re
 	log.Info("start to wait TiUP ready", zap.String("tag", c.tag))
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	for {

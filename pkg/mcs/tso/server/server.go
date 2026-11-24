@@ -71,7 +71,7 @@ type Server struct {
 	diagnosticspb.DiagnosticsServer
 
 	// Server state. 0 is not running, 1 is running.
-	isRunning int64
+	isRunning atomic.Int64
 
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
@@ -176,14 +176,17 @@ func (s *Server) Run() (err error) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
+	if !s.isRunning.CompareAndSwap(1, 0) {
 		// server is already closed
 		return
 	}
 
 	log.Info("closing tso server ...")
 	s.cgMonitor.StopMonitor()
-	// close tso service loops in the keyspace group manager
+	// Close the TSO service loops in the keyspace group manager, which also resigns the
+	// primary. The TSO service keeps handling the requests until the gRPC server stops, so
+	// they get the leader-change error once the allocators start to close, and the clients
+	// look for the new primary instead of reconnecting to this server.
 	s.keyspaceGroupManager.Close()
 	if err := s.serviceRegister.Deregister(); err != nil {
 		log.Error("failed to deregister the service", errs.ZapError(err))
@@ -216,7 +219,7 @@ func (s *Server) IsServing() bool {
 // IsKeyspaceServingByGroup returns whether the server is the primary of the given keyspace.
 // It only returns true when the keyspace ID matches the keyspace group ID.
 func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bool {
-	if atomic.LoadInt64(&s.isRunning) == 0 {
+	if s.isRunning.Load() == 0 {
 		return false
 	}
 	// We need to check if the keyspace group ID is expected for the given keyspace ID.
@@ -282,7 +285,7 @@ func (*Server) AddServiceReadyCallback(...func(context.Context) error) {
 
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
-	return atomic.LoadInt64(&s.isRunning) == 0
+	return s.isRunning.Load() == 0
 }
 
 // GetKeyspaceGroupManager returns the manager of keyspace group.
@@ -384,7 +387,7 @@ func (s *Server) startServer() (err error) {
 		cb()
 	}
 
-	atomic.StoreInt64(&s.isRunning, 1)
+	s.isRunning.Store(1)
 	return nil
 }
 

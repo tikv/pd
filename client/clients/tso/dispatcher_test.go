@@ -53,7 +53,7 @@ func newMockTSOServiceProvider(option *opt.Option, createStream func(ctx context
 	return &mockTSOServiceProvider{
 		option:       option,
 		createStream: createStream,
-		conCtxMgr:    cctx.NewManager[*tsoStream](),
+		conCtxMgr:    newConnectionCtxManager(),
 	}
 }
 
@@ -107,10 +107,13 @@ func (s *testTSODispatcherSuite) SetupTest() {
 	// single stable access to the inner stream, we do not allow it to create it more than once in these tests.
 	// To avoid data race on reading `stream` and `streamInner` fields.
 	created := new(atomic.Bool)
+	streamCreated := make(chan struct{})
+	var streamCreatedOnce sync.Once
 	createStream := func(ctx context.Context) *tsoStream {
 		s.streamInner = newMockTSOStreamImpl(ctx, resultModeGenerateOnSignal)
 		s.stream = newTSOStream(ctx, mockStreamURL, s.streamInner)
 		created.Store(true)
+		streamCreatedOnce.Do(func() { close(streamCreated) })
 		return s.stream
 	}
 	s.dispatcher = newTSODispatcher(context.Background(), newMockTSOServiceProvider(s.option, createStream))
@@ -134,9 +137,7 @@ func (s *testTSODispatcherSuite) SetupTest() {
 		req := s.sendReq(ctx)
 		s.reqMustNotReady(req)
 		// Wait until created
-		for !created.Load() {
-			time.Sleep(time.Millisecond)
-		}
+		<-streamCreated
 		s.streamInner.generateNext()
 		s.reqMustReady(req)
 	}
@@ -182,6 +183,37 @@ func (s *testTSODispatcherSuite) reqMustReady(req *Request) (physical int64, log
 	physical, logical, err := req.waitTimeout(time.Second)
 	s.re.NoError(err)
 	return physical, logical
+}
+
+func (s *testTSODispatcherSuite) TestEvictStreamWithBatchOnIt() {
+	conCtxMgr := s.dispatcher.provider.getConnectionCtxMgr()
+	// Serve the next batch with a stream bound to the context of its connection, so that
+	// canceling the connection fails the batch on it.
+	oldCtx, oldCancel := context.WithCancel(context.Background())
+	defer oldCancel()
+	oldInner := newMockTSOStreamImpl(oldCtx, resultModeGenerateOnSignal)
+	defer oldInner.stop()
+	s.re.True(conCtxMgr.Store(oldCtx, oldCancel, mockStreamURL, newTSOStream(oldCtx, mockStreamURL, oldInner), true))
+	req := s.sendReq(context.Background())
+	s.reqMustNotReady(req)
+
+	// Overwriting the stream evicts it, which fails the batch on it with an error that GetTS retries.
+	newCtx, newCancel := context.WithCancel(context.Background())
+	defer newCancel()
+	newInner := newMockTSOStreamImpl(newCtx, resultModeGenerateOnSignal)
+	// Keep the timestamps above those already returned by the stream created in SetupTest.
+	newInner.resGenPhysical += 10000
+	defer newInner.stop()
+	s.re.True(conCtxMgr.CleanAllAndStore(newCtx, newCancel, "new-url", newTSOStream(newCtx, "new-url", newInner)))
+	s.re.Error(oldCtx.Err())
+	_, _, err := req.waitTimeout(time.Second)
+	s.re.True(errs.ErrClientTSOStreamClosed.Equal(err), "%v", err)
+
+	// A retried request is served by the new stream.
+	req = s.sendReq(context.Background())
+	s.reqMustNotReady(req)
+	newInner.generateNext()
+	s.reqMustReady(req)
 }
 
 func TestTSODispatcherTestSuite(t *testing.T) {
@@ -312,13 +344,7 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 	// Also note that in current implementation, the tsoStream tries to receive the next result before checking
 	// the `tsoStream.pendingRequests` queue. Changing this behavior may need to update this test.
 	for i := range tokenCount + 3 {
-		expectedPending := tokenCount + 1 - i
-		if expectedPending > tokenCount {
-			expectedPending = tokenCount
-		}
-		if expectedPending < 0 {
-			expectedPending = 0
-		}
+		expectedPending := max(min(tokenCount+1-i, tokenCount), 0)
 
 		// Spin for a while as the dispatcher loop may have not finished sending next batch to pendingRequests
 		spinStart := time.Now()
@@ -428,7 +454,7 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 	}()
 
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		req := getReq()
 		dispatcher.push(req)
 		_, _, err := req.Wait()

@@ -107,7 +107,7 @@ func newUpsertMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
 			cmd.PrintErrf("Invalid --group: address cannot be empty in %q", group)
 			return
 		}
-		for _, addrSegment := range strings.Split(addr, ",") {
+		for addrSegment := range strings.SplitSeq(addr, ",") {
 			if strings.TrimSpace(addrSegment) == "" {
 				cmd.PrintErrf("Invalid --group: address cannot contain empty segment in %q", group)
 				return

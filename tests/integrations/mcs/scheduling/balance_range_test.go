@@ -201,3 +201,34 @@ func (suite *serverTestSuite) TestBalanceRangeRemoveSchedulerWithRunningJob() {
 		return listSchedulingBalanceRangeJobs(re, primary) == nil && km.IsEmpty()
 	})
 }
+
+func (suite *serverTestSuite) TestBalanceRangeDeleteWatchedJobConfig() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	primary := tc.WaitForPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	primary.GetCluster().SetPrepared()
+	defer tests.MustDeleteScheduler(re, suite.backendEndpoints, types.BalanceRangeScheduler.String())
+
+	suite.mustAddBalanceRangeJob(re, "job-0", "1h", "100", "200")
+	km := primary.GetCluster().GetKeyRangeManager()
+	testutil.Eventually(re, func() bool {
+		jobs := listSchedulingBalanceRangeJobs(re, primary)
+		return len(jobs) == 1 && jobs[0].Status == "running" && !km.IsEmpty()
+	})
+
+	// Delete only the payload, leaving the scheduler list unchanged. The job
+	// watcher must clear the running job without relying on scheduler removal.
+	re.NoError(suite.pdLeader.GetServer().GetStorage().RemoveSchedulerConfig(types.BalanceRangeScheduler.String()))
+	testutil.Eventually(re, func() bool {
+		jobs := listSchedulingBalanceRangeJobs(re, primary)
+		_, exists := primary.GetCluster().GetCoordinator().GetSchedulersController().
+			GetSchedulerHandlers()[types.BalanceRangeScheduler.String()]
+		return exists && len(jobs) == 0 && km.IsEmpty()
+	})
+}
