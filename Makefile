@@ -175,7 +175,8 @@ dashboard-replace-distro-info:
 #### Static tools ####
 
 PD_PKG := github.com/tikv/pd
-PACKAGES := $(shell go list ./...)
+# Discover packages once, when a lint or test target first needs them.
+PACKAGES = $(eval PACKAGES := $$(shell go list ./...))$(PACKAGES)
 
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 GOLANGCI_LINT_VERSION := 2.14.0
@@ -201,6 +202,10 @@ install-test-tools:
 	@go install github.com/pingcap/failpoint/failpoint-ctl
 
 .PHONY: install-tools install-test-tools
+
+$(GO_TOOLS_BIN_PATH)/easyjson: go.mod go.sum
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@go install github.com/mailru/easyjson/easyjson
 
 #### Static checks ####
 
@@ -241,7 +246,7 @@ check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
-generate-easyjson: install-tools
+generate-easyjson: $(GO_TOOLS_BIN_PATH)/easyjson
 	@echo "generating easyjson..."
 	easyjson -all ./pkg/response/region.go
 
@@ -271,10 +276,10 @@ ut: pd-ut
 	@$(CLEAN_UT_BINARY)
 	@$(FAILPOINT_DISABLE)
 
-PACKAGE_DIRECTORIES := $(subst $(PD_PKG)/,,$(PACKAGES))
-TEST_PKGS := $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
+PACKAGE_DIRECTORIES = $(subst $(PD_PKG)/,,$(PACKAGES))
+TEST_PKGS = $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/"),$(PACKAGES))
-BASIC_TEST_PKGS := $(filter-out $(PD_PKG)/tests%,$(TEST_PKGS))
+BASIC_TEST_PKGS = $(filter-out $(PD_PKG)/tests%,$(TEST_PKGS))
 
 SUBMODULES := $(filter $(shell find . -iname "go.mod" -exec dirname {} \;),\
 				$(filter-out .,$(shell find . -iname "Makefile" -exec dirname {} \;)))
