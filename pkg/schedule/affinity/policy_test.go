@@ -207,10 +207,12 @@ func TestRangeConflictPreservesTarget(t *testing.T) {
 		name    string
 		observe bool
 		admin   bool
+		stale   bool
 		voters  []uint64
 	}{
 		{name: "observe", observe: true, voters: []uint64{2, 3, 4}},
-		{name: "versioned-update", voters: []uint64{2, 3, 4}},
+		{name: "observed-update", voters: []uint64{2, 3, 4}},
+		{name: "stale-update", stale: true, voters: []uint64{2, 3, 4}},
 		{name: "leader-only-update", voters: []uint64{1, 2, 3}},
 		{name: "admin-update", admin: true, voters: []uint64{2, 3, 4}},
 	} {
@@ -235,6 +237,7 @@ func TestRangeConflictPreservesTarget(t *testing.T) {
 			re.NoError(err)
 			re.True(state.AffinitySchedulingAllowed)
 			re.False(state.RegularSchedulingAllowed)
+			beforeConflict := state
 			before, err := store.LoadAffinityGroup("a")
 			re.NoError(err)
 
@@ -256,7 +259,11 @@ func TestRangeConflictPreservesTarget(t *testing.T) {
 				_, err = manager.UpdateAffinityGroupPeers("a", 2, tc.voters)
 				re.NoError(err)
 			} else {
-				_, err = manager.updateAffinityGroupPeersWithAffinityVer("a", state.affinityVer, 2, tc.voters)
+				observed := state
+				if tc.stale {
+					observed = beforeConflict
+				}
+				_, err = manager.updateAffinityGroupPeersWithState("a", observed, 2, tc.voters)
 				re.NoError(err)
 			}
 
@@ -291,6 +298,53 @@ func TestRangeConflictPreservesTarget(t *testing.T) {
 			assertTarget()
 		})
 	}
+}
+
+func TestObserveAvailableRegionIgnoresRecreatedGroup(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for id := uint64(1); id <= 4; id++ {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id)},
+			core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	const groupID = "recreated-group"
+	ranges := createGroupForTest(re, manager, groupID, 1)
+	original, err := manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 4})
+	re.NoError(err)
+	expired, ok := manager.ExpireAffinityGroupIf(original)
+	re.True(ok)
+	re.True(expired.RegularSchedulingAllowed)
+
+	const adminLeaderStoreID uint64 = 2
+	voters := []uint64{1, 2, 3}
+	region := generateRegionForTest(1, voters, ranges[0])
+	re.NoError(manager.DeleteAffinityGroups([]string{groupID}, true))
+	createGroupForTest(re, manager, groupID, 1)
+	_, err = manager.UpdateAffinityGroupPeers(groupID, adminLeaderStoreID, voters)
+	re.NoError(err)
+	// Updating the ranges brings the replacement to the same version as the expired snapshot.
+	re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{
+		GroupID: groupID, KeyRanges: []keyutil.KeyRange{nonOverlappingRange},
+	}}, nil))
+	replacement := manager.GetAffinityGroupState(groupID)
+	re.True(replacement.AffinitySchedulingAllowed)
+	re.Equal(expired.affinityVer, replacement.affinityVer)
+	re.NotSame(expired.groupInfoPtr, replacement.groupInfoPtr)
+
+	manager.ObserveAvailableRegion(region, expired)
+	re.Equal(adminLeaderStoreID, manager.GetAffinityGroupState(groupID).LeaderStoreID)
+	persisted, err := store.LoadAffinityGroup(groupID)
+	re.NoError(err)
+	var group Group
+	re.NoError(json.Unmarshal([]byte(persisted), &group))
+	re.Equal(adminLeaderStoreID, group.LeaderStoreID)
 }
 
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {

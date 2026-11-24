@@ -273,10 +273,16 @@ func getEndpoints(cmd *cobra.Command) []string {
 }
 
 func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]any) {
+	if err := requestJSONE(cmd, method, prefix, input); err != nil {
+		cmd.Printf("Failed! %s\n", strings.TrimSpace(err.Error()))
+	}
+}
+
+// requestJSONE is like requestJSON but returns the error instead of printing it.
+func requestJSONE(cmd *cobra.Command, method, prefix string, input map[string]any) error {
 	data, err := json.Marshal(input)
 	if err != nil {
-		cmd.Println(err)
-		return
+		return err
 	}
 
 	endpoints := getEndpoints(cmd)
@@ -311,15 +317,19 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]any
 		return nil
 	})
 	if err != nil {
-		cmd.Printf("Failed! %s\n", strings.TrimSpace(err.Error()))
-		return
+		return err
 	}
 	msg = bytes.Trim(bytes.TrimSpace(msg), "\"")
 	cmd.Printf("Success! %s\n", string(msg))
+	return nil
 }
 
 func postJSON(cmd *cobra.Command, prefix string, input map[string]any) {
 	requestJSON(cmd, http.MethodPost, prefix, input)
+}
+
+func postJSONE(cmd *cobra.Command, prefix string, input map[string]any) error {
+	return requestJSONE(cmd, http.MethodPost, prefix, input)
 }
 
 func patchJSON(cmd *cobra.Command, prefix string, input map[string]any) {

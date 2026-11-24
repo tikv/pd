@@ -1193,3 +1193,66 @@ func interleave[T any](a, b []T) [][]T {
 	}
 	return result
 }
+
+func TestExpireAffinityGroupIf(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for id := uint64(1); id <= 4; id++ {
+		storeInfo := core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id)})
+		storeInfos.PutStore(storeInfo.Clone(core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	const groupID = "conditional-expire"
+	createGroupForTest(re, manager, groupID, 1)
+	snapshot, err := manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.True(snapshot.AffinitySchedulingAllowed)
+
+	expired, ok := manager.ExpireAffinityGroupIf(nil)
+	re.False(ok)
+	re.Nil(expired)
+
+	// A concurrent peer update invalidates the stale snapshot.
+	updated, err := manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 4})
+	re.NoError(err)
+	expired, ok = manager.ExpireAffinityGroupIf(snapshot)
+	re.False(ok)
+	re.Nil(expired)
+	current := manager.GetAffinityGroupState(groupID)
+	re.True(current.AffinitySchedulingAllowed)
+	re.Equal([]uint64{1, 2, 4}, current.VoterStoreIDs)
+
+	// Matching snapshot expires atomically and yields the new version for relearning.
+	expired, ok = manager.ExpireAffinityGroupIf(updated)
+	re.True(ok)
+	re.NotNil(expired)
+	re.False(expired.AffinitySchedulingAllowed)
+	re.True(expired.RegularSchedulingAllowed)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+		{Id: 13, StoreId: 3, Role: metapb.PeerRole_Voter},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 100, Peers: peers}, peers[0])
+	manager.ObserveAvailableRegion(region, expired)
+	relearned := manager.GetAffinityGroupState(groupID)
+	re.True(relearned.AffinitySchedulingAllowed)
+	re.Equal([]uint64{1, 2, 3}, relearned.VoterStoreIDs)
+
+	// Deleting and recreating a group with the same ID must also reject an old snapshot.
+	re.NoError(manager.DeleteAffinityGroups([]string{groupID}, true))
+	createGroupForTest(re, manager, groupID, 1)
+	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	expired, ok = manager.ExpireAffinityGroupIf(relearned)
+	re.False(ok)
+	re.Nil(expired)
+	re.True(manager.GetAffinityGroupState(groupID).AffinitySchedulingAllowed)
+}
