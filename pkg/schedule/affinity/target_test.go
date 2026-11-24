@@ -230,12 +230,10 @@ func TestFirstWinStoreConditions(t *testing.T) {
 
 func TestFirstWinSingleFlightAndGlobalBackoff(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		written []string
-		err     error
+		name string
+		err  error
 	}{
 		{name: "failed", err: errors.New("PD unavailable")},
-		{name: "not written", written: []string{"another-group"}},
 		{name: "not ready", err: fmt.Errorf("PD leader is not found: %w", ErrTargetWriterNotReady)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -248,16 +246,17 @@ func TestFirstWinSingleFlightAndGlobalBackoff(t *testing.T) {
 				test.reply = func(_ context.Context, targets []GroupTarget) ([]string, error) {
 					if len(test.calls) == 1 {
 						<-release
-						return tc.written, tc.err
+						return nil, tc.err
 					}
 					return []string{targets[0].Expected.ID}, nil
 				}
 				g, h := test.target("g", 1, 1, 2), test.target("h", 1, 1, 2)
 				test.observe("g", 1, 2)
 				test.observe("h", 1, 2)
-				test.Equal([]GroupTarget{g}, test.calls, "busy observations are discarded")
+				test.Equal([]GroupTarget{g}, test.calls, "only one request can be in flight")
 				release <- struct{}{}
 				synctest.Wait()
+				test.Len(test.calls, 1, "failure drops pending observations")
 				test.observe("h", 1, 2)
 				test.Len(test.calls, 1, "failure delays all groups")
 				if !errors.Is(tc.err, ErrTargetWriterNotReady) {
@@ -269,10 +268,90 @@ func TestFirstWinSingleFlightAndGlobalBackoff(t *testing.T) {
 				test.observe("h", 1, 2)
 				test.Zero(test.GetAffinityGroupState("h").LeaderStoreID, "HTTP success waits for the watcher")
 				test.observe("g", 1, 2)
-				test.Equal([]GroupTarget{g, h, g}, test.calls, "success has no cooldown")
+				test.Equal([]GroupTarget{g, h, g}, test.calls, "success does not delay other groups")
 			})
 		})
 	}
+}
+
+func TestFirstWinSkippedGroupDoesNotBlockPatrol(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		skippedIDs := []string{"a"}
+		for index := range 1024 {
+			skippedIDs = append(skippedIDs, fmt.Sprintf("a%04d", index))
+		}
+		ids := append(skippedIDs, "b", "c")
+		pd, test := newTargetTest(t, ids...), newTargetTest(t)
+		for _, id := range ids {
+			test.SyncGroupFromEtcd(pd.stored(id))
+		}
+		failures := testutil.ToFloat64(targetWriteFailureCounter)
+		release := make(chan struct{})
+		defer close(release)
+		var skippedAt []time.Time
+		var written []string
+		test.SetTargetWriter(test)
+		test.reply = func(_ context.Context, targets []GroupTarget) ([]string, error) {
+			test.LessOrEqual(len(targets), 128)
+			if targets[0].Expected.ID == "a" {
+				skippedAt = append(skippedAt, time.Now())
+				<-release
+			}
+			for len(targets) > 0 && targets[0].Expected.ID < "b" {
+				targets = targets[1:]
+			}
+			if len(targets) == 0 {
+				return nil, nil
+			}
+			ids, err := pd.UpdateAffinityGroupTargets(targets)
+			written = append(written, ids...)
+			return ids, err
+		}
+
+		b := test.target("b", 2, 2, 3)
+		c := test.target("c", 3, 3, 4)
+		want := make([]GroupTarget, 0, len(ids))
+		for _, id := range skippedIDs {
+			want = append(want, test.target(id, 1, 1, 2))
+		}
+		want = append(want, b, c)
+		region := targetRegion(1, 2)
+		for patrol := range 3 {
+			start := time.Now()
+			before := len(test.calls)
+			test.observe("a", 1, 2)
+			for _, id := range skippedIDs[1:] {
+				test.ObserveAvailableRegion(region, test.GetAffinityGroupState(id))
+			}
+			test.observe("b", 1, 2)
+			test.observe("b", 2, 3)
+			test.observe("c", 3, 4)
+			test.observe("a", 1, 2) // A repeat queued behind its in-flight request.
+			test.Equal(want[:1], test.calls[before:])
+			release <- struct{}{}
+			synctest.Wait()
+
+			test.Equal(start, time.Now(), "the queued groups drain without waiting for a cooldown")
+			test.Equal([]string{"b", "c"}, written[patrol*2:])
+			test.Len(test.calls[before:], len(want))
+			test.Equal(want, test.calls[before:])
+			test.Zero(pd.stored("a").LeaderStoreID)
+			test.Equal(b.result(), pd.stored("b"))
+			test.Equal(c.result(), pd.stored("c"))
+
+			time.Sleep(time.Second - time.Millisecond)
+			test.observe("a", 1, 2)
+			test.observe("b", 2, 3)
+			test.observe("c", 3, 4)
+			test.Len(test.calls, before+len(want), "reobserved groups are still in cooldown")
+			time.Sleep(time.Millisecond)
+		}
+		test.Len(skippedAt, 3)
+		for i := 1; i < len(skippedAt); i++ {
+			test.Equal(time.Second, skippedAt[i].Sub(skippedAt[i-1]))
+		}
+		test.Equal(failures, testutil.ToFloat64(targetWriteFailureCounter))
+	})
 }
 
 func TestFirstWinCancelsInFlight(t *testing.T) {
@@ -358,7 +437,12 @@ func TestFirstWinReconcilesLocalTarget(t *testing.T) {
 		test.checkGroupsAvailability()
 		test.SetTargetWriter(test)
 		failures := testutil.ToFloat64(targetWriteFailureCounter)
+		release := make(chan struct{})
+		defer close(release)
 		test.reply = func(_ context.Context, targets []GroupTarget) ([]string, error) {
+			if len(test.calls) == 1 {
+				<-release
+			}
 			if len(test.calls) <= 2 {
 				return nil, fmt.Errorf("404 Not Found: %w", ErrTargetWriterUnsupported)
 			}
@@ -366,13 +450,15 @@ func TestFirstWinReconcilesLocalTarget(t *testing.T) {
 		}
 		target := test.target("g", 1, 1, 2)
 		test.observe("g", 1, 2)
+		test.observe("h", 2, 3)
+		release <- struct{}{}
+		synctest.Wait()
 		local := test.GetAffinityGroupState("g")
 		test.Equal(*target.result(), local.Group)
 		test.True(local.HasUnpersistedTarget())
 		test.True(local.AffinitySchedulingAllowed)
 		test.Zero(pd.stored("g").LeaderStoreID)
-		test.observe("h", 2, 3)
-		test.True(test.GetAffinityGroupState("h").HasUnpersistedTarget())
+		test.True(test.GetAffinityGroupState("h").HasUnpersistedTarget(), "the queued observation also falls back to a local target")
 		test.observe("g", 4, 1)
 		test.Len(test.calls, 1, "the cooldown allows local targets without sending HTTP requests")
 		test.Equal(local, test.GetAffinityGroupState("g"))

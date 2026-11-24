@@ -26,9 +26,18 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-// sendObservedTarget permits one outstanding first-win write per Manager. Busy
-// observations are discarded. A 404 pauses HTTP attempts but lets groups
-// without an available target use a fresh observation locally. Caller holds metaMutex.
+const maxTargetBatchSize = 128
+
+type observedTarget struct {
+	target       GroupTarget
+	groupInfoPtr *runtimeGroupInfo
+	affinityVer  uint64
+	persistOnly  bool
+}
+
+// sendObservedTarget queues the latest observation per group for a single writer.
+// A 404 pauses HTTP attempts but lets groups use observations locally.
+// Caller holds metaMutex.
 func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64, persistOnly bool) {
 	m.targetWriteMutex.Lock()
 	now := time.Now()
@@ -39,40 +48,106 @@ func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGr
 		}
 		return
 	}
-	if m.ctx.Err() != nil || m.targetWriteInFlight || now.Before(m.targetWriteRetryAt) {
+	id := target.Expected.ID
+	if m.ctx.Err() != nil || now.Before(m.targetWriteRetryAt) ||
+		(groupInfoPtr != nil && now.Before(groupInfoPtr.targetSendAfter)) {
 		m.targetWriteMutex.Unlock()
 		return
 	}
-	m.targetWriteInFlight = true
+	if _, queued := m.pendingTargets[id]; !queued {
+		m.pendingTargetIDs = append(m.pendingTargetIDs, id)
+	}
+	if m.pendingTargets == nil {
+		m.pendingTargets = make(map[string]observedTarget)
+	}
+	m.pendingTargets[id] = observedTarget{target, groupInfoPtr, affinityVer, persistOnly}
+	if !m.targetWriteInFlight {
+		m.targetWriteInFlight = true
+		go m.drainObservedTargets()
+	}
 	m.targetWriteMutex.Unlock()
-	go func() {
-		defer logutil.LogPanic()
-		written, err := m.targetWriter.WriteGroupTargets(m.ctx, []GroupTarget{target})
-		if err == nil && !slices.Contains(written, target.Expected.ID) {
-			err = errors.New("affinity group target was not written")
-		}
-		unsupported := errors.Is(err, ErrTargetWriterUnsupported)
-		if unsupported && !persistOnly {
-			m.metaMutex.Lock()
-			m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
-			m.metaMutex.Unlock()
-		}
+}
+
+func (m *Manager) drainObservedTargets() {
+	defer logutil.LogPanic()
+	for {
 		m.targetWriteMutex.Lock()
-		m.targetWriteInFlight = false
-		if err != nil {
-			m.targetWriteRetryAt = time.Now().Add(time.Second)
+		now := time.Now()
+		if m.ctx.Err() != nil || now.Before(m.targetWriteRetryAt) {
+			clear(m.pendingTargets)
+			m.pendingTargetIDs = nil
+			m.targetWriteInFlight = false
+			m.targetWriteMutex.Unlock()
+			return
 		}
-		if unsupported {
-			m.targetEndpointUnsupportedUntil = m.targetWriteRetryAt
-		} else {
-			m.targetEndpointUnsupportedUntil = time.Time{}
+		batch := make([]observedTarget, 0, min(maxTargetBatchSize, len(m.pendingTargetIDs)))
+		for len(batch) < maxTargetBatchSize && len(m.pendingTargetIDs) > 0 {
+			id := m.pendingTargetIDs[0]
+			m.pendingTargetIDs[0] = ""
+			m.pendingTargetIDs = m.pendingTargetIDs[1:]
+			obs := m.pendingTargets[id]
+			if obs.groupInfoPtr == nil || !now.Before(obs.groupInfoPtr.targetSendAfter) {
+				batch = append(batch, obs)
+			}
+			delete(m.pendingTargets, id)
+		}
+		if len(m.pendingTargetIDs) == 0 {
+			m.pendingTargetIDs = nil
+		}
+		if len(batch) == 0 {
+			m.targetWriteInFlight = false
+			m.targetWriteMutex.Unlock()
+			return
 		}
 		m.targetWriteMutex.Unlock()
-		if err != nil && !unsupported && !errors.Is(err, ErrTargetWriterNotReady) && m.ctx.Err() == nil {
-			targetWriteFailureCounter.Inc()
-			log.Warn("failed to write affinity group target", zap.String("group-id", target.Expected.ID), zap.Error(err))
+
+		targets := make([]GroupTarget, len(batch))
+		for i, obs := range batch {
+			targets[i] = obs.target
 		}
-	}()
+		_, err := m.targetWriter.WriteGroupTargets(m.ctx, targets)
+		unsupported := errors.Is(err, ErrTargetWriterUnsupported)
+
+		m.targetWriteMutex.Lock()
+		finish := time.Now()
+		m.targetEndpointUnsupportedUntil = time.Time{}
+		if err == nil {
+			// PD can skip individual targets in a successful response.
+			for _, obs := range batch {
+				if obs.groupInfoPtr != nil {
+					obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
+				}
+			}
+			m.targetWriteMutex.Unlock()
+			continue
+		}
+
+		m.targetWriteRetryAt = finish.Add(time.Second)
+		if unsupported {
+			m.targetEndpointUnsupportedUntil = m.targetWriteRetryAt
+			for _, id := range m.pendingTargetIDs {
+				batch = append(batch, m.pendingTargets[id])
+			}
+		}
+		clear(m.pendingTargets)
+		m.pendingTargetIDs = nil
+		m.targetWriteInFlight = false
+		m.targetWriteMutex.Unlock()
+
+		if unsupported {
+			m.metaMutex.Lock()
+			for _, obs := range batch {
+				if !obs.persistOnly {
+					m.applyLocalObservedTarget(obs.target, obs.groupInfoPtr, obs.affinityVer)
+				}
+			}
+			m.metaMutex.Unlock()
+		} else if !errors.Is(err, ErrTargetWriterNotReady) && m.ctx.Err() == nil {
+			targetWriteFailureCounter.Inc()
+			log.Warn("failed to write affinity group targets", zap.Int("group-count", len(batch)), zap.Error(err))
+		}
+		return
+	}
 }
 
 // applyLocalObservedTarget applies a healthy observation without a write when it

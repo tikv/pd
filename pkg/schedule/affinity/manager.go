@@ -72,8 +72,10 @@ type Manager struct {
 	// targetWriter writes the targets this Manager decides when it does not own the storage,
 	// as in the scheduling service. When it is nil, the Manager writes its own storage.
 	targetWriter TargetWriter
-	// targetWriteMutex protects admission and backoff for background first-win requests.
+	// targetWriteMutex protects the queue, backoff, and per-group cooldown for background first-win requests.
 	targetWriteMutex               syncutil.Mutex
+	pendingTargets                 map[string]observedTarget
+	pendingTargetIDs               []string
 	targetWriteInFlight            bool
 	targetWriteRetryAt             time.Time
 	targetEndpointUnsupportedUntil time.Time
