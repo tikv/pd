@@ -110,6 +110,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		waitTimeout = affinityUnknownSizeWait
 	}
 	storeConfig := c.cluster.GetStoreConfig()
+	previous, tracked := c.splitAttempts[regionID]
 	var (
 		attempt   affinitySplitAttempt
 		splitWait time.Duration
@@ -121,7 +122,6 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			version:       region.GetRegionEpoch().GetVersion(),
 			voterStoreIDs: group.VoterStoreIDs,
 		}
-		previous, tracked := c.splitAttempts[regionID]
 		if tracked {
 			if !now.Before(previous.expiresAt) {
 				delete(c.splitAttempts, regionID)
@@ -189,24 +189,29 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			c.splitAttempts[regionID] = attempt
 			return op, false
 		}
-		c.splitAttempts[regionID] = attempt
-	} else {
+	} else if tracked && (previous.split == nil || region.GetRegionEpoch().GetVersion() > previous.version ||
+		!slices.Equal(previous.voterStoreIDs, group.VoterStoreIDs)) {
+		// Size can change without an epoch change. An older small snapshot must
+		// not erase a split that can still start or already used its wait budget.
 		delete(c.splitAttempts, regionID)
 	}
 	// Merges can leave a positive but stale size. Reuse the merge cooldown;
 	// after a restart its cache is gone, so allow the same time for statistics.
-	if time.Since(c.startTime) < recentMergeTTL || c.recentMergeCache.Exists(regionID) {
-		return wait("recent-merge-or-startup")
-	}
+	coolingDown := time.Since(c.startTime) < recentMergeTTL || c.recentMergeCache.Exists(regionID)
 	// The engine may have no split key or no positive size, so a timed-out attempt
 	// moves without a preliminary split and accepts a potentially large snapshot.
-	if splitWait >= waitTimeout && !attempt.fallbackRecorded {
-		attempt.fallbackRecorded = true
+	if splitWait >= waitTimeout {
+		if !coolingDown && !attempt.fallbackRecorded {
+			attempt.fallbackRecorded = true
+			log.Info("allow affinity peer move after split wait timeout", zap.Uint64("region-id", regionID),
+				zap.String("group-id", group.ID), zap.Int64("size", region.GetApproximateSize()),
+				zap.Int64("keys", region.GetApproximateKeys()), zap.Duration("wait-duration", splitWait))
+			affinityCheckerSplitTimeoutCounter.Inc()
+		}
 		c.splitAttempts[regionID] = attempt
-		log.Info("allow affinity peer move after split wait timeout", zap.Uint64("region-id", regionID),
-			zap.String("group-id", group.ID), zap.Int64("size", region.GetApproximateSize()),
-			zap.Int64("keys", region.GetApproximateKeys()), zap.Duration("wait-duration", splitWait))
-		affinityCheckerSplitTimeoutCounter.Inc()
+	}
+	if coolingDown {
+		return wait("recent-merge-or-startup")
 	}
 	return nil, true
 }

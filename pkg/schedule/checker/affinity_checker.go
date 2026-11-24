@@ -163,7 +163,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// A Region may no longer exist in the RegionTree due to a merge.
 	// In this case, clear the cache in affinity manager for that Region and skip processing it.
-	if c.cluster.GetRegion(region.GetID()) == nil {
+	current := c.cluster.GetRegion(region.GetID())
+	if current == nil {
 		c.affinityManager.InvalidCache(region.GetID())
 		return nil
 	}
@@ -175,10 +176,13 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
-		// The move is done, so a later move of the Region tries to split it again.
-		c.splitMu.Lock()
-		delete(c.splitAttempts, region.GetID())
-		c.splitMu.Unlock()
+		// A current snapshot confirms the move is done, so a later move tries to split again.
+		epoch, currentEpoch := region.GetRegionEpoch(), current.GetRegionEpoch()
+		if epoch.GetVersion() >= currentEpoch.GetVersion() && epoch.GetConfVer() >= currentEpoch.GetConfVer() {
+			c.splitMu.Lock()
+			delete(c.splitAttempts, region.GetID())
+			c.splitMu.Unlock()
+		}
 		return c.mergeCheck(region, group)
 	}
 
