@@ -234,7 +234,7 @@ func (m *mockRequest) getCount() uint32 {
 	return m.count
 }
 
-func (m *mockRequest) getCountIfActive() (uint32, bool) { return m.count, true }
+func (m *mockRequest) getCountAndActive() (uint32, bool) { return m.count, true }
 
 func (m *mockRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
 	if m.err != nil {
@@ -326,7 +326,8 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 
 func TestTSODispatcherPartitionsValidRequests(t *testing.T) {
 	dispatcher := NewTSODispatcher(prometheus.NewHistogram(prometheus.HistogramOpts{Name: "partition_requests"}), nil)
-	counts := []uint32{logicalBits, 1, 1<<17 - 1, 1, 1 << 17, logicalBits - 1, logicalBits}
+	// Requests above the merge target retain their full count, up to logical capacity.
+	counts := []uint32{logicalBits, 1<<17 + 1, 1, 1<<17 - 1, 1, 1 << 17, logicalBits - 1, logicalBits}
 	requests := make([]Request, 0, len(counts))
 	responses := make([]*countResponseStream, 0, len(counts))
 	for _, count := range counts {
@@ -340,7 +341,7 @@ func TestTSODispatcherPartitionsValidRequests(t *testing.T) {
 		pending, err = dispatcher.processRequests(forward, pending)
 		require.NoError(t, err)
 	}
-	require.Equal(t, []uint32{logicalBits, 1 << 17, 1, 1 << 17, logicalBits - 1, logicalBits}, forward.counts)
+	require.Equal(t, []uint32{logicalBits, 1<<17 + 1, 1 << 17, 1, 1 << 17, logicalBits - 1, logicalBits}, forward.counts)
 	var previous uint64
 	for i, response := range responses {
 		require.Equal(t, counts[i], response.response.GetCount())

@@ -32,8 +32,8 @@ type Request interface {
 	getClientConn() *grpc.ClientConn
 	// getCount returns the count of timestamps to retrieve
 	getCount() uint32
-	// getCountIfActive returns the count and whether the downstream stream is still active.
-	getCountIfActive() (uint32, bool)
+	// getCountAndActive returns the count even when the downstream stream is inactive.
+	getCountAndActive() (uint32, bool)
 	// process sends request and receive response via stream.
 	// count defines the count of timestamps to retrieve.
 	process(forwardStream stream, count uint32) (tsoResp, error)
@@ -85,7 +85,7 @@ func (r *PDProtoRequest) getCount() uint32 {
 	return r.request.GetCount()
 }
 
-func (r *PDProtoRequest) getCountIfActive() (uint32, bool) {
+func (r *PDProtoRequest) getCountAndActive() (uint32, bool) {
 	return r.request.GetCount(), r.stream.Context().Err() == nil
 }
 

@@ -17,6 +17,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -85,13 +86,18 @@ func ValidateBatchSplitRequest(splitCount uint32, region *metapb.Region) error {
 	if splitCount == 0 {
 		return nil
 	}
-	// Charge ten bytes per uint64 varint, and eleven bytes for each field tag
-	// and length prefix: region ID, packed peer IDs, and enclosing SplitID.
-	// Reserve room for the response header as well. This also bounds the peer
-	// arrays; the count limit bounds the per-region objects and bookkeeping.
-	const payloadBudget = MaxBatchSplitResponseSize - 1024
+	const (
+		responseHeaderReserve = 1024
+		// Conservatively allow a one-byte tag and a maximum-width varint for
+		// the region ID, packed peer-ID length, and enclosing SplitID length.
+		splitIDOverhead = 3 * (1 + binary.MaxVarintLen64)
+		payloadBudget   = MaxBatchSplitResponseSize - responseHeaderReserve
+	)
+	// The byte budget also bounds peer arrays; the count limit bounds
+	// per-region objects and bookkeeping.
 	peers := uint64(len(region.GetPeers()))
-	if peers > payloadBudget/10 || uint64(splitCount) > payloadBudget/(33+10*peers) {
+	if peers > payloadBudget/binary.MaxVarintLen64 ||
+		uint64(splitCount) > payloadBudget/(splitIDOverhead+binary.MaxVarintLen64*peers) {
 		return errors.Errorf("split response exceeds maximum %d bytes", MaxBatchSplitResponseSize)
 	}
 
