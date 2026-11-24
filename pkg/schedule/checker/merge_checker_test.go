@@ -33,7 +33,9 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -618,6 +620,91 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 		core.SetApproximateSize(size),
 		core.SetApproximateKeys(keys),
 	)
+}
+
+func TestMergeCheckerSkipsActiveAffinityGroup(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		targetStores          []uint64
+		maxAffinityMergeSize  uint64
+		affinityScheduleLimit uint64
+		expectAffinityMerge   bool
+	}{
+		{"aligned", []uint64{1, 2, 3}, 20, 4, true},
+		{"different-stores", []uint64{4, 5, 6}, 20, 4, false},
+		{"affinity-merge-disabled", []uint64{1, 2, 3}, 0, 4, false},
+		{"affinity-scheduling-disabled", []uint64{4, 5, 6}, 20, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			opt := newAffinityTestOptions()
+			opt.SetMaxMergeRegionSize(20)
+			opt.SetMaxMergeRegionKeys(200)
+			opt.SetSplitMergeInterval(0)
+			opt.SetMaxAffinityMergeRegionSize(tc.maxAffinityMergeSize)
+			opt.SetAffinityScheduleLimit(tc.affinityScheduleLimit)
+			cluster := mockcluster.NewCluster(ctx, opt)
+			for storeID := uint64(1); storeID <= 6; storeID++ {
+				cluster.AddRegionStore(storeID, 10)
+			}
+			cluster.AddLeaderRegion(1, 1, 2, 3)
+			cluster.AddLeaderRegion(2, tc.targetStores[0], tc.targetStores[1:]...)
+			source := cluster.GetRegion(1).Clone(withAffinityTestRange("a", "b"),
+				core.SetApproximateSize(5), core.SetApproximateKeys(5))
+			target := cluster.GetRegion(2).Clone(withAffinityTestRange("b", "c"),
+				core.SetApproximateSize(5), core.SetApproximateKeys(5))
+			cluster.PutRegion(source)
+			cluster.PutRegion(target)
+
+			manager := cluster.GetAffinityManager()
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: "test", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
+			}, affinityTestRange("a", "c")))
+			re.False(manager.GetAffinityGroupState("test").RegularSchedulingAllowed)
+			affinityChecker := newTestAffinityChecker(ctx, cluster, opt)
+			ops := affinityChecker.Check(source)
+			if tc.expectAffinityMerge {
+				re.Len(ops, 2)
+				for _, op := range ops {
+					re.Equal(operator.OpAffinity, op.SchedulerKind())
+				}
+			} else {
+				re.Nil(ops)
+			}
+
+			mergeChecker := NewMergeChecker(ctx, cluster, opt)
+			affinityFilter := filter.NewAffinityFilter(cluster)
+			for _, region := range []*core.RegionInfo{source, target} {
+				// Active groups stay protected even when affinity-schedule-limit is zero.
+				re.False(affinityFilter.Select(region).IsOK())
+				re.Nil(mergeChecker.Check(region))
+			}
+			re.False(AllowMerge(cluster, source, target))
+			re.False(AllowMerge(cluster, target, source))
+
+			// A healthy region with matching voters would restore the degraded group.
+			_, err := manager.UpdateAffinityGroupPeers("test", 1, []uint64{1, 2, 4})
+			re.NoError(err)
+			manager.DegradeAffinityGroup("test")
+			state := manager.GetAffinityGroupState("test")
+			re.False(state.AffinitySchedulingAllowed)
+			re.False(state.RegularSchedulingAllowed)
+			re.Nil(affinityChecker.Check(source))
+			re.False(affinityFilter.Select(source).IsOK())
+			re.Nil(mergeChecker.Check(source))
+			re.False(AllowMerge(cluster, source, target))
+
+			manager.ExpireAffinityGroup("test")
+			re.True(manager.GetAffinityGroupState("test").RegularSchedulingAllowed)
+			re.True(AllowMerge(cluster, source, target))
+			re.True(AllowMerge(cluster, target, source))
+			for _, region := range []*core.RegionInfo{source, target} {
+				re.True(affinityFilter.Select(region).IsOK())
+				re.Len(mergeChecker.Check(region), 2)
+			}
+		})
+	}
 }
 
 func TestAllowMergeCrossTable(t *testing.T) {
