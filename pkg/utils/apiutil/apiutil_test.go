@@ -16,14 +16,22 @@ package apiutil
 
 import (
 	"bytes"
+	"encoding/json"
+	stderrors "errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/require"
 	"github.com/unrolled/render"
 	"go.uber.org/goleak"
+
+	"github.com/pingcap/errors"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 func TestMain(m *testing.M) {
@@ -49,27 +57,33 @@ func TestJsonRespondErrorOk(t *testing.T) {
 }
 
 func TestJsonRespondErrorBadInput(t *testing.T) {
-	re := require.New(t)
-	rd := render.New(render.Options{
-		IndentJSON: true,
-	})
-	response := httptest.NewRecorder()
-	body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
-	var input []string
-	err := ReadJSONRespondError(rd, response, body, &input)
-	re.EqualError(err, "json: cannot unmarshal object into Go value of type []string")
-	result := response.Result()
-	defer result.Body.Close()
-	re.Equal(400, result.StatusCode)
-
-	{
-		body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\","))
-		var input []string
-		err := ReadJSONRespondError(rd, response, body, &input)
-		re.EqualError(err, "unexpected end of JSON input")
-		result := response.Result()
-		defer result.Body.Close()
-		re.Equal(400, result.StatusCode)
+	for _, tc := range []struct {
+		name    string
+		body    string
+		message string
+		data    string
+	}{
+		{name: "type mismatch", body: `{"zone":"cn","host":"local"}`, message: "json: cannot unmarshal object into Go value of type []string", data: `{"Value":"object","Type":{},"Offset":1,"Struct":"","Field":"","Err":null}`},
+		{name: "invalid syntax", body: `{"zone":"cn",`, message: "unexpected end of JSON input", data: `{"Offset":13}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			response := httptest.NewRecorder()
+			var input []string
+			err := ReadJSONRespondError(render.New(), response, io.NopCloser(bytes.NewBufferString(tc.body)), &input)
+			re.EqualError(err, tc.message)
+			re.Equal(http.StatusBadRequest, response.Code)
+			re.Equal("input", response.Header().Get("TiDB-Error-Code"))
+			var body struct {
+				Code string          `json:"code"`
+				Msg  string          `json:"msg"`
+				Data json.RawMessage `json:"data"`
+			}
+			re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
+			re.Equal("input", body.Code)
+			re.Equal(tc.message, body.Msg)
+			re.JSONEq(tc.data, string(body.Data))
+		})
 	}
 }
 
@@ -244,4 +258,113 @@ func TestParseHexKeys(t *testing.T) {
 	re.Len(parseKeys, 2)
 	re.NotEqual([]byte("\x00\x01\x02\x03\x04\x05\x06\x07"), parseKeys[0])
 	re.Equal([]byte("world"), parseKeys[1])
+}
+
+type responseTestError struct {
+	Detail string `json:"detail"`
+}
+
+func (e *responseTestError) Error() string { return e.Detail }
+
+type causeOnlyResponseError struct{ error }
+
+// Cause exposes a legacy wrapper that has no Unwrap method.
+func (e causeOnlyResponseError) Cause() error { return e.error }
+
+// TestErrorResp checks response metadata through legacy and standard wrappers.
+func TestErrorResp(t *testing.T) {
+	plainErr := stderrors.New("request failed")
+	normalizedErr := errs.ErrStrconvParseInt.FastGenByArgs("invalid value")
+	typeErr := &responseTestError{Detail: "invalid store ID"}
+	for _, tc := range []struct {
+		name    string
+		err     error
+		status  int
+		code    string
+		message string
+		data    string
+		stack   bool
+	}{
+		{name: "nil", status: http.StatusInternalServerError, message: "nil error"},
+		{name: "plain", err: plainErr, status: http.StatusInternalServerError, message: plainErr.Error()},
+		{name: "normalized error", err: normalizedErr, status: http.StatusInternalServerError, message: normalizedErr.Error()},
+		{name: "invalid input", err: errs.NewInvalidInputErr(plainErr), status: http.StatusBadRequest, code: "input", message: plainErr.Error(), data: `{}`},
+		{name: "typed input", err: errs.NewInvalidInputErr(typeErr), status: http.StatusBadRequest, code: "input", message: typeErr.Error(), data: `{"detail":"invalid store ID"}`},
+		{name: "annotated input", err: errors.Annotate(errs.NewInvalidInputErr(plainErr), "store"), status: http.StatusBadRequest, code: "input", message: "store: request failed", data: `{}`},
+		{name: "wrapped input", err: fmt.Errorf("store: %w", errs.NewInvalidInputErr(plainErr)), status: http.StatusBadRequest, code: "input", message: "store: request failed", data: `{}`},
+		{name: "cause input", err: causeOnlyResponseError{errs.NewInvalidInputErr(plainErr)}, status: http.StatusBadRequest, code: "input", message: plainErr.Error(), data: `{}`},
+		{name: "mixed input chain", err: fmt.Errorf("store: %w", causeOnlyResponseError{errs.NewInvalidInputErr(typeErr)}), status: http.StatusBadRequest, code: "input", message: "store: invalid store ID", data: `{"detail":"invalid store ID"}`},
+		{name: "repeated typed input", err: errs.NewInvalidInputErr(errs.NewInvalidInputErr(typeErr)), status: http.StatusBadRequest, code: "input", message: typeErr.Error(), data: `{"detail":"invalid store ID"}`},
+		{name: "repeated typed internal", err: errs.NewInternalErr(errs.NewInternalErr(typeErr)), status: http.StatusInternalServerError, code: "internal", message: typeErr.Error(), data: `{"detail":"invalid store ID"}`, stack: true},
+		{name: "cause internal", err: causeOnlyResponseError{errs.NewInternalErr(plainErr)}, status: http.StatusInternalServerError, code: "internal", message: plainErr.Error(), data: `{}`, stack: true},
+		{name: "internal from input", err: errs.NewInternalErr(errs.NewInvalidInputErr(plainErr)), status: http.StatusInternalServerError, code: "internal", message: plainErr.Error(), data: `{}`, stack: true},
+		{name: "internal", err: errs.NewInternalErr(plainErr), status: http.StatusInternalServerError, code: "internal", message: plainErr.Error(), data: `{}`, stack: true},
+		{name: "wrapped internal", err: errors.Annotate(errs.NewInternalErr(plainErr), "config"), status: http.StatusInternalServerError, code: "internal", message: "config: request failed", data: `{}`, stack: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			response := httptest.NewRecorder()
+			ErrorResp(render.New(), response, tc.err)
+			re.Equal(tc.status, response.Code)
+			re.Equal(tc.code, response.Header().Get("TiDB-Error-Code"))
+			if tc.code == "" {
+				var message string
+				re.NoError(json.Unmarshal(response.Body.Bytes(), &message))
+				re.Equal(tc.message, message)
+				return
+			}
+			var body map[string]json.RawMessage
+			re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
+			re.JSONEq(fmt.Sprintf("%q", tc.code), string(body["code"]))
+			re.JSONEq(fmt.Sprintf("%q", tc.message), string(body["msg"]))
+			re.JSONEq(tc.data, string(body["data"]))
+			if tc.stack {
+				var stack []uintptr
+				re.NoError(json.Unmarshal(body["stack"], &stack))
+				re.NotEmpty(stack)
+				re.Len(body, 4)
+			} else {
+				re.NotContains(body, "stack")
+				re.Len(body, 3)
+			}
+		})
+	}
+}
+
+// TestInternalErrorPreservesStack prevents wrapping from replacing the cause's trace.
+func TestInternalErrorPreservesStack(t *testing.T) {
+	re := require.New(t)
+	original := errors.New("storage failed")
+	wrapped := errs.NewInternalErr(original)
+	re.Implements((*errors.StackTracer)(nil), wrapped)
+	re.ErrorIs(wrapped, original)
+	re.Equal(original, errors.Cause(wrapped))
+	response := httptest.NewRecorder()
+	ErrorResp(render.New(), response, wrapped)
+	var body struct {
+		Stack json.RawMessage `json:"stack"`
+	}
+	re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
+	stack, err := json.Marshal(errors.GetStackTracer(original).StackTrace())
+	re.NoError(err)
+	re.JSONEq(string(stack), string(body.Stack))
+}
+
+func TestJSONRespondReadError(t *testing.T) {
+	re := require.New(t)
+	response := httptest.NewRecorder()
+	var input []string
+	err := ReadJSONRespondError(render.New(), response, io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF)), &input)
+	re.ErrorIs(err, io.ErrUnexpectedEOF)
+	re.Equal(http.StatusInternalServerError, response.Code)
+	re.Equal("internal", response.Header().Get("TiDB-Error-Code"))
+	var body struct {
+		Code  string    `json:"code"`
+		Msg   string    `json:"msg"`
+		Stack []uintptr `json:"stack"`
+	}
+	re.NoError(json.Unmarshal(response.Body.Bytes(), &body))
+	re.Equal("internal", body.Code)
+	re.Equal(io.ErrUnexpectedEOF.Error(), body.Msg)
+	re.NotEmpty(body.Stack)
 }

@@ -16,6 +16,9 @@ package errs
 
 import (
 	"bytes"
+	stderrors "errors"
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -163,4 +166,83 @@ func TestErrorWithStack(t *testing.T) {
 	re.GreaterOrEqual(idx3, -1)
 	re.Len(m2[idx2:], len(m1[idx1:]))
 	re.Len(m3[idx3:], len(m1[idx1:]))
+}
+
+type causeOnlyError struct{ error }
+
+// Cause exposes the legacy error chain without implementing Unwrap.
+func (e causeOnlyError) Cause() error { return e.error }
+
+// TestHTTPError checks HTTP codes, client data, stack traces, and nil inputs.
+func TestHTTPError(t *testing.T) {
+	original := stderrors.New("invalid request")
+	for _, tc := range []struct {
+		name     string
+		err      error
+		code     string
+		status   int
+		hasStack bool
+	}{
+		{"input", NewInvalidInputErr(original), "input", http.StatusBadRequest, false},
+		{"repeated input", NewInvalidInputErr(NewInvalidInputErr(original)), "input", http.StatusBadRequest, false},
+		{"internal", NewInternalErr(original), "internal", http.StatusInternalServerError, true},
+		{"repeated internal", NewInternalErr(NewInternalErr(original)), "internal", http.StatusInternalServerError, true},
+		{"preserve internal code", NewInvalidInputErr(NewInternalErr(original)), "internal", http.StatusInternalServerError, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			httpErr := FindHTTPError(tc.err)
+			re.NotNil(httpErr)
+			re.Equal(tc.code, httpErr.Code())
+			re.Equal(tc.status, httpErr.HTTPCode())
+			re.Equal(original, httpErr.GetClientData())
+			re.ErrorIs(tc.err, original)
+			re.Equal(original, errors.Cause(tc.err))
+			re.Error(stderrors.Unwrap(tc.err))
+			re.Equal(tc.hasStack, errors.HasStack(tc.err))
+			if tc.hasStack {
+				re.NotEmpty(GetStackTracer(tc.err).StackTrace())
+			}
+		})
+	}
+	re := require.New(t)
+	re.Panics(func() { _ = NewInvalidInputErr(nil) })
+	re.Panics(func() { _ = NewInternalErr(nil) })
+	re.Nil(FindHTTPError(nil))
+	re.Nil(GetStackTracer(nil))
+}
+
+// TestHTTPErrorChains prevents mixed wrapping from hiding metadata or the original stack.
+func TestHTTPErrorChains(t *testing.T) {
+	original := errors.New("storage failed")
+	for _, tc := range []struct {
+		name string
+		wrap func(error) error
+	}{
+		{"cause", func(err error) error { return causeOnlyError{err} }},
+		{"unwrap", func(err error) error { return fmt.Errorf("request: %w", err) }},
+		{"annotated", func(err error) error { return errors.Annotate(err, "request") }},
+		{"cause then unwrap", func(err error) error { return causeOnlyError{fmt.Errorf("request: %w", err)} }},
+		{"unwrap then cause", func(err error) error { return fmt.Errorf("request: %w", causeOnlyError{err}) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			for _, internal := range []bool{false, true} {
+				marked := NewInvalidInputErr(original)
+				if internal {
+					marked = NewInternalErr(original)
+				}
+				expected := FindHTTPError(marked)
+				found := FindHTTPError(tc.wrap(marked))
+				re.NotNil(found)
+				re.Equal(expected.Code(), found.Code())
+				re.Equal(expected.HTTPCode(), found.HTTPCode())
+				re.Equal(original, found.GetClientData())
+			}
+			wrapped := NewInternalErr(tc.wrap(original))
+			re.Implements((*errors.StackTracer)(nil), wrapped)
+			re.Equal(errors.GetStackTracer(original).StackTrace(), wrapped.(errors.StackTracer).StackTrace())
+			re.Equal(errors.GetStackTracer(original).StackTrace(), GetStackTracer(tc.wrap(wrapped)).StackTrace())
+		})
+	}
 }

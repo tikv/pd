@@ -33,10 +33,10 @@ func TestDiscover(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", DefaultLeaseInSeconds)
+	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", testLeaseInSeconds)
 	err := sr1.Register()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
+	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", testLeaseInSeconds)
 	err = sr2.Register()
 	re.NoError(err)
 
@@ -64,13 +64,13 @@ func TestServiceRegistryEntry(t *testing.T) {
 	entry1 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:1"}
 	s1, err := entry1.Serialize()
 	re.NoError(err)
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", s1, DefaultLeaseInSeconds)
+	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", s1, testLeaseInSeconds)
 	err = sr1.Register()
 	re.NoError(err)
 	entry2 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:2"}
 	s2, err := entry2.Serialize()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", s2, DefaultLeaseInSeconds)
+	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", s2, testLeaseInSeconds)
 	err = sr2.Register()
 	re.NoError(err)
 

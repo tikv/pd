@@ -164,7 +164,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
-	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/metering_sdk v0.0.0-20260814062708-9e3b68cd9adf // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
 	github.com/pingcap/tidb-dashboard v0.0.0-20261026035210-a2c7919bad2a // indirect
@@ -184,7 +183,7 @@ require (
 	github.com/shoenig/go-m1cpu v0.2.1 // indirect
 	github.com/shurcooL/httpgzip v0.0.0-20190720172056-320755c1c1b0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
-	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99 // indirect
+	github.com/smallnest/chanx v1.2.1-0.20261118073114-cf251b591d2f // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/cobra v1.8.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect

@@ -247,9 +247,16 @@ func (s *evictStoppingStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerC
 		return
 	}
 	cluster.StoppingStoreRecovered(evictStoppingStore)
-	// Reset the stopping store evicted status metric.
 	storeIDStr := strconv.FormatUint(evictStoppingStore, 10)
+	if store := cluster.GetStore(evictStoppingStore); store == nil || store.IsRemoved() {
+		evictedStoppingStoreStatusGauge.DeleteLabelValues(storeIDStr)
+		return
+	}
 	evictedStoppingStoreStatusGauge.WithLabelValues(storeIDStr).Set(0)
+	// Burial may have cleared the metrics after we read the live snapshot.
+	if store := cluster.GetStore(evictStoppingStore); store == nil || store.IsRemoved() {
+		evictedStoppingStoreStatusGauge.DeleteLabelValues(storeIDStr)
+	}
 }
 
 func (s *evictStoppingStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
@@ -323,8 +330,15 @@ func (s *evictStoppingStoreScheduler) scheduleStoppingStore(cluster sche.Schedul
 		return
 	}
 	// Record the stopping store evicted status.
+	if store := cluster.GetStore(stoppingStoreID); store == nil || store.IsRemoved() {
+		return
+	}
 	storeIDStr := strconv.FormatUint(stoppingStoreID, 10)
 	evictedStoppingStoreStatusGauge.WithLabelValues(storeIDStr).Set(1)
+	// Burial may have cleared the metrics after we read the live snapshot.
+	if store := cluster.GetStore(stoppingStoreID); store == nil || store.IsRemoved() {
+		evictedStoppingStoreStatusGauge.DeleteLabelValues(storeIDStr)
+	}
 }
 
 // newEvictStoppingStoreScheduler creates a scheduler that detects and evicts stopping stores.
