@@ -43,6 +43,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
@@ -105,6 +106,40 @@ func getGCStateFromAddr(ctx context.Context, re *require.Assertions, addr string
 	grpcPDClient, conn := testutil.MustNewGrpcClient(re, addr)
 	defer conn.Close()
 	return grpcPDClient.GetGCState(ctx, req)
+}
+
+func TestStarterNativeBRBarrierOnLeaderChange(t *testing.T) {
+	if !kerneltype.IsNextGen() {
+		t.Skip("Starter upgrades use NextGen PD")
+	}
+	re := require.New(t)
+	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
+	defer cleanup()
+	oldLeader := cluster.GetLeaderServer()
+	store := oldLeader.GetServer().GetStorage()
+	const id = keypath.NativeBRServiceSafePointID
+	source := keypath.ServiceGCSafePointPath(id)
+	re.NoError(store.Save(keypath.GCMigrationCutoffPath(), "1"))
+	expires := time.Now().Add(12 * time.Hour).Unix()
+	re.NoError(store.Save(source, fmt.Sprintf(`{"service_id":"native_br","safe_point":100,"expired_at":%d}`, expires)))
+	re.NoError(oldLeader.ResignLeaderWithRetry())
+	re.NotEmpty(cluster.WaitLeaderChange(oldLeader.GetConfig().Name))
+
+	ctx := t.Context()
+	client, conn := testutil.MustNewGrpcClient(re, cluster.GetLeaderServer().GetAddr())
+	defer conn.Close()
+	advance, err := client.AdvanceTxnSafePoint(ctx, &pdpb.AdvanceTxnSafePointRequest{
+		Header: req.Header, KeyspaceScope: makeKeyspaceScope(keyspace.GetBootstrapKeyspaceID()), Target: 150,
+	})
+	re.NoError(err)
+	re.Nil(advance.GetHeader().GetError())
+	re.Equal(uint64(100), advance.GetNewTxnSafePoint())
+	set, err := client.SetGlobalGCBarrier(ctx, &pdpb.SetGlobalGCBarrierRequest{
+		Header: req.Header, BarrierId: "another-backup", TtlSeconds: 60,
+	})
+	re.NoError(err)
+	re.Nil(set.GetHeader().GetError())
+	re.Equal(uint64(100), set.GetNewBarrierInfo().GetBarrierTs())
 }
 
 type blockingFailpoint struct {

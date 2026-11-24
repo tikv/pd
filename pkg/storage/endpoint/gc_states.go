@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -407,6 +408,55 @@ func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier
 func (p GCStateProvider) LoadAllGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
 	prefix := keypath.GlobalGCBarrierPrefix()
 	return p.loadAllGlobalGCBarriersImpl(prefix)
+}
+
+// MigrateNativeBRBarrier moves Starter's legacy backup protection before the new leader serves GC requests.
+func (p GCStateProvider) MigrateNativeBRBarrier(ctx context.Context, client *clientv3.Client) error {
+	const id = keypath.NativeBRServiceSafePointID
+	source := keypath.ServiceGCSafePointPath(id)
+	value, revision, err := p.storage.loadValueWithRevision(ctx, source)
+	if err != nil || revision == 0 {
+		return err
+	}
+	// Old Starter can renew after the upgrade marker is written. The first native GC
+	// write creates the GC revision key; a scoped barrier written since then must stay scoped.
+	ctx, cancel := context.WithTimeout(ctx, etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	resp, err := client.Txn(ctx).
+		If(clientv3.Compare(clientv3.Value(keypath.GCMigrationCutoffPath()), "=", "1")).
+		Then(clientv3.OpGet(keypath.GCStateRevisionPath())).Commit()
+	if err != nil || !resp.Succeeded {
+		return err
+	}
+	nativeRevision := resp.Responses[0].GetResponseRange().Kvs
+	if len(nativeRevision) != 0 && revision >= nativeRevision[0].CreateRevision {
+		return nil
+	}
+	var legacy ServiceSafePoint
+	if err := json.Unmarshal([]byte(value), &legacy); err != nil {
+		return errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+	}
+	if legacy.ServiceID != id || legacy.KeyspaceID != constant.NullKeyspaceID {
+		return errors.Errorf("invalid legacy native_br service safe point at %s", source)
+	}
+	return p.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+		// Legacy writes do not update the GC revision.
+		wb.conditions = append(wb.conditions, kv.RawTxnCondition{
+			Key: source, CmpType: kv.RawTxnCmpModRevisionEqual, ModRevision: revision,
+		})
+		if err := wb.DeleteGCBarrier(constant.NullKeyspaceID, id); err != nil {
+			return err
+		}
+		barrier := gcBarrierFromServiceSafePoint(&legacy)
+		if legacy.ExpiredAt <= 0 || barrier.IsExpired(time.Now()) {
+			return nil
+		}
+		existing, err := p.LoadGlobalGCBarrier(id)
+		if err != nil || existing != nil {
+			return err
+		}
+		return wb.SetGlobalGCBarrier(NewGlobalGCBarrier(id, barrier.BarrierTS, barrier.ExpirationTime))
+	})
 }
 
 func (p GCStateProvider) loadAllGlobalGCBarriersImpl(prefix string) ([]*GlobalGCBarrier, error) {
