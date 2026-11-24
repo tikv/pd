@@ -116,6 +116,8 @@ type SharedConfigProvider interface {
 	GetRegionScoreFormulaVersion() string
 	GetSchedulerMaxWaitingOperator() uint64
 	GetStoreLimitByType(uint64, storelimit.Type) float64
+	// PeekStoreLimitByType reads the latest snapshot without creating a store entry.
+	PeekStoreLimitByType(uint64, storelimit.Type) float64
 	IsWitnessAllowed() bool
 	IsPlacementRulesCacheEnabled() bool
 	SetHaltScheduling(bool, string)

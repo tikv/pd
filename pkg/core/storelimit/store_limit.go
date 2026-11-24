@@ -129,6 +129,24 @@ func (l *StoreRateLimit) Reset(rate float64, typ Type) {
 	l.limits[typ].Reset(rate)
 }
 
+// Refresh updates a rate from getRate, re-reading it under the reset lock so an
+// older configuration read cannot overwrite a concurrent Reset. getRate must
+// only read configuration snapshots, without writing configuration or acquiring
+// locks whose holders may access this limiter.
+func (l *StoreRateLimit) Refresh(typ Type, getRate func() float64) {
+	if typ == SendSnapshot {
+		return
+	}
+	rate := getRate()
+	limit := l.limits[typ]
+	if limit.GetRatePerSec() == rate {
+		return
+	}
+	limit.ratePerSecMutex.Lock()
+	defer limit.ratePerSecMutex.Unlock()
+	limit.resetLocked(getRate())
+}
+
 // limit the operators of a store
 type limit struct {
 	limiter         *ratelimit.RateLimiter
@@ -140,6 +158,10 @@ type limit struct {
 func (l *limit) Reset(ratePerSec float64) {
 	l.ratePerSecMutex.Lock()
 	defer l.ratePerSecMutex.Unlock()
+	l.resetLocked(ratePerSec)
+}
+
+func (l *limit) resetLocked(ratePerSec float64) {
 	if l.ratePerSec == ratePerSec {
 		return
 	}
