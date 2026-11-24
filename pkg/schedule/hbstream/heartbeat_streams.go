@@ -45,7 +45,7 @@ type Operation struct {
 	SplitRegion     *pdpb.SplitRegion
 	ChangePeerV2    *pdpb.ChangePeerV2
 	SwitchWitnesses *pdpb.BatchSwitchWitness
-	// PD requires preventing the auto-splitting of this region.
+	// PD enables or disables automatic splitting for this region.
 	ChangeSplit *pdpb.ChangeSplit
 }
 
@@ -235,7 +235,8 @@ func (s *HeartbeatStreams) BindStream(storeID uint64, stream HeartbeatStream) {
 	}
 }
 
-// SendMsg sends a message to related store.
+// SendMsg sends a message to related store. ChangeSplit is best effort and may
+// be dropped when the queue is full.
 func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 	if region.GetLeader() == nil {
 		return
@@ -274,6 +275,16 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 		}
 	}
 
+	if op.ChangeSplit != nil {
+		select {
+		case s.msgCh <- resp:
+		default:
+			if store := s.storeInformer.GetStore(region.GetLeader().GetStoreId()); store != nil && !store.IsRemoved() {
+				heartbeatStreamCounter.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10), "push", "queue-full").Inc()
+			}
+		}
+		return
+	}
 	select {
 	case s.msgCh <- resp:
 	case <-s.hbStreamCtx.Done():
@@ -303,6 +314,17 @@ func (s *HeartbeatStreams) SendErr(errType pdpb.ErrorType, errMsg string, target
 // For test only.
 func (s *HeartbeatStreams) MsgLength() int {
 	return len(s.msgCh)
+}
+
+// PopMsg returns one queued message, or nil if the queue is empty.
+// For test only.
+func (s *HeartbeatStreams) PopMsg() core.RegionHeartbeatResponse {
+	select {
+	case msg := <-s.msgCh:
+		return msg
+	default:
+		return nil
+	}
 }
 
 // Drain consumes message from msgCh when disable background running.
