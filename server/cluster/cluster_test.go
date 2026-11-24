@@ -1713,8 +1713,7 @@ func TestRegionFlowChanged(t *testing.T) {
 
 func TestRegionReadCPUChanged(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
