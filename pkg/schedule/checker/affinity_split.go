@@ -110,6 +110,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		waitTimeout = affinityUnknownSizeWait
 	}
 	storeConfig := c.cluster.GetStoreConfig()
+	version := region.GetRegionEpoch().GetVersion()
 	previous, tracked := c.splitAttempts[regionID]
 	var (
 		attempt   affinitySplitAttempt
@@ -119,13 +120,15 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		uint64(region.GetApproximateKeys()) > storeConfig.GetRegionSplitKeys() {
 		now := time.Now()
 		attempt = affinitySplitAttempt{
-			version:       region.GetRegionEpoch().GetVersion(),
+			version:       version,
 			voterStoreIDs: group.VoterStoreIDs,
 		}
 		if tracked {
 			if !now.Before(previous.expiresAt) {
 				delete(c.splitAttempts, regionID)
-			} else if previous.version == attempt.version && slices.Equal(previous.voterStoreIDs, attempt.voterStoreIDs) {
+			} else if version < previous.version {
+				return nil, false
+			} else if version == previous.version && slices.Equal(previous.voterStoreIDs, attempt.voterStoreIDs) {
 				attempt = previous
 			}
 		} else if len(c.splitAttempts) >= c.maxSplitAttempts {
@@ -189,10 +192,10 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			c.splitAttempts[regionID] = attempt
 			return op, false
 		}
-	} else if tracked && (previous.split == nil || region.GetRegionEpoch().GetVersion() > previous.version ||
+	} else if tracked && version >= previous.version && (previous.split == nil || version > previous.version ||
 		!slices.Equal(previous.voterStoreIDs, group.VoterStoreIDs)) {
-		// Size can change without an epoch change. An older small snapshot must
-		// not erase a split that can still start or already used its wait budget.
+		// Size can change without an epoch change. Keep the SCAN budget for the
+		// same version and target in case another large snapshot is checked.
 		delete(c.splitAttempts, regionID)
 	}
 	// Merges can leave a positive but stale size. Reuse the merge cooldown;

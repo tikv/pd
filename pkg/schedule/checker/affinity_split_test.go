@@ -29,6 +29,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func newAffinitySplitTest(t *testing.T) (*mockcluster.Cluster, *Controller, *operator.Controller) {
@@ -38,12 +40,35 @@ func newAffinitySplitTest(t *testing.T) (*mockcluster.Cluster, *Controller, *ope
 		cluster.SetStoreUp(store.GetID())
 	}
 	setAffinitySplitStoreConfig(cluster)
-	group := &affinity.Group{ID: "split", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-	require.NoError(t, createAffinityGroupForTest(cluster.GetAffinityManager(), group, []byte("a"), []byte("z")))
-	region := cluster.GetRegion(1).Clone(core.WithEndKey([]byte("z")), core.WithReplacePeerStore(3, 4),
+	region := cluster.GetRegion(1).Clone(withAffinitySplitTestRange("a", "z"), core.WithReplacePeerStore(3, 4),
 		core.SetApproximateSize(64), core.SetSource(core.Heartbeat))
+	group := &affinity.Group{ID: "split", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+	createAffinitySplitTestGroup(t, cluster.GetAffinityManager(), group, region)
 	cluster.PutRegion(region)
 	return cluster, controller, ops
+}
+
+func withAffinitySplitTestRange(start, end string) core.RegionCreateOption {
+	startKey, endKey := []byte(start), []byte(end)
+	if kerneltype.IsNextGen() {
+		const keyspaceID = 1
+		startKey = encodeKeyspaceRawKey(keyspaceID, startKey)
+		endKey = encodeKeyspaceRawKey(keyspaceID, endKey)
+	}
+	return func(region *core.RegionInfo) {
+		core.WithStartKey(startKey)(region)
+		core.WithEndKey(endKey)(region)
+	}
+}
+
+func createAffinitySplitTestGroup(t *testing.T, manager *affinity.Manager, group *affinity.Group, region *core.RegionInfo) {
+	t.Helper()
+	require.NoError(t, manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID:   group.ID,
+		KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+	}}))
+	_, err := manager.UpdateAffinityGroupPeers(group.ID, group.LeaderStoreID, group.VoterStoreIDs)
+	require.NoError(t, err)
 }
 
 func setAffinitySplitStoreConfig(cluster *mockcluster.Cluster) {
@@ -287,8 +312,8 @@ func putOversizedAffinityRegions(cluster *mockcluster.Cluster) []*core.RegionInf
 	keys := []string{"a", "g", "m", "z"}
 	regions := make([]*core.RegionInfo, 0, len(keys)-1)
 	for i := range len(keys) - 1 {
-		region := parent.Clone(core.WithNewRegionID(uint64(i+1)), core.WithStartKey([]byte(keys[i])),
-			core.WithEndKey([]byte(keys[i+1])), core.WithIncVersion())
+		region := parent.Clone(core.WithNewRegionID(uint64(i+1)), withAffinitySplitTestRange(keys[i], keys[i+1]),
+			core.WithIncVersion())
 		cluster.PutRegion(region)
 		regions = append(regions, region)
 	}
@@ -370,11 +395,12 @@ func TestAffinitySplitBeforeLearnerMove(t *testing.T) {
 			setAffinitySplitStoreConfig(cluster)
 			cluster.SetEnableUseJointConsensus(true)
 			require.NoError(t, cluster.GetRuleManager().SetRule(newLearnerRule(test.stores...)))
-			region := putLearners(cluster, 1, 4).Clone(core.SetApproximateSize(64), core.SetSource(core.Heartbeat))
+			region := putLearners(cluster, 1, 4).Clone(withAffinitySplitTestRange("a", "b"),
+				core.SetApproximateSize(64), core.SetSource(core.Heartbeat))
 			cluster.PutRegion(region)
 			manager := cluster.GetAffinityManager()
 			group := &affinity.Group{ID: "large", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 4}}
-			require.NoError(t, createAffinityGroupForTest(manager, group, region.GetStartKey(), region.GetEndKey()))
+			createAffinitySplitTestGroup(t, manager, group, region)
 			moves := promtestutil.ToFloat64(affinityCheckerLearnerMoveCounter)
 			conflicts := promtestutil.ToFloat64(affinityCheckerLearnerPeerConflictCounter)
 			if len(test.stores) > 0 {
@@ -403,28 +429,51 @@ func TestAffinitySplitBeforeLearnerMove(t *testing.T) {
 }
 
 func TestAffinitySplitBeforeMoveStaleSize(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		cluster, controller, ops := newAffinitySplitTest(t)
+	t.Run("scan split", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			cluster, controller, ops := newAffinitySplitTest(t)
+			checker := controller.GetAffinityChecker()
+			previous := cluster.GetRegion(1)
+			atTarget := previous.Clone(core.WithIncVersion(), core.WithReplacePeerStore(4, 3))
+			large := atTarget.Clone(core.WithIncConfVer(), core.WithReplacePeerStore(3, 4))
+			cluster.PutRegion(large)
+			small := large.Clone(core.SetApproximateSize(1))
+			controller.tryAddOperators(large)
+			split := requireAffinitySplit(t, []*operator.Operator{ops.GetOperator(1)})
+			// The smaller snapshot passed the controller's operator check before SCAN admission.
+			move := requireAffinityMove(t, checker.Check(small))
+			require.Zero(t, ops.AddWaitingOperator(move))
+			require.Same(t, split, checker.splitAttempts[1].split)
+			staleVersion := core.SetRegionVersion(previous.GetRegionEpoch().GetVersion())
+			requireAffinityMove(t, checker.Check(small.Clone(staleVersion)))
+			require.Same(t, split, checker.splitAttempts[1].split)
+			require.Empty(t, checker.Check(atTarget))
+			require.Same(t, split, checker.splitAttempts[1].split)
+
+			require.Empty(t, checker.Check(large))
+			attempt := checker.splitAttempts[1]
+			require.Equal(t, split.GetStartTime(), attempt.startedAt)
+			advanceAffinitySplitTime(cluster, affinitySplitTimeout)
+			ops.Dispatch(large, operator.DispatchFromHeartBeat, func(uint64) {})
+			require.Equal(t, operator.TIMEOUT, split.Status())
+			require.Empty(t, checker.Check(large.Clone(staleVersion)))
+			require.Equal(t, attempt, checker.splitAttempts[1])
+			requireAffinityMove(t, checker.Check(small))
+			requireAffinityMove(t, controller.CheckRegion(large))
+		})
+	})
+	t.Run("unknown size", func(t *testing.T) {
+		cluster, controller, _ := newAffinitySplitTest(t)
 		checker := controller.GetAffinityChecker()
 		previous := cluster.GetRegion(1)
-		atTarget := previous.Clone(core.WithIncVersion(), core.WithReplacePeerStore(4, 3))
-		large := atTarget.Clone(core.WithIncConfVer(), core.WithReplacePeerStore(3, 4))
-		cluster.PutRegion(large)
-		small := large.Clone(core.SetApproximateSize(1))
-		controller.tryAddOperators(large)
-		split := requireAffinitySplit(t, []*operator.Operator{ops.GetOperator(1)})
-		// The smaller snapshot passed the controller's operator check before SCAN admission.
-		move := requireAffinityMove(t, checker.Check(small))
-		require.Zero(t, ops.AddWaitingOperator(move))
-		require.Same(t, split, checker.splitAttempts[1].split)
-		requireAffinityMove(t, checker.Check(small.Clone(core.SetRegionVersion(previous.GetRegionEpoch().GetVersion()))))
-		require.Same(t, split, checker.splitAttempts[1].split)
-		require.Empty(t, checker.Check(atTarget))
-		require.Same(t, split, checker.splitAttempts[1].split)
-		advanceAffinitySplitTime(cluster, affinitySplitTimeout)
-		ops.Dispatch(large, operator.DispatchFromHeartBeat, func(uint64) {})
-		require.Equal(t, operator.TIMEOUT, split.Status())
-		requireAffinityMove(t, checker.Check(small))
-		requireAffinityMove(t, controller.CheckRegion(large))
+		unknown := previous.Clone(core.WithIncVersion(), core.SetApproximateSize(0))
+		cluster.PutRegion(unknown)
+		require.Empty(t, checker.Check(unknown))
+		attempt := checker.splitAttempts[1]
+		require.Equal(t, unknown.GetRegionEpoch().GetVersion(), attempt.version)
+		require.Nil(t, attempt.split)
+
+		requireAffinityMove(t, checker.Check(previous.Clone(core.SetApproximateSize(1))))
+		require.Equal(t, attempt, checker.splitAttempts[1])
 	})
 }
