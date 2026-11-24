@@ -136,8 +136,8 @@ type GCStatesClient interface {
 	// The barrierID must be non-empty.
 	//
 	// Passing zero asks PD to select the smallest active global barrier timestamp, including the
-	// current record for this ID. With no active barrier, PD selects an upper bound from the
-	// persisted TSO windows. An explicit timestamp must be at least as large as the selected bound.
+	// current record for this ID. With no active barrier, PD selects the greater of the persisted
+	// TSO window bound and the unified GC txn safe point. An explicit timestamp must meet the same bound.
 	// On rejection the existing timestamp and expiration are preserved.
 	//
 	// During a rolling upgrade, older PD leaders may treat zero as an explicit timestamp.

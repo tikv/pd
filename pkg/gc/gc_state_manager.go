@@ -1387,8 +1387,8 @@ type GCState struct {
 // The barrierID must be non-empty.
 //
 // A zero barrierTS selects the smallest active global barrier TS, including an active record with this ID.
-// With no active barriers, PD uses the upper bound from the persisted TSO windows. An explicit barrierTS
-// must meet the same threshold. A successful call returns the stored record.
+// With no active barriers, PD uses the greater of the persisted TSO window bound and the unified GC txn
+// safe point. An explicit barrierTS must meet the same threshold. A successful call returns the stored record.
 //
 // Pass zero for now to sample the current time during each admission attempt. A supplied time is used as-is.
 func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GlobalGCBarrier, error) {

@@ -1523,6 +1523,31 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierAdmission() {
 	re.Equal(gcTestTS(200), a.BarrierTS)
 }
 
+func (s *gcStateManagerTestSuite) TestGlobalGCBarrierProtectsUnifiedTxnSafePoint() {
+	re := s.Require()
+	ctx := s.T().Context()
+	now := time.Now()
+	setTestTSOWindow(s.T(), s.storage, 120)
+	groupKey := keypath.TimestampPath(1)
+	window := typeutil.Uint64ToBytes(uint64(time.UnixMilli(200).UnixNano()))
+	re.NoError(s.storage.Save(groupKey, string(window)))
+
+	safePoint := tsoutil.ComposeTS(150, 7)
+	res, err := s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, safePoint, now)
+	re.NoError(err)
+	re.Equal(safePoint, res.NewTxnSafePoint)
+	// An old cleaner deleted the group's window without retaining its upper bound.
+	re.NoError(s.storage.Remove(groupKey))
+
+	_, err = s.manager.SetGlobalGCBarrier(ctx, "backup", gcTestTS(130), time.Hour, now)
+	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSUnsafe)
+	re.Nil(s.getGlobalGCBarrier("backup"))
+	b, err := s.manager.SetGlobalGCBarrier(ctx, "backup", 0, time.Hour, now)
+	re.NoError(err)
+	re.Equal(safePoint, b.BarrierTS)
+	re.Equal(b, s.getGlobalGCBarrier("backup"))
+}
+
 func (s *gcStateManagerTestSuite) TestGlobalGCBarrierProtectsRetainedSafePoints() {
 	re := s.Require()
 	ctx := context.Background()

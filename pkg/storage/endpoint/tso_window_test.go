@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -60,6 +61,8 @@ func TestGlobalGCBarrierTSFloor(t *testing.T) {
 	} {
 		re.NoError(se.Save(unrelated, "unrelated value"))
 	}
+	unifiedKey := keypath.TxnSafePointPath(constant.NullKeyspaceID)
+	re.NoError(se.Save(unifiedKey, "1"))
 	reads = nil
 	_, err := provider.LoadGlobalGCBarrierTSFloor(t.Context())
 	re.ErrorContains(err, "no persisted TSO window")
@@ -67,9 +70,9 @@ func TestGlobalGCBarrierTSFloor(t *testing.T) {
 	// ranges. In particular, keyspace metadata and membership are never scanned.
 	re.Len(reads, 1)
 	re.Empty(reads[0].Compare)
-	re.Len(reads[0].Success, 4)
+	re.Len(reads[0].Success, 5)
 	for i, bounds := range [][2]string{
-		{keypath.TimestampPath(0), ""}, {keypath.RetiredTSOWindowPath(), ""},
+		{unifiedKey, ""}, {keypath.TimestampPath(0), ""}, {keypath.RetiredTSOWindowPath(), ""},
 		{local, clientv3.GetPrefixRangeEnd(local)}, {groups + "00001/", groups + ":"},
 	} {
 		r := reads[0].Success[i].GetRequestRange()
@@ -110,6 +113,9 @@ func TestGlobalGCBarrierTSFloor(t *testing.T) {
 		}
 		re.NoError(se.Remove(key))
 	}
+	re.NoError(se.Save(unifiedKey, "bad"))
+	_, err = provider.LoadGlobalGCBarrierTSFloor(t.Context())
+	re.ErrorContains(err, unifiedKey)
 }
 
 func TestDeleteTimestampRetainsWindowOnConflict(t *testing.T) {

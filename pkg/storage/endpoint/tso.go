@@ -178,15 +178,18 @@ var (
 	groupTSOWindow = regexp.MustCompile(`^[0-9]{5}/(gta/timestamp|lta/` + localTSOWindowSuffix + `)$`)
 )
 
-// LoadGlobalGCBarrierTSFloor returns a TSO upper bound for timestamps issued
-// across the cluster, including retired groups and legacy per-DC allocators.
+// LoadGlobalGCBarrierTSFloor returns the greater of the persisted TSO window
+// bound (including retired groups and legacy per-DC allocators) and the unified
+// txn safe point, which can outlive the group that issued its timestamp.
 func (p GCStateProvider) LoadGlobalGCBarrierTSFloor(ctx context.Context) (uint64, error) {
 	defaultKey, retiredKey := keypath.TimestampPath(constant.DefaultKeyspaceGroupID), keypath.RetiredTSOWindowPath()
+	unifiedKey := keypath.TxnSafePointPath(constant.NullKeyspaceID)
 	localPrefix, groupPrefix := keypath.LegacyLocalTSOPrefix(), keypath.TSOMicroservicePrefix()
-	// Read all four disjoint ranges at the same etcd revision. Group IDs are
-	// formatted as five decimal digits; this range skips registries, elections
-	// and the default group, whose windows live under /pd.
+	// Read the safe point and windows at the same etcd revision. Group IDs are
+	// formatted as five decimal digits, so the group range skips registries,
+	// elections and the default group, whose windows live under /pd.
 	ops := []kv.RawTxnOp{
+		{OpType: kv.RawTxnOpGet, Key: unifiedKey},
 		{OpType: kv.RawTxnOpGet, Key: defaultKey},
 		{OpType: kv.RawTxnOpGet, Key: retiredKey},
 		{OpType: kv.RawTxnOpGetRange, Key: localPrefix, EndKey: "\x00"},
@@ -203,8 +206,15 @@ func (p GCStateProvider) LoadGlobalGCBarrierTSFloor(ctx context.Context) (uint64
 	if !result.Succeeded || len(result.Responses) != len(ops) {
 		return 0, errors.New("invalid TSO window snapshot response")
 	}
+	var unifiedTxnSafePoint uint64
+	if pairs := result.Responses[0].KeyValuePairs; len(pairs) > 0 {
+		unifiedTxnSafePoint, err = decodeTxnSafePoint(pairs[0].Value)
+		if err != nil {
+			return 0, errors.Annotatef(err, "invalid unified txn safe point at %q", unifiedKey)
+		}
+	}
 	var largest uint64
-	for _, item := range result.Responses {
+	for _, item := range result.Responses[1:] {
 		for _, pair := range item.KeyValuePairs {
 			isWindow := pair.Key == defaultKey || pair.Key == retiredKey ||
 				localTSOWindow.MatchString(strings.TrimPrefix(pair.Key, localPrefix)) ||
@@ -225,5 +235,5 @@ func (p GCStateProvider) LoadGlobalGCBarrierTSFloor(ctx context.Context) (uint64
 	// Round the maximal physical window up to a millisecond boundary before
 	// composing logical zero. Avoid overflowing when rounding a large UnixNano.
 	millis := (largest-1)/uint64(time.Millisecond) + 1
-	return tsoutil.ComposeTS(int64(millis), 0), nil
+	return max(tsoutil.ComposeTS(int64(millis), 0), unifiedTxnSafePoint), nil
 }
