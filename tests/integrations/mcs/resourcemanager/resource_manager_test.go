@@ -522,6 +522,79 @@ func (suite *resourceManagerClientTestSuite) TearDownTest() {
 	suite.cleanupResourceGroups(re)
 }
 
+<<<<<<< HEAD
+=======
+func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupControllerWatchCount() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	etcdClient := suite.cluster.GetLeaderServer().GetEtcdClient()
+	configKey := keypath.ControllerConfigPath()
+
+	// This test overwrites the shared controller config key, so save the
+	// original value and restore it afterwards to avoid polluting other tests.
+	originalConfig, err := suite.client.Get(ctx, pd.ControllerConfigPathPrefixBytes)
+	re.NoError(err)
+	defer func() {
+		if len(originalConfig.GetKvs()) == 0 {
+			_, err := etcdClient.Put(suite.ctx, configKey, "{}")
+			re.NoError(err)
+			return
+		}
+		// Use suite.ctx because the test-scoped ctx is canceled by earlier defers.
+		_, err := etcdClient.Put(suite.ctx, configKey, string(originalConfig.GetKvs()[0].GetValue()))
+		re.NoError(err)
+	}()
+
+	minRevision := int64(0)
+	maxRevision := int64(0)
+	for i := range 3 {
+		res, err := etcdClient.Put(ctx, fmt.Sprintf("%s/%d", configKey, i), "{}")
+		re.NoError(err)
+		if i == 0 {
+			minRevision = res.Header.Revision
+		}
+		maxRevision = res.Header.Revision
+	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError", fmt.Sprintf("return(%d)", maxRevision)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/watchStreamError", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/staleRevision", fmt.Sprintf("return(%d)", minRevision)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/watchStreamError"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/staleRevision"))
+		cancel()
+	}()
+
+	provider := &watchCountingResourceGroupProvider{Client: suite.client}
+	rgController, err := controller.NewResourceGroupController(
+		ctx, 1, provider, nil, 1, controller.EnableSingleGroupByKeyspace())
+	re.NoError(err)
+	rgController.Start(ctx)
+	defer func() {
+		re.NoError(rgController.Stop())
+		cancel()
+	}()
+	re.NotEqual(controller.RUVersionV2, rgController.GetRUVersion())
+	config := controller.DefaultConfig()
+	config.RUVersionPolicy = &controller.RUVersionPolicy{
+		Default: controller.RUVersionV1,
+		Overrides: map[uint32]controller.RUVersion{
+			1: controller.RUVersionV2,
+		},
+	}
+	configBytes, err := json.Marshal(config)
+	re.NoError(err)
+	// trigger resource group controller to watch config changes.
+	_, err = etcdClient.Put(ctx, configKey, string(configBytes))
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return rgController.GetRUVersion() == controller.RUVersionV2
+	})
+	watchTimes := provider.getWatchTimes()
+	re.Zero(watchTimes)
+}
+
+>>>>>>> a89cce5835 (metastorage: restrict access to component metadata namespaces (#11521))
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups(re *require.Assertions) {
 	cli := suite.client
 	groups, err := cli.ListResourceGroups(suite.ctx)
