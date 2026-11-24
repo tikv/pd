@@ -173,11 +173,14 @@ func (c *splitScatterPDClient) AllocID(ctx context.Context, req *pdpb.AllocIDReq
 		count = 1
 	}
 	c.next += uint64(count)
-	return &pdpb.AllocIDResponse{
+	resp := &pdpb.AllocIDResponse{
 		Header: &pdpb.ResponseHeader{},
 		Id:     c.next - 1,
-		Count:  count,
-	}, nil
+	}
+	if count > 1 {
+		resp.Count = count
+	}
+	return resp, nil
 }
 
 func TestMain(m *testing.M) {

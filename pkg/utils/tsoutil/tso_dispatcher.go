@@ -238,28 +238,24 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 // finishRequest sends the allocated timestamps and reports whether any downstream send failed.
 func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) bool {
 	countSum := int64(0)
-	for i := range requests {
-		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
+	sendFailed := false
+	for _, request := range requests {
+		if sendFailed {
+			count, active := request.getCountIfActive()
+			if !active {
+				countSum += int64(count)
+				continue
+			}
+		}
+		newCountSum, err := request.postProcess(countSum, physical, firstLogical)
 		// The timestamps remain consumed even if this downstream stream closed.
 		countSum = newCountSum
 		if err != nil {
+			sendFailed = true
 			log.Warn("send tso response to client failed", errs.ZapError(err))
-			for _, request := range requests[i+1:] {
-				count, active := request.getCountIfActive()
-				if !active {
-					countSum += int64(count)
-					continue
-				}
-				newCountSum, err := request.postProcess(countSum, physical, firstLogical)
-				countSum = newCountSum
-				if err != nil {
-					log.Warn("send tso response to client failed", errs.ZapError(err))
-				}
-			}
-			return true
 		}
 	}
-	return false
+	return sendFailed
 }
 
 // clearPendingRequests clears all pending requests in the queue to prevent goroutine leakage.
