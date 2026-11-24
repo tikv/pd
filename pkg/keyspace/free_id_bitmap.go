@@ -34,6 +34,35 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
+// Background
+//
+// Normal creation allocates increasing 24-bit keyspace IDs, allowing about
+// 16.8 million IDs. Frequent creation and deletion can exhaust this space
+// even when few keyspaces remain active. This mechanism reclaims IDs from
+// deleted keyspaces.
+//
+// Current workflow
+//
+// After a keyspace enters TOMBSTONE, an external caller may select it from
+// a cached view of PD metadata and request reclamation. PD rechecks eligibility,
+// removes the old metadata and name mapping, and marks the ID free in an
+// etcd-backed bitmap. The Create path may then look up and claim a free ID.
+// Bitmap and metadata changes commit atomically in the same transaction.
+//
+// Design trade-off
+//
+// An alternative is to retain TOMBSTONE metadata, check reuse eligibility
+// during Create, and replace the old metadata and name mapping using CAS.
+// This avoids a persisted bitmap, but keeps one metadata record per candidate
+// and puts reclamation work on Create. Rebuilding the candidate index after
+// restart requires scanning all keyspace metadata, unless a separate index
+// is persisted.
+//
+// The bitmap provides a compact persisted index of IDs that have passed
+// reclamation checks and supports gradual loading from compact buckets.
+// Its cost is an extra bucket CAS/write in the metadata transaction and
+// a persisted layout to maintain.
+
 // A 64-byte bucket covers 512 IDs, balancing etcd key count and rewrite size.
 // Bucket width is persisted by initialize and must stay fixed for that index.
 const defaultFreeIDBucketBytes = 64
@@ -47,13 +76,6 @@ type freeIDBitmapStore interface {
 // represents one ID: 1 means free, and 0 means unavailable. Consecutive IDs
 // share a bucket; a 64-byte bucket covers 512 IDs. Only IDs whose reclamation
 // has completed belong in this index.
-//
-// Keeping a separate free-ID index lets reclamation remove old keyspace
-// metadata and name bindings before reuse. Retaining TOMBSTONE records is
-// another option, but keeps one metadata record per candidate and requires
-// rebuilding the candidate index from those records. The bitmap supports
-// gradual loading from compact buckets, at the cost of an extra bucket
-// CAS/write in the metadata transaction and a persisted layout.
 //
 // Buckets are persisted in etcd and loaded gradually into an in-memory cache.
 // Reclamation sets an ID's bit; claiming it for a new keyspace clears the bit.
