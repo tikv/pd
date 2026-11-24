@@ -217,17 +217,34 @@ func TestNewWriterWithCOSConfig(t *testing.T) {
 }
 
 func TestNewWriterWithTOSConfig(t *testing.T) {
-	c := config.NewMeteringConfig().
-		WithTOS("cn-beijing", "metering-bucket").
-		WithTOSConfig(&config.MeteringTOSConfig{
-			AccessKey:       "test-access-key",
-			SecretAccessKey: "test-secret-access-key",
-		})
+	t.Run("static credentials", func(t *testing.T) {
+		c := config.NewMeteringConfig().
+			WithTOS("cn-beijing", "metering-bucket").
+			WithTOSConfig(&config.MeteringTOSConfig{
+				AccessKey:       "test-access-key",
+				SecretAccessKey: "test-secret-access-key",
+			})
 
-	writer, err := NewWriter(t.Context(), c, "testtoswriter")
-	require.NoError(t, err)
-	require.NotNil(t, writer)
-	writer.Stop()
+		writer, err := NewWriter(t.Context(), c, "testtoswriter")
+		require.NoError(t, err)
+		require.NotNil(t, writer)
+		writer.Stop()
+	})
+
+	t.Run("assume role without static credentials", func(t *testing.T) {
+		t.Setenv("VOLCSTACK_ACCESS_KEY_ID", "")
+		t.Setenv("VOLCSTACK_SECRET_ACCESS_KEY", "")
+		t.Setenv("VOLCENGINE_OIDC_TOKEN_FILE", "")
+		t.Setenv("VOLCENGINE_OIDC_ROLE_TRN", "")
+
+		c := config.NewMeteringConfig().
+			WithTOSAssumeRole("cn-beijing", "metering-bucket", "trn:iam::1234567890:role/metering-writer")
+
+		writer, err := NewWriter(t.Context(), c, "testtosassumerolewriter")
+		require.NoError(t, err)
+		require.NotNil(t, writer)
+		writer.Stop()
+	})
 }
 
 func TestRegisterCollector(t *testing.T) {
