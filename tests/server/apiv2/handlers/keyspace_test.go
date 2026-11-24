@@ -35,9 +35,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -248,6 +250,74 @@ func (suite *keyspaceTestSuite) TestHTTPAuditSwitch() {
 				re.Equal(increment, after[key]-before[key], key)
 			}
 		}
+	}
+}
+
+func (suite *keyspaceTestSuite) TestHTTPAuditRedactsRequestBodies() {
+	for _, mode := range []logutil.RedactInfoLogType{logutil.RedactInfoLogOFF, logutil.RedactInfoLogON, logutil.RedactInfoLogMarker} {
+		suite.Run(fmt.Sprintf("redaction=%d", mode), func() {
+			re := suite.Require()
+			var logger *zap.Logger
+			var props *log.ZapProperties
+			re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, mode))
+			suite.T().Cleanup(func() {
+				re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, logutil.RedactInfoLogOFF))
+			})
+			logFile := testutil.InitTempFileLogger(suite.T(), "info")
+			re.NoError(suite.server.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: true}))
+			name := fmt.Sprintf("audit-private-%d", mode)
+			byIDName := fmt.Sprintf("audit-by-id-%d", mode)
+			const marker = "synthetic-private-value"
+			sensitive := strings.Repeat(marker, 256)
+			updated := sensitive + "-updated"
+			for _, tc := range []struct {
+				method, path, label, body, name, value string
+			}{
+				{http.MethodPost, "", "CreateKeyspace", fmt.Sprintf(`{"name":%q,"config":{"opaque":%q}}`, name, sensitive), name, sensitive},
+				{http.MethodPost, "/id", "CreateKeyspaceByID", fmt.Sprintf(`{"id":%d,"name":%q,"config":{"opaque":%q}}`, 2000+mode, byIDName, sensitive), byIDName, sensitive},
+				{http.MethodPatch, "/" + name + "/config", "UpdateKeyspaceConfig", fmt.Sprintf(`{"config":{"opaque":%q},"preconditions":{"opaque":%q}}`, updated, sensitive), name, updated},
+				{http.MethodPut, "/" + name + "/state", "UpdateKeyspaceState", fmt.Sprintf(`{"state":"DISABLED","unused":%q}`, sensitive), name, updated},
+			} {
+				before := auditMetricCounts(re)
+				request, err := http.NewRequest(tc.method, suite.server.GetAddr()+"/pd/api/v2/keyspaces"+tc.path, strings.NewReader(tc.body))
+				re.NoError(err)
+				request.Header.Set("Content-Type", "application/json")
+				response, err := tests.TestDialClient.Do(request)
+				re.NoError(err)
+				data, err := io.ReadAll(response.Body)
+				re.NoError(err)
+				re.NoError(response.Body.Close())
+				re.Equal(http.StatusOK, response.StatusCode, string(data))
+				meta := &handlers.KeyspaceMeta{}
+				re.NoError(json.Unmarshal(data, meta))
+				re.Equal(tc.name, meta.Name)
+				re.Equal(tc.value, meta.Config["opaque"])
+				stored := mustLoadKeyspaces(re, suite.server, tc.name)
+				re.Equal(meta.KeyspaceMeta, stored)
+				if tc.method == http.MethodPut {
+					re.Equal(keyspacepb.KeyspaceState_DISABLED, stored.State)
+				}
+				after := auditMetricCounts(re)
+				for _, family := range []string{"pd_service_audit_requests_total", "pd_service_audit_handling_seconds"} {
+					key := family + ":" + tc.label
+					re.Equal(float64(1), after[key]-before[key], key)
+				}
+				data, err = os.ReadFile(logFile)
+				re.NoError(err)
+				var entries []string
+				for line := range strings.SplitSeq(string(data), "\n") {
+					if strings.Contains(line, "audit log") && strings.Contains(line, "ServiceLabel:"+tc.label+",") {
+						entries = append(entries, line)
+					}
+				}
+				re.Len(entries, 1, tc.label)
+				re.NotContains(entries[0], marker, tc.label)
+				re.Contains(entries[0], "BodyParam:"+logutil.RedactString("?"), tc.label)
+				if tc.method != http.MethodPost && mode != logutil.RedactInfoLogON {
+					re.Contains(entries[0], tc.name)
+				}
+			}
+		})
 	}
 }
 

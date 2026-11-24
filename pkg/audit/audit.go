@@ -175,6 +175,16 @@ func (*LocalLogBackend) writeHTTPRequest(r *http.Request, entry *zapcore.Checked
 // a body is captured. Auditing never reads ahead, drains input, or replaces a
 // body-read error. Fully redacted and metrics-only requests skip body capture.
 func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendLabels, backends []Backend, next http.HandlerFunc) {
+	runHTTPAudit(w, r, labels, backends, next, false)
+}
+
+// ProcessHTTPRequestWithRedactedBody hides the body regardless of the global
+// redaction mode, without changing backend ordering or reading the body.
+func ProcessHTTPRequestWithRedactedBody(w http.ResponseWriter, r *http.Request, labels *BackendLabels, backends []Backend, next http.HandlerFunc) {
+	runHTTPAudit(w, r, labels, backends, next, true)
+}
+
+func runHTTPAudit(w http.ResponseWriter, r *http.Request, labels *BackendLabels, backends []Backend, next http.HandlerFunc, redactBody bool) {
 	if labels == nil || len(labels.Labels) == 0 {
 		next(w, r)
 		return
@@ -184,7 +194,10 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 		info = requestutil.GetRequestInfoWithoutBody(r)
 	}
 	capture := info.BodyParam == "" && slices.Contains(labels.Labels, LocalLogLabel) && r.Body != nil && r.Body != http.NoBody
-	if capture && logutil.IsInfoLogFullyRedacted() {
+	fullyRedacted := capture && logutil.IsInfoLogFullyRedacted()
+	// Hiding body contents must not move deferred log writes before the handler.
+	deferBefore := capture && !fullyRedacted
+	if redactBody || fullyRedacted {
 		info.BodyParam = "?"
 		capture = false
 	}
@@ -200,7 +213,7 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 			continue
 		}
 		if backend.ProcessBeforeHandler() {
-			if !capture {
+			if !deferBefore {
 				backend.ProcessHTTPRequest(auditRequest)
 			} else {
 				process := backend.ProcessHTTPRequest
@@ -236,9 +249,9 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 		if body != nil {
 			info.BodyParam = body.String()
 			auditRequest = auditRequest.WithContext(requestutil.WithRequestInfo(auditRequest.Context(), info))
-			for _, process := range deferredBackends {
-				process(auditRequest)
-			}
+		}
+		for _, process := range deferredBackends {
+			process(auditRequest)
 		}
 
 		if !hasAfterBackend {

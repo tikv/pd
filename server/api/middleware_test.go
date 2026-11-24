@@ -103,7 +103,7 @@ func (b *testHTTPAuditBody) Close() error {
 
 func TestHTTPAuditParity(t *testing.T) {
 	both := []string{audit.LocalLogLabel, audit.PrometheusHistogram}
-	for _, version := range []string{"v1", "v2"} {
+	for _, version := range []string{"v1", "v2", "v2 redacted body"} {
 		for _, tc := range []struct {
 			name         string
 			labels       []string
@@ -136,6 +136,7 @@ func TestHTTPAuditParity(t *testing.T) {
 		} {
 			t.Run(version+"/"+tc.name, func(t *testing.T) {
 				re := require.New(t)
+				redactBody := version == "v2 redacted body"
 				var logger *zap.Logger
 				var props *log.ZapProperties
 				re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, tc.mode))
@@ -180,7 +181,7 @@ func TestHTTPAuditParity(t *testing.T) {
 					re.False(body.closed)
 					_, hasInfo := requestutil.RequestInfoFrom(r.Context())
 					re.Equal(tc.existingInfo || tc.enabled && len(tc.labels) > 0, hasInfo)
-					if !tc.enabled || !slices.Contains(tc.labels, audit.LocalLogLabel) || tc.mode == logutil.RedactInfoLogON || tc.captured != "" {
+					if redactBody || !tc.enabled || !slices.Contains(tc.labels, audit.LocalLogLabel) || tc.mode == logutil.RedactInfoLogON || tc.captured != "" {
 						re.Same(body, r.Body)
 					}
 					if tc.consume < 0 {
@@ -214,7 +215,11 @@ func TestHTTPAuditParity(t *testing.T) {
 					r := gin.New()
 					r.Use(gin.CustomRecovery(func(c *gin.Context, _ any) { c.AbortWithStatus(http.StatusInternalServerError) }))
 					r.Use(func(c *gin.Context) { c.Set(v2.ServerContextKey, svr) })
-					r.POST("/selected", v2.Audit("Selected", tc.labels...), func(c *gin.Context) { handler(c.Writer, c.Request) })
+					auditHandler := v2.Audit("Selected", tc.labels...)
+					if redactBody {
+						auditHandler = v2.AuditWithRedactedBody("Selected", tc.labels...)
+					}
+					r.POST("/selected", auditHandler, func(c *gin.Context) { handler(c.Writer, c.Request) })
 					router = r
 				}
 				recorder := httptest.NewRecorder()
@@ -238,14 +243,16 @@ func TestHTTPAuditParity(t *testing.T) {
 				}
 				expected := []string{"handler"}
 				if tc.enabled && slices.Contains(tc.labels, audit.LocalLogLabel) {
-					if tc.captured != "" {
+					if tc.captured != "" || tc.mode == logutil.RedactInfoLogON {
 						expected = append([]string{audit.LocalLogLabel}, expected...)
-						re.Equal(tc.captured, loggedBody)
-					} else if tc.mode == logutil.RedactInfoLogON {
-						expected = append([]string{audit.LocalLogLabel}, expected...)
-						re.Equal("?", loggedBody)
 					} else {
 						expected = append(expected, audit.LocalLogLabel)
+					}
+					if redactBody || tc.mode == logutil.RedactInfoLogON && tc.captured == "" {
+						re.Equal("?", loggedBody)
+					} else if tc.captured != "" {
+						re.Equal(tc.captured, loggedBody)
+					} else {
 						consumed := tc.consume
 						if consumed < 0 {
 							consumed = len(payload)
@@ -277,7 +284,7 @@ func (w *delayedAuditLogWriter) Write(p []byte) (int, error) {
 }
 
 func TestHTTPAuditMetricsDuration(t *testing.T) {
-	for _, version := range []string{"v1", "v2"} {
+	for _, version := range []string{"v1", "v2", "v2 redacted body"} {
 		for _, tc := range []struct {
 			name         string
 			localLog     bool
@@ -299,6 +306,7 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 			t.Run(version+"/"+tc.name, func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					re := require.New(t)
+					redactBody := version == "v2 redacted body"
 					var logger *zap.Logger
 					var props *log.ZapProperties
 					re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, tc.mode))
@@ -329,18 +337,28 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 						payload = ""
 					}
 					var originalBody io.ReadCloser
+					started := time.Now()
 					handler := func(w http.ResponseWriter, r *http.Request) {
+						beforeHandler := time.Duration(0)
+						if tc.localLog && !tc.suppressed && (tc.bodyless || tc.mode == logutil.RedactInfoLogON) {
+							beforeHandler = time.Second
+						}
+						re.Equal(beforeHandler, time.Since(started))
 						if tc.bodyless {
 							re.Equal(http.NoBody, r.Body)
 						}
-						if tc.suppressed {
+						if tc.suppressed || redactBody {
 							re.Equal(originalBody, r.Body)
 						}
 						info, ok := requestutil.RequestInfoFrom(r.Context())
 						re.True(ok)
 						if tc.existingInfo {
-							re.Equal(existing, info)
-						} else if version == "v2" && !tc.localLog {
+							expected := existing
+							if redactBody {
+								expected.BodyParam = "?"
+							}
+							re.Equal(expected, info)
+						} else if version != "v1" && !tc.localLog {
 							re.Empty(info.Method)
 							re.Empty(info.URLParam)
 							re.Empty(info.IP)
@@ -365,10 +383,13 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 					} else {
 						r := gin.New()
 						r.Use(func(c *gin.Context) { c.Set(v2.ServerContextKey, svr) })
-						r.POST("/selected", v2.Audit("Selected", labels...), func(c *gin.Context) { handler(c.Writer, c.Request) })
+						auditHandler := v2.Audit("Selected", labels...)
+						if redactBody {
+							auditHandler = v2.AuditWithRedactedBody("Selected", labels...)
+						}
+						r.POST("/selected", auditHandler, func(c *gin.Context) { handler(c.Writer, c.Request) })
 						router = r
 					}
-					started := time.Now()
 					recorder := httptest.NewRecorder()
 					serve := func() {
 						request := httptest.NewRequest(http.MethodPost, "/selected?query=one", strings.NewReader(payload))

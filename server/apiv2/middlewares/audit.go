@@ -37,7 +37,21 @@ type auditServer interface {
 // Audit applies the shared HTTP audit pipeline to one route.
 // Local-log backends capture consumed body bytes; metrics-only routes do not.
 func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
+	return newAudit(serviceLabel, false, backendLabels...)
+}
+
+// AuditWithRedactedBody records request metadata and metrics without retaining
+// the request body, even when global log redaction is disabled.
+func AuditWithRedactedBody(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
+	return newAudit(serviceLabel, true, backendLabels...)
+}
+
+func newAudit(serviceLabel string, redactBody bool, backendLabels ...string) gin.HandlerFunc {
 	labels := &audit.BackendLabels{Labels: backendLabels}
+	process := audit.ProcessHTTPRequest
+	if redactBody {
+		process = audit.ProcessHTTPRequestWithRedactedBody
+	}
 	return func(c *gin.Context) {
 		if len(labels.Labels) == 0 {
 			c.Next()
@@ -83,7 +97,7 @@ func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 			}
 		}
 		r := c.Request.WithContext(requestutil.WithRequestInfo(c.Request.Context(), info))
-		audit.ProcessHTTPRequest(c.Writer, r, labels, backends, func(_ http.ResponseWriter, r *http.Request) {
+		process(c.Writer, r, labels, backends, func(_ http.ResponseWriter, r *http.Request) {
 			c.Request = r
 			c.Next()
 		})
