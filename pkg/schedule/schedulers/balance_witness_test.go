@@ -20,6 +20,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -29,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestBalanceWitnessSchedulerTestSuite(t *testing.T) {
@@ -153,11 +155,13 @@ func (suite *balanceWitnessSchedulerTestSuite) TestAffinity() {
 		{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3},
 		{GroupID: placement.DefaultGroupID, ID: "witness", Role: placement.Voter, Count: 1, IsWitness: true},
 	}))
-	tc.AddLeaderRegionWithWitness(1, 1, []uint64{2, 3, 4}, 4)
-	region := tc.GetRegion(1)
+	region := tc.AddLeaderRegionWithWitness(1, 1, []uint64{2, 3, 4}, 4)
+	keyRange := testutil.TxnKeyspaceRange(region.GetStartKey(), region.GetEndKey())
+	region = region.Clone(core.WithStartKey(keyRange.StartKey), core.WithEndKey(keyRange.EndKey))
+	tc.PutRegion(region)
 	manager := tc.GetAffinityManager()
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-		GroupID: "witness", KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+		GroupID: "witness", KeyRanges: []keyutil.KeyRange{keyRange},
 	}}))
 	_, err := manager.UpdateAffinityGroupPeers("witness", 2, []uint64{1, 2, 3, 4})
 	re.NoError(err)
