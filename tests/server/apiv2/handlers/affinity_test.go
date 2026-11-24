@@ -1453,9 +1453,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		serverAddr := cluster.GetLeaderServer().GetAddr()
+		keyRange := testutil.TxnKeyspaceRange([]byte{0x20}, []byte{0x30})
 		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"targets": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				"targets": {Ranges: []handlers.AffinityKeyRange{handlers.AffinityKeyRange(keyRange)}},
 			},
 		})
 		for id := uint64(1); id <= 3; id++ {

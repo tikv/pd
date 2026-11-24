@@ -38,7 +38,10 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	pdtestutil "github.com/tikv/pd/pkg/utils/testutil"
 )
+
+var targetTestRange = pdtestutil.TxnKeyspaceRange(nonOverlappingRange.StartKey, nonOverlappingRange.EndKey)
 
 func newTargetTestManager(t *testing.T, ctx context.Context, store storage.Storage) *Manager {
 	stores := core.NewStoresInfo()
@@ -106,7 +109,7 @@ func (test *targetTest) observe(id string, voters ...uint64) {
 }
 
 func targetRegion(voters ...uint64) *core.RegionInfo {
-	return generateRegionForTest(10, voters, nonOverlappingRange)
+	return generateRegionForTest(10, voters, targetTestRange)
 }
 
 func TestUpdateAffinityGroupTargetsValidation(t *testing.T) {
@@ -151,7 +154,7 @@ func TestSyncRecreatedAffinityGroup(t *testing.T) {
 			test := newTargetTest(t)
 			old := Group{ID: "g", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
 			test.SyncGroupFromEtcdWithRevision(&old, 1)
-			test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}}, nil))
+			test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{targetTestRange}}}, nil))
 			test.RestoreAffinityGroup("g")
 			_, cached := test.GetAndCacheRegionAffinityGroupState(targetRegion(1, 2, 3))
 			test.True(cached)
@@ -496,7 +499,7 @@ func TestTargetCASAndLostReplyWithEtcd(t *testing.T) {
 	test.Equal(*test.stored("g"), test.GetAffinityGroupState("g").Group)
 	test.Equal(beforeRetry.ModRevision, read().ModRevision, "idempotent retries do not put again")
 
-	test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{nonOverlappingRange}}}, nil))
+	test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{targetTestRange}}}, nil))
 	test.GetAndCacheRegionAffinityGroupState(targetRegion(3, 1, 2))
 	stable := test.GetAffinityGroupState("g")
 	test.Equal(1, stable.AffinityRegionCount)

@@ -316,10 +316,15 @@ func TestAffinityCheckerPersistsUnpersistedTarget(t *testing.T) {
 		for id := uint64(1); id <= 3; id++ {
 			cluster.AddRegionStore(id, 10)
 		}
-		region := cluster.AddLeaderRegion(100, 1, 2, 3)
+		keyRange := testutil.TxnKeyspaceRange([]byte("a"), []byte("z"))
+		cluster.AddLeaderRegionWithRange(100, string(keyRange.StartKey), string(keyRange.EndKey), 1, 2, 3)
+		region := cluster.GetRegion(100)
 		manager := cluster.GetAffinityManager()
 		checker := newTestAffinityChecker(t.Context(), cluster, opt)
-		re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: "g"}, []byte{}, []byte{}))
+		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+			GroupID:   "g",
+			KeyRanges: []keyutil.KeyRange{keyRange},
+		}}))
 		created := manager.GetAffinityGroupState("g")
 		var requests []affinity.GroupTarget
 		manager.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []affinity.GroupTarget) ([]string, error) {
