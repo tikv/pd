@@ -257,8 +257,7 @@ func (suite *keyspaceTestSuite) TestRepairReservedKeyspaceUsesPersistedUserKind(
 // by our stale snapshot.
 func TestSaveKeyspaceRegionLabelerTxnOpReloadsFromStorage(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	// Rebind the mock cluster's region labeler onto the same store the
@@ -392,8 +391,8 @@ func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceGroupsTxnOpFailed"))
 
-	// A wait-split failure preserves a complete pending object. The next
-	// request resumes it rather than allocating a new ID.
+	// A wait-split failure preserves a complete pending object. Duplicate
+	// Create is rejected; manual enable completes the existing object.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed", `return(true)`))
 	_, err = manager.CreateKeyspace(requests[0])
 	re.Error(err)
@@ -402,7 +401,9 @@ func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 	re.NotEmpty(pending.GetConfig()[creationPendingKey])
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
 
-	ks, err := manager.CreateKeyspace(requests[0])
+	_, err = manager.CreateKeyspace(requests[0])
+	re.ErrorIs(err, errs.ErrKeyspaceExists)
+	ks, err := manager.UpdateKeyspaceState(requests[0].Name, keyspacepb.KeyspaceState_ENABLED, 2)
 	re.NoError(err)
 	re.Equal(pending.GetId(), ks.GetId())
 	km, err := manager.LoadKeyspace(ks.Name)
@@ -411,7 +412,7 @@ func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 }
 
 // TestWaitSplitFailurePreservesPendingKeyspace verifies that a failed wait
-// retains the persisted creation identity for a user-initiated retry.
+// retains the persisted creation identity for a user-initiated manual enable.
 func (suite *keyspaceTestSuite) TestWaitSplitFailurePreservesPendingKeyspace() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -446,7 +447,7 @@ func (suite *keyspaceTestSuite) TestWaitSplitFailurePreservesPendingKeyspace() {
 }
 
 // TestWaitSplitFailurePreservesCrossSubsystemState verifies that a failed wait
-// and its retry neither undo nor duplicate group assignments.
+// and manual enable neither undo nor duplicate group assignments.
 func (suite *keyspaceTestSuite) TestWaitSplitFailurePreservesCrossSubsystemState() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -494,7 +495,9 @@ func (suite *keyspaceTestSuite) TestWaitSplitFailurePreservesCrossSubsystemState
 	re.NoError(err)
 	re.Equal(1, status["meta-1"].AssignmentCount)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
-	resumed, err := manager.CreateKeyspace(&CreateKeyspaceRequest{Name: pending.GetName()})
+	_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{Name: pending.GetName()})
+	re.ErrorIs(err, errs.ErrKeyspaceExists)
+	resumed, err := manager.UpdateKeyspaceState(pending.GetName(), keyspacepb.KeyspaceState_ENABLED, 2)
 	re.NoError(err)
 	re.Equal(pending.GetId(), resumed.GetId())
 	re.NotContains(resumed.GetConfig(), creationPendingKey)
@@ -507,8 +510,7 @@ func (suite *keyspaceTestSuite) TestWaitSplitFailurePreservesCrossSubsystemState
 // without modifying the durable assignment.
 func TestRefreshPendingKeyspaceGroupCache(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))

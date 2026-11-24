@@ -19,35 +19,47 @@ but the request does not wait for the split. Client readiness checks continue
 to check the actual region boundaries. Reserved keyspace bootstrap retains its
 non-waiting behavior and idempotent repair.
 
-## Retrying a failed create
+## Recovering a failed create
 
-The caller decides whether to retry. A Create request for an existing
-`DISABLED` keyspace with a pending token restores the caches and continues
-creation using the stored ID and configuration. A supplied ID must match that
-object. Retry configuration does not replace the stored configuration; use the
-separate config API to change it. A non-pending object, including an already
-`ENABLED` keyspace, retains the existing `ErrKeyspaceExists` behavior. After an
-uncertain enable response, query the keyspace to confirm whether it is enabled.
+Create rejects an existing name or ID with `ErrKeyspaceExists`, including a
+`DISABLED` keyspace with a pending token. It never adopts an existing object or
+silently ignores conflicting settings in a duplicate request. After a failed
+create, query the keyspace to determine whether it was persisted or enabled.
+Use the state API to manually enable a persisted pending keyspace, and the
+separate config API to change its settings. Retry Create only if the object
+does not exist.
 
 The enable transaction rechecks the original creation token and state, then
 atomically sets `ENABLED` and removes the token. This prevents an old request
 from enabling a new object that reused the original ID after deletion.
 
+For the original Create's enable transaction only, a commit-stage deadline,
+transport-unavailable error, or recognized etcd request timeout uses optimistic
+`ENABLED` cache state when a fresh read still identifies the same disabled pending
+generation. The API still returns the error. Read, validation, staging, transaction
+conflict, and explicit etcd rejection errors do not publish optimistic state.
+This is a deliberate trade-off similar to master's pre-commit publication: if
+the uncertain transaction never commits, cache state can lead storage. Query
+metadata and use manual enable to complete the durable transition. A failed
+reconciliation read invalidates the cache instead of guessing identity.
+Ordinary state updates, including manual ENABLE, retain their existing handling
+of uncertain transaction results and are outside this change's scope.
+
 ## Management operations
 
 - Users cannot set or delete `creation_pending` through Create or config APIs.
-- A manual enable of a disabled pending keyspace is rejected while the current
-  server setting requires waiting. Retry Create to finish it instead.
-- With waiting disabled in the current server setting, manual enable is allowed
-  after restoring the group and region label caches. A refresh failure returns
+- Manual enable first restores the group and region label caches, regardless of
+  the server's wait-region-split setting. A refresh failure returns
   an error and preserves the token. The enable transaction rechecks the creation
   identity and current state before removing the token atomically.
+- Manual enable does not wait for region split. As on master, `ENABLED` does not
+  mean split-ready; client readiness checks still require actual boundaries.
 - Reapplying `DISABLED` remains a no-op; it does not cancel pending creation.
-- Archiving cancels creation and removes the token in the same transaction.
-  Deletion and recreation retain the existing lifecycle rules.
+- Pending keyspaces cannot be archived, tombstoned, or removed. Complete manual
+  enable first; ordinary disable/archive/removal and ID reuse are then allowed.
 - Old disabled objects without a token are not adopted as pending creations.
 
 These recovery semantics require a PD version that understands the token. An
-older leader does not resume pending creates and does not enforce the new manual
-enable guard. Enable this workflow only after completing the PD upgrade when
+older leader does not enforce pending archive/removal guards or restore creation
+caches during manual enable. Use this workflow only after completing the PD upgrade when
 those guarantees must hold throughout the rollout.

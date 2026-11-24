@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -129,7 +128,7 @@ func installCreationBounds(manager *Manager, cluster *mockcluster.Cluster, id ui
 	cluster.AddLeaderRegionWithRange(101, string(right), "", 1)
 }
 
-func TestPendingCreationRetryUsesStoredConfig(t *testing.T) {
+func TestPendingCreationRejectsDuplicateCreate(t *testing.T) {
 	re := require.New(t)
 	manager, _, cluster, _ := newPendingCreationManager(t)
 	request := &CreateKeyspaceRequest{Name: "pending_config", Config: map[string]string{"setting": "first"}, CreateTime: 123}
@@ -150,7 +149,13 @@ func TestPendingCreationRetryUsesStoredConfig(t *testing.T) {
 	wrongID := id + 1
 	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &wrongID, Name: request.Name})
 	re.ErrorIs(err, errs.ErrKeyspaceExists)
-	created, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: request.Name, Config: map[string]string{"setting": "ignored"}})
+	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: request.Name, Config: map[string]string{"setting": "conflicting"}})
+	re.ErrorIs(err, errs.ErrKeyspaceExists)
+	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: "another_name"})
+	re.ErrorIs(err, errs.ErrKeyspaceExists)
+	_, err = manager.CreateKeyspace(request)
+	re.ErrorIs(err, errs.ErrKeyspaceExists)
+	created, err := manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
 	re.NoError(err)
 	re.Equal(id, created.GetId())
 	re.Equal("patched", created.GetConfig()["setting"])
@@ -182,7 +187,9 @@ func TestPendingCreationCacheReadFailure(t *testing.T) {
 			}
 			store.ruleReadErr, store.failGroupRefresh, store.groupReadErr = false, false, false
 			installCreationBounds(manager, cluster, pending.GetId())
-			created, err := manager.CreateKeyspace(request)
+			_, err = manager.CreateKeyspace(request)
+			re.ErrorIs(err, errs.ErrKeyspaceExists)
+			created, err := manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
 			re.NoError(err)
 			re.Equal(pending.GetId(), created.GetId())
 			re.NotNil(cluster.GetLabelRule(getRegionLabelID(created.GetId())))
@@ -205,14 +212,16 @@ func TestPendingCreationWithoutWaiting(t *testing.T) {
 	re.Equal(keyspacepb.KeyspaceState_DISABLED, pending.GetState())
 	re.NotEmpty(pending.GetConfig()[creationPendingKey])
 	store.ruleReadErr = false
-	created, err := manager.CreateKeyspace(request)
+	_, err = manager.CreateKeyspace(request)
+	re.ErrorIs(err, errs.ErrKeyspaceExists)
+	created, err := manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
 	re.NoError(err)
 	re.Equal(pending.GetId(), created.GetId())
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, created.GetState())
 	re.False(manager.CheckKeyspaceRegionBound(created))
 }
 
-func TestPendingCreationRetryAfterGroupMove(t *testing.T) {
+func TestPendingManualEnableAfterGroupMove(t *testing.T) {
 	re := require.New(t)
 	manager, _, cluster, _ := newPendingCreationManager(t)
 	request := &CreateKeyspaceRequest{Name: "moved_group"}
@@ -225,7 +234,7 @@ func TestPendingCreationRetryAfterGroupMove(t *testing.T) {
 	// Like a split/merge, move durable membership without updating meta.Config.
 	re.NoError(manager.kgm.UpdateKeyspaceGroup(pending.GetConfig()[TSOKeyspaceGroupIDKey], "1", endpoint.Basic, endpoint.Basic, pending.GetId()))
 	installCreationBounds(manager, cluster, pending.GetId())
-	created, err := manager.CreateKeyspace(request)
+	created, err := manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
 	re.NoError(err)
 	groupID, _, err := manager.kgm.GetGroupByKeyspaceID(created.GetId())
 	re.NoError(err)
@@ -234,21 +243,14 @@ func TestPendingCreationRetryAfterGroupMove(t *testing.T) {
 
 func TestPendingCreationConcurrentCompletion(t *testing.T) {
 	re := require.New(t)
-	manager, _, cluster, _ := newPendingCreationManager(t)
+	manager, _, _, cfg := newPendingCreationManager(t)
+	cfg.WaitRegionSplit = false
 	request := &CreateKeyspaceRequest{Name: "concurrent"}
-	_, err := manager.CreateKeyspace(request)
-	re.ErrorIs(err, errs.ErrRegionSplitTimeout)
-	pending, err := manager.LoadKeyspace(request.Name)
-	re.NoError(err)
-	installCreationBounds(manager, cluster, pending.GetId())
 	reached, release := make(chan struct{}), make(chan struct{})
-	var calls atomic.Int32
 	name := "github.com/tikv/pd/pkg/keyspace/beforeEnableCreatedKeyspace"
 	re.NoError(failpoint.EnableCall(name, func() {
-		if calls.Add(1) == 1 {
-			close(reached)
-			<-release
-		}
+		close(reached)
+		<-release
 	}))
 	var once sync.Once
 	defer func() {
@@ -265,19 +267,27 @@ func TestPendingCreationConcurrentCompletion(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("first request did not reach enable")
 	}
-	created, err := manager.CreateKeyspace(request)
+	pending, err := manager.LoadKeyspace(request.Name)
 	re.NoError(err)
-	re.Equal(pending.GetId(), created.GetId())
+	_, err = manager.CreateKeyspace(request)
+	re.ErrorIs(err, errs.ErrKeyspaceExists)
+	// A user can manually enable the object while its original Create is
+	// still running. That old request must not enable it again after a disable.
+	_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_DISABLED, 3)
+	re.NoError(err)
 	once.Do(func() { close(release) })
 	select {
 	case err := <-result:
-		re.ErrorIs(err, errs.ErrKeyspaceExists)
+		re.ErrorContains(err, "no longer pending")
 	case <-time.After(5 * time.Second):
 		t.Fatal("first request did not finish")
 	}
 	stored, err := manager.LoadKeyspace(request.Name)
 	re.NoError(err)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, stored.GetState())
+	re.Equal(pending.GetId(), stored.GetId())
+	re.Equal(keyspacepb.KeyspaceState_DISABLED, stored.GetState())
 	re.NotContains(stored.GetConfig(), creationPendingKey)
 }
 
@@ -291,7 +301,7 @@ func TestPendingCreationMissingRule(t *testing.T) {
 	re.NoError(err)
 	re.NoError(cluster.DeleteLabelRule(getRegionLabelID(pending.GetId())))
 	installCreationBounds(manager, cluster, pending.GetId())
-	_, err = manager.CreateKeyspace(request)
+	_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
 	re.ErrorContains(err, "not found")
 	loaded, err := manager.LoadKeyspace(request.Name)
 	re.NoError(err)
@@ -319,7 +329,13 @@ func TestPendingCreationEnableErrorAndUncertainCommit(t *testing.T) {
 			default:
 				store.failEnable = true
 			}
-			_, err = manager.CreateKeyspace(request)
+			if stage == "commit_create" {
+				_, err = manager.CreateKeyspace(request)
+			} else {
+				// Exercise the original create's enable step with its persisted
+				// generation, not a duplicate Create request.
+				_, err = manager.enableNewKeyspace(pending)
+			}
 			re.ErrorIs(err, errCreationStorage)
 			store.failEnable = false
 			loaded, err := manager.LoadKeyspace(request.Name)
@@ -336,7 +352,9 @@ func TestPendingCreationEnableErrorAndUncertainCommit(t *testing.T) {
 			}
 			re.NotEmpty(loaded.GetConfig()[creationPendingKey])
 			installCreationBounds(manager, cluster, loaded.GetId())
-			created, err := manager.CreateKeyspace(request)
+			_, err = manager.CreateKeyspace(request)
+			re.ErrorIs(err, errs.ErrKeyspaceExists)
+			created, err := manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
 			re.NoError(err)
 			re.Equal(loaded.GetId(), created.GetId())
 		})
@@ -345,16 +363,16 @@ func TestPendingCreationEnableErrorAndUncertainCommit(t *testing.T) {
 
 func TestPendingCreationManagement(t *testing.T) {
 	re := require.New(t)
-	manager, _, _, cfg := newPendingCreationManager(t)
+	manager, _, _, _ := newPendingCreationManager(t)
 	request := &CreateKeyspaceRequest{Name: "management"}
 	_, err := manager.CreateKeyspace(request)
 	re.ErrorIs(err, errs.ErrRegionSplitTimeout)
 	pending, err := manager.LoadKeyspace(request.Name)
 	re.NoError(err)
-	_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 1)
-	re.ErrorContains(err, "region split is pending")
-	_, err = manager.UpdateKeyspaceStateByID(pending.GetId(), keyspacepb.KeyspaceState_ENABLED, 1)
-	re.ErrorContains(err, "region split is pending")
+	_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ARCHIVED, 1)
+	re.ErrorContains(err, "creation is pending")
+	_, err = manager.UpdateKeyspaceStateByID(pending.GetId(), keyspacepb.KeyspaceState_TOMBSTONE, 1)
+	re.ErrorContains(err, "creation is pending")
 	unchanged, err := manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_DISABLED, 1)
 	re.NoError(err)
 	re.Equal(pending.GetConfig()[creationPendingKey], unchanged.GetConfig()[creationPendingKey])
@@ -364,8 +382,7 @@ func TestPendingCreationManagement(t *testing.T) {
 	}
 	_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{Name: "forged", Config: map[string]string{creationPendingKey: "forged"}})
 	re.ErrorContains(err, "managed by PD")
-	// Read the current server setting, not a persisted wait_region_split value.
-	cfg.WaitRegionSplit = false
+	// Manual enable restores caches without waiting, even with waitSplit=true.
 	enabled, err := manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
 	re.NoError(err)
 	re.NotContains(enabled.GetConfig(), creationPendingKey)
@@ -376,19 +393,51 @@ func TestPendingCreationManagement(t *testing.T) {
 	re.ErrorIs(err, errs.ErrKeyspaceExists)
 }
 
+func TestPendingCreationCannotBeRemoved(t *testing.T) {
+	re := require.New(t)
+	manager, store, _, _ := newPendingCreationManager(t)
+	_, err := manager.CreateKeyspace(&CreateKeyspaceRequest{Name: "pending_remove"})
+	re.ErrorIs(err, errs.ErrRegionSplitTimeout)
+	pending, err := manager.LoadKeyspace("pending_remove")
+	re.NoError(err)
+	for _, state := range []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ARCHIVED, keyspacepb.KeyspaceState_TOMBSTONE} {
+		_, err = manager.UpdateKeyspaceStateByID(pending.GetId(), state, 2)
+		re.ErrorContains(err, "creation is pending")
+		_, err = manager.UpdateKeyspaceState(pending.GetName(), state, 2)
+		re.ErrorContains(err, "creation is pending")
+	}
+	// Also enforce the token at the deletion boundary, including legacy or
+	// externally repaired metadata already in a removable state.
+	pending.State = keyspacepb.KeyspaceState_ARCHIVED
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceMeta(txn, pending)
+	}))
+	err = store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return manager.RemoveKeyspace(txn, pending.GetId())
+	})
+	re.ErrorContains(err, "creation is pending")
+	groupID, _, err := manager.kgm.GetGroupByKeyspaceID(pending.GetId())
+	re.NoError(err)
+	group, err := manager.kgm.RemoveKeyspacesFromGroup(t.Context(), groupID, manager, nil, []uint32{pending.GetId()})
+	re.NoError(err)
+	re.Contains(group.Keyspaces, pending.GetId())
+	stored, err := manager.LoadKeyspace(pending.GetName())
+	re.NoError(err)
+	re.Equal(pending.GetConfig()[creationPendingKey], stored.GetConfig()[creationPendingKey])
+}
+
 func TestPendingManualEnableRestoresCaches(t *testing.T) {
 	for _, api := range []string{"name", "id"} {
 		for _, cache := range []string{"rule", "group"} {
 			t.Run(api+"/"+cache, func(t *testing.T) {
 				re := require.New(t)
-				manager, store, cluster, cfg := newPendingCreationManager(t)
+				manager, store, cluster, _ := newPendingCreationManager(t)
 				store.ruleReadErr = cache == "rule"
 				store.failGroupRefresh = cache == "group"
 				_, err := manager.CreateKeyspace(&CreateKeyspaceRequest{Name: "manual_enable"})
 				re.ErrorIs(err, errCreationStorage)
 				pending, err := manager.LoadKeyspace("manual_enable")
 				re.NoError(err)
-				cfg.WaitRegionSplit = false
 				enable := func() (*keyspacepb.KeyspaceMeta, error) {
 					if api == "id" {
 						return manager.UpdateKeyspaceStateByID(pending.GetId(), keyspacepb.KeyspaceState_ENABLED, 2)
@@ -419,10 +468,10 @@ func TestPendingManualEnableRestoresCaches(t *testing.T) {
 
 func TestPendingManualEnableRechecksCreation(t *testing.T) {
 	for _, api := range []string{"name", "id"} {
-		for _, change := range []string{"archive", "reuse", "wait_enabled", "config"} {
+		for _, change := range []string{"archive", "wait_enabled", "config", "enabled_then_disabled"} {
 			t.Run(api+"/"+change, func(t *testing.T) {
 				re := require.New(t)
-				manager, store, _, cfg := newPendingCreationManager(t)
+				manager, _, _, cfg := newPendingCreationManager(t)
 				request := &CreateKeyspaceRequest{Name: "manual_race"}
 				_, err := manager.CreateKeyspace(request)
 				re.ErrorIs(err, errs.ErrRegionSplitTimeout)
@@ -461,33 +510,24 @@ func TestPendingManualEnableRechecksCreation(t *testing.T) {
 				case "config":
 					_, err = manager.UpdateKeyspaceConfig(request.Name, []*Mutation{{Op: OpPut, Key: "setting", Value: "updated"}})
 					re.NoError(err)
-				default:
+				case "archive":
 					_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ARCHIVED, 3)
+					re.ErrorContains(err, "creation is pending")
+				case "enabled_then_disabled":
+					// Complete a separate enable without entering the paused hook.
+					_, err = manager.enableNewKeyspace(original)
 					re.NoError(err)
-					if change == "reuse" {
-						groupID, _, err := manager.kgm.GetGroupByKeyspaceID(original.GetId())
-						re.NoError(err)
-						_, err = manager.kgm.RemoveKeyspacesFromGroup(t.Context(), groupID, manager, nil, []uint32{original.GetId()})
-						re.NoError(err)
-						// A replacement creation must remain pending, so the old
-						// manual-enable transaction must distinguish its generation.
-						store.failEnable = true
-						id := original.GetId()
-						_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: request.Name})
-						re.ErrorIs(err, errCreationStorage)
-						store.failEnable = false
-					}
+					_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_DISABLED, 3)
+					re.NoError(err)
 				}
 				releaseOnce.Do(func() { close(release) })
 				select {
 				case err := <-result:
 					switch change {
-					case "wait_enabled":
-						re.ErrorContains(err, "region split is pending")
-					case "config":
-						re.NoError(err)
-					default:
+					case "enabled_then_disabled":
 						re.ErrorContains(err, "creation changed after cache refresh")
+					default:
+						re.NoError(err)
 					}
 				case <-time.After(5 * time.Second):
 					t.Fatal("manual enable did not finish")
@@ -495,18 +535,14 @@ func TestPendingManualEnableRechecksCreation(t *testing.T) {
 				loaded, err := manager.LoadKeyspace(request.Name)
 				re.NoError(err)
 				switch change {
-				case "archive":
-					re.Equal(keyspacepb.KeyspaceState_ARCHIVED, loaded.GetState())
+				case "enabled_then_disabled":
+					re.Equal(keyspacepb.KeyspaceState_DISABLED, loaded.GetState())
 					re.NotContains(loaded.GetConfig(), creationPendingKey)
-				case "config":
+				default:
 					re.Equal(keyspacepb.KeyspaceState_ENABLED, loaded.GetState())
 					re.NotContains(loaded.GetConfig(), creationPendingKey)
-					re.Equal("updated", loaded.GetConfig()["setting"])
-				default:
-					re.Equal(keyspacepb.KeyspaceState_DISABLED, loaded.GetState())
-					re.NotEmpty(loaded.GetConfig()[creationPendingKey])
-					if change == "reuse" {
-						re.NotEqual(original.GetConfig()[creationPendingKey], loaded.GetConfig()[creationPendingKey])
+					if change == "config" {
+						re.Equal("updated", loaded.GetConfig()["setting"])
 					}
 				}
 			})
@@ -559,13 +595,9 @@ func TestPendingCreationArchiveAndIDReuse(t *testing.T) {
 	for _, reuse := range []bool{false, true} {
 		t.Run(map[bool]string{false: "archive", true: "reuse"}[reuse], func(t *testing.T) {
 			re := require.New(t)
-			manager, _, cluster, _ := newPendingCreationManager(t)
+			manager, _, _, cfg := newPendingCreationManager(t)
+			cfg.WaitRegionSplit = false
 			request := &CreateKeyspaceRequest{Name: "same_identity"}
-			_, err := manager.CreateKeyspace(request)
-			re.ErrorIs(err, errs.ErrRegionSplitTimeout)
-			original, err := manager.LoadKeyspace(request.Name)
-			re.NoError(err)
-			installCreationBounds(manager, cluster, original.GetId())
 			reached, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			name := "github.com/tikv/pd/pkg/keyspace/beforeEnableCreatedKeyspace"
@@ -588,9 +620,18 @@ func TestPendingCreationArchiveAndIDReuse(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("create did not reach the enable barrier")
 			}
-			archived, err := manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ARCHIVED, 2)
+			original, err := manager.LoadKeyspace(request.Name)
 			re.NoError(err)
-			re.NotContains(archived.GetConfig(), creationPendingKey)
+			_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ARCHIVED, 2)
+			re.ErrorContains(err, "creation is pending")
+			// Enabling completes pending creation, after which ordinary archive,
+			// removal and reuse are legal. The old Create must remain fenced.
+			_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ENABLED, 2)
+			re.NoError(err)
+			_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_DISABLED, 3)
+			re.NoError(err)
+			_, err = manager.UpdateKeyspaceState(request.Name, keyspacepb.KeyspaceState_ARCHIVED, 4)
+			re.NoError(err)
 			if reuse {
 				groupID, _, err := manager.kgm.GetGroupByKeyspaceID(original.GetId())
 				re.NoError(err)

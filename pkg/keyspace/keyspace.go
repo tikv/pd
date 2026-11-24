@@ -18,14 +18,19 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	goerrors "errors"
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -360,10 +365,8 @@ func (manager *Manager) createKeyspaceInner(name string, config map[string]strin
 		}
 	}
 	tracer.waitSplit = manager.config.ToWaitRegionSplit()
-	if existing, err := manager.loadPendingKeyspace(name, ids...); err != nil {
+	if err := manager.checkKeyspaceAvailable(name, ids...); err != nil {
 		return nil, err
-	} else if existing != nil {
-		return manager.resumeKeyspaceCreation(tracer, existing)
 	}
 	var err error
 	var newID uint32
@@ -416,62 +419,37 @@ func (manager *Manager) createKeyspaceInner(name string, config map[string]strin
 		}
 	}
 	tracer.OnGetConfigFinished()
-	meta, err := manager.createKeyspaceWithoutCheck(tracer, config, createTime)
-	if errors.Cause(err) == errs.ErrKeyspaceExists {
-		// Another create may have committed after the preflight name check.
-		existing, loadErr := manager.loadPendingKeyspace(name, ids...)
-		if loadErr != nil {
-			return nil, loadErr
-		}
-		if existing != nil {
-			return manager.resumeKeyspaceCreation(tracer, existing)
-		}
-	}
-	return meta, err
+	return manager.createKeyspaceWithoutCheck(tracer, config, createTime)
 }
 
-func (manager *Manager) loadPendingKeyspace(name string, ids ...uint32) (*keyspacepb.KeyspaceMeta, error) {
-	var meta *keyspacepb.KeyspaceMeta
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		found, id, err := manager.store.LoadKeyspaceID(txn, name)
-		if err != nil || !found {
-			return err
-		}
-		if len(ids) > 0 && ids[0] != id {
-			return errs.ErrKeyspaceExists
-		}
-		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
+func (manager *Manager) checkKeyspaceAvailable(name string, ids ...uint32) error {
+	return manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		found, _, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
 			return err
 		}
-		if meta == nil {
-			return errs.ErrKeyspaceNotFound
-		}
-		if meta.GetState() != keyspacepb.KeyspaceState_DISABLED || meta.GetConfig()[creationPendingKey] == "" {
+		if found {
 			return errs.ErrKeyspaceExists
+		}
+		if len(ids) > 0 {
+			meta, err := manager.store.LoadKeyspaceMeta(txn, ids[0])
+			if err != nil {
+				return err
+			}
+			if meta != nil {
+				return errs.ErrKeyspaceExists
+			}
 		}
 		return nil
 	})
-	return meta, err
-}
-
-func (manager *Manager) resumeKeyspaceCreation(tracer *createKeyspaceTracer, meta *keyspacepb.KeyspaceMeta) (*keyspacepb.KeyspaceMeta, error) {
-	tracer.SetKeyspace(meta.GetId(), meta.GetName())
-	tracer.OnAllocateIDFinished()
-	tracer.OnGetConfigFinished()
-	manager.refreshKeyspaceMetaCache(meta.GetId())
-	if err := manager.refreshKeyspaceCreationCaches(meta); err != nil {
-		return nil, err
-	}
-	return manager.finishKeyspaceCreation(tracer, meta)
 }
 
 func (manager *Manager) refreshKeyspaceCreationCaches(meta *keyspacepb.KeyspaceMeta) error {
 	if err := manager.kgm.refreshKeyspaceGroupForKeyspace(meta); err != nil {
-		return errors.Annotate(err, "refresh keyspace group cache failed; retry create to continue")
+		return errors.Annotate(err, "refresh keyspace group cache failed; retry manual enable to continue")
 	}
 	if err := manager.refreshKeyspaceRegionLabel(meta.GetId()); err != nil {
-		return errors.Annotate(err, "refresh keyspace region label cache failed; retry create to continue")
+		return errors.Annotate(err, "refresh keyspace region label cache failed; retry manual enable to continue")
 	}
 	return nil
 }
@@ -558,7 +536,7 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 	}
 	for _, cb := range txnCbs {
 		if err := cb(nil); err != nil {
-			return nil, errors.Annotate(err, "keyspace records committed but cache refresh failed; retry create to continue")
+			return nil, errors.Annotate(err, "keyspace records committed but cache refresh failed; use manual enable to continue")
 		}
 	}
 	return manager.finishKeyspaceCreation(tracer, keyspace)
@@ -577,12 +555,12 @@ func (manager *Manager) finishKeyspaceCreation(tracer *createKeyspaceTracer, key
 			})
 		}
 		if err != nil {
-			return nil, errors.Annotate(err, "wait for keyspace region split failed; retry create to continue")
+			return nil, errors.Annotate(err, "wait for keyspace region split failed; use manual enable to continue")
 		}
 		failpoint.InjectCall("beforeEnableCreatedKeyspace")
 		keyspace, err = manager.enableNewKeyspace(keyspace)
 		if err != nil {
-			return nil, errors.Annotate(err, "enable keyspace transaction failed; query keyspace or retry create")
+			return nil, errors.Annotate(err, "enable keyspace transaction failed; query keyspace or use manual enable")
 		}
 	}
 
@@ -1248,6 +1226,14 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 // be wrong - deleting it forces the next read through that safe fallback
 // instead.
 func (manager *Manager) refreshKeyspaceMetaCache(id uint32) {
+	manager.refreshKeyspaceMetaCacheAfterEnable(id, nil)
+}
+
+// refreshKeyspaceMetaCacheAfterEnable normally publishes durable state. For an
+// uncertain enable commit only, expected permits optimistic ENABLED publication
+// for the same pending generation. It must never override a different object,
+// a completed manual enable, or a later disable/archive.
+func (manager *Manager) refreshKeyspaceMetaCacheAfterEnable(id uint32, expected *keyspacepb.KeyspaceMeta) {
 	manager.metaLock.Lock(id)
 	defer manager.metaLock.Unlock(id)
 	var meta *keyspacepb.KeyspaceMeta
@@ -1270,8 +1256,14 @@ func (manager *Manager) refreshKeyspaceMetaCache(id uint32) {
 		return
 	}
 	manager.keyspaceNameLookup.Store(id, meta.GetName())
-	manager.keyspaceStateLookup.Store(id, meta.GetState())
-	manager.cache.Save(id, meta.GetName(), meta.GetState())
+	state := meta.GetState()
+	if expected != nil && expected.GetConfig()[creationPendingKey] != "" &&
+		meta.GetName() == expected.GetName() && state == keyspacepb.KeyspaceState_DISABLED &&
+		meta.GetConfig()[creationPendingKey] == expected.GetConfig()[creationPendingKey] {
+		state = keyspacepb.KeyspaceState_ENABLED
+	}
+	manager.keyspaceStateLookup.Store(id, state)
+	manager.cache.Save(id, meta.GetName(), state)
 }
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
@@ -1345,6 +1337,12 @@ func (manager *Manager) removeKeyspaceMetadataIfEligible(
 		return "", false, false, errs.ErrKeyspaceNotFound
 	}
 	state := meta.GetState()
+	if meta.GetConfig()[creationPendingKey] != "" {
+		if skipNonRemovable {
+			return "", false, false, nil
+		}
+		return "", false, false, errors.New("cannot remove keyspace while creation is pending")
+	}
 	if skipNonRemovable {
 		if state != keyspacepb.KeyspaceState_ARCHIVED && state != keyspacepb.KeyspaceState_TOMBSTONE {
 			return "", false, false, nil
@@ -1443,9 +1441,6 @@ func (manager *Manager) prepareManualKeyspaceEnable(meta *keyspacepb.KeyspaceMet
 	if meta.GetState() != keyspacepb.KeyspaceState_DISABLED || meta.GetConfig()[creationPendingKey] == "" {
 		return nil, nil
 	}
-	if manager.config.ToWaitRegionSplit() {
-		return nil, errors.New("keyspace region split is pending; retry create to enable it")
-	}
 	if err := manager.refreshKeyspaceCreationCaches(meta); err != nil {
 		return nil, err
 	}
@@ -1457,6 +1452,7 @@ func (manager *Manager) enableNewKeyspace(expected *keyspacepb.KeyspaceMeta) (*k
 	id := expected.GetId()
 	var meta *keyspacepb.KeyspaceMeta
 	var err error
+	staged := false
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		manager.metaLock.Lock(id)
 		defer manager.metaLock.Unlock(id)
@@ -1482,12 +1478,21 @@ func (manager *Manager) enableNewKeyspace(expected *keyspacepb.KeyspaceMeta) (*k
 		failpoint.Inject("saveKeyspaceMetaFailed", func() {
 			failpoint.Return(errors.New("failpoint triggered: saveKeyspaceMetaFailed"))
 		})
-		return manager.store.SaveKeyspaceMeta(txn, meta)
+		if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
+			return err
+		}
+		staged = true
+		return nil
 	})
 	if err != nil {
-		// A commit error can mean the enable actually committed. Never leave
-		// a previously cached DISABLED state trusted after an uncertain result.
-		manager.refreshKeyspaceMetaCache(id)
+		if staged && isUncertainKeyspaceEnableError(err) {
+			// A timeout/transport failure can precede a late commit. Match
+			// master's optimistic state only for this uncertain outcome;
+			// still return the error and leave durable pending metadata intact.
+			manager.refreshKeyspaceMetaCacheAfterEnable(id, expected)
+		} else {
+			manager.refreshKeyspaceMetaCache(id)
+		}
 		return nil, err
 	}
 	manager.refreshKeyspaceMetaCache(meta.GetId())
@@ -1495,6 +1500,34 @@ func (manager *Manager) enableNewKeyspace(expected *keyspacepb.KeyspaceMeta) (*k
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
 	return meta, nil
+}
+
+// isUncertainKeyspaceEnableError is used only after the transaction callback
+// successfully stages the enable write. Read/validation/staging errors must not
+// be interpreted as uncertain commits, even when they have the same status code.
+func isUncertainKeyspaceEnableError(err error) bool {
+	for unwrapped := goerrors.Unwrap(err); unwrapped != nil; unwrapped = goerrors.Unwrap(err) {
+		err = unwrapped
+	}
+	err = errors.Cause(err)
+	if goerrors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	normalized := rpctypes.Error(err)
+	switch normalized {
+	case rpctypes.ErrTimeout, rpctypes.ErrTimeoutDueToLeaderFail, rpctypes.ErrTimeoutDueToConnectionLost:
+		return true
+	}
+	// Known etcd rejections (no leader, no space, unhealthy, etc.) are not
+	// generic transport failures despite some using codes.Unavailable.
+	if _, ok := normalized.(rpctypes.EtcdError); ok {
+		return false
+	}
+	if strings.HasPrefix(rpctypes.ErrorDesc(err), "etcdserver:") {
+		return false
+	}
+	code := status.Code(err)
+	return code == codes.DeadlineExceeded || code == codes.Unavailable
 }
 
 // unassignKeyspaceFromMetaServiceGroup removes the keyspace's meta-service group
@@ -1525,6 +1558,9 @@ func (manager *Manager) unassignKeyspaceFromMetaServiceGroup(txn kv.Txn, meta *k
 
 // transformKeyspaceState transforms the keyspace state to the target state and record the update time.
 func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64, prepared *keyspacepb.KeyspaceMeta) error {
+	if meta.GetConfig()[creationPendingKey] != "" && (newState == keyspacepb.KeyspaceState_ARCHIVED || newState == keyspacepb.KeyspaceState_TOMBSTONE) {
+		return errors.New("cannot archive or tombstone keyspace while creation is pending")
+	}
 	if prepared != nil && (meta.GetId() != prepared.GetId() || meta.GetName() != prepared.GetName() ||
 		meta.GetState() != keyspacepb.KeyspaceState_DISABLED || meta.GetConfig()[creationPendingKey] != prepared.GetConfig()[creationPendingKey]) {
 		return errors.New("keyspace creation changed after cache refresh; retry the state update")
@@ -1544,9 +1580,6 @@ func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.Keys
 		return errors.Errorf("cannot change keyspace state from %s to %s", meta.GetState().String(), newState.String())
 	}
 	if newState == keyspacepb.KeyspaceState_ENABLED && meta.GetConfig()[creationPendingKey] != "" {
-		if manager.config.ToWaitRegionSplit() {
-			return errors.New("keyspace region split is pending; retry create to enable it")
-		}
 		if prepared == nil {
 			return errors.New("pending keyspace caches have not been refreshed; retry the state update")
 		}

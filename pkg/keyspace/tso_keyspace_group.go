@@ -1532,7 +1532,8 @@ func (m *GroupManager) refreshKeyspaceGroupLocked(groupID uint32) (*endpoint.Key
 	return group, nil
 }
 
-// refreshKeyspaceGroupForKeyspace restores the cache on a pending create retry.
+// refreshKeyspaceGroupForKeyspace restores the cache before manually enabling a
+// pending keyspace.
 // Try the recorded group first. Split/merge can move membership without updating
 // that config, so only the recovery fallback scans the durable groups.
 func (m *GroupManager) refreshKeyspaceGroupForKeyspace(meta *keyspacepb.KeyspaceMeta) error {
