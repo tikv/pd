@@ -480,6 +480,19 @@ func (m *GCStateManager) terminateGCStateWatcher(
 	m.terminateGCStateWatcherLocked(watcher, cause, reason)
 }
 
+// Metadata changes only publish removals; live upserts come from successful
+// safe-point updates.
+func (m *GCStateManager) publishGCStateRemovals(generation *gcStateGeneration, ids []uint32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.activeGeneration.Load() != generation {
+		return
+	}
+	for _, id := range ids {
+		m.publishGCStateChangeLocked(NewGCStateRemoved(id))
+	}
+}
+
 // TODO: Reconcile missed updates after uncertain etcd commits; see
 // https://github.com/tikv/pd/issues/11360. A timed-out write may commit after
 // cache invalidation or refill, and cache reloads do not publish updates.
@@ -498,7 +511,6 @@ func (m *GCStateManager) publishGCStateChangeLocked(change GCStateChange) {
 			m.terminateGCStateWatcherLocked(watcher, errs.ErrGCStateWatcherSlowConsumer, watcherTerminationSlowConsumer)
 		}
 	}
-	// TODO: Publish keyspace metadata upserts and removals through this same serialized path when an authoritative GC-leader-owned lifecycle hook exists.
 }
 
 func (m *GCStateManager) terminateGCStateWatcherLocked(

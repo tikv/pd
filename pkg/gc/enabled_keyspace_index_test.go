@@ -236,6 +236,56 @@ func TestEnabledKeyspaceIndexAppliesMetadataChanges(t *testing.T) {
 	require.Equal(t, []enabledKeyspace{{id: 2, gcManagementType: keyspace.KeyspaceLevelGC}}, list)
 }
 
+func TestEnabledKeyspaceIndexRemovalCallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	index := newEnabledKeyspaceIndex(nil, "")
+	var removed []uint32
+	index.onRemoved = func(ids []uint32) {
+		// Reentrant reads must see the complete batch without deadlocking.
+		entries, _, err := index.snapshotAtLeast(ctx, 0)
+		if err != nil {
+			panic(err)
+		}
+		for _, entry := range entries {
+			for _, id := range ids {
+				if entry.id == id {
+					panic("removed entry is still in the index")
+				}
+			}
+		}
+		removed = append(removed, ids...)
+	}
+	require.True(t, index.publish(ctx, map[uint32]enabledKeyspace{1: {id: 1}, 2: {id: 2}}, 1))
+	for n, tc := range []struct {
+		name    string
+		changes map[uint32]*enabledKeyspace
+		want    []uint32
+	}{
+		{"leaves enabled", map[uint32]*enabledKeyspace{2: nil}, []uint32{2}},
+		{"already absent", map[uint32]*enabledKeyspace{2: nil, 4: nil}, nil},
+		{"coalesced final enabled", map[uint32]*enabledKeyspace{1: {id: 1}, 2: {id: 2}}, nil},
+		{"leaves enabled again", map[uint32]*enabledKeyspace{2: nil}, []uint32{2}},
+	} {
+		if !t.Run(tc.name, func(t *testing.T) {
+			removed = nil
+			done := make(chan struct{})
+			go func() {
+				index.publishProgress(ctx, tc.changes, int64(n+2))
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("removal callback could not read the index")
+			}
+			require.Equal(t, tc.want, removed)
+		}) {
+			return
+		}
+	}
+}
+
 func TestEnabledKeyspaceIndexLoadsAllPagesAtOneRevision(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(clean)

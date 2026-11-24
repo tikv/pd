@@ -198,9 +198,11 @@ func TestRUTimelineConcurrentRecording(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	wg.Wait()
-	// Wait for the second of the last record to close.
-	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second + 10*time.Millisecond)))
-	drain()
+	// Wait until the final bucket is closed and every recorded RU is reported.
+	re.Eventually(func() bool {
+		drain()
+		return reported == float64(recorded.Load())
+	}, time.Second+10*time.Millisecond, time.Millisecond)
 	re.Equal(float64(recorded.Load()), reported)
 }
 

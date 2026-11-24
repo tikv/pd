@@ -63,7 +63,7 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 	// Double-check the group ID from the label rule.
 	var groupIDFromLabel string
 	for _, label := range rule.Labels {
-		if label.Key == labelKey {
+		if label.Key == AffinityLabelKey {
 			groupIDFromLabel = label.Value
 			break
 		}
@@ -85,7 +85,7 @@ func MakeLabelRule(groupKeyRanges GroupKeyRanges) *labeler.LabelRule {
 	}
 	return &labeler.LabelRule{
 		ID:       GetLabelRuleID(groupKeyRanges.GroupID),
-		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: groupKeyRanges.GroupID}},
+		Labels:   []labeler.RegionLabel{{Key: AffinityLabelKey, Value: groupKeyRanges.GroupID}},
 		RuleType: labeler.KeyRange,
 		Data:     labelData,
 	}
@@ -298,14 +298,13 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	return m.updateAffinityGroupPeersWithAffinityVer(groupID, 0, leaderStoreID, voterStoreIDs)
+	return m.updateAffinityGroupPeersWithState(groupID, nil, leaderStoreID, voterStoreIDs)
 }
 
-// updateAffinityGroupPeersWithAffinityVer updates the leader and voter stores of an affinity group and marks it available.
-// If affinityVer is non-zero (0 indicates an admin operation and is enforced)
-//   - Its equality will be checked.
-//   - Group must not change voterStoreIDs while it is not in the expired status.
-func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+// updateAffinityGroupPeersWithState updates the leader and voter stores of an affinity group and marks it available.
+// A nil observed state indicates an admin update. Otherwise the runtime group and version must match,
+// and the observation can change the voter stores only if the group is expired.
+func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *GroupState, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
 		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
@@ -331,11 +330,9 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 
 	voterStoreIDs = slices.Clone(voterStoreIDs)
 	slices.Sort(voterStoreIDs)
-	// When affinityVer is non-zero, it indicates a non-admin operation and triggers additional checks.
-	// Note: if the check fails, no changes are applied. The existing Group is returned as-is without error.
-	if affinityVer != 0 {
-		// If affinityVer is not equal, the update may come from stale statistics and will be ignored.
-		if group.affinityVer != affinityVer {
+	if observed != nil {
+		// A recreated group can reuse the observed version.
+		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer {
 			return group, nil
 		}
 		// Group must not change voterStoreIDs while it is not in the expired status. Changing only leaderStoreID is allowed.

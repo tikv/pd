@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"strconv"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sasha-s/go-deadlock"
@@ -36,7 +37,9 @@ import (
 	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -107,180 +110,188 @@ func (suite *mergeCheckerTestSuite) TearDownTest() {
 }
 
 func (suite *mergeCheckerTestSuite) TestBasic() {
-	re := suite.Require()
-	suite.cluster.SetSplitMergeInterval(0)
+	synctest.Test(suite.T(), func(t *testing.T) {
+		suite := new(mergeCheckerTestSuite)
+		suite.SetT(t)
+		suite.SetupTest()
+		defer suite.TearDownTest()
 
-	// should with same peer count
-	ops := suite.mc.Check(suite.regions[0])
-	re.Nil(ops)
-	// The size should be small enough.
-	ops = suite.mc.Check(suite.regions[1])
-	re.Nil(ops)
-	// target region size is too large
-	suite.cluster.PutRegion(suite.regions[1].Clone(core.SetApproximateSize(600)))
-	ops = suite.mc.Check(suite.regions[2])
-	re.Nil(ops)
+		re := suite.Require()
+		suite.cluster.SetSplitMergeInterval(0)
 
-	// it can merge if the max region size of the store is greater than the target region size.
-	suite.cluster.SetRegionMaxSize("144MiB")
-	suite.cluster.SetRegionSizeMB(1024)
+		// should with same peer count
+		ops := suite.mc.Check(suite.regions[0])
+		re.Nil(ops)
+		// The size should be small enough.
+		ops = suite.mc.Check(suite.regions[1])
+		re.Nil(ops)
+		// target region size is too large
+		suite.cluster.PutRegion(suite.regions[1].Clone(core.SetApproximateSize(600)))
+		ops = suite.mc.Check(suite.regions[2])
+		re.Nil(ops)
 
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	suite.cluster.SetRegionSizeMB(144)
-	ops = suite.mc.Check(suite.regions[2])
-	re.Nil(ops)
-	// change the size back
-	suite.cluster.PutRegion(suite.regions[1].Clone(core.SetApproximateSize(200)))
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	// Check merge with previous region.
-	re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
-	re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
+		// it can merge if the max region size of the store is greater than the target region size.
+		suite.cluster.SetRegionMaxSize("144MiB")
+		suite.cluster.SetRegionSizeMB(1024)
 
-	// Test the peer store check.
-	store := suite.cluster.GetStore(1)
-	re.NotNil(store)
-	// Test the peer store is deleted.
-	suite.cluster.DeleteStore(store)
-	ops = suite.mc.Check(suite.regions[2])
-	re.Nil(ops)
-	// Test the store is normal.
-	suite.cluster.PutStore(store)
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
-	re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
-	// Test the store is offline.
-	suite.cluster.SetStoreOffline(store.GetID())
-	ops = suite.mc.Check(suite.regions[2])
-	// Only target region have a peer on the offline store,
-	// so it's not ok to merge.
-	re.Nil(ops)
-	// Test the store is up.
-	suite.cluster.SetStoreUp(store.GetID())
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
-	re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
-	store = suite.cluster.GetStore(5)
-	re.NotNil(store)
-	// Test the peer store is deleted.
-	suite.cluster.DeleteStore(store)
-	ops = suite.mc.Check(suite.regions[2])
-	re.Nil(ops)
-	// Test the store is normal.
-	suite.cluster.PutStore(store)
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
-	re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
-	// Test the store is offline.
-	suite.cluster.SetStoreOffline(store.GetID())
-	ops = suite.mc.Check(suite.regions[2])
-	// Both regions have peers on the offline store,
-	// so it's ok to merge.
-	re.NotNil(ops)
-	re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
-	re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
-	// Test the store is up.
-	suite.cluster.SetStoreUp(store.GetID())
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
-	re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		suite.cluster.SetRegionSizeMB(144)
+		ops = suite.mc.Check(suite.regions[2])
+		re.Nil(ops)
+		// change the size back
+		suite.cluster.PutRegion(suite.regions[1].Clone(core.SetApproximateSize(200)))
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		// Check merge with previous region.
+		re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
+		re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
 
-	// Enable one way merge
-	suite.cluster.SetEnableOneWayMerge(true)
-	ops = suite.mc.Check(suite.regions[2])
-	re.Nil(ops)
-	suite.cluster.SetEnableOneWayMerge(false)
+		// Test the peer store check.
+		store := suite.cluster.GetStore(1)
+		re.NotNil(store)
+		// Test the peer store is deleted.
+		suite.cluster.DeleteStore(store)
+		ops = suite.mc.Check(suite.regions[2])
+		re.Nil(ops)
+		// Test the store is normal.
+		suite.cluster.PutStore(store)
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
+		re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
+		// Test the store is offline.
+		suite.cluster.SetStoreOffline(store.GetID())
+		ops = suite.mc.Check(suite.regions[2])
+		// Only target region have a peer on the offline store,
+		// so it's not ok to merge.
+		re.Nil(ops)
+		// Test the store is up.
+		suite.cluster.SetStoreUp(store.GetID())
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
+		re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
+		store = suite.cluster.GetStore(5)
+		re.NotNil(store)
+		// Test the peer store is deleted.
+		suite.cluster.DeleteStore(store)
+		ops = suite.mc.Check(suite.regions[2])
+		re.Nil(ops)
+		// Test the store is normal.
+		suite.cluster.PutStore(store)
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
+		re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
+		// Test the store is offline.
+		suite.cluster.SetStoreOffline(store.GetID())
+		ops = suite.mc.Check(suite.regions[2])
+		// Both regions have peers on the offline store,
+		// so it's ok to merge.
+		re.NotNil(ops)
+		re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
+		re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
+		// Test the store is up.
+		suite.cluster.SetStoreUp(store.GetID())
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
+		re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
 
-	// Make up peers for next region.
-	suite.regions[3] = suite.regions[3].Clone(core.WithAddPeer(&metapb.Peer{Id: 110, StoreId: 1}), core.WithAddPeer(&metapb.Peer{Id: 111, StoreId: 2}))
-	suite.cluster.PutRegion(suite.regions[3])
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	// Now it merges to next region.
-	re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
-	re.Equal(suite.regions[3].GetID(), ops[1].RegionID())
+		// Enable one way merge
+		suite.cluster.SetEnableOneWayMerge(true)
+		ops = suite.mc.Check(suite.regions[2])
+		re.Nil(ops)
+		suite.cluster.SetEnableOneWayMerge(false)
 
-	// merge cannot across rule key.
-	suite.cluster.SetEnablePlacementRules(true)
-	err := suite.cluster.SetRule(&placement.Rule{
-		GroupID:     placement.DefaultGroupID,
-		ID:          "test",
-		Index:       1,
-		Override:    true,
-		StartKeyHex: hex.EncodeToString([]byte("x")),
-		EndKeyHex:   hex.EncodeToString([]byte("z")),
-		Role:        placement.Voter,
-		Count:       3,
+		// Make up peers for next region.
+		suite.regions[3] = suite.regions[3].Clone(core.WithAddPeer(&metapb.Peer{Id: 110, StoreId: 1}), core.WithAddPeer(&metapb.Peer{Id: 111, StoreId: 2}))
+		suite.cluster.PutRegion(suite.regions[3])
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		// Now it merges to next region.
+		re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
+		re.Equal(suite.regions[3].GetID(), ops[1].RegionID())
+
+		// merge cannot across rule key.
+		suite.cluster.SetEnablePlacementRules(true)
+		err := suite.cluster.SetRule(&placement.Rule{
+			GroupID:     placement.DefaultGroupID,
+			ID:          "test",
+			Index:       1,
+			Override:    true,
+			StartKeyHex: hex.EncodeToString([]byte("x")),
+			EndKeyHex:   hex.EncodeToString([]byte("z")),
+			Role:        placement.Voter,
+			Count:       3,
+		})
+		re.NoError(err)
+		// region 2 can only merge with previous region now.
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
+		re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
+		err = suite.cluster.RuleManager.DeleteRule(placement.DefaultGroupID, "test")
+		re.NoError(err)
+
+		//  check 'merge_option' label
+		err = suite.cluster.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
+			ID:       "test",
+			Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
+			RuleType: labeler.KeyRange,
+			Data:     keyutil.BuildKeyRangeMaps("", "74"),
+		})
+		re.NoError(err)
+		ops = suite.mc.Check(suite.regions[0])
+		re.Empty(ops)
+		ops = suite.mc.Check(suite.regions[1])
+		re.Empty(ops)
+
+		// Skip recently split regions.
+		suite.cluster.SetSplitMergeInterval(time.Hour)
+		ops = suite.mc.Check(suite.regions[2])
+		re.Nil(ops)
+
+		suite.mc.startTime = time.Now().Add(-2 * time.Hour)
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		ops = suite.mc.Check(suite.regions[3])
+		re.NotNil(ops)
+
+		suite.mc.RecordRegionSplit([]uint64{suite.regions[2].GetID()})
+		ops = suite.mc.Check(suite.regions[2])
+		re.Nil(ops)
+		ops = suite.mc.Check(suite.regions[3])
+		re.Nil(ops)
+
+		// issue #4616
+		suite.cluster.SetSplitMergeInterval(500 * time.Millisecond)
+		ops = suite.mc.Check(suite.regions[2])
+		re.Nil(ops)
+		ops = suite.mc.Check(suite.regions[3])
+		re.Nil(ops)
+
+		// Cache entries expire strictly after their deadline.
+		synctest.Sleep(500*time.Millisecond + time.Nanosecond)
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		ops = suite.mc.Check(suite.regions[3])
+		re.NotNil(ops)
+
+		// issue #8405
+		suite.mc.startTime = time.Now()
+		suite.cluster.SetSplitMergeInterval(time.Second)
+		suite.cluster.SetSplitMergeInterval(time.Hour)
+		suite.mc.RecordRegionSplit([]uint64{suite.regions[2].GetID()})
+		suite.cluster.SetSplitMergeInterval(time.Second)
+		suite.mc.Check(suite.regions[2])              // trigger the config update
+		synctest.Sleep(time.Second + time.Nanosecond) // wait for the cache to gc
+		ops = suite.mc.Check(suite.regions[2])
+		re.NotNil(ops)
+		ops = suite.mc.Check(suite.regions[3])
+		re.NotNil(ops)
 	})
-	re.NoError(err)
-	// region 2 can only merge with previous region now.
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
-	re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
-	err = suite.cluster.RuleManager.DeleteRule(placement.DefaultGroupID, "test")
-	re.NoError(err)
-
-	//  check 'merge_option' label
-	err = suite.cluster.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
-		ID:       "test",
-		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
-		RuleType: labeler.KeyRange,
-		Data:     keyutil.BuildKeyRangeMaps("", "74"),
-	})
-	re.NoError(err)
-	ops = suite.mc.Check(suite.regions[0])
-	re.Empty(ops)
-	ops = suite.mc.Check(suite.regions[1])
-	re.Empty(ops)
-
-	// Skip recently split regions.
-	suite.cluster.SetSplitMergeInterval(time.Hour)
-	ops = suite.mc.Check(suite.regions[2])
-	re.Nil(ops)
-
-	suite.mc.startTime = time.Now().Add(-2 * time.Hour)
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	ops = suite.mc.Check(suite.regions[3])
-	re.NotNil(ops)
-
-	suite.mc.RecordRegionSplit([]uint64{suite.regions[2].GetID()})
-	ops = suite.mc.Check(suite.regions[2])
-	re.Nil(ops)
-	ops = suite.mc.Check(suite.regions[3])
-	re.Nil(ops)
-
-	// issue #4616
-	suite.cluster.SetSplitMergeInterval(500 * time.Millisecond)
-	ops = suite.mc.Check(suite.regions[2])
-	re.Nil(ops)
-	ops = suite.mc.Check(suite.regions[3])
-	re.Nil(ops)
-
-	time.Sleep(500 * time.Millisecond)
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	ops = suite.mc.Check(suite.regions[3])
-	re.NotNil(ops)
-
-	// issue #8405
-	suite.mc.startTime = time.Now()
-	suite.cluster.SetSplitMergeInterval(time.Second)
-	suite.cluster.SetSplitMergeInterval(time.Hour)
-	suite.mc.RecordRegionSplit([]uint64{suite.regions[2].GetID()})
-	suite.cluster.SetSplitMergeInterval(time.Second)
-	suite.mc.Check(suite.regions[2]) // trigger the config update
-	time.Sleep(time.Second)          // wait for the cache to gc
-	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
-	ops = suite.mc.Check(suite.regions[3])
-	re.NotNil(ops)
 }
 
 func (suite *mergeCheckerTestSuite) TestMatchPeers() {
@@ -563,36 +574,43 @@ func (suite *mergeCheckerTestSuite) checkStoreLimitWithMerge(size, keys int64, a
 }
 
 func (suite *mergeCheckerTestSuite) TestCache() {
-	re := suite.Require()
-	cfg := mockconfig.NewTestOptions()
-	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
-	suite.cluster.SetMaxMergeRegionSize(2)
-	suite.cluster.SetMaxMergeRegionKeys(2)
-	suite.cluster.SetSplitMergeInterval(time.Hour)
-	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	stores := map[uint64][]string{
-		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
-	}
-	for storeID, labels := range stores {
-		suite.cluster.PutStoreWithLabels(storeID, labels...)
-	}
-	suite.regions = []*core.RegionInfo{
-		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
-		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
-	}
+	synctest.Test(suite.T(), func(t *testing.T) {
+		suite := new(mergeCheckerTestSuite)
+		suite.SetT(t)
+		suite.SetupTest()
+		defer suite.TearDownTest()
 
-	for _, region := range suite.regions {
-		suite.cluster.PutRegion(region)
-	}
+		re := suite.Require()
+		cfg := mockconfig.NewTestOptions()
+		suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
+		suite.cluster.SetMaxMergeRegionSize(2)
+		suite.cluster.SetMaxMergeRegionKeys(2)
+		suite.cluster.SetSplitMergeInterval(time.Hour)
+		suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+		stores := map[uint64][]string{
+			1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
+		}
+		for storeID, labels := range stores {
+			suite.cluster.PutStoreWithLabels(storeID, labels...)
+		}
+		suite.regions = []*core.RegionInfo{
+			newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
+			newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
+		}
 
-	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetCheckerConfig())
+		for _, region := range suite.regions {
+			suite.cluster.PutRegion(region)
+		}
 
-	ops := suite.mc.Check(suite.regions[1])
-	re.Nil(ops)
-	suite.cluster.SetSplitMergeInterval(0)
-	time.Sleep(time.Second)
-	ops = suite.mc.Check(suite.regions[1])
-	re.NotNil(ops)
+		suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetCheckerConfig())
+
+		ops := suite.mc.Check(suite.regions[1])
+		re.Nil(ops)
+		suite.cluster.SetSplitMergeInterval(0)
+		synctest.Sleep(time.Second + time.Nanosecond)
+		ops = suite.mc.Check(suite.regions[1])
+		re.NotNil(ops)
+	})
 }
 
 func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
@@ -611,6 +629,91 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 		core.SetApproximateSize(size),
 		core.SetApproximateKeys(keys),
 	)
+}
+
+func TestMergeCheckerSkipsActiveAffinityGroup(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		targetStores          []uint64
+		maxAffinityMergeSize  uint64
+		affinityScheduleLimit uint64
+		expectAffinityMerge   bool
+	}{
+		{"aligned", []uint64{1, 2, 3}, 20, 4, true},
+		{"different-stores", []uint64{4, 5, 6}, 20, 4, false},
+		{"affinity-merge-disabled", []uint64{1, 2, 3}, 0, 4, false},
+		{"affinity-scheduling-disabled", []uint64{4, 5, 6}, 20, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			opt := newAffinityTestOptions()
+			opt.SetMaxMergeRegionSize(20)
+			opt.SetMaxMergeRegionKeys(200)
+			opt.SetSplitMergeInterval(0)
+			opt.SetMaxAffinityMergeRegionSize(tc.maxAffinityMergeSize)
+			opt.SetAffinityScheduleLimit(tc.affinityScheduleLimit)
+			cluster := mockcluster.NewCluster(ctx, opt)
+			for storeID := uint64(1); storeID <= 6; storeID++ {
+				cluster.AddRegionStore(storeID, 10)
+			}
+			cluster.AddLeaderRegion(1, 1, 2, 3)
+			cluster.AddLeaderRegion(2, tc.targetStores[0], tc.targetStores[1:]...)
+			source := cluster.GetRegion(1).Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("b")),
+				core.SetApproximateSize(5), core.SetApproximateKeys(5))
+			target := cluster.GetRegion(2).Clone(core.WithStartKey([]byte("b")), core.WithEndKey([]byte("c")),
+				core.SetApproximateSize(5), core.SetApproximateKeys(5))
+			cluster.PutRegion(source)
+			cluster.PutRegion(target)
+
+			manager := cluster.GetAffinityManager()
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: "test", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
+			}, []byte("a"), []byte("c")))
+			re.False(manager.GetAffinityGroupState("test").RegularSchedulingAllowed)
+			affinityChecker := newTestAffinityChecker(ctx, cluster, opt)
+			ops := affinityChecker.Check(source)
+			if tc.expectAffinityMerge {
+				re.Len(ops, 2)
+				for _, op := range ops {
+					re.Equal(operator.OpAffinity, op.SchedulerKind())
+				}
+			} else {
+				re.Nil(ops)
+			}
+
+			mergeChecker := NewMergeChecker(ctx, cluster, opt)
+			affinityFilter := filter.NewAffinityFilter(cluster)
+			for _, region := range []*core.RegionInfo{source, target} {
+				// Active groups stay protected even when affinity-schedule-limit is zero.
+				re.False(affinityFilter.Select(region).IsOK())
+				re.Nil(mergeChecker.Check(region))
+			}
+			re.False(AllowMerge(cluster, source, target))
+			re.False(AllowMerge(cluster, target, source))
+
+			// A healthy region with matching voters would restore the degraded group.
+			_, err := manager.UpdateAffinityGroupPeers("test", 1, []uint64{1, 2, 4})
+			re.NoError(err)
+			manager.DegradeAffinityGroup("test")
+			state := manager.GetAffinityGroupState("test")
+			re.False(state.AffinitySchedulingAllowed)
+			re.False(state.RegularSchedulingAllowed)
+			re.Nil(affinityChecker.Check(source))
+			re.False(affinityFilter.Select(source).IsOK())
+			re.Nil(mergeChecker.Check(source))
+			re.False(AllowMerge(cluster, source, target))
+
+			manager.ExpireAffinityGroup("test")
+			re.True(manager.GetAffinityGroupState("test").RegularSchedulingAllowed)
+			re.True(AllowMerge(cluster, source, target))
+			re.True(AllowMerge(cluster, target, source))
+			for _, region := range []*core.RegionInfo{source, target} {
+				re.True(affinityFilter.Select(region).IsOK())
+				re.Len(mergeChecker.Check(region), 2)
+			}
+		})
+	}
 }
 
 func TestAllowMergeCrossTable(t *testing.T) {

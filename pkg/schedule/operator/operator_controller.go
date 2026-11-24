@@ -1071,15 +1071,18 @@ func (oc *Controller) ExceedStoreLimit(ops ...*Operator) bool {
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *Controller) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) storelimit.StoreLimit {
-	ratePerSec := oc.config.GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
 	if s == nil {
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
 		return nil
 	}
 	// The other limits do not need to update by config exclude StoreRateLimit.
-	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok && limit.Rate(limitType) != ratePerSec {
-		oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
+	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok {
+		limit.Refresh(limitType, func() float64 {
+			// Refresh calls this under the limiter lock. A create-on-miss lookup
+			// could acquire the persistence lock and invert the store-lock order.
+			return oc.config.PeekStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
+		})
 	}
 	return s.GetStoreLimit()
 }

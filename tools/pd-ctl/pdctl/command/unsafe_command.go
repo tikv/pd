@@ -15,6 +15,7 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -44,7 +45,7 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove-failed-stores [<store_id1>,<store_id2>,...]",
 		Short: "Remove failed stores unsafely",
-		Run:   removeFailedStoresCommandFunc,
+		RunE:  removeFailedStoresCommandFunc,
 	}
 	cmd.PersistentFlags().Float64("timeout", 300, "timeout in seconds")
 	cmd.PersistentFlags().Float64("plan-execution-timeout", 60, "plan execution timeout in seconds before dispatching the plan again")
@@ -75,36 +76,36 @@ func NewRemoveFailedStoresAbortCommand() *cobra.Command {
 	}
 }
 
-func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
+func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) error {
 	prefix := fmt.Sprintf("%s/remove-failed-stores", unsafePrefix)
 	postInput := make(map[string]any, 3)
 
 	autoDetect, err := cmd.Flags().GetBool("auto-detect")
 	if err != nil {
-		cmd.Println(err)
-		return
+		return err
 	}
 
 	if autoDetect {
 		if len(args) > 0 {
-			cmd.Println("The flag `auto-detect` is set, no need to specify failed store ids")
-			return
+			return errors.New("the flag `auto-detect` is set, no need to specify failed store ids")
 		}
 		postInput["auto-detect"] = autoDetect
 	} else {
 		if len(args) < 1 {
-			cmd.Println("Failed store ids are not specified")
-			_ = cmd.Usage()
-			return
+			return errors.New("failed store ids are not specified")
+		}
+
+		// This is to detect "<storeid> <storeid>" instead of "<storeid>,<storeid>"
+		if len(args) > 1 {
+			return errors.New("more arguments than expected, use a comma separated list of store ids")
 		}
 
 		strStores := strings.Split(args[0], ",")
-		var stores []uint64
+		stores := make([]uint64, 0, len(strStores))
 		for _, strStore := range strStores {
 			store, err := strconv.ParseUint(strStore, 10, 64)
 			if err != nil {
-				cmd.Println(err)
-				return
+				return fmt.Errorf("invalid store id %q: %w", strStore, err)
 			}
 			stores = append(stores, store)
 		}
@@ -113,33 +114,34 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 
 	timeout, err := cmd.Flags().GetFloat64("timeout")
 	if err != nil {
-		cmd.Println(err)
-		return
-	} else if timeout != 300 {
+		return err
+	}
+	if timeout != 300 {
 		postInput["timeout"] = timeout
 	}
 
 	planExecutionTimeout, err := cmd.Flags().GetFloat64("plan-execution-timeout")
 	if err != nil {
-		cmd.Println(err)
-		return
-	} else if planExecutionTimeout != 60 {
+		return err
+	}
+	if planExecutionTimeout != 60 {
 		if err := validatePlanExecutionTimeoutSeconds(planExecutionTimeout); err != nil {
-			cmd.Println(err)
-			return
+			return err
 		}
 		postInput["plan-execution-timeout"] = planExecutionTimeout
 	}
 
 	disableParanoidCheck, err := cmd.Flags().GetBool("disable-paranoid-check")
 	if err != nil {
-		cmd.Println(err)
-		return
-	} else if disableParanoidCheck {
+		return err
+	}
+	if disableParanoidCheck {
 		postInput["disable-paranoid-check"] = disableParanoidCheck
 	}
 
-	postJSON(cmd, prefix, postInput)
+	// The arguments are valid from here on, so don't print usage on server errors.
+	cmd.SilenceUsage = true
+	return postJSONE(cmd, prefix, postInput)
 }
 
 func validatePlanExecutionTimeoutSeconds(timeout float64) error {

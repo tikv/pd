@@ -56,6 +56,9 @@ type TLSConfig struct {
 	KeyPath string `toml:"key-path" json:"key-path"`
 	// CertAllowedCNs is the list of CN which must be provided by a client
 	CertAllowedCNs []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
+	// ClientCertAuth requires a trusted client certificate on MCS listeners.
+	// The default preserves the existing client certificate policy.
+	ClientCertAuth bool `toml:"client-cert-auth,omitempty" json:"client-cert-auth,omitempty"`
 
 	SSLCABytes   []byte
 	SSLCertBytes []byte
@@ -114,15 +117,19 @@ func (s TLSConfig) ToClientTLSConfig() (*tls.Config, error) {
 
 // ToServerTLSConfig generates tls config.
 func (s TLSConfig) ToServerTLSConfig() (*tls.Config, error) {
+	if s.ClientCertAuth && (s.CAPath == "" || s.CertPath == "" || s.KeyPath == "") {
+		return nil, errs.ErrSecurityConfig.FastGenByArgs("client-cert-auth requires cacert-path, cert-path and key-path")
+	}
 	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
 		return nil, nil
 	}
 
 	tlsInfo := transport.TLSInfo{
-		CertFile:      s.CertPath,
-		KeyFile:       s.KeyPath,
-		TrustedCAFile: s.CAPath,
-		AllowedCNs:    s.CertAllowedCNs,
+		CertFile:       s.CertPath,
+		KeyFile:        s.KeyPath,
+		TrustedCAFile:  s.CAPath,
+		AllowedCNs:     s.CertAllowedCNs,
+		ClientCertAuth: s.ClientCertAuth,
 	}
 
 	tlsConfig, err := tlsInfo.ServerConfig()
@@ -130,7 +137,9 @@ func (s TLSConfig) ToServerTLSConfig() (*tls.Config, error) {
 		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
 	}
 	tlsConfig.NextProtos = []string{"http/1.1", "h2"}
-	tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+	if !s.ClientCertAuth {
+		tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+	}
 
 	return tlsConfig, nil
 }

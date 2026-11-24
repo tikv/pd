@@ -76,8 +76,10 @@ func (s *schedulerSuite) TestTransferLeader() {
 	oldSchedulersLen := len(res)
 
 	re.NoError(pdHTTPCli.TransferLeader(ctx, newLeader))
-	// wait for transfer leader to new leader
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		leader, err := pdHTTPCli.GetLeader(ctx)
+		return err == nil && leader.Name == newLeader
+	})
 	resp, err = pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	re.Equal(newLeader, resp.Name)
@@ -88,8 +90,10 @@ func (s *schedulerSuite) TestTransferLeader() {
 
 	// transfer leader to old leader
 	re.NoError(pdHTTPCli.TransferLeader(ctx, oldLeader))
-	// wait for transfer leader
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		leader, err := pdHTTPCli.GetLeader(ctx)
+		return err == nil && leader.Name == oldLeader
+	})
 	resp, err = pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	re.Equal(oldLeader, resp.Name)

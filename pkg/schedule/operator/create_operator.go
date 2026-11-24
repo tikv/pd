@@ -98,20 +98,13 @@ func CreateForceTransferLeaderOperator(desc string, ci sche.SharedCluster, regio
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
 func CreateMoveRegionOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
 	// construct the peers from roles
-	oldPeers := region.GetPeers()
-	peers := make(map[uint64]*metapb.Peer)
-	i := 0
+	peers := make(map[uint64]*metapb.Peer, len(roles))
 	for storeID, role := range roles {
-		isWitness := false
-		if i < len(oldPeers) {
-			isWitness = oldPeers[i].GetIsWitness()
-		}
 		peers[storeID] = &metapb.Peer{
 			StoreId:   storeID,
 			Role:      role.MetaPeerRole(),
-			IsWitness: isWitness,
+			IsWitness: region.GetStorePeer(storeID).GetIsWitness(),
 		}
-		i += 1
 	}
 	builder := NewBuilder(desc, ci, region).SetPeers(peers).SetExpectedRoles(roles)
 	return builder.Build(kind)

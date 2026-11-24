@@ -18,44 +18,35 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/suite"
+	"github.com/stretchr/testify/require"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 )
 
-type clusterIDSuite struct {
-	clusterSuite
-}
-
 func TestClusterID(t *testing.T) {
-	suite.Run(t, &clusterIDSuite{
-		suiteName: "cluster_id",
+	t.Run("TestClientClusterID", func(t *testing.T) {
+		re := require.New(t)
+		s := clusterSuite{suiteName: "cluster_id"}
+		ctx := context.Background()
+		// deploy first cluster
+		cluster1 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
+		cluster1.start()
+		defer cluster1.stop()
+		// deploy second cluster
+		cluster2 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
+		cluster2.start()
+		defer cluster2.stop()
+
+		pdEndpoints := getPDEndpoints(re)
+		// Try to create a client with the mixed endpoints.
+		cli, err := pd.NewClientWithContext(
+			ctx, caller.TestComponent, pdEndpoints,
+			pd.SecurityOption{}, opt.WithMaxErrorRetry(1),
+		)
+		re.Error(err)
+		defer cli.Close()
+		re.Contains(err.Error(), "unmatched cluster id")
 	})
-}
-
-func (s *clusterIDSuite) TestClientClusterID() {
-	// create clusters manually
-	s.TearDownSuite()
-	re := s.Require()
-	ctx := context.Background()
-	// deploy first cluster
-	cluster1 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
-	cluster1.start()
-	defer cluster1.stop()
-	// deploy second cluster
-	cluster2 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
-	cluster2.start()
-	defer cluster2.stop()
-
-	pdEndpoints := getPDEndpoints(re)
-	// Try to create a client with the mixed endpoints.
-	cli, err := pd.NewClientWithContext(
-		ctx, caller.TestComponent, pdEndpoints,
-		pd.SecurityOption{}, opt.WithMaxErrorRetry(1),
-	)
-	re.Error(err)
-	defer cli.Close()
-	re.Contains(err.Error(), "unmatched cluster id")
 }
