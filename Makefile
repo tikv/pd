@@ -179,12 +179,16 @@ PD_PKG := github.com/tikv/pd
 PACKAGES = $(eval PACKAGES := $$(shell go list ./...))$(PACKAGES)
 
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
+EASYJSON_PACKAGE := github.com/mailru/easyjson/easyjson
 GOLANGCI_LINT_VERSION := 2.14.0
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
-install-tools:
+install-easyjson:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@go install $(EASYJSON_PACKAGE)
+
+install-tools: install-easyjson
 	@set -o pipefail; \
 	if ! $(GO_TOOLS_BIN_PATH)/golangci-lint version 2>/dev/null | grep -Fq 'version $(GOLANGCI_LINT_VERSION) '; then \
 		curl -sSfL https://golangci-lint.run/install.sh | \
@@ -195,17 +199,13 @@ install-tools:
 		prom_dir=$$(go env GOMODCACHE)/github.com/prometheus/prometheus@v0.310.0; \
 		(cd $$prom_dir && GOWORK=off go install ./cmd/promtool); \
 	}
-	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
+	@grep '_' tools.go | sed 's/"//g' | awk '$$2 != "$(EASYJSON_PACKAGE)" {print $$2}' | xargs go install
 
 install-test-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
 	@go install github.com/pingcap/failpoint/failpoint-ctl
 
-.PHONY: install-tools install-test-tools
-
-$(GO_TOOLS_BIN_PATH)/easyjson: go.mod go.sum
-	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@go install github.com/mailru/easyjson/easyjson
+.PHONY: install-easyjson install-tools install-test-tools
 
 #### Static checks ####
 
@@ -246,7 +246,7 @@ check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
-generate-easyjson: $(GO_TOOLS_BIN_PATH)/easyjson
+generate-easyjson: install-easyjson
 	@echo "generating easyjson..."
 	easyjson -all ./pkg/response/region.go
 
