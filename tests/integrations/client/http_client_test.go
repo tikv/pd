@@ -1018,11 +1018,6 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	re.Equal(mode, meta.Config[keyspace.GCManagementType])
 	for _, value := range []string{opposite, "test-type", ""} {
 		err = suite.client.UpdateKeyspaceGCManagementType(ctx, name, &pd.KeyspaceGCManagementTypeConfig{Config: pd.KeyspaceGCManagementType{GCManagementType: value}})
-		// The typed helper omits an empty field, producing an unrelated empty patch.
-		if value == "" {
-			re.NoError(err)
-			continue
-		}
 		re.ErrorContains(err, "400 Bad Request")
 	}
 	legacy := "v2"

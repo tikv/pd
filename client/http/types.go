@@ -669,7 +669,7 @@ type MicroserviceMember struct {
 // If `gc_management_type` is `keyspace_level` it means the current keyspace can calculate gc safe point by its own.
 // The effective mode is immutable; updates may repeat the current canonical value.
 type KeyspaceGCManagementType struct {
-	GCManagementType string `json:"gc_management_type,omitempty"`
+	GCManagementType string `json:"gc_management_type"`
 }
 
 // KeyspaceGCManagementTypeConfig represents parameters needed to modify target keyspace's configs.
