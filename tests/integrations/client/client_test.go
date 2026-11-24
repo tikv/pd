@@ -1464,7 +1464,7 @@ func TestWatch(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 
-	key := "test"
+	key := "resource_group/meta_storage_test"
 	resp, err := client.Get(ctx, []byte(key))
 	re.NoError(err)
 	rev := resp.GetHeader().GetRevision()
@@ -1514,7 +1514,7 @@ func TestPutGet(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 
-	key := []byte("test")
+	key := []byte("/tidb/br-stream/meta_storage_test")
 	putResp, err := client.Put(context.Background(), key, []byte("1"))
 	re.NoError(err)
 	re.Empty(putResp.GetPrevKv())
@@ -1549,7 +1549,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 	s := cluster.GetLeaderServer()
-	watchPrefix := "watch_test"
+	watchPrefix := "resource_group/meta_storage_watch_test"
 	defer func() {
 		_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+"test")
 		re.NoError(err)
