@@ -23,7 +23,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -255,27 +254,4 @@ func TestAuditBodyReadDoesNotDelayResponse(t *testing.T) {
 	// An early proxy response must not wait for its asynchronous body reader.
 	re.NoError(reader.Close())
 	re.ErrorIs(<-finished, io.ErrClosedPipe)
-}
-
-func TestAuditBodyLogOnPanic(t *testing.T) {
-	re := require.New(t)
-	var recorded string
-	svr := newTestAuditServer(&recordingAuditBackend{Backend: audit.NewLocalLogBackend(true), run: func(r *http.Request) {
-		info, ok := requestutil.RequestInfoFrom(r.Context())
-		re.True(ok)
-		recorded = info.BodyParam
-	}})
-	router := gin.New()
-	router.Use(gin.CustomRecovery(func(c *gin.Context, _ any) { c.AbortWithStatus(http.StatusInternalServerError) }))
-	router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
-	router.POST("/selected", Audit("Selected", audit.LocalLogLabel), func(c *gin.Context) {
-		data, err := io.ReadAll(c.Request.Body)
-		re.NoError(err)
-		re.Equal("request-body", string(data))
-		panic("handler failed")
-	})
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", strings.NewReader("request-body")))
-	re.Equal(http.StatusInternalServerError, recorder.Code)
-	re.Equal("request-body", recorded)
 }

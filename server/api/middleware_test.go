@@ -211,6 +211,7 @@ func TestHTTPAuditParity(t *testing.T) {
 					router = r
 				} else {
 					r := gin.New()
+					r.Use(gin.CustomRecovery(func(c *gin.Context, _ any) { c.AbortWithStatus(http.StatusInternalServerError) }))
 					r.Use(func(c *gin.Context) { c.Set(v2.ServerContextKey, svr) })
 					r.POST("/selected", v2.Audit("Selected", tc.labels...), func(c *gin.Context) { handler(c.Writer, c.Request) })
 					router = r
@@ -224,11 +225,15 @@ func TestHTTPAuditParity(t *testing.T) {
 					request = request.WithContext(requestutil.WithRequestInfo(request.Context(), info))
 				}
 				serve := func() { router.ServeHTTP(recorder, request) }
-				if tc.panic {
+				if tc.panic && version == "v1" {
 					re.PanicsWithValue("handler failed", serve)
 				} else {
 					serve()
-					re.Equal(http.StatusBadRequest, recorder.Code)
+					if tc.panic {
+						re.Equal(http.StatusInternalServerError, recorder.Code)
+					} else {
+						re.Equal(http.StatusBadRequest, recorder.Code)
+					}
 				}
 				expected := []string{"handler"}
 				if tc.enabled && slices.Contains(tc.labels, audit.LocalLogLabel) {
