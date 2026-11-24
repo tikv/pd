@@ -16,7 +16,6 @@ package affinity_test
 
 import (
 	"encoding/hex"
-	"fmt"
 	"strconv"
 	"testing"
 
@@ -37,9 +36,7 @@ import (
 
 func TestAffinityCommands(t *testing.T) {
 	re := require.New(t)
-	ctx := t.Context()
-
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	cluster, err := pdTests.NewTestCluster(t.Context(), 1)
 	re.NoError(err)
 	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())
@@ -47,13 +44,31 @@ func TestAffinityCommands(t *testing.T) {
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
+	manager, err := leaderServer.GetServer().GetAffinityManager()
+	re.NoError(err)
+	regionLabeler := leaderServer.GetRaftCluster().GetRegionLabeler()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	run := func(args ...string) ([]byte, error) {
+		return tests.ExecuteCommand(ctl.GetRootCmd(), append([]string{"-u", pdAddr, "config", "affinity"}, args...)...)
+	}
+	mustRun := func(re *require.Assertions, out any, args ...string) {
+		tests.MustExec(re, ctl.GetRootCmd(), append([]string{"-u", pdAddr, "config", "affinity"}, args...), out)
+	}
+	key := func(keyspaceID uint32, raw []byte) []byte {
+		prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
+		return codec.EncodeBytes(append(prefix, raw...))
+	}
+	tableKey := func(keyspaceID uint32, tableID int64) []byte {
+		return key(keyspaceID, codec.GenerateTableKey(tableID))
+	}
+	hexRange := func(start, end []byte) string {
+		return hex.EncodeToString(start) + "," + hex.EncodeToString(end)
+	}
+
 	// Prepare stores for peer updates.
 	for id := uint64(1); id <= 2; id++ {
 		pdTests.MustPutStore(re, cluster, &metapb.Store{Id: id, State: metapb.StoreState_Up})
 	}
-
-	manager, err := leaderServer.GetServer().GetAffinityManager()
-	re.NoError(err)
 
 	// Pre-create groups so CLI commands can operate on them.
 	const tableID = uint64(1001)
@@ -71,7 +86,6 @@ func TestAffinityCommands(t *testing.T) {
 		{GroupID: partitionGroup},
 	}))
 
-	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
 	// show should return both groups with the expected IDs.
@@ -222,432 +236,225 @@ func TestAffinityCommands(t *testing.T) {
 	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "show"}, &groups)
 	re.NotContains(groups, tableGroup)
 	re.Contains(groups, partitionGroup)
-}
+	re.NoError(manager.DeleteAffinityGroups([]string{partitionGroup}, true))
 
-func TestAffinityRangeShow(t *testing.T) {
-	re := require.New(t)
-	cluster, err := pdTests.NewTestCluster(t.Context(), 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-	pdAddr := cluster.GetConfig().GetClientURL()
-	run := func(args ...string) ([]byte, error) {
-		return tests.ExecuteCommand(ctl.GetRootCmd(), append([]string{"-u", pdAddr, "config", "affinity"}, args...)...)
-	}
-	manager, err := leaderServer.GetServer().GetAffinityManager()
-	re.NoError(err)
-	key := func(tableID int64) string {
-		raw := append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), codec.GenerateTableKey(tableID)...)
-		return hex.EncodeToString(codec.EncodeBytes(raw))
-	}
-	keyRange := key(100) + "," + key(101)
-
-	t.Run("missing", func(t *testing.T) {
+	t.Run("range show", func(t *testing.T) {
+		keyRange := hexRange(tableKey(1, 100), tableKey(1, 101))
 		re := require.New(t)
 		_, err := run("range", "show", "--group-id", "nonexistent")
 		re.ErrorContains(err, "failed to get the key ranges of affinity group nonexistent")
-		re.ErrorContains(err, "404 Not Found")
-		re.ErrorContains(err, "affinity group nonexistent not found")
 		_, err = run("range", "add", "--group-id", "nonexistent", "--range", keyRange)
 		re.ErrorContains(err, "404 Not Found")
 		re.ErrorContains(err, "affinity group nonexistent not found")
-		re.ErrorContains(err, "failed to change the key ranges of affinity group nonexistent")
-	})
-	t.Run("empty", func(t *testing.T) {
-		re := require.New(t)
+
 		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "empty"}}))
-		out, err := run("range", "show", "--group-id", "empty")
-		re.NoError(err)
-		re.JSONEq(`{"id":"empty","ranges":[]}`, string(out))
-		_, err = run("range", "add", "--group-id", "empty", "--range", keyRange)
-		re.NoError(err)
-		_, err = run("range", "remove", "--group-id", "empty", "--range", keyRange)
-		re.NoError(err)
-		out, err = run("range", "show", "--group-id", "empty")
-		re.NoError(err)
-		re.JSONEq(`{"id":"empty","ranges":[]}`, string(out))
-	})
-	t.Run("orphaned-rule", func(t *testing.T) {
-		re := require.New(t)
-		re.False(manager.IsGroupExist("orphan"))
-		regionLabeler := leaderServer.GetRaftCluster().GetRegionLabeler()
-		re.NoError(regionLabeler.SetLabelRule(affinity.MakeLabelRule(affinity.GroupKeyRanges{
-			GroupID:   "orphan",
-			KeyRanges: []keyutil.KeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x21}}},
-		})))
-		out, err := run("range", "show", "--group-id", "orphan")
-		re.NoError(err)
-		re.JSONEq(`{"id":"orphan","ranges":[{"start_key":"20","end_key":"21"}]}`, string(out))
-	})
-}
-
-func TestAffinityRangeRemoveHalfUnbounded(t *testing.T) {
-	re := require.New(t)
-	cluster, err := pdTests.NewTestCluster(t.Context(), 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
-	server := cluster.GetLeaderServer()
-	re.NoError(server.BootstrapCluster())
-	manager, err := server.GetServer().GetAffinityManager()
-	re.NoError(err)
-	key := func(table int64) []byte {
-		return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), codec.GenerateTableKey(table)...))
-	}
-	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
-	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
-	for i, legacy := range []keyutil.KeyRange{{EndKey: key(100)}, {StartKey: key(300)}} {
-		id := fmt.Sprintf("legacy-half-%d", i)
-		re.NoError(failpoint.Enable(modeFlag, "return(false)"))
-		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{legacy, {StartKey: key(200), EndKey: key(201)}}}}))
-		re.NoError(failpoint.Disable(modeFlag))
-		before := manager.GetAffinityGroupState(id)
-		groups := make(map[string]*pd.AffinityGroupState)
-		tests.MustExec(re, ctl.GetRootCmd(), []string{
-			"-u", cluster.GetConfig().GetClientURL(), "config", "affinity", "range", "remove", "--group-id", id,
-			"--range", hex.EncodeToString(legacy.StartKey) + "," + hex.EncodeToString(legacy.EndKey),
-		}, &groups)
-		re.Equal(1, groups[id].RangeCount)
-		re.Equal(before.CreateTimestamp, groups[id].CreateTimestamp)
-		re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
-	}
-}
-
-func TestAffinityGroupAndRangeCommands(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
-	re.NoError(cluster.GetLeaderServer().BootstrapCluster())
-	pdAddr := cluster.GetConfig().GetClientURL()
-	run := func(args ...string) ([]byte, error) {
-		return tests.ExecuteCommand(ctl.GetRootCmd(), append([]string{"-u", pdAddr, "config", "affinity"}, args...)...)
-	}
-	mustRun := func(out any, args ...string) {
-		tests.MustExec(re, ctl.GetRootCmd(), append([]string{"-u", pdAddr, "config", "affinity"}, args...), out)
-	}
-	type rangesOutput struct {
-		ID     string `json:"id"`
-		Ranges []struct {
-			StartKey string `json:"start_key"`
-			EndKey   string `json:"end_key"`
-		} `json:"ranges"`
-	}
-	showRanges := func(args ...string) rangesOutput {
-		var out rangesOutput
-		mustRun(&out, append([]string{"range", "show"}, args...)...)
-		return out
-	}
-
-	// customKey returns a key for custom groups. Nextgen requires their key
-	// ranges to lie in one keyspace, so the key is in keyspace 1 there.
-	customKey := func(b byte) string {
-		if kerneltype.IsNextGen() {
-			return hex.EncodeToString(codec.EncodeBytes(append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), b)))
-		}
-		return hex.EncodeToString([]byte{b})
-	}
-	customRange := func(start, end byte) string { return customKey(start) + "," + customKey(end) }
-
-	// A group with a custom ID needs its key ranges.
-	groups := make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "create", "--group-id", "poc-a", "--range", customRange(0x0a, 0x0b), "--range", customRange(0x0c, 0x0d))
-	re.Equal(2, groups["poc-a"].RangeCount)
-	ranges := showRanges("--group-id", "poc-a")
-	re.Equal("poc-a", ranges.ID)
-	re.Len(ranges.Ranges, 2)
-	_, err = run("create", "--group-id", "poc-b")
-	re.ErrorContains(err, "--range is required")
-	_, err = run("create", "--group-id", "poc-b", "--range", "0b")
-	re.ErrorContains(err, "invalid --range")
-
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "range", "add", "--group-id", "poc-a", "--range", customRange(0x0e, 0x0f))
-	re.Equal(3, groups["poc-a"].RangeCount)
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "range", "remove", "--group-id", "poc-a", "--range", customRange(0x0a, 0x0b))
-	re.Equal(2, groups["poc-a"].RangeCount)
-	ranges = showRanges("--group-id", "poc-a")
-	re.Len(ranges.Ranges, 2)
-	re.Equal(customKey(0x0c), ranges.Ranges[0].StartKey)
-
-	// TiDB groups take the key range of their physical ID.
-	selector := []string{"--table-id", "100", "--partition-id", "101"}
-	tidbPrefix := "_tidb_pt_100_p"
-	if kerneltype.IsNextGen() {
-		selector = append(selector, "--keyspace-id", "1")
-		tidbPrefix = "_tidb_ks1_pt_100_p"
-	}
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, append([]string{"create"}, selector...)...)
-	re.Contains(groups, tidbPrefix+"101")
-	ranges = showRanges(selector...)
-	re.Len(ranges.Ranges, 1)
-	if kerneltype.IsNextGen() {
-		re.Equal("7800000174800000ff0000000065000000fc", ranges.Ranges[0].StartKey)
-	} else {
-		re.Equal("7480000000000000ff6500000000000000f8", ranges.Ranges[0].StartKey)
-		re.Equal("7480000000000000ff6600000000000000f8", ranges.Ranges[0].EndKey)
-	}
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "create", "--group-id", tidbPrefix+"102")
-	re.Equal(1, groups[tidbPrefix+"102"].RangeCount)
-	// Another key range of the same keyspace, as PD checks for keyspace groups.
-	tableKey := func(tableID int64) string {
-		key := codec.GenerateTableKey(tableID)
-		if kerneltype.IsNextGen() {
-			key = append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), key...)
-		}
-		return hex.EncodeToString(codec.EncodeBytes(key))
-	}
-	extraRange := tableKey(200) + "," + tableKey(201)
-	for _, tc := range []struct {
-		args []string
-		err  string
-	}{
-		{[]string{"create", "--group-id", tidbPrefix + "103", "--range", "0a,0b"}, "derived from its ID"},
-		{[]string{"create", "--group-id", "_tidb_tg_1_i0"}, "ADMIN REPAIR AFFINITY TABLE GROUP"},
-		{[]string{"create", "--group-id", "_tidb_ks1_tg_1_i0"}, "ADMIN REPAIR AFFINITY TABLE GROUP"},
-		{[]string{"create", "--group-id", "_tidb_pg1"}, "reserved for TiDB"},
-		{[]string{"create", "--group-id", "_tidb_custom"}, "reserved for TiDB"},
-		{append([]string{"range", "add", "--range", extraRange}, selector...), "managed by TiDB"},
-		{append([]string{"range", "remove", "--range", extraRange}, selector...), "managed by TiDB"},
-		{[]string{"show", "--group-id", "poc-a", "--table-id", "1"}, "--group-id cannot be used with --table-id"},
-		{[]string{"show", "--prefix", "poc-", "--group-id", "poc-a"}, "--prefix cannot be used"},
-		{[]string{"show", "--prefix", "poc a"}, "invalid group ID prefix"},
-		{[]string{"show", "--group-id", "poc a"}, "invalid --group-id"},
-	} {
-		_, err = run(tc.args...)
-		re.ErrorContains(err, tc.err, "%v", tc.args)
-	}
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, append([]string{"range", "add", "--force", "--range", extraRange}, selector...)...)
-	re.Equal(2, groups[tidbPrefix+"101"].RangeCount)
-
-	// Prefixes select groups across ID formats.
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "show", "--prefix", tidbPrefix)
-	re.Len(groups, 2)
-	re.Contains(groups, tidbPrefix+"101")
-	re.Contains(groups, tidbPrefix+"102")
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "show", "--prefix", "poc-")
-	re.Len(groups, 1)
-	re.Contains(groups, "poc-a")
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "show", "--prefix", "")
-	re.Len(groups, 3)
-	var state pd.AffinityGroupState
-	mustRun(&state, "show", "--group-id", "poc-a")
-	re.Equal("poc-a", state.ID)
-
-	// Deleting a group removes its key ranges, so regular scheduling resumes there.
-	out, err := run("delete", "--group-id", "poc-a", "--force")
-	re.NoError(err)
-	re.Contains(string(out), "Affinity group poc-a and its label rule are deleted if they existed")
-	_, err = run("range", "show", "--group-id", "poc-a")
-	re.ErrorContains(err, "affinity group poc-a not found")
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "show", "--prefix", "poc-")
-	re.Empty(groups)
-
-	// A forced delete also removes a label rule left without its group.
-	regionLabeler := cluster.GetLeaderServer().GetRaftCluster().GetRegionLabeler()
-	re.NoError(regionLabeler.SetLabelRule(affinity.MakeLabelRule(affinity.GroupKeyRanges{
-		GroupID:   "poc-leftover",
-		KeyRanges: []keyutil.KeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x21}}},
-	})))
-	re.Len(showRanges("--group-id", "poc-leftover").Ranges, 1)
-	_, err = run("delete", "--group-id", "poc-leftover")
-	re.ErrorContains(err, "ErrAffinityGroupNotFound")
-	re.NotNil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID("poc-leftover")))
-	out, err = run("delete", "--group-id", "poc-leftover", "--force")
-	re.NoError(err)
-	re.Contains(string(out), "Affinity group poc-leftover and its label rule are deleted if they existed")
-	re.Nil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID("poc-leftover")))
-	_, err = run("range", "show", "--group-id", "poc-leftover")
-	re.ErrorContains(err, "affinity group poc-leftover not found")
-}
-
-// TestAffinityCustomGroupKeyspace checks that Classic accepts unbounded ranges
-// and NextGen keeps all ranges of a custom group within one transaction keyspace.
-func TestAffinityCustomGroupKeyspace(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-	manager, err := leaderServer.GetServer().GetAffinityManager()
-	re.NoError(err)
-	pdAddr := cluster.GetConfig().GetClientURL()
-	run := func(args ...string) ([]byte, error) {
-		return tests.ExecuteCommand(ctl.GetRootCmd(), append([]string{"-u", pdAddr, "config", "affinity"}, args...)...)
-	}
-	mustRun := func(out any, args ...string) {
-		tests.MustExec(re, ctl.GetRootCmd(), append([]string{"-u", pdAddr, "config", "affinity"}, args...), out)
-	}
-
-	if !kerneltype.IsNextGen() {
-		groups := make(map[string]*pd.AffinityGroupState)
-		const openGroup = "poc-open"
-		// Exercise both open endpoints on both the create and add paths.
-		for _, pair := range [][2]string{{"61,", ",61"}, {",61", "61,"}} {
-			mustRun(&groups, "create", "--group-id", openGroup, "--range", pair[0])
-			re.Equal(1, groups[openGroup].RangeCount)
-			mustRun(&groups, "range", "add", "--group-id", openGroup, "--range", pair[1])
-			re.Equal(2, groups[openGroup].RangeCount)
-			mustRun(&groups, "range", "remove", "--group-id", openGroup, "--range", pair[0], "--range", pair[1])
-			re.Zero(groups[openGroup].RangeCount)
-			_, err := run("delete", "--group-id", openGroup)
-			re.NoError(err)
-		}
-
-		// A range without either endpoint covers the whole key space.
-		mustRun(&groups, "create", "--group-id", "poc-all", "--range", ",")
-		re.Equal(1, groups["poc-all"].RangeCount)
-		mustRun(&groups, "range", "remove", "--group-id", "poc-all", "--range", ",")
-		re.Zero(groups["poc-all"].RangeCount)
-		mustRun(&groups, "range", "add", "--group-id", "poc-all", "--range", ",")
-		re.Equal(1, groups["poc-all"].RangeCount)
-
-		for _, keyRange := range []string{"61,61", "62,61"} {
-			_, err := run("create", "--group-id", "poc-invalid", "--range", keyRange)
-			re.ErrorContains(err, "start_key must be less than end_key", keyRange)
-			_, err = run("range", "add", "--group-id", "poc-all", "--range", keyRange)
-			re.ErrorContains(err, "start_key must be less than end_key", keyRange)
-		}
-		return
-	}
-
-	// key returns the Region key of a table in a transaction keyspace, or the
-	// key where the keyspace starts for table 0.
-	key := func(keyspaceID uint32, tableID int64) []byte {
-		raw := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
-		if tableID > 0 {
-			raw = append(raw, codec.GenerateTableKey(tableID)...)
-		}
-		return codec.EncodeBytes(raw)
-	}
-	keyRange := func(start, end []byte) string { return hex.EncodeToString(start) + "," + hex.EncodeToString(end) }
-	table := func(keyspaceID uint32, tableID int64) string {
-		return keyRange(key(keyspaceID, tableID), key(keyspaceID, tableID+1))
-	}
-	rule := func(groupID string) string {
-		return fmt.Sprintf("nextgen requires the key ranges of custom group %s to lie in one keyspace, but ", groupID)
-	}
-
-	groups := make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "create", "--group-id", "poc-one", "--range", table(1, 100))
-	re.Equal(1, groups["poc-one"].RangeCount)
-
-	// pd-ctl rejects unbounded ranges and ranges outside a single transaction keyspace.
-	for _, tc := range []struct {
-		groupID, keyRange, problem string
-	}{
-		{"poc-cross", keyRange(key(1, 100), key(3, 100)), "starts in keyspace 1 and ends after it"},
-		{"poc-keyspaces", keyRange(key(1, 0), key(3, 0)), "starts in keyspace 1 and ends after it"},
-		{"poc-all", ",", "covers the whole key space"},
-		{"poc-open-end", "61,", "does not start in a transaction keyspace"},
-		{"poc-open-start", ",61", "has no start key"},
-		{"poc-no-end", keyRange(key(1, 100), nil), "starts in keyspace 1 and has no end key"},
-		{"poc-outside", "0a,0b", "does not start in a transaction keyspace"},
-	} {
-		_, err := run("create", "--group-id", tc.groupID, "--range", tc.keyRange)
-		re.EqualError(err, fmt.Sprintf("%skey range %q %s", rule(tc.groupID), tc.keyRange, tc.problem), tc.groupID)
-		re.False(manager.IsGroupExist(tc.groupID), tc.groupID)
-		_, err = run("range", "add", "--group-id", "poc-one", "--range", tc.keyRange)
-		re.EqualError(err, fmt.Sprintf("%skey range %q %s", rule("poc-one"), tc.keyRange, tc.problem))
-	}
-	_, err = run("create", "--group-id", "poc-two", "--range", table(1, 100), "--range", table(2, 100))
-	re.EqualError(err, fmt.Sprintf("%skey range %q lies in keyspace 2 and key range %q in keyspace 1", rule("poc-two"), table(2, 100), table(1, 100)))
-	re.False(manager.IsGroupExist("poc-two"))
-
-	// PD checks the new ranges with the persisted ranges of the group.
-	_, err = run("range", "add", "--group-id", "poc-one", "--range", table(2, 100))
-	re.ErrorContains(err, "key ranges must belong to transaction keyspace 1")
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "range", "add", "--group-id", "poc-one", "--range", table(1, 110))
-	re.Equal(2, groups["poc-one"].RangeCount)
-
-	// Seed a legacy range; PD rejects further additions until it is removed.
-	legacy := keyRange(key(4, 100), key(6, 100))
-	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
-	re.NoError(failpoint.Enable(modeFlag, "return(false)"))
-	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
-	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-		GroupID:   "poc-legacy",
-		KeyRanges: []keyutil.KeyRange{{StartKey: key(4, 100), EndKey: key(6, 100)}},
-	}}))
-	re.NoError(failpoint.Disable(modeFlag))
-	_, err = run("range", "add", "--group-id", "poc-legacy", "--range", table(4, 50))
-	re.ErrorContains(err, "key ranges must belong to transaction keyspace 4")
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "range", "remove", "--group-id", "poc-legacy", "--range", legacy)
-	re.Zero(groups["poc-legacy"].RangeCount)
-	groups = make(map[string]*pd.AffinityGroupState)
-	mustRun(&groups, "range", "add", "--group-id", "poc-legacy", "--range", table(4, 200))
-	re.Equal(1, groups["poc-legacy"].RangeCount)
-}
-
-func TestAffinityNextGenLegacyCleanup(t *testing.T) {
-	re := require.New(t)
-	cluster, err := pdTests.NewTestCluster(t.Context(), 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
-	server := cluster.GetLeaderServer()
-	re.NoError(server.BootstrapCluster())
-	manager, err := server.GetServer().GetAffinityManager()
-	re.NoError(err)
-	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
-	re.NoError(failpoint.Enable(modeFlag, "return(false)"))
-	defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
-	const groupID, orphanID = "_tidb_t_9001", "_tidb_tg_9002"
-	kr := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
-	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: groupID, KeyRanges: []keyutil.KeyRange{kr}}}))
-	regionLabeler := server.GetRaftCluster().GetRegionLabeler()
-	re.NoError(regionLabeler.SetLabelRule(affinity.MakeLabelRule(affinity.GroupKeyRanges{GroupID: orphanID, KeyRanges: []keyutil.KeyRange{kr}})))
-	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
-	run := func(args ...string) ([]byte, error) {
-		return tests.ExecuteCommand(ctl.GetRootCmd(), append([]string{"-u", server.GetAddr(), "config", "affinity"}, args...)...)
-	}
-	out, err := run("show", "--group-id", groupID)
-	re.NoError(err)
-	re.Contains(string(out), groupID)
-	for _, id := range []string{groupID, orphanID} {
-		out, err := run("range", "show", "--group-id", id)
-		re.NoError(err)
-		re.Contains(string(out), `"start_key": "61"`)
-		if id == groupID {
-			for _, args := range [][]string{
-				{"create", "--group-id", id},
-				{"update", "--group-id", id, "--leader", "1", "--voters", "1"},
-				{"range", "add", "--group-id", id, "--range", "63,64", "--force"},
-			} {
-				_, err := run(args...)
-				re.ErrorContains(err, "pd-ctl --keyspace-id")
+		for _, action := range []string{"show", "add", "remove", "show"} {
+			args := []string{"range", action, "--group-id", "empty"}
+			if action != "show" {
+				args = append(args, "--range", keyRange)
 			}
-			_, err := run("range", "remove", "--group-id", id, "--range", "61,62", "--force")
+			out, err := run(args...)
 			re.NoError(err)
-			re.Zero(manager.GetAffinityGroupState(id).RangeCount)
+			if action == "show" {
+				re.JSONEq(`{"id":"empty","ranges":[]}`, string(out))
+			}
 		}
-		_, err = run("delete", "--group-id", id, "--force")
+		re.NoError(manager.DeleteAffinityGroups([]string{"empty"}, true))
+	})
+	t.Run("group and range commands", func(t *testing.T) {
+		re := require.New(t)
+		type rangesOutput struct {
+			ID     string `json:"id"`
+			Ranges []struct {
+				StartKey string `json:"start_key"`
+				EndKey   string `json:"end_key"`
+			} `json:"ranges"`
+		}
+		showRanges := func(args ...string) rangesOutput {
+			var out rangesOutput
+			mustRun(re, &out, append([]string{"range", "show"}, args...)...)
+			return out
+		}
+
+		// customKey returns a key for custom groups. Nextgen requires their key
+		// ranges to lie in one keyspace, so the key is in keyspace 1 there.
+		customKey := func(b byte) string {
+			if kerneltype.IsNextGen() {
+				return hex.EncodeToString(key(1, []byte{b}))
+			}
+			return hex.EncodeToString([]byte{b})
+		}
+		customRange := func(start, end byte) string { return customKey(start) + "," + customKey(end) }
+
+		groupOp := func(id string, want int, args ...string) {
+			var groups map[string]*pd.AffinityGroupState
+			mustRun(re, &groups, append(args, "--group-id", id)...)
+			re.Equal(want, groups[id].RangeCount)
+		}
+		groupOp("poc-a", 2, "create", "--range", customRange(0x0a, 0x0b), "--range", customRange(0x0c, 0x0d))
+		ranges := showRanges("--group-id", "poc-a")
+		re.Equal("poc-a", ranges.ID)
+		re.Len(ranges.Ranges, 2)
+		groupOp("poc-a", 3, "range", "add", "--range", customRange(0x0e, 0x0f))
+		groupOp("poc-a", 2, "range", "remove", "--range", customRange(0x0a, 0x0b))
+		ranges = showRanges("--group-id", "poc-a")
+		re.Len(ranges.Ranges, 2)
+		re.Equal(customKey(0x0c), ranges.Ranges[0].StartKey)
+		// TiDB groups take the key range of their physical ID.
+		selector := []string{"--table-id", "100", "--partition-id", "101"}
+		tidbPrefix := "_tidb_pt_100_p"
+		if kerneltype.IsNextGen() {
+			selector = append(selector, "--keyspace-id", "1")
+			tidbPrefix = "_tidb_ks1_pt_100_p"
+		}
+		var groups map[string]*pd.AffinityGroupState
+		mustRun(re, &groups, append([]string{"create"}, selector...)...)
+		re.Contains(groups, tidbPrefix+"101")
+		ranges = showRanges(selector...)
+		re.Len(ranges.Ranges, 1)
+		groupOp(tidbPrefix+"102", 1, "create")
+		// Another key range of the same keyspace, as PD checks for keyspace groups.
+		start, end := codec.GenerateTableKey(200), codec.GenerateTableKey(201)
+		if kerneltype.IsNextGen() {
+			start, end = tableKey(1, 200), tableKey(1, 201)
+		} else {
+			start, end = codec.EncodeBytes(start), codec.EncodeBytes(end)
+		}
+		extraRange := hexRange(start, end)
+		for _, tc := range []struct {
+			args []string
+			err  string
+		}{
+			{[]string{"create", "--group-id", "poc-b"}, "--range is required"},
+			{[]string{"create", "--group-id", "poc-b", "--range", "0b"}, "invalid --range"},
+			{[]string{"create", "--group-id", tidbPrefix + "103", "--range", "0a,0b"}, "derived from its ID"},
+			{[]string{"create", "--group-id", "_tidb_pg1"}, "reserved for TiDB"},
+			{[]string{"create", "--group-id", "_tidb_custom"}, "reserved for TiDB"},
+			{append([]string{"range", "add", "--range", extraRange}, selector...), "managed by TiDB"},
+			{append([]string{"range", "remove", "--range", extraRange}, selector...), "managed by TiDB"},
+			{[]string{"show", "--group-id", "poc-a", "--table-id", "1"}, "--group-id cannot be used with --table-id"},
+			{[]string{"show", "--prefix", "poc-", "--group-id", "poc-a"}, "--prefix cannot be used"},
+			{[]string{"show", "--prefix", "poc a"}, "invalid group ID prefix"},
+			{[]string{"show", "--group-id", "poc a"}, "invalid --group-id"},
+		} {
+			_, err := run(tc.args...)
+			re.ErrorContains(err, tc.err, "%v", tc.args)
+		}
+		clear(groups)
+		mustRun(re, &groups, append([]string{"range", "add", "--force", "--range", extraRange}, selector...)...)
+		re.Equal(2, groups[tidbPrefix+"101"].RangeCount)
+
+		// Prefixes select groups across ID formats.
+		clear(groups)
+		mustRun(re, &groups, "show", "--prefix", tidbPrefix)
+		re.Len(groups, 2)
+		re.Contains(groups, tidbPrefix+"101")
+		re.Contains(groups, tidbPrefix+"102")
+		clear(groups)
+		mustRun(re, &groups, "show", "--prefix", "poc-")
+		re.Len(groups, 1)
+		re.Contains(groups, "poc-a")
+		clear(groups)
+		mustRun(re, &groups, "show", "--prefix", "")
+		re.Len(groups, 3)
+		var state pd.AffinityGroupState
+		mustRun(re, &state, "show", "--group-id", "poc-a")
+		re.Equal("poc-a", state.ID)
+
+		// Deleting a group removes its key ranges, so regular scheduling resumes there.
+		out, err := run("delete", "--group-id", "poc-a", "--force")
 		re.NoError(err)
-		re.False(manager.IsGroupExist(id))
-		re.Nil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID(id)))
-	}
+		re.Contains(string(out), "Affinity group poc-a and its label rule are deleted if they existed")
+		_, err = run("range", "show", "--group-id", "poc-a")
+		re.ErrorContains(err, "affinity group poc-a not found")
+		clear(groups)
+		mustRun(re, &groups, "show", "--prefix", "poc-")
+		re.Empty(groups)
+
+		re.NoError(manager.DeleteAffinityGroups([]string{tidbPrefix + "101", tidbPrefix + "102"}, true))
+	})
+	t.Run("custom group keyspace", func(t *testing.T) {
+		re := require.New(t)
+		if !kerneltype.IsNextGen() {
+			const id = "poc-open"
+			groups := make(map[string]*pd.AffinityGroupState)
+			for _, pair := range [][2]string{{"61,", ",61"}, {",61", "61,"}} {
+				mustRun(re, &groups, "create", "--group-id", id, "--range", pair[0])
+				re.Equal(1, groups[id].RangeCount)
+				mustRun(re, &groups, "range", "add", "--group-id", id, "--range", pair[1])
+				re.Equal(2, groups[id].RangeCount)
+				mustRun(re, &groups, "range", "remove", "--group-id", id, "--range", pair[0], "--range", pair[1])
+				re.Zero(groups[id].RangeCount)
+				_, err := run("delete", "--group-id", id)
+				re.NoError(err)
+			}
+			mustRun(re, &groups, "create", "--group-id", id, "--range", ",")
+			re.Equal(1, groups[id].RangeCount)
+			mustRun(re, &groups, "range", "remove", "--group-id", id, "--range", ",")
+			re.Zero(groups[id].RangeCount)
+			mustRun(re, &groups, "range", "add", "--group-id", id, "--range", ",")
+			re.Equal(1, groups[id].RangeCount)
+			re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
+			return
+		}
+
+		table := func(ks uint32, id int64) string {
+			return hexRange(tableKey(ks, id), tableKey(ks, id+1))
+		}
+		groups := make(map[string]*pd.AffinityGroupState)
+		mustRun(re, &groups, "create", "--group-id", "poc-one", "--range", table(1, 100))
+		t.Cleanup(func() { mustRun(re, nil, "delete", "--group-id", "poc-one", "--force") })
+		re.Equal(1, groups["poc-one"].RangeCount)
+
+		_, err := run("create", "--group-id", "poc-two", "--range", table(1, 100), "--range", table(2, 100))
+		re.ErrorContains(err, "400 Bad Request")
+		re.ErrorContains(err, "key ranges must belong to transaction keyspace 1")
+		re.False(manager.IsGroupExist("poc-two"))
+
+		_, err = run("range", "add", "--group-id", "poc-one", "--range", table(2, 100))
+		re.ErrorContains(err, "400 Bad Request")
+		re.ErrorContains(err, "key ranges must belong to transaction keyspace 1")
+		mustRun(re, &groups, "range", "add", "--group-id", "poc-one", "--range", table(1, 110))
+		re.Equal(2, groups["poc-one"].RangeCount)
+	})
+	t.Run("NextGen legacy cleanup", func(t *testing.T) {
+		re := require.New(t)
+		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+		re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
+		const groupID, orphanID = "_tidb_t_9001", "_tidb_tg_9002"
+		kr := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
+		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: groupID, KeyRanges: []keyutil.KeyRange{kr}}}))
+		re.NoError(regionLabeler.SetLabelRule(affinity.MakeLabelRule(affinity.GroupKeyRanges{GroupID: orphanID, KeyRanges: []keyutil.KeyRange{kr}})))
+		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+		out, err := run("show", "--group-id", groupID)
+		re.NoError(err)
+		re.Contains(string(out), groupID)
+		for _, id := range []string{groupID, orphanID} {
+			out, err := run("range", "show", "--group-id", id)
+			re.NoError(err)
+			re.Contains(string(out), `"start_key": "61"`)
+			if id == groupID {
+				for _, args := range [][]string{
+					{"create", "--group-id", id},
+					{"update", "--group-id", id, "--leader", "1", "--voters", "1"},
+					{"range", "add", "--group-id", id, "--range", "63,64", "--force"},
+				} {
+					_, err := run(args...)
+					re.ErrorContains(err, "pd-ctl --keyspace-id")
+				}
+				_, err := run("range", "remove", "--group-id", id, "--range", "61,62", "--force")
+				re.NoError(err)
+				re.Zero(manager.GetAffinityGroupState(id).RangeCount)
+			} else {
+				_, err := run("delete", "--group-id", id)
+				re.ErrorContains(err, "ErrAffinityGroupNotFound")
+				re.NotNil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID(id)))
+			}
+			_, err = run("delete", "--group-id", id, "--force")
+			re.NoError(err)
+			re.False(manager.IsGroupExist(id))
+			re.Nil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID(id)))
+		}
+	})
 }

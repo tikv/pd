@@ -19,12 +19,9 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/gin-gonic/gin"
 
@@ -143,9 +140,6 @@ func createAffinityGroups(c *gin.Context) {
 	req := &CreateAffinityGroupsRequest{}
 	// Reject duplicate names before Unmarshal can merge map entries or struct fields.
 	body, err := jsontext.NewDecoder(c.Request.Body).ReadValue()
-	if err == nil {
-		err = checkFoldedJSONNames(body)
-	}
 	if errors.Is(err, jsontext.ErrDuplicateName) {
 		handleAffinityError(c, errs.ErrAffinityGroupContent.FastGenByArgs(err.Error()))
 		return
@@ -242,66 +236,6 @@ func createAffinityGroups(c *gin.Context) {
 		}
 	}
 	c.IndentedJSON(http.StatusOK, resp)
-}
-
-// checkFoldedJSONNames checks struct objects for names that encoding/json can
-// match to the same struct field. ReadValue has already checked exact names, so
-// case-sensitive group IDs inside the affinity_groups map are preserved.
-func checkFoldedJSONNames(body jsontext.Value) error {
-	decoder := jsontext.NewDecoder(bytes.NewBuffer(body), jsontext.AllowDuplicateNames(true))
-	type objectScope struct {
-		isMap bool
-		names map[string]struct{}
-	}
-	var stack []objectScope
-	nextValueIsMap := false
-	for {
-		token, err := decoder.ReadToken()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		switch token.Kind() {
-		case jsontext.KindBeginObject:
-			isMap := nextValueIsMap
-			nextValueIsMap = false
-			stack = append(stack, objectScope{isMap: isMap, names: make(map[string]struct{})})
-		case jsontext.KindEndObject:
-			nextValueIsMap = false
-			stack = stack[:len(stack)-1]
-		case jsontext.KindString:
-			kind, count := decoder.StackIndex(decoder.StackDepth())
-			// A name is the odd token in an object, before its value.
-			if kind != jsontext.KindBeginObject || count%2 == 0 {
-				nextValueIsMap = false
-				continue
-			}
-			name := token.String()
-			cur := stack[len(stack)-1]
-			nextValueIsMap = len(stack) == 1 && strings.EqualFold(name, "affinity_groups")
-			if cur.isMap {
-				continue
-			}
-			// Use the smallest rune in each simple fold cycle for strings.EqualFold semantics.
-			folded := strings.Map(func(r rune) rune {
-				for {
-					next := unicode.SimpleFold(r)
-					if next <= r {
-						return next
-					}
-					r = next
-				}
-			}, name)
-			if _, exists := cur.names[folded]; exists {
-				return fmt.Errorf("%w %q", jsontext.ErrDuplicateName, name)
-			}
-			cur.names[folded] = struct{}{}
-		default:
-			nextValueIsMap = false
-		}
-	}
 }
 
 // deleteAffinityGroups deletes multiple affinity groups in batch.

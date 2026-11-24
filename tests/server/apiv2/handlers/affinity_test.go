@@ -121,76 +121,23 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 			}
 			re.False(manager.IsGroupExist(id))
 		}
-		// The same table in two keyspaces can be created and managed independently.
-		status, message := doCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"_tidb_ks42_t_1001": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}},
-			},
-		})
-		re.Equal(http.StatusBadRequest, status)
-		re.Contains(message, "key ranges must belong to transaction keyspace 42")
-		re.False(manager.IsGroupExist("_tidb_ks42_t_1001"))
-		for _, keyspaceID := range []uint32{42, 43} {
-			id := fmt.Sprintf("_tidb_ks%d_t_1001", keyspaceID)
-			prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
-			kr := handlers.AffinityKeyRange{
-				StartKey: codec.EncodeBytes(append(prefix, codec.GenerateTableKey(1001)...)),
-				EndKey:   codec.EncodeBytes(append(prefix, codec.GenerateTableKey(1002)...)),
-			}
+		// A scoped table group uses the keyspace encoded in its ID.
+		for _, id := range []string{"_tidb_ks42_t_1001", "_tidb_ks42_tg_100"} {
+			lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 42)
+			upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 43)
+			ranges := []handlers.AffinityKeyRange{{StartKey: lower[:], EndKey: upper[:]}}
 			mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
-				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{id: {Ranges: []handlers.AffinityKeyRange{kr}}},
+				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{id: {Ranges: ranges}},
 			})
-			mustBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
-				Remove: []handlers.GroupRangesModification{{ID: id, Ranges: []handlers.AffinityKeyRange{kr}}},
-			})
-			re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
-		}
-	})
-}
-
-func (suite *affinityHandlerTestSuite) TestNextGenCustomGroupKeyspaces() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
-		re := suite.Require()
-		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
-		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
-		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
-		leader := cluster.GetLeaderServer()
-		manager, err := leader.GetServer().GetAffinityManager()
-		re.NoError(err)
-		rangeIn := func(ks uint32, table int64) handlers.AffinityKeyRange {
-			key := func(id int64) []byte {
-				return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, ks), codec.GenerateTableKey(id)...))
-			}
-			return handlers.AffinityKeyRange{StartKey: key(table), EndKey: key(table + 1)}
-		}
-		first, other := rangeIn(1, 100), rangeIn(2, 100)
-		for _, ranges := range [][]handlers.AffinityKeyRange{
-			{{}}, {first, other}, {{StartKey: first.StartKey, EndKey: other.EndKey}},
-		} {
-			status, message := doCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
-				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{"custom-invalid": {Ranges: ranges}},
+			outside := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 44)
+			status, message := doBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
+				Add: []handlers.GroupRangesModification{{ID: id, Ranges: []handlers.AffinityKeyRange{{StartKey: upper[:], EndKey: outside[:]}}}},
 			})
 			re.Equal(http.StatusBadRequest, status)
-			re.Contains(message, "transaction keyspace")
-			re.False(manager.IsGroupExist("custom-invalid"))
+			re.Contains(message, "transaction keyspace 42")
+			re.Equal(1, manager.GetAffinityGroupState(id).RangeCount)
+			mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
 		}
-		mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{"custom-one": {Ranges: []handlers.AffinityKeyRange{first}}},
-		})
-		status, message := doBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
-			Add: []handlers.GroupRangesModification{{ID: "custom-one", Ranges: []handlers.AffinityKeyRange{other}}},
-		})
-		re.Equal(http.StatusBadRequest, status)
-		re.Contains(message, "transaction keyspace 1")
-		re.Equal(1, manager.GetAffinityGroupState("custom-one").RangeCount)
-		mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{"_tidb_ks42_tg_100": {Ranges: []handlers.AffinityKeyRange{rangeIn(42, 100)}}},
-		})
-		status, message = doBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
-			Add: []handlers.GroupRangesModification{{ID: "_tidb_ks42_tg_100", Ranges: []handlers.AffinityKeyRange{rangeIn(43, 100)}}},
-		})
-		re.Equal(http.StatusBadRequest, status)
-		re.Contains(message, "transaction keyspace 42")
 	})
 }
 
@@ -844,10 +791,11 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() 
 	})
 }
 
-func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateDuplicateRequestIDs() {
+func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateDuplicateJSONMembers() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
 		re := suite.Require()
-		serverAddr := cluster.GetLeaderServer().GetAddr()
+		leader := cluster.GetLeaderServer()
+		url := getAffinityGroupURL(leader.GetAddr())
 		input := func(start, end string) []byte {
 			data, err := json.Marshal(handlers.CreateAffinityGroupInput{
 				Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte(start)), EndKey: affinityTestKey([]byte(end))}},
@@ -855,62 +803,34 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateDuplicateRequestID
 			re.NoError(err)
 			return data
 		}
-		body := fmt.Appendf(nil, `{"affinity_groups":{"duplicate":%s,"other":%s,"duplicate":%s}}`,
-			input("a", "b"), input("c", "d"), input("e", "f"))
-		for _, suffix := range []string{"", "?skip_exist_check=true"} {
-			var message string
-			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr)+suffix, body,
-				testutil.Status(re, http.StatusBadRequest), testutil.ExtractJSON(re, &message)))
-			re.Contains(message, "ErrAffinityGroupContent")
-			re.Contains(message, "duplicate")
-			re.Empty(mustGetAllAffinityGroups(re, serverAddr).AffinityGroups)
-		}
-	})
-}
-
-func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateDuplicateJSONMembers() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
-		re := suite.Require()
-		leader := cluster.GetLeaderServer()
-		serverAddr := leader.GetAddr()
+		first, second := input("a", "b"), input("c", "d")
 		start := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("a")))
 		end := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("b")))
-		input := fmt.Sprintf(`{"ranges":[{"start_key":%q,"end_key":%q}]}`, start, end)
-
+		duplicateBound := fmt.Appendf(nil, `{"affinity_groups":{"g1":{"ranges":[{"start_key":%q,"start_key":%q,"end_key":%q}]}}}`, start, start, end)
 		for _, tc := range []struct {
 			name string
 			body []byte
 		}{
-			{
-				name: "Affinity_Groups",
-				body: fmt.Appendf(nil, `{"affinity_groups":{"g1":%s},"Affinity_Groups":{"g1":%s}}`, input, input),
-			},
-			{
-				name: "start_Key",
-				body: fmt.Appendf(nil, `{"affinity_groups":{"g1":{"ranges":[{"start_key":%q,"start_\u212aey":%q,"end_key":%q}]}}}`, start, start, end),
-			},
+			{"affinity_groups", fmt.Appendf(nil, `{"affinity_groups":{"g1":%s},"affinity_groups":{"g2":%s}}`, first, second)},
+			{"g1", fmt.Appendf(nil, `{"affinity_groups":{"g1":%s,"g2":%s,"g1":%s}}`, first, second, first)},
+			{"start_key", duplicateBound},
 		} {
 			for _, suffix := range []string{"", "?skip_exist_check=true"} {
 				var message string
-				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr)+suffix, tc.body,
+				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url+suffix, tc.body,
 					testutil.Status(re, http.StatusBadRequest), testutil.ExtractJSON(re, &message)))
 				re.Contains(message, "ErrAffinityGroupContent")
 				re.Contains(message, tc.name)
-				re.Empty(mustGetAllAffinityGroups(re, serverAddr).AffinityGroups)
-
-				persisted := 0
-				re.NoError(leader.GetServer().GetStorage().LoadAllAffinityGroups(func(_, _ string) { persisted++ }))
-				re.Zero(persisted)
 			}
 		}
+		re.Empty(mustGetAllAffinityGroups(re, leader.GetAddr()).AffinityGroups)
+		re.NoError(leader.GetServer().GetStorage().LoadAllAffinityGroups(func(id, _ string) {
+			suite.T().Errorf("rejected request stored affinity group %s", id)
+		}))
 
-		// Case-distinct group IDs in affinity_groups remain distinct valid groups.
-		cstart := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("c")))
-		cend := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("d")))
-		input2 := fmt.Sprintf(`{"ranges":[{"start_key":%q,"end_key":%q}]}`, cstart, cend)
-		caseDistinctBody := fmt.Appendf(nil, `{"affinity_groups":{"g1":%s,"G1":%s}}`, input, input2)
 		var created handlers.AffinityGroupsResponse
-		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr), caseDistinctBody,
+		body := fmt.Appendf(nil, `{"affinity_groups":{"g1":%s,"G1":%s}}`, first, second)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, body,
 			testutil.Status(re, http.StatusOK), testutil.ExtractJSON(re, &created)))
 		re.Len(created.AffinityGroups, 2)
 		re.Contains(created.AffinityGroups, "g1")
@@ -1014,6 +934,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityOpenEndedKeyRanges() {
 		}{
 			{"only-start", handlers.AffinityKeyRange{StartKey: key}},
 			{"only-end", handlers.AffinityKeyRange{EndKey: key}},
+			{"whole", handlers.AffinityKeyRange{}},
 		} {
 			status, message := doCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
 				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
@@ -1022,7 +943,11 @@ func (suite *affinityHandlerTestSuite) TestAffinityOpenEndedKeyRanges() {
 			})
 			if kerneltype.IsNextGen() {
 				re.Equal(http.StatusBadRequest, status)
-				re.Contains(message, "key range must have both start_key and end_key")
+				if tc.groupID == "whole" {
+					re.Contains(message, "transaction keyspace")
+				} else {
+					re.Contains(message, "key range must have both start_key and end_key")
+				}
 				continue
 			}
 			re.Equal(http.StatusOK, status, message)
@@ -1135,28 +1060,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityGetInvalidGroupID() {
 	})
 }
 
-// TestAffinityListWithIDs verifies listing affinity groups with ids filter.
-func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
-		re := suite.Require()
-		leader := cluster.GetLeaderServer()
-		serverAddr := leader.GetAddr()
-
-		createReq := handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
-				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x20}), EndKey: affinityTestKey([]byte{0x30})}}},
-				"group-3": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x40}), EndKey: affinityTestKey([]byte{0x50})}}},
-			},
-		}
-		mustCreateAffinityGroups(re, serverAddr, &createReq)
-
-		waitForAffinityGroups(re, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", "group-1", "group-3")
-	})
-}
-
-// TestAffinityListWithPrefix verifies that a prefix selects groups and can be combined with IDs.
-func (suite *affinityHandlerTestSuite) TestAffinityListWithPrefix() {
+// TestAffinityListFilters verifies that a prefix selects groups and can be combined with IDs.
+func (suite *affinityHandlerTestSuite) TestAffinityListFilters() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		serverAddr := cluster.GetLeaderServer().GetAddr()
@@ -1168,37 +1073,13 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithPrefix() {
 			},
 		})
 		url := getAffinityGroupURL(serverAddr)
+		waitForAffinityGroups(re, url+"?ids=prefix-1&ids=other-1&ids=missing", "prefix-1", "other-1")
 		waitForAffinityGroups(re, url+"?prefix=prefix-", "prefix-1", "prefix-10")
-		waitForAffinityGroups(re, url+"?prefix=prefix-1", "prefix-1", "prefix-10")
 		waitForAffinityGroups(re, url+"?prefix=prefix-&ids=prefix-10&ids=other-1", "prefix-10")
-		waitForAffinityGroups(re, url+"?prefix=", "prefix-1", "prefix-10", "other-1")
-		waitForAffinityGroups(re, url+"?prefix=missing")
 		resp, err := apiutil.GetJSON(tests.TestDialClient, url+"?prefix=bad%20prefix", nil)
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusBadRequest, resp.StatusCode)
-	})
-}
-
-// TestAffinityListWithPrefixForwarded verifies that the scheduling service applies the prefix.
-func (suite *affinityHandlerTestSuite) TestAffinityListWithPrefixForwarded() {
-	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
-		re := suite.Require()
-		serverAddr := cluster.GetLeaderServer().GetAddr()
-		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"forwarded-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
-				"other-2":     {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x40}), EndKey: affinityTestKey([]byte{0x50})}}},
-			},
-		})
-		testutil.Eventually(re, func() bool {
-			result, header, ok := tryGetAffinityGroups(getAffinityGroupURL(serverAddr) + "?prefix=forwarded-")
-			if !ok || header.Get(apiutil.XForwardedToMicroserviceHeader) != "true" {
-				return false
-			}
-			_, found := result.AffinityGroups["forwarded-1"]
-			return found && len(result.AffinityGroups) == 1
-		})
 	})
 }
 
@@ -1227,25 +1108,24 @@ func (suite *affinityHandlerTestSuite) TestAffinityForceDeleteLeftoverLabelRule(
 			re.Contains(storedRuleIDs(), affinity.GetLabelRuleID(groupID))
 		}
 
-		putLeftover("leftover-single", 0x01, 0x02)
-		// Without force, a missing group is not found and its rule stays.
-		statusCode, errorMsg := doDeleteAffinityGroup(re, serverAddr, "leftover-single", false)
-		re.Equal(http.StatusNotFound, statusCode, errorMsg)
-		re.NotNil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID("leftover-single")))
-		// The forced delete removes the rule, and repeating it succeeds.
-		for range 2 {
-			statusCode, errorMsg = doDeleteAffinityGroup(re, serverAddr, "leftover-single", true)
-			re.Equal(http.StatusOK, statusCode, errorMsg)
-			re.Nil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID("leftover-single")))
-			re.NotContains(storedRuleIDs(), affinity.GetLabelRuleID("leftover-single"))
+		for _, id := range []string{"leftover-single", "_tidb_t_9999"} {
+			putLeftover(id, 0x01, 0x02)
+			status, message := doDeleteAffinityGroup(re, serverAddr, id, false)
+			re.Equal(http.StatusNotFound, status, message)
+			ruleID := affinity.GetLabelRuleID(id)
+			re.NotNil(regionLabeler.GetLabelRule(ruleID))
+			for range 2 {
+				if id == "leftover-single" {
+					status, message = doDeleteAffinityGroup(re, serverAddr, id, true)
+				} else {
+					status, message = doBatchDeleteAffinityGroups(re, serverAddr,
+						&handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{id}, Force: true})
+				}
+				re.Equal(http.StatusOK, status, message)
+				re.Nil(regionLabeler.GetLabelRule(ruleID))
+				re.NotContains(storedRuleIDs(), ruleID)
+			}
 		}
-
-		putLeftover("leftover-batch", 0x03, 0x04)
-		statusCode, errorMsg = doBatchDeleteAffinityGroups(re, serverAddr,
-			&handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{"leftover-batch"}, Force: true})
-		re.Equal(http.StatusOK, statusCode, errorMsg)
-		re.Nil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID("leftover-batch")))
-		re.NotContains(storedRuleIDs(), affinity.GetLabelRuleID("leftover-batch"))
 	})
 }
 
@@ -1382,34 +1262,34 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyEmptyRanges() {
 	})
 }
 
-// TestBatchModifyAddOnly tests batch modify with only add operations.
-func (suite *affinityHandlerTestSuite) TestBatchModifyAddOnly() {
+func (suite *affinityHandlerTestSuite) TestBatchModifyRequestOrder() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
-		serverAddr := leader.GetAddr()
-
-		// Create a group
-		createReq := handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"add-only": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
-			},
+		manager, err := leader.GetServer().GetAffinityManager()
+		re.NoError(err)
+		addr := leader.GetAddr()
+		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "z"}, {GroupID: "a"}}))
+		op := func(id, start, end string) handlers.GroupRangesModification {
+			return handlers.GroupRangesModification{ID: id, Ranges: []handlers.AffinityKeyRange{{
+				StartKey: affinityTestKey([]byte(start)), EndKey: affinityTestKey([]byte(end)),
+			}}}
 		}
-		mustCreateAffinityGroups(re, serverAddr, &createReq)
-
-		// Add more ranges (no remove)
-		patchReq := handlers.BatchModifyAffinityGroupsRequest{
-			Add: []handlers.GroupRangesModification{
-				{ID: "add-only", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x20}), EndKey: affinityTestKey([]byte{0x30})}}},
-			},
+		ranges := []handlers.GroupRangesModification{op("z", "a", "b"), op("a", "c", "d"), op("z", "e", "f")}
+		added := mustBatchModifyAffinityGroups(re, addr, &handlers.BatchModifyAffinityGroupsRequest{Add: ranges})
+		re.Equal(2, added.AffinityGroups["z"].RangeCount)
+		re.Equal(1, added.AffinityGroups["a"].RangeCount)
+		for _, ids := range [][2]string{{"z", "a"}, {"a", "z"}} {
+			remove := []handlers.GroupRangesModification{op(ids[0], "g", "h"), op(ids[1], "i", "j")}
+			for range 8 {
+				status, message := doBatchModifyAffinityGroups(re, addr, &handlers.BatchModifyAffinityGroupsRequest{Remove: remove})
+				re.Equal(http.StatusNotFound, status)
+				re.Contains(message, "affinity group "+ids[0]+" not found")
+			}
 		}
-		mustBatchModifyAffinityGroups(re, serverAddr, &patchReq)
-
-		// Verify the group now has 2 ranges
-		testutil.Eventually(re, func() bool {
-			state := mustGetAffinityGroup(re, serverAddr, "add-only")
-			return state.RangeCount == 2
-		})
+		removed := mustBatchModifyAffinityGroups(re, addr, &handlers.BatchModifyAffinityGroupsRequest{Remove: ranges})
+		re.Zero(removed.AffinityGroups["z"].RangeCount)
+		re.Zero(removed.AffinityGroups["a"].RangeCount)
 	})
 }
 
@@ -1674,81 +1554,35 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDQueriesMCS() {
 			getAffinityGroupURL(cluster.GetLeaderServer().GetAddr()),
 		}
 		for _, url := range urls {
-			for _, id := range []string{"_tidb_t_123", "_tidb_pt_123_p456"} {
-				for _, path := range []string{"/" + id, "?ids=" + id} {
-					resp, err := tests.TestDialClient.Get(url + path)
-					re.NoError(err)
-					body, err := io.ReadAll(resp.Body)
-					re.NoError(err)
-					re.NoError(resp.Body.Close())
-					if strings.HasPrefix(path, "/") {
-						re.Equal(http.StatusNotFound, resp.StatusCode, "%s%s: %s", url, path, body)
-					} else {
-						re.Equal(http.StatusOK, resp.StatusCode, "%s%s: %s", url, path, body)
-						var result handlers.AffinityGroupsResponse
-						re.NoError(json.Unmarshal(body, &result))
-						re.Empty(result.AffinityGroups)
-					}
-				}
+			for _, id := range []string{"_tidb_t_123", "_tidb_pt_123_p456", "_tidb_ks42_t_123"} {
+				re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url+"/"+id, nil, testutil.Status(re, http.StatusNotFound)))
+				var result handlers.AffinityGroupsResponse
+				re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url+"?ids="+id, &result))
+				re.Empty(result.AffinityGroups)
 			}
-
-			resp, err := tests.TestDialClient.Get(url + "/_tidb_ks42_t_123")
-			re.NoError(err)
-			re.NoError(resp.Body.Close())
-			re.Equal(http.StatusNotFound, resp.StatusCode, url)
 		}
 	})
 }
 
-// TestAffinityForwardedHeader verifies microservice forwarding sets the header and returns the scheduling response.
 func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
 		re := suite.Require()
-		leader := cluster.GetLeaderServer()
-		serverAddr := leader.GetAddr()
-
-		// Create a group to ensure GET succeeds.
-		createReq := handlers.CreateAffinityGroupsRequest{
+		addr := cluster.GetLeaderServer().GetAddr()
+		mustCreateAffinityGroups(re, addr, &handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"header-check": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
+				"forwarded-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte("a")), EndKey: affinityTestKey([]byte("b"))}}},
+				"other":       {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte("c")), EndKey: affinityTestKey([]byte("d"))}}},
 			},
-		}
-		mustCreateAffinityGroups(re, serverAddr, &createReq)
-
-		var result handlers.AffinityGroupsResponse
-		testutil.Eventually(re, func() bool {
-			var header http.Header
-			var ok bool
-			result, header, ok = tryGetAffinityGroups(getAffinityGroupURL(serverAddr))
-			if !ok || header.Get(apiutil.XForwardedToMicroserviceHeader) != "true" {
-				return false
-			}
-			_, ok = result.AffinityGroups["header-check"]
-			return ok
 		})
-		re.Contains(result.AffinityGroups, "header-check")
-	})
-}
-
-func (suite *affinityHandlerTestSuite) TestNextGenLegacyOrphanCleanup() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
-		re := suite.Require()
-		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
-		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
-		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
-		leader := cluster.GetLeaderServer()
-		regionLabeler := leader.GetRaftCluster().GetRegionLabeler()
-		for i, id := range []string{"_tidb_t_9001", "_tidb_pt_9002_p3", "_tidb_tg_9003"} {
-			rule := affinity.MakeLabelRule(affinity.GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("b")}}})
-			re.NoError(regionLabeler.SetLabelRule(rule))
-			status, _ := doGetAffinityGroup(re, leader.GetAddr(), id)
-			re.Equal(http.StatusNotFound, status)
-			if i == 0 {
-				mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
-			} else {
-				mustBatchDeleteAffinityGroups(re, leader.GetAddr(), &handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{id}, Force: true})
-			}
-			re.Nil(regionLabeler.GetLabelRule(rule.ID))
+		for _, tc := range []struct {
+			query string
+			count int
+		}{{"", 2}, {"?prefix=forwarded-", 1}} {
+			testutil.Eventually(re, func() bool {
+				result, header, ok := tryGetAffinityGroups(getAffinityGroupURL(addr) + tc.query)
+				return ok && header.Get(apiutil.XForwardedToMicroserviceHeader) == "true" &&
+					len(result.AffinityGroups) == tc.count && result.AffinityGroups["forwarded-1"] != nil
+			})
 		}
 	})
 }

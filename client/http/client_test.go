@@ -166,3 +166,40 @@ func TestGetAffinityGroupsByPrefix(t *testing.T) {
 	re.Len(groups, 1)
 	re.Contains(groups, "_tidb_ks1_pt_100_p101")
 }
+
+func TestAffinityGroupPathEscaping(t *testing.T) {
+	for _, tc := range []struct {
+		method string
+		query  string
+		send   func(Client, string) error
+	}{
+		{http.MethodGet, "", func(c Client, id string) error {
+			_, err := c.GetAffinityGroup(t.Context(), id)
+			return err
+		}},
+		{http.MethodPut, "", func(c Client, id string) error {
+			_, err := c.UpdateAffinityGroupPeers(t.Context(), id, 1, []uint64{1})
+			return err
+		}},
+		{http.MethodDelete, "", func(c Client, id string) error {
+			return c.DeleteAffinityGroup(t.Context(), id, false)
+		}},
+		{http.MethodDelete, "?force=true", func(c Client, id string) error {
+			return c.DeleteAffinityGroup(t.Context(), id, true)
+		}},
+	} {
+		calls := 0
+		transport := NewHTTPClientWithRequestChecker(func(req *http.Request) error {
+			calls++
+			require.Equal(t, tc.method, req.Method)
+			require.Equal(t, "/pd/api/v2/affinity-groups/..%2Fa%3Fforce=true%23%25%20b"+tc.query, req.URL.RequestURI())
+			return nil
+		})
+		c := newClientWithMockServiceDiscovery("affinity-path", []string{"http://127.0.0.1"}, WithHTTPClient(transport))
+		t.Cleanup(c.Close)
+		require.ErrorContains(t, tc.send(c, ""), "group ID must not be empty")
+		require.Zero(t, calls)
+		require.NoError(t, tc.send(c, "../a?force=true#% b"))
+		require.Equal(t, 1, calls)
+	}
+}

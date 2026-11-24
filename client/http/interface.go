@@ -136,7 +136,6 @@ type Client interface {
 	// The affinityGroups parameter is a map from group ID to a list of key ranges.
 	// Use options to customize behavior (for example, skipping existing groups).
 	CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange, opts ...CreateAffinityGroupsOption) (map[string]*AffinityGroupState, error)
-	// GetAffinityGroup gets an affinity group by group ID.
 	GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error)
 	// GetAffinityGroups gets affinity groups by group IDs.
 	// When groupIDs is empty, it returns all affinity groups.
@@ -1292,10 +1291,17 @@ func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[st
 	return resp.AffinityGroups, nil
 }
 
+func validateAffinityGroupID(groupID string) error {
+	if groupID == "" {
+		return errors.New("group ID must not be empty")
+	}
+	return nil
+}
+
 // GetAffinityGroup gets an affinity group by group ID.
 func (c *client) GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error) {
-	if groupID == "" {
-		return nil, errors.New("group ID must not be empty")
+	if err := validateAffinityGroupID(groupID); err != nil {
+		return nil, err
 	}
 	var state AffinityGroupState
 	err := c.request(ctx, newRequestInfo().
@@ -1366,8 +1372,8 @@ func (c *client) GetAllAffinityGroups(ctx context.Context) (map[string]*Affinity
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
 func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error) {
-	if groupID == "" {
-		return nil, errors.New("group ID must not be empty")
+	if err := validateAffinityGroupID(groupID); err != nil {
+		return nil, err
 	}
 	req := UpdateAffinityGroupPeersRequest{
 		LeaderStoreID: leaderStoreID,
@@ -1392,8 +1398,8 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 
 // DeleteAffinityGroup deletes an affinity group by group ID.
 func (c *client) DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error {
-	if groupID == "" {
-		return errors.New("group ID must not be empty")
+	if err := validateAffinityGroupID(groupID); err != nil {
+		return err
 	}
 	uri := AffinityGroupByIDPath(groupID)
 	if force {

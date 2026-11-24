@@ -27,6 +27,7 @@ import (
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
@@ -76,6 +77,25 @@ func TestTiDBGroupIDValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNextGenRangeBoundaries(t *testing.T) {
+	re := require.New(t)
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 1<<24)
+	for _, id := range []string{"custom", "_tidb_ks16777215_t_1"} {
+		for _, start := range [][]byte{codec.EncodeBytes([]byte("y")), codec.EncodeBytes([]byte("y\x00")), {'x', 0xff, 0xff, 0xff, 't'}} {
+			re.ErrorIs(validateGroupKeyRanges(GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: start, EndKey: upper[:]}}}), errs.ErrAffinityGroupContent)
+		}
+	}
+
+	// A short encoded x-prefix below boundary(2) still belongs to keyspace 1.
+	end := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 2)
+	beforeTwo := append([]byte(nil), end[:]...)
+	beforeTwo[len(beforeTwo)-1]--
+	re.NoError(validateGroupKeyRanges(GroupKeyRanges{GroupID: "custom", KeyRanges: []keyutil.KeyRange{{StartKey: beforeTwo, EndKey: end[:]}}}))
 }
 
 func TestGroupState(t *testing.T) {

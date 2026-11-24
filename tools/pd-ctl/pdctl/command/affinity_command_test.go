@@ -18,49 +18,28 @@ import (
 	"context"
 	"encoding/hex"
 	"io"
-	"strconv"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pingcap/errors"
-
-	"github.com/tikv/pd/client/constants"
 	pd "github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
-
-type affinityRangeAddClient struct {
-	pd.Client
-	added bool
-	read  bool
-}
-
-func (c *affinityRangeAddClient) GetRegionLabelRulesByIDs(context.Context, []string) ([]*pd.LabelRule, error) {
-	c.read = true
-	return nil, errors.New("label rules are not synchronized")
-}
-
-func (c *affinityRangeAddClient) AddAffinityGroupKeyRanges(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange) (map[string]*pd.AffinityGroupState, error) {
-	c.added = true
-	return map[string]*pd.AffinityGroupState{"custom": {ID: "custom", RangeCount: len(groups["custom"])}}, nil
-}
 
 func TestAffinityRangeAddDoesNotReadLabelRules(t *testing.T) {
 	re := require.New(t)
 	previous := PDCli
 	t.Cleanup(func() { PDCli = previous })
-	client := &affinityRangeAddClient{}
+	client := &affinityTestClient{}
 	PDCli = client
 	cmd := NewAffinityCommand()
 	cmd.PersistentPreRunE = nil
 	cmd.SetArgs([]string{"range", "add", "--group-id", "custom", "--range", "7800000174800000ff0000000064000000fc,7800000174800000ff0000000065000000fc"})
 	re.NoError(cmd.Execute())
-	re.True(client.added)
-	re.False(client.read)
+	re.Equal("custom", client.calledID)
+	re.False(client.readLabelRules)
 }
 
 func TestAffinityCommandsRejectPositionalArgs(t *testing.T) {
@@ -140,147 +119,55 @@ func TestParseAffinityKeyRanges(t *testing.T) {
 	}
 }
 
-func TestCheckCustomGroupKeyspace(t *testing.T) {
-	re := require.New(t)
-	// key returns the Region key of a table in a transaction keyspace, or the
-	// key where the keyspace starts for table 0.
-	key := func(keyspaceID uint32, tableID int64) []byte {
-		raw := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
-		if tableID > 0 {
-			raw = append(raw, codec.GenerateTableKey(tableID)...)
-		}
-		return codec.EncodeBytes(raw)
-	}
-	keyRange := func(start, end []byte) pd.AffinityGroupKeyRange {
-		return pd.AffinityGroupKeyRange{StartKey: start, EndKey: end}
-	}
-	table := func(keyspaceID uint32, tableID int64) pd.AffinityGroupKeyRange {
-		return keyRange(key(keyspaceID, tableID), key(keyspaceID, tableID+1))
-	}
-	ranges := func(r ...pd.AffinityGroupKeyRange) []pd.AffinityGroupKeyRange { return r }
-	quote := func(r pd.AffinityGroupKeyRange) string { return strconv.Quote(formatAffinityKeyRange(r)) }
-	afterLast := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, constants.MaxKeyspaceID+1)
-	rawKeyspace := codec.EncodeBytes(codec.MakeKeyspacePrefix(codec.RawKeyspaceModePrefix, 1))
-	for _, tc := range []struct {
-		existing, added []pd.AffinityGroupKeyRange
-		// problem is what the first range that breaks the rule does, or empty
-		// if the ranges lie in one keyspace.
-		problem string
-	}{
-		{added: ranges(table(1, 100), table(1, 200))},
-		{existing: ranges(table(1, 100)), added: ranges(table(1, 200))},
-		// A keyspace ends where the next one starts, and the last one at the
-		// boundary after it.
-		{added: ranges(keyRange(key(1, 0), key(2, 0)))},
-		{added: ranges(keyRange(key(constants.MaxKeyspaceID, 0), afterLast[:]))},
-		// A Region boundary must contain the complete encoded keyspace prefix.
-		{added: ranges(keyRange([]byte{'x', 0, 0, 1, 't'}, []byte{'x', 0, 0, 1, 'u'})),
-			problem: `key range "7800000174,7800000175" does not start in a transaction keyspace`},
-		{added: ranges(keyRange(nil, nil)), problem: `key range "," covers the whole key space`},
-		{
-			added:   ranges(keyRange(nil, key(1, 100))),
-			problem: `key range ",7800000174800000ff0000000064000000fc" has no start key`,
-		},
-		{
-			added:   ranges(keyRange(key(1, 100), nil)),
-			problem: `key range "7800000174800000ff0000000064000000fc," starts in keyspace 1 and has no end key`,
-		},
-		{added: ranges(keyRange([]byte{0x0a}, []byte{0x0b})), problem: `key range "0a,0b" does not start in a transaction keyspace`},
-		{
-			added:   ranges(keyRange(rawKeyspace, key(1, 0))),
-			problem: "key range " + quote(keyRange(rawKeyspace, key(1, 0))) + " does not start in a transaction keyspace",
-		},
-		{
-			added:   ranges(keyRange(afterLast[:], append(afterLast[:], 0))),
-			problem: "key range " + quote(keyRange(afterLast[:], append(afterLast[:], 0))) + " does not start in a transaction keyspace",
-		},
-		{
-			added:   ranges(keyRange(key(1, 100), key(3, 100))),
-			problem: "key range " + quote(keyRange(key(1, 100), key(3, 100))) + " starts in keyspace 1 and ends after it",
-		},
-		{
-			added:   ranges(keyRange(key(1, 0), append(key(2, 0), 0))),
-			problem: "key range " + quote(keyRange(key(1, 0), append(key(2, 0), 0))) + " starts in keyspace 1 and ends after it",
-		},
-		{
-			added:   ranges(table(1, 100), table(2, 100)),
-			problem: "key range " + quote(table(2, 100)) + " lies in keyspace 2 and key range " + quote(table(1, 100)) + " in keyspace 1",
-		},
-		// The ranges that the group has are checked with the new ones.
-		{
-			existing: ranges(table(1, 100)),
-			added:    ranges(table(2, 100)),
-			problem:  "key range " + quote(table(2, 100)) + " lies in keyspace 2 and key range " + quote(table(1, 100)) + " in keyspace 1",
-		},
-		{existing: ranges(keyRange(nil, nil)), added: ranges(table(1, 100)), problem: `key range "," covers the whole key space`},
-	} {
-		err := checkCustomGroupKeyspace("poc", append(tc.existing, tc.added...))
-		if tc.problem == "" {
-			re.NoError(err, "%v %v", tc.existing, tc.added)
-			continue
-		}
-		re.EqualError(err, "nextgen requires the key ranges of custom group poc to lie in one keyspace, but "+tc.problem)
-	}
-}
-
-func TestKeyspaceOfKeyRejectsNonTxnPrefixes(t *testing.T) {
-	for _, key := range [][]byte{codec.EncodeBytes([]byte("y")), codec.EncodeBytes([]byte("y\x00")), {'x', 0, 0, 1, 't'}} {
-		_, ok := keyspaceOfKey(key)
-		require.False(t, ok, "%x", key)
-	}
-}
-
-type affinityStructuredSelectorClient struct {
+type affinityTestClient struct {
 	pd.Client
-	calledID string
+	calledID       string
+	readLabelRules bool
 }
 
-func (c *affinityStructuredSelectorClient) GetAffinityGroup(_ context.Context, groupID string) (*pd.AffinityGroupState, error) {
+func (c *affinityTestClient) GetAffinityGroup(_ context.Context, groupID string) (*pd.AffinityGroupState, error) {
 	c.calledID = groupID
 	return &pd.AffinityGroupState{ID: groupID}, nil
 }
 
-func (c *affinityStructuredSelectorClient) GetRegionLabelRulesByIDs(_ context.Context, ruleIDs []string) ([]*pd.LabelRule, error) {
-	if len(ruleIDs) == 1 {
-		c.calledID = ruleIDs[0]
-	}
+func (c *affinityTestClient) GetRegionLabelRulesByIDs(_ context.Context, ruleIDs []string) ([]*pd.LabelRule, error) {
+	c.readLabelRules = true
+	c.calledID = ruleIDs[0]
 	return []*pd.LabelRule{{ID: c.calledID}}, nil
 }
 
-func (c *affinityStructuredSelectorClient) DeleteAffinityGroup(_ context.Context, groupID string, _ bool) error {
+func (c *affinityTestClient) DeleteAffinityGroup(_ context.Context, groupID string, _ bool) error {
 	c.calledID = groupID
 	return nil
 }
 
-func (c *affinityStructuredSelectorClient) BatchDeleteAffinityGroups(_ context.Context, groupIDs []string, _ bool) error {
+func (c *affinityTestClient) BatchDeleteAffinityGroups(_ context.Context, groupIDs []string, _ bool) error {
 	if len(groupIDs) == 1 {
 		c.calledID = groupIDs[0]
 	}
 	return nil
 }
 
-func (c *affinityStructuredSelectorClient) RemoveAffinityGroupKeyRanges(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange) (map[string]*pd.AffinityGroupState, error) {
+func (c *affinityTestClient) RemoveAffinityGroupKeyRanges(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange) (map[string]*pd.AffinityGroupState, error) {
+	return c.recordGroupChange(groups)
+}
+
+func (c *affinityTestClient) CreateAffinityGroups(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange, _ ...pd.CreateAffinityGroupsOption) (map[string]*pd.AffinityGroupState, error) {
+	return c.recordGroupChange(groups)
+}
+
+func (c *affinityTestClient) AddAffinityGroupKeyRanges(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange) (map[string]*pd.AffinityGroupState, error) {
+	return c.recordGroupChange(groups)
+}
+
+func (c *affinityTestClient) recordGroupChange(groups map[string][]pd.AffinityGroupKeyRange) (map[string]*pd.AffinityGroupState, error) {
 	for id := range groups {
 		c.calledID = id
 	}
 	return map[string]*pd.AffinityGroupState{c.calledID: {ID: c.calledID}}, nil
 }
 
-func (c *affinityStructuredSelectorClient) CreateAffinityGroups(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange, _ ...pd.CreateAffinityGroupsOption) (map[string]*pd.AffinityGroupState, error) {
-	for id := range groups {
-		c.calledID = id
-	}
-	return map[string]*pd.AffinityGroupState{c.calledID: {ID: c.calledID}}, nil
-}
-
-func (c *affinityStructuredSelectorClient) AddAffinityGroupKeyRanges(_ context.Context, groups map[string][]pd.AffinityGroupKeyRange) (map[string]*pd.AffinityGroupState, error) {
-	for id := range groups {
-		c.calledID = id
-	}
-	return map[string]*pd.AffinityGroupState{c.calledID: {ID: c.calledID}}, nil
-}
-
-func (c *affinityStructuredSelectorClient) UpdateAffinityGroupPeers(_ context.Context, groupID string, _ uint64, _ []uint64) (*pd.AffinityGroupState, error) {
+func (c *affinityTestClient) UpdateAffinityGroupPeers(_ context.Context, groupID string, _ uint64, _ []uint64) (*pd.AffinityGroupState, error) {
 	c.calledID = groupID
 	return &pd.AffinityGroupState{ID: groupID}, nil
 }
@@ -292,7 +179,7 @@ func TestAffinityCreateTiDBTableGroupRepairGuidance(t *testing.T) {
 	for _, groupID := range []string{"_tidb_ks1_tg_100", "_tidb_tg_100"} {
 		t.Run(groupID, func(t *testing.T) {
 			re := require.New(t)
-			client := &affinityStructuredSelectorClient{}
+			client := &affinityTestClient{}
 			PDCli = client
 			cmd := NewAffinityCommand()
 			cmd.PersistentPreRunE = nil
@@ -310,7 +197,7 @@ func TestAffinityStructuredSelectorValidation(t *testing.T) {
 	t.Cleanup(func() { PDCli = previous })
 
 	runCmd := func(args ...string) (string, error) {
-		client := &affinityStructuredSelectorClient{}
+		client := &affinityTestClient{}
 		PDCli = client
 		cmd := NewAffinityCommand()
 		cmd.PersistentPreRunE = nil

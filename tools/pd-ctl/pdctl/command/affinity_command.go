@@ -15,7 +15,6 @@
 package command
 
 import (
-	"bytes"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -31,7 +30,6 @@ import (
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/schedule/affinity"
-	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const tidbGroupIDPrefix = "_tidb_"
@@ -239,11 +237,6 @@ func affinityCreateCommandFunc(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		if kerneltype.IsNextGen() {
-			if err := checkCustomGroupKeyspace(groupID, ranges); err != nil {
-				return err
-			}
-		}
 	default:
 		if len(rawRanges) > 0 {
 			return errors.Errorf("the key range of TiDB group %s is derived from its ID; do not set --range", groupID)
@@ -342,11 +335,6 @@ func changeAffinityGroupRanges(cmd *cobra.Command, add bool) error {
 	ranges, err := parseAffinityKeyRanges(rawRanges)
 	if err != nil {
 		return err
-	}
-	if add && kerneltype.IsNextGen() && !strings.HasPrefix(groupID, tidbGroupIDPrefix) {
-		if err := checkCustomGroupKeyspace(groupID, ranges); err != nil {
-			return err
-		}
 	}
 	change := map[string][]pd.AffinityGroupKeyRange{groupID: ranges}
 	var groups map[string]*pd.AffinityGroupState
@@ -530,61 +518,6 @@ func parseAffinityKeyRanges(rawRanges []string) ([]pd.AffinityGroupKeyRange, err
 		ranges = append(ranges, pd.AffinityGroupKeyRange{StartKey: startKey, EndKey: endKey})
 	}
 	return ranges, nil
-}
-
-// checkCustomGroupKeyspace checks the key ranges of a group with a custom ID
-// in nextgen: each range needs both keys, and all ranges lie in one
-// transaction keyspace. PD validates the merged ranges against the persisted
-// group; this check provides early feedback on the ranges in the command.
-func checkCustomGroupKeyspace(groupID string, ranges []pd.AffinityGroupKeyRange) error {
-	const rule = "nextgen requires the key ranges of custom group %s to lie in one keyspace, but key range %q "
-	var first pd.AffinityGroupKeyRange
-	var firstKeyspaceID uint32
-	for i, r := range ranges {
-		keyRange := formatAffinityKeyRange(r)
-		if len(r.StartKey) == 0 {
-			if len(r.EndKey) == 0 {
-				return errors.Errorf(rule+"covers the whole key space", groupID, keyRange)
-			}
-			return errors.Errorf(rule+"has no start key", groupID, keyRange)
-		}
-		keyspaceID, ok := keyspaceOfKey(r.StartKey)
-		if !ok {
-			return errors.Errorf(rule+"does not start in a transaction keyspace", groupID, keyRange)
-		}
-		keyspaceEnd := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID+1)
-		switch {
-		case len(r.EndKey) == 0:
-			return errors.Errorf(rule+"starts in keyspace %d and has no end key", groupID, keyRange, keyspaceID)
-		case bytes.Compare(r.EndKey, keyspaceEnd[:]) > 0:
-			return errors.Errorf(rule+"starts in keyspace %d and ends after it", groupID, keyRange, keyspaceID)
-		case i == 0:
-			first, firstKeyspaceID = r, keyspaceID
-		case keyspaceID != firstKeyspaceID:
-			return errors.Errorf(rule+"lies in keyspace %d and key range %q in keyspace %d",
-				groupID, keyRange, keyspaceID, formatAffinityKeyRange(first), firstKeyspaceID)
-		}
-	}
-	return nil
-}
-
-// keyspaceOfKey returns the transaction keyspace that holds key: the keyspace
-// k with boundary(k) <= key < boundary(k+1), where the boundaries are encoded
-// like Region keys. PD compares keys with the same boundaries when it checks
-// the key ranges of a keyspace-aware TiDB group.
-func keyspaceOfKey(key []byte) (uint32, bool) {
-	if len(key) < codec.EncodedKeyspacePrefixLen || key[0] != codec.TxnKeyspaceModePrefix {
-		return 0, false
-	}
-	id := uint32(key[1])<<16 | uint32(key[2])<<8 | uint32(key[3])
-	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id)
-	if bytes.Compare(key, lower[:]) < 0 {
-		if id == 0 {
-			return 0, false
-		}
-		id--
-	}
-	return id, id <= constants.MaxKeyspaceID
 }
 
 // formatAffinityKeyRange formats a key range as --range takes it.

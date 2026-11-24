@@ -17,6 +17,7 @@ package affinity
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
@@ -173,6 +175,42 @@ func TestBasicGroupOperations(t *testing.T) {
 	err = manager.DeleteAffinityGroups([]string{"group1"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group1"))
+}
+
+func TestCollectGroupStatesByQuery(t *testing.T) {
+	re := require.New(t)
+	manager := newTxnTestManager(t)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "p-1"}, {GroupID: "p-10"}, {GroupID: "q-1"}}))
+	manager.Lock()
+	manager.groups["p-1"].VoterStoreIDs = []uint64{1, 2, 3}
+	manager.Unlock()
+
+	for _, tc := range []struct {
+		ids    []string
+		prefix string
+		want   []string
+	}{
+		{nil, "", []string{"p-1", "p-10", "q-1"}},
+		{nil, "p-", []string{"p-1", "p-10"}},
+		{nil, "p-1", []string{"p-1", "p-10"}},
+		{nil, "r", []string{}},
+		{[]string{"p-10", "q-1", "missing"}, "p-", []string{"p-10"}},
+		{[]string{"q-1"}, "", []string{"q-1"}},
+		{[]string{" p-1 ", "p-1", "", "q-1"}, "p-", []string{"p-1"}},
+		{[]string{""}, "", []string{}},
+	} {
+		states, err := CollectGroupStatesByQuery(manager, tc.ids, tc.prefix)
+		re.NoError(err)
+		re.ElementsMatch(tc.want, slices.Collect(maps.Keys(states)), "%v %q", tc.ids, tc.prefix)
+	}
+	states, err := CollectGroupStatesByQuery(manager, nil, "p-")
+	re.NoError(err)
+	states["p-1"].VoterStoreIDs[0] = 99
+	re.Equal([]uint64{1, 2, 3}, manager.GetAffinityGroupState("p-1").VoterStoreIDs)
+	for _, prefix := range []string{"bad prefix", strings.Repeat("a", 65)} {
+		_, err := CollectGroupStatesByQuery(manager, nil, prefix)
+		re.ErrorIs(err, errs.ErrAffinityGroupContent)
+	}
 }
 
 // TestSyncLabelRuleBeforeGroup ensures label rules arriving before group sync are applied after group creation.
