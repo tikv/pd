@@ -15,6 +15,7 @@
 package api
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/negroni/v3"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/pingcap/log"
 
@@ -258,42 +261,104 @@ func TestHTTPAuditParity(t *testing.T) {
 	}
 }
 
+type delayedAuditLogWriter struct {
+	bytes.Buffer
+}
+
+func (w *delayedAuditLogWriter) Write(p []byte) (int, error) {
+	synctest.Sleep(time.Second)
+	return w.Buffer.Write(p)
+}
+
 func TestHTTPAuditMetricsDuration(t *testing.T) {
 	for _, version := range []string{"v1", "v2"} {
-		t.Run(version, func(t *testing.T) {
-			re := require.New(t)
-			histogram := prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "audit_duration_seconds"}, []string{"service", "method"})
-			counter := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "audit_requests_total"}, []string{"service", "method", "caller_component"})
-			svr := &testHTTPAuditServer{
-				options:  config.NewServiceMiddlewarePersistOptions(config.NewServiceMiddlewareConfig()),
-				labels:   &audit.BackendLabels{Labels: []string{audit.PrometheusHistogram}},
-				backends: []audit.Backend{audit.NewPrometheusBackend(histogram, counter, false)},
-			}
-			handler := func(w http.ResponseWriter, _ *http.Request) {
-				time.Sleep(20 * time.Millisecond)
-				w.WriteHeader(http.StatusNoContent)
-			}
-			var router http.Handler
-			if version == "v1" {
-				r := mux.NewRouter()
-				r.Handle("/selected", negroni.New(&auditMiddleware{svr: svr}, negroni.WrapFunc(handler))).Name("Selected")
-				router = r
-			} else {
-				r := gin.New()
-				r.Use(func(c *gin.Context) { c.Set(v2.ServerContextKey, svr) })
-				r.GET("/selected", v2.Audit("Selected", audit.PrometheusHistogram), func(c *gin.Context) { handler(c.Writer, c.Request) })
-				router = r
-			}
-			started := time.Now()
-			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/selected", http.NoBody))
-			elapsed := time.Since(started)
-			re.Equal(http.StatusNoContent, recorder.Code)
-			var metric dto.Metric
-			re.NoError(histogram.WithLabelValues("Selected", "HTTP").(prometheus.Metric).Write(&metric))
-			re.EqualValues(1, metric.GetHistogram().GetSampleCount())
-			re.GreaterOrEqual(metric.GetHistogram().GetSampleSum(), (20 * time.Millisecond).Seconds())
-			re.LessOrEqual(metric.GetHistogram().GetSampleSum(), elapsed.Seconds())
-		})
+		for _, tc := range []struct {
+			name     string
+			localLog bool
+			mode     logutil.RedactInfoLogType
+			panic    bool
+		}{
+			{name: "metrics only"},
+			{name: "deferred log", localLog: true},
+			{name: "marker", localLog: true, mode: logutil.RedactInfoLogMarker},
+			{name: "fully redacted", localLog: true, mode: logutil.RedactInfoLogON},
+			{name: "panic", localLog: true, panic: true},
+		} {
+			t.Run(version+"/"+tc.name, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					re := require.New(t)
+					var logger *zap.Logger
+					var props *log.ZapProperties
+					re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, tc.mode))
+					t.Cleanup(func() { re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, logutil.RedactInfoLogOFF)) })
+					output := &delayedAuditLogWriter{}
+					sink := zapcore.AddSync(output)
+					logger, props, err := log.InitLoggerWithWriteSyncer(&log.Config{Format: "json"}, sink, sink)
+					re.NoError(err)
+					t.Cleanup(log.ReplaceGlobals(logger, props))
+
+					histogram := prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "audit_duration_seconds"}, []string{"service", "method"})
+					counter := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "audit_requests_total"}, []string{"service", "method", "caller_component"})
+					labels := []string{audit.PrometheusHistogram}
+					if tc.localLog {
+						labels = append(labels, audit.LocalLogLabel)
+					}
+					svr := &testHTTPAuditServer{
+						options:  config.NewServiceMiddlewarePersistOptions(config.NewServiceMiddlewareConfig()),
+						labels:   &audit.BackendLabels{Labels: labels},
+						backends: []audit.Backend{audit.NewLocalLogBackend(true), audit.NewPrometheusBackend(histogram, counter, false)},
+					}
+					handler := func(w http.ResponseWriter, r *http.Request) {
+						data, err := io.ReadAll(r.Body)
+						re.NoError(err)
+						re.Equal("request-body", string(data))
+						synctest.Sleep(20 * time.Millisecond)
+						if tc.panic {
+							panic("handler failed")
+						}
+						w.WriteHeader(http.StatusNoContent)
+					}
+					var router http.Handler
+					if version == "v1" {
+						r := mux.NewRouter()
+						r.Handle("/selected", negroni.New(&auditMiddleware{svr: svr}, negroni.WrapFunc(handler))).Name("Selected")
+						router = r
+					} else {
+						r := gin.New()
+						r.Use(func(c *gin.Context) { c.Set(v2.ServerContextKey, svr) })
+						r.POST("/selected", v2.Audit("Selected", labels...), func(c *gin.Context) { handler(c.Writer, c.Request) })
+						router = r
+					}
+					started := time.Now()
+					recorder := httptest.NewRecorder()
+					serve := func() {
+						router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", strings.NewReader("request-body")))
+					}
+					if tc.panic {
+						re.PanicsWithValue("handler failed", serve)
+					} else {
+						serve()
+						re.Equal(http.StatusNoContent, recorder.Code)
+					}
+					elapsed := 20 * time.Millisecond
+					if tc.localLog {
+						elapsed += time.Second
+						re.Contains(output.String(), "audit log")
+					} else {
+						re.Empty(output.String())
+					}
+					re.Equal(elapsed, time.Since(started))
+					var metric dto.Metric
+					re.NoError(histogram.WithLabelValues("Selected", "HTTP").(prometheus.Metric).Write(&metric))
+					re.EqualValues(1, metric.GetHistogram().GetSampleCount())
+					want := 20 * time.Millisecond
+					if tc.mode == logutil.RedactInfoLogON {
+						// Fully redacted logs still run before the handler.
+						want += time.Second
+					}
+					re.Equal(want.Seconds(), metric.GetHistogram().GetSampleSum())
+				})
+			})
+		}
 	}
 }

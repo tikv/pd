@@ -15,6 +15,7 @@
 package middlewares
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -48,6 +49,8 @@ func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 			info = requestutil.GetRequestInfoWithoutBody(c.Request)
 		}
 		info.ServiceLabel = serviceLabel
+		// Keep user-controlled path parameters out of the audit log.
+		info.Method = fmt.Sprintf("%s/%s:%s", c.Request.Proto, c.Request.Method, c.FullPath())
 		r := c.Request.WithContext(requestutil.WithRequestInfo(c.Request.Context(), info))
 		audit.ProcessHTTPRequest(c.Writer, r, labels, svr.GetAuditBackend(), func(_ http.ResponseWriter, r *http.Request) {
 			c.Request = r

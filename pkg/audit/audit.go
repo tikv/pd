@@ -211,6 +211,10 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 	}
 
 	defer func() {
+		var end time.Time
+		if hasAfterBackend {
+			end = time.Now()
+		}
 		if body != nil {
 			info.BodyParam = body.String()
 			auditRequest = auditRequest.WithContext(requestutil.WithRequestInfo(auditRequest.Context(), info))
@@ -222,7 +226,6 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 		if !hasAfterBackend {
 			return
 		}
-		end := time.Now()
 		ctx := requestutil.WithEndTime(auditRequest.Context(), end.Unix())
 		ctx = requestutil.WithRequestDuration(ctx, end.Sub(start))
 		auditRequest = auditRequest.WithContext(ctx)

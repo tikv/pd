@@ -137,12 +137,14 @@ func TestAuditWithoutLabelsDoesNotRequireServer(t *testing.T) {
 
 func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		mode logutil.RedactInfoLogType
+		name         string
+		mode         logutil.RedactInfoLogType
+		existingInfo bool
 	}{
 		{name: "disabled", mode: logutil.RedactInfoLogOFF},
 		{name: "enabled", mode: logutil.RedactInfoLogON},
 		{name: "marker", mode: logutil.RedactInfoLogMarker},
+		{name: "existing metadata", mode: logutil.RedactInfoLogON, existingInfo: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -164,7 +166,9 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
 			var recordedInfo requestutil.RequestInfo
-			router.POST("/selected", Audit("CreateKeyspace", audit.LocalLogLabel), func(c *gin.Context) {
+			router.POST("/selected/:group_id", Audit("CreateKeyspace", audit.LocalLogLabel), func(c *gin.Context) {
+				re.Equal("private-group", c.Param("group_id"))
+				re.Equal("/selected/private-group", c.Request.URL.Path)
 				var ok bool
 				recordedInfo, ok = requestutil.RequestInfoFrom(c.Request.Context())
 				re.True(ok)
@@ -177,12 +181,16 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 				c.Request.URL.Path = "/rewritten"
 				c.AbortWithStatus(http.StatusBadRequest)
 			})
-			request := httptest.NewRequest(http.MethodPost, "/selected?key=private-value", bytes.NewReader(body))
+			request := httptest.NewRequest(http.MethodPost, "/selected/private-group?key=private-value", bytes.NewReader(body))
 			request.RemoteAddr = "192.0.2.10:12345"
 			request.Header.Set(apiutil.XForwardedForHeader, "203.0.113.99")
 			request.Header.Set(apiutil.XCallerIDHeader, "claimed-caller")
 			certificate := &x509.Certificate{Subject: pkix.Name{CommonName: "verified-client"}}
 			request.TLS = &tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{certificate}}}
+			if tc.existingInfo {
+				info := requestutil.GetRequestInfoWithoutBody(request)
+				request = request.WithContext(requestutil.WithRequestInfo(request.Context(), info))
+			}
 			recorder := httptest.NewRecorder()
 			router.ServeHTTP(recorder, request)
 			re.Equal(http.StatusBadRequest, recorder.Code)
@@ -197,6 +205,8 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 				re.Equal(v1[field], v2[field], field)
 			}
 			re.Equal("audit log", v2["message"])
+			re.Contains(v2["service-info"], "Method:HTTP/1.1/POST:/selected/:group_id,")
+			re.NotContains(string(lines[0]), "private-group")
 			re.Equal("192.0.2.10:12345", v2["remote-addr"])
 			re.Equal("verified-client", v2["tls-client-cn"])
 			re.Contains(v2["service-info"], "IP:203.0.113.99")
