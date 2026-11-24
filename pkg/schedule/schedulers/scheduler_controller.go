@@ -290,7 +290,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 }
 
 // RemoveScheduler removes a scheduler by name.
-func (c *Controller) RemoveScheduler(name string) (err error) {
+func (c *Controller) RemoveScheduler(name string) error {
 	c.Lock()
 	defer c.Unlock()
 	if c.cluster == nil {
@@ -300,19 +300,12 @@ func (c *Controller) RemoveScheduler(name string) (err error) {
 	if !ok {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	if removal := s.removal; removal != nil {
+	if done := s.removalDone; done != nil {
 		c.Unlock()
-		<-removal.done
+		<-done
 		c.Lock()
-		return removal.err
+		return nil
 	}
-	removal := &schedulerRemoval{done: make(chan struct{})}
-	s.removal = removal
-	defer func() {
-		removal.err = err
-		s.removal = nil
-		close(removal.done)
-	}()
 
 	conf := c.cluster.GetSchedulerConfig()
 	conf.RemoveSchedulerCfg(s.GetType())
@@ -333,6 +326,7 @@ func (c *Controller) RemoveScheduler(name string) (err error) {
 
 	// Stop only after config deletion succeeds. Keep the name reserved until
 	// the loop and CleanConfig finish, without blocking unrelated scheduler APIs.
+	s.removalDone = make(chan struct{})
 	s.Stop()
 	c.Unlock()
 	<-s.done
@@ -340,6 +334,7 @@ func (c *Controller) RemoveScheduler(name string) (err error) {
 
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
+	close(s.removalDone)
 	return nil
 }
 
@@ -542,13 +537,6 @@ func (c *Controller) GetAllSchedulerConfigs() (sches, configs []string, err erro
 	return c.storage.LoadAllSchedulerConfigs()
 }
 
-// schedulerRemoval records the result of one removal attempt. Closing done
-// publishes err to concurrent callers, even if a later attempt starts.
-type schedulerRemoval struct {
-	done chan struct{}
-	err  error
-}
-
 // ScheduleController is used to manage a scheduler.
 type ScheduleController struct {
 	Scheduler
@@ -557,8 +545,8 @@ type ScheduleController struct {
 	nextInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc
-	done               chan struct{}     // Closed by runScheduler after CleanConfig returns.
-	removal            *schedulerRemoval // Guarded by the owning Controller's lock.
+	done               chan struct{} // Closed by runScheduler after CleanConfig returns.
+	removalDone        chan struct{} // Guarded by the owning Controller's lock; closed after unregistration.
 	delayAt            atomic.Int64
 	delayUntil         atomic.Int64
 	diagnosticRecorder *DiagnosticRecorder
