@@ -15,6 +15,7 @@
 package affinity
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"testing"
@@ -30,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestStoreCondition(t *testing.T) {
@@ -198,6 +200,57 @@ func TestObserveAvailableRegion(t *testing.T) {
 	state = manager.GetAffinityGroupState("g")
 	re.NotNil(state)
 	re.True(state.AffinitySchedulingAllowed)
+}
+
+func TestObserveAvailableRegionIgnoresRecreatedGroup(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for id := uint64(1); id <= 4; id++ {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id)},
+			core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	const groupID = "recreated-group"
+	ranges := createGroupForTest(re, manager, groupID, 1)
+	original, err := manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 4})
+	re.NoError(err)
+	expired, ok := manager.ExpireAffinityGroupIf(original)
+	re.True(ok)
+	re.True(expired.RegularSchedulingAllowed)
+
+	const adminLeaderStoreID uint64 = 2
+	voters := []uint64{1, 2, 3}
+	region := generateRegionForTest(1, voters, ranges[0])
+	re.NoError(manager.DeleteAffinityGroups([]string{groupID}, true))
+	createGroupForTest(re, manager, groupID, 1)
+	_, err = manager.UpdateAffinityGroupPeers(groupID, adminLeaderStoreID, voters)
+	re.NoError(err)
+	// Updating the ranges brings the replacement to the same version as the expired snapshot.
+	replacementRange := keyutil.KeyRange{
+		StartKey: keyForTest(nonOverlappingRange.StartKey),
+		EndKey:   keyForTest(nonOverlappingRange.EndKey),
+	}
+	re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{
+		GroupID: groupID, KeyRanges: []keyutil.KeyRange{replacementRange},
+	}}, nil))
+	replacement := manager.GetAffinityGroupState(groupID)
+	re.True(replacement.AffinitySchedulingAllowed)
+	re.Equal(expired.affinityVer, replacement.affinityVer)
+	re.NotSame(expired.groupInfoPtr, replacement.groupInfoPtr)
+
+	manager.ObserveAvailableRegion(region, expired)
+	re.Equal(adminLeaderStoreID, manager.GetAffinityGroupState(groupID).LeaderStoreID)
+	persisted, err := store.LoadAffinityGroup(groupID)
+	re.NoError(err)
+	var group Group
+	re.NoError(json.Unmarshal([]byte(persisted), &group))
+	re.Equal(adminLeaderStoreID, group.LeaderStoreID)
 }
 
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
