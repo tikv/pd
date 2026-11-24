@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	v2 "github.com/tikv/pd/server/apiv2/middlewares"
@@ -278,13 +279,17 @@ func (w *delayedAuditLogWriter) Write(p []byte) (int, error) {
 func TestHTTPAuditMetricsDuration(t *testing.T) {
 	for _, version := range []string{"v1", "v2"} {
 		for _, tc := range []struct {
-			name     string
-			localLog bool
-			mode     logutil.RedactInfoLogType
-			panic    bool
+			name         string
+			localLog     bool
+			mode         logutil.RedactInfoLogType
+			panic        bool
+			existingInfo bool
+			suppressed   bool
 		}{
 			{name: "metrics only"},
+			{name: "metrics existing metadata", existingInfo: true},
 			{name: "deferred log", localLog: true},
+			{name: "suppressed log", localLog: true, suppressed: true},
 			{name: "marker", localLog: true, mode: logutil.RedactInfoLogMarker},
 			{name: "fully redacted", localLog: true, mode: logutil.RedactInfoLogON},
 			{name: "panic", localLog: true, panic: true},
@@ -301,6 +306,9 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 					logger, props, err := log.InitLoggerWithWriteSyncer(&log.Config{Format: "json"}, sink, sink)
 					re.NoError(err)
 					t.Cleanup(log.ReplaceGlobals(logger, props))
+					if tc.suppressed {
+						log.SetLevel(zap.ErrorLevel)
+					}
 
 					histogram := prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "audit_duration_seconds"}, []string{"service", "method"})
 					counter := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "audit_requests_total"}, []string{"service", "method", "caller_component"})
@@ -313,7 +321,24 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 						labels:   &audit.BackendLabels{Labels: labels},
 						backends: []audit.Backend{audit.NewLocalLogBackend(true), audit.NewPrometheusBackend(histogram, counter, false)},
 					}
+					existing := requestutil.RequestInfo{ServiceLabel: "Selected", CallerID: "saved-caller", Method: "saved-method", URLParam: "saved-query"}
+					var originalBody io.ReadCloser
 					handler := func(w http.ResponseWriter, r *http.Request) {
+						if tc.suppressed {
+							re.Equal(originalBody, r.Body)
+						}
+						info, ok := requestutil.RequestInfoFrom(r.Context())
+						re.True(ok)
+						if tc.existingInfo {
+							re.Equal(existing, info)
+						} else if version == "v2" && !tc.localLog {
+							re.Empty(info.Method)
+							re.Empty(info.URLParam)
+							re.Empty(info.IP)
+							re.Empty(info.Port)
+							re.Equal("test-caller", info.CallerID)
+						}
+						re.Equal("one", r.URL.Query().Get("query"))
 						data, err := io.ReadAll(r.Body)
 						re.NoError(err)
 						re.Equal("request-body", string(data))
@@ -337,7 +362,13 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 					started := time.Now()
 					recorder := httptest.NewRecorder()
 					serve := func() {
-						router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/selected", strings.NewReader("request-body")))
+						request := httptest.NewRequest(http.MethodPost, "/selected?query=one", strings.NewReader("request-body"))
+						originalBody = request.Body
+						request.Header.Set(apiutil.XCallerIDHeader, "test-caller")
+						if tc.existingInfo {
+							request = request.WithContext(requestutil.WithRequestInfo(request.Context(), existing))
+						}
+						router.ServeHTTP(recorder, request)
 					}
 					if tc.panic {
 						re.PanicsWithValue("handler failed", serve)
@@ -346,7 +377,7 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 						re.Equal(http.StatusNoContent, recorder.Code)
 					}
 					elapsed := 20 * time.Millisecond
-					if tc.localLog {
+					if tc.localLog && !tc.suppressed {
 						elapsed += time.Second
 						re.Contains(output.String(), "audit log")
 					} else {
@@ -362,6 +393,12 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 						want += time.Second
 					}
 					re.Equal(want.Seconds(), metric.GetHistogram().GetSampleSum())
+					caller := "test-caller"
+					if tc.existingInfo {
+						caller = existing.CallerID
+					}
+					re.NoError(counter.WithLabelValues("Selected", "HTTP", caller).Write(&metric))
+					re.EqualValues(1, metric.GetCounter().GetValue())
 				})
 			})
 		}

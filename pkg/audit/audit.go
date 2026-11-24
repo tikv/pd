@@ -141,6 +141,9 @@ func (b *LocalLogBackend) prepareHTTPRequest() func(*http.Request) bool {
 	// The handler may change the global log level. Preserve the decision and
 	// destination from before it runs, while filling body fields after it returns.
 	entry := log.L().Check(zap.InfoLevel, "audit log")
+	if entry == nil {
+		return nil
+	}
 	return func(r *http.Request) bool { return b.writeHTTPRequest(r, entry) }
 }
 
@@ -181,9 +184,10 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 	if !ok {
 		info = requestutil.GetRequestInfoWithoutBody(r)
 	}
-	var body *capturedBody
-	if info.BodyParam == "" && slices.Contains(labels.Labels, LocalLogLabel) {
-		body = captureBody(r, &info)
+	capture := info.BodyParam == "" && slices.Contains(labels.Labels, LocalLogLabel) && r.Body != nil && r.Body != http.NoBody
+	if capture && logutil.IsInfoLogFullyRedacted() {
+		info.BodyParam = "?"
+		capture = false
 	}
 	ctx := requestutil.WithRequestInfo(r.Context(), info)
 	// Keep ingress identity even if downstream routing rewrites the request.
@@ -191,23 +195,37 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 	r = r.WithContext(ctx)
 	var deferredBackends []func(*http.Request) bool
 	hasAfterBackend := false
+	captureAfter := false
 	for _, backend := range backends {
 		if !backend.Match(labels) {
 			continue
 		}
 		if backend.ProcessBeforeHandler() {
-			if body == nil {
+			if !capture {
 				backend.ProcessHTTPRequest(auditRequest)
 			} else {
 				process := backend.ProcessHTTPRequest
 				if local, ok := backend.(*LocalLogBackend); ok {
 					process = local.prepareHTTPRequest()
 				}
-				deferredBackends = append(deferredBackends, process)
+				if process != nil {
+					deferredBackends = append(deferredBackends, process)
+				}
 			}
 		} else {
 			hasAfterBackend = true
+			if _, metricsOnly := backend.(*PrometheusBackend); !metricsOnly {
+				captureAfter = true
+			}
 		}
+	}
+	var body *capturedBody
+	// Reserve log admission before retaining input. Custom backends may still
+	// need the body even when all built-in before-handler logs are suppressed.
+	if capture && (len(deferredBackends) > 0 || captureAfter) {
+		body = &capturedBody{ReadCloser: r.Body}
+		auditRequest.Body = body
+		r.Body = body
 	}
 
 	defer func() {
@@ -260,17 +278,4 @@ func (body *capturedBody) String() string {
 	body.mu.Lock()
 	defer body.mu.Unlock()
 	return body.data.String()
-}
-
-func captureBody(r *http.Request, info *requestutil.RequestInfo) *capturedBody {
-	if r.Body == nil || r.Body == http.NoBody {
-		return nil
-	}
-	if logutil.IsInfoLogFullyRedacted() {
-		info.BodyParam = "?"
-		return nil
-	}
-	body := &capturedBody{ReadCloser: r.Body}
-	r.Body = body
-	return body
 }

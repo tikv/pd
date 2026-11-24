@@ -17,10 +17,12 @@ package middlewares
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/server/config"
 )
@@ -44,15 +46,33 @@ func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		backends := svr.GetAuditBackend()
+		metricsOnly := len(backendLabels) == 1 && backendLabels[0] == audit.PrometheusHistogram
+		if metricsOnly {
+			for _, backend := range backends {
+				if _, ok := backend.(*audit.PrometheusBackend); !ok && backend.Match(labels) {
+					// Custom backends may consume fields that Prometheus ignores.
+					metricsOnly = false
+					break
+				}
+			}
+		}
 		info, ok := requestutil.RequestInfoFrom(c.Request.Context())
 		if !ok {
-			info = requestutil.GetRequestInfoWithoutBody(c.Request)
+			if metricsOnly {
+				info.CallerID = apiutil.GetCallerIDOnHTTP(c.Request)
+				info.StartTimeStamp = time.Now().Unix()
+			} else {
+				info = requestutil.GetRequestInfoWithoutBody(c.Request)
+			}
 		}
 		info.ServiceLabel = serviceLabel
-		// Keep user-controlled path parameters out of the audit log.
-		info.Method = fmt.Sprintf("%s/%s:%s", c.Request.Proto, c.Request.Method, c.FullPath())
+		if !metricsOnly {
+			// Keep user-controlled path parameters out of the audit log.
+			info.Method = fmt.Sprintf("%s/%s:%s", c.Request.Proto, c.Request.Method, c.FullPath())
+		}
 		r := c.Request.WithContext(requestutil.WithRequestInfo(c.Request.Context(), info))
-		audit.ProcessHTTPRequest(c.Writer, r, labels, svr.GetAuditBackend(), func(_ http.ResponseWriter, r *http.Request) {
+		audit.ProcessHTTPRequest(c.Writer, r, labels, backends, func(_ http.ResponseWriter, r *http.Request) {
 			c.Request = r
 			c.Next()
 		})

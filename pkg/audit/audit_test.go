@@ -194,22 +194,35 @@ func TestHTTPAuditLogLevelChanges(t *testing.T) {
 		initial zapcore.Level
 		updated zapcore.Level
 		panic   bool
+		after   bool
+		mode    logutil.RedactInfoLogType
 	}{
 		{name: "raise", initial: zap.InfoLevel, updated: zap.ErrorLevel},
 		{name: "lower", initial: zap.ErrorLevel, updated: zap.InfoLevel},
 		{name: "unchanged info", initial: zap.InfoLevel, updated: zap.InfoLevel},
 		{name: "unchanged error", initial: zap.ErrorLevel, updated: zap.ErrorLevel},
 		{name: "raise and panic", initial: zap.InfoLevel, updated: zap.ErrorLevel, panic: true},
+		{name: "marker suppressed", initial: zap.ErrorLevel, updated: zap.InfoLevel, mode: logutil.RedactInfoLogMarker},
+		{name: "after handler lower", initial: zap.ErrorLevel, updated: zap.InfoLevel, after: true},
+		{name: "after handler raise", initial: zap.InfoLevel, updated: zap.ErrorLevel, after: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
+			var logger *zap.Logger
+			var props *log.ZapProperties
+			re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, tc.mode))
+			t.Cleanup(func() { re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, logutil.RedactInfoLogOFF)) })
 			output := captureAuditJSON(t)
 			log.SetLevel(tc.initial)
 			request := httptest.NewRequest(http.MethodPost, "/selected", strings.NewReader("request-body"))
+			originalBody := request.Body
 			recorder := httptest.NewRecorder()
 			serve := func() {
 				ProcessHTTPRequest(recorder, request, &BackendLabels{Labels: []string{LocalLogLabel}},
-					[]Backend{NewLocalLogBackend(true)}, func(w http.ResponseWriter, r *http.Request) {
+					[]Backend{NewLocalLogBackend(!tc.after)}, func(w http.ResponseWriter, r *http.Request) {
+						if tc.initial == zap.ErrorLevel && !tc.after {
+							re.Equal(originalBody, r.Body, "suppressed logs must not buffer the body")
+						}
 						data, err := io.ReadAll(r.Body)
 						re.NoError(err)
 						re.Equal("request-body", string(data))
@@ -227,7 +240,11 @@ func TestHTTPAuditLogLevelChanges(t *testing.T) {
 				re.Equal(http.StatusNoContent, recorder.Code)
 			}
 			re.Equal(tc.updated, log.GetLevel())
-			if tc.initial == zap.ErrorLevel {
+			level := tc.initial
+			if tc.after {
+				level = tc.updated
+			}
+			if level == zap.ErrorLevel {
 				re.Empty(output.String())
 				return
 			}
