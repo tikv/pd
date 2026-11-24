@@ -94,6 +94,9 @@ type Manager struct {
 	// store conditions. Targets loaded or reapplied from storage start degraded
 	// while conditions are unknown.
 	storeConditionsKnown bool
+	// storeConditionsGeneration changes when the last group is deleted, so a
+	// scan that started before the deletion cannot publish its results afterward.
+	storeConditionsGeneration uint64
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// keyRanges cached in memory to reduce labeler lock contention
@@ -181,6 +184,10 @@ func (m *Manager) initGroupLocked(group *Group) {
 		log.Error("group already initialized", zap.String("group-id", group.ID))
 		return
 	}
+	m.setGroupLocked(group)
+}
+
+func (m *Manager) setGroupLocked(group *Group) {
 	groupInfo := &runtimeGroupInfo{
 		ID:                  group.ID,
 		CreateTimestamp:     group.CreateTimestamp,
@@ -374,6 +381,11 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
 	delete(m.groupModRevisions, groupID)
+	if len(m.groups) == 0 {
+		m.unavailableStores = nil
+		m.storeConditionsKnown = false
+		m.storeConditionsGeneration++
+	}
 }
 
 func (m *Manager) deleteGroups(groupIDs []string) {
@@ -638,8 +650,10 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 // Both metaMutex and the write lock of RWMutex must be held.
 func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) bool {
 	if groupInfo.CreateTimestamp != group.CreateTimestamp {
-		m.deleteGroupLocked(group.ID)
-		m.initGroupLocked(group)
+		// The replacement happens under the same lock, so store conditions remain valid.
+		m.clearGroupCacheLocked(group.ID)
+		delete(m.groupModRevisions, group.ID)
+		m.setGroupLocked(group)
 		// The label watcher will not resend an unchanged rule for the new instance.
 		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)
 		return true
