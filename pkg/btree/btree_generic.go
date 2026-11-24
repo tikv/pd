@@ -512,37 +512,6 @@ func (n *node[T]) getAt(k int) T {
 	return n.children[i].getAt(k - n.indices[i-1] - 1)
 }
 
-// ascendFromIndex visits a suffix without comparing item keys.
-// The caller must ensure that k is within this subtree.
-func (n *node[T]) ascendFromIndex(k int, iter ItemIteratorG[T]) bool {
-	if len(n.children) == 0 {
-		for _, item := range n.items[k:] {
-			if !iter(item) {
-				return false
-			}
-		}
-		return true
-	}
-	i, found := n.indices.find(k)
-	if !found {
-		if i > 0 {
-			k -= n.indices[i-1] + 1
-		}
-		if !n.children[i].ascendFromIndex(k, iter) {
-			return false
-		}
-	}
-	for ; i < len(n.items); i++ {
-		if !iter(n.items[i]) {
-			return false
-		}
-		if _, ok := n.children[i+1].iterate(ascend, nil, nil, false, false, iter); !ok {
-			return false
-		}
-	}
-	return true
-}
-
 // index is the number of items < key
 func (n *node[T]) getWithIndex(key T) (_ T, _ int) {
 	i, found := n.items.find(key)
@@ -1011,16 +980,6 @@ func (t *BTreeG[T]) Ascend(iterator ItemIteratorG[T]) {
 		return
 	}
 	t.root.iterate(ascend, nil, nil, false, false, iterator)
-}
-
-// AscendFromIndex calls the iterator starting at the zero-based index, until
-// the iterator returns false or the tree ends. An out-of-range index visits
-// no items. Traversal uses subtree sizes and does not compare item keys.
-func (t *BTreeG[T]) AscendFromIndex(index int, iterator ItemIteratorG[T]) {
-	if index < 0 || index >= t.length {
-		return
-	}
-	t.root.ascendFromIndex(index, iterator)
 }
 
 // DescendRange calls the iterator for every value in the tree within the range

@@ -81,7 +81,7 @@ func TestPrepareCheckerRequiresAllRegions(t *testing.T) {
 			checker := newPrepareChecker(func() (int, error) { return tc.total, nil })
 			// A failed count check must not clone and scan the Region trees.
 			scanned := false
-			point := "github.com/tikv/pd/pkg/core/regionPreparationScanBatch"
+			point := "github.com/tikv/pd/pkg/core/afterRegionPreparationSnapshot"
 			re.NoError(failpoint.EnableCall(point, func(uint64) { scanned = true }))
 			t.Cleanup(func() { re.NoError(failpoint.Disable(point)) })
 			re.Equal(tc.prepared, checker.check(cluster))
@@ -103,7 +103,7 @@ func TestPrepareCheckerRechecksStoreCountsAfterScan(t *testing.T) {
 	cluster.PutRegion(core.NewRegionInfo(&metapb.Region{Id: 1, EndKey: []byte("b"), Peers: []*metapb.Peer{peer}}, peer, core.SetSource(core.Heartbeat)))
 	checker := newPrepareChecker(func() (int, error) { return 1, nil })
 	updated := false
-	point := "github.com/tikv/pd/pkg/core/regionPreparationScanBatch"
+	point := "github.com/tikv/pd/pkg/core/afterRegionPreparationSnapshot"
 	re.NoError(failpoint.EnableCall(point, func(uint64) {
 		if !updated {
 			// A store heartbeat reveals an uncollected Region during the scan.
