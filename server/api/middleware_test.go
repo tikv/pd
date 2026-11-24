@@ -285,6 +285,7 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 			panic        bool
 			existingInfo bool
 			suppressed   bool
+			bodyless     bool
 		}{
 			{name: "metrics only"},
 			{name: "metrics existing metadata", existingInfo: true},
@@ -292,6 +293,7 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 			{name: "suppressed log", localLog: true, suppressed: true},
 			{name: "marker", localLog: true, mode: logutil.RedactInfoLogMarker},
 			{name: "fully redacted", localLog: true, mode: logutil.RedactInfoLogON},
+			{name: "bodyless", localLog: true, bodyless: true},
 			{name: "panic", localLog: true, panic: true},
 		} {
 			t.Run(version+"/"+tc.name, func(t *testing.T) {
@@ -322,8 +324,15 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 						backends: []audit.Backend{audit.NewLocalLogBackend(true), audit.NewPrometheusBackend(histogram, counter, false)},
 					}
 					existing := requestutil.RequestInfo{ServiceLabel: "Selected", CallerID: "saved-caller", Method: "saved-method", URLParam: "saved-query"}
+					payload := "request-body"
+					if tc.bodyless {
+						payload = ""
+					}
 					var originalBody io.ReadCloser
 					handler := func(w http.ResponseWriter, r *http.Request) {
+						if tc.bodyless {
+							re.Equal(http.NoBody, r.Body)
+						}
 						if tc.suppressed {
 							re.Equal(originalBody, r.Body)
 						}
@@ -341,7 +350,7 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 						re.Equal("one", r.URL.Query().Get("query"))
 						data, err := io.ReadAll(r.Body)
 						re.NoError(err)
-						re.Equal("request-body", string(data))
+						re.Equal(payload, string(data))
 						synctest.Sleep(20 * time.Millisecond)
 						if tc.panic {
 							panic("handler failed")
@@ -362,7 +371,10 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 					started := time.Now()
 					recorder := httptest.NewRecorder()
 					serve := func() {
-						request := httptest.NewRequest(http.MethodPost, "/selected?query=one", strings.NewReader("request-body"))
+						request := httptest.NewRequest(http.MethodPost, "/selected?query=one", strings.NewReader(payload))
+						if tc.bodyless {
+							request.Body = http.NoBody
+						}
 						originalBody = request.Body
 						request.Header.Set(apiutil.XCallerIDHeader, "test-caller")
 						if tc.existingInfo {
@@ -387,12 +399,7 @@ func TestHTTPAuditMetricsDuration(t *testing.T) {
 					var metric dto.Metric
 					re.NoError(histogram.WithLabelValues("Selected", "HTTP").(prometheus.Metric).Write(&metric))
 					re.EqualValues(1, metric.GetHistogram().GetSampleCount())
-					want := 20 * time.Millisecond
-					if tc.mode == logutil.RedactInfoLogON {
-						// Fully redacted logs still run before the handler.
-						want += time.Second
-					}
-					re.Equal(want.Seconds(), metric.GetHistogram().GetSampleSum())
+					re.Equal(0.02, metric.GetHistogram().GetSampleSum())
 					caller := "test-caller"
 					if tc.existingInfo {
 						caller = existing.CallerID

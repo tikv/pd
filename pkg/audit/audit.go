@@ -179,7 +179,6 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 		next(w, r)
 		return
 	}
-	start := time.Now()
 	info, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
 		info = requestutil.GetRequestInfoWithoutBody(r)
@@ -228,6 +227,7 @@ func ProcessHTTPRequest(w http.ResponseWriter, r *http.Request, labels *BackendL
 		r.Body = body
 	}
 
+	start := time.Now()
 	defer func() {
 		var end time.Time
 		if hasAfterBackend {

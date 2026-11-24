@@ -15,6 +15,7 @@
 package middlewares
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/server/config"
 )
@@ -68,8 +70,17 @@ func Audit(serviceLabel string, backendLabels ...string) gin.HandlerFunc {
 		}
 		info.ServiceLabel = serviceLabel
 		if !metricsOnly {
-			// Keep user-controlled path parameters out of the audit log.
+			// Keep the route template separate from redacted target parameters.
 			info.Method = fmt.Sprintf("%s/%s:%s", c.Request.Proto, c.Request.Method, c.FullPath())
+			if len(c.Params) > 0 {
+				if logutil.IsInfoLogFullyRedacted() {
+					info.PathParam = "?"
+				} else {
+					// Gin parameters contain only strings, so marshaling cannot fail.
+					params, _ := json.Marshal(c.Params)
+					info.PathParam = string(params)
+				}
+			}
 		}
 		r := c.Request.WithContext(requestutil.WithRequestInfo(c.Request.Context(), info))
 		audit.ProcessHTTPRequest(c.Writer, r, labels, backends, func(_ http.ResponseWriter, r *http.Request) {

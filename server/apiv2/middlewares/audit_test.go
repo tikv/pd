@@ -139,11 +139,15 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 		name         string
 		mode         logutil.RedactInfoLogType
 		existingInfo bool
+		bodyless     bool
+		groupID      string
 	}{
 		{name: "disabled", mode: logutil.RedactInfoLogOFF},
 		{name: "enabled", mode: logutil.RedactInfoLogON},
 		{name: "marker", mode: logutil.RedactInfoLogMarker},
 		{name: "existing metadata", mode: logutil.RedactInfoLogON, existingInfo: true},
+		{name: "bodyless delete first target", mode: logutil.RedactInfoLogOFF, bodyless: true, groupID: "group-alpha"},
+		{name: "bodyless delete second target", mode: logutil.RedactInfoLogOFF, bodyless: true, groupID: "group-beta"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -162,12 +166,20 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 			backend := audit.NewLocalLogBackend(true)
 			svr := newTestAuditServer(backend)
 			body := []byte(`{"name":"private-value"}`)
+			method, query := http.MethodPost, "?key=private-value"
+			if tc.bodyless {
+				body, method, query = []byte{}, http.MethodDelete, ""
+			}
+			groupID := tc.groupID
+			if groupID == "" {
+				groupID = "private-group"
+			}
 			router := gin.New()
 			router.Use(func(c *gin.Context) { c.Set(ServerContextKey, svr) })
 			var recordedInfo requestutil.RequestInfo
-			router.POST("/selected/:group_id", Audit("CreateKeyspace", audit.LocalLogLabel), func(c *gin.Context) {
-				re.Equal("private-group", c.Param("group_id"))
-				re.Equal("/selected/private-group", c.Request.URL.Path)
+			router.Handle(method, "/selected/:group_id", Audit("CreateKeyspace", audit.LocalLogLabel), func(c *gin.Context) {
+				re.Equal(groupID, c.Param("group_id"))
+				re.Equal("/selected/"+groupID, c.Request.URL.Path)
 				var ok bool
 				recordedInfo, ok = requestutil.RequestInfoFrom(c.Request.Context())
 				re.True(ok)
@@ -180,7 +192,10 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 				c.Request.URL.Path = "/rewritten"
 				c.AbortWithStatus(http.StatusBadRequest)
 			})
-			request := httptest.NewRequest(http.MethodPost, "/selected/private-group?key=private-value", bytes.NewReader(body))
+			request := httptest.NewRequest(method, "/selected/"+groupID+query, bytes.NewReader(body))
+			if tc.bodyless {
+				request.Body = http.NoBody
+			}
 			request.RemoteAddr = "192.0.2.10:12345"
 			request.Header.Set(apiutil.XForwardedForHeader, "203.0.113.99")
 			request.Header.Set(apiutil.XCallerIDHeader, "claimed-caller")
@@ -204,16 +219,23 @@ func TestAuditUsesV1FormatAndRedaction(t *testing.T) {
 				re.Equal(v1[field], v2[field], field)
 			}
 			re.Equal("audit log", v2["message"])
-			re.Contains(v2["service-info"], "Method:HTTP/1.1/POST:/selected/:group_id,")
-			re.NotContains(string(lines[0]), "private-group")
+			re.Contains(v2["service-info"], "Method:HTTP/1.1/"+method+":/selected/:group_id,")
 			re.Equal("192.0.2.10:12345", v2["remote-addr"])
 			re.Equal("verified-client", v2["tls-client-cn"])
 			re.Contains(v2["service-info"], "IP:203.0.113.99")
 			re.Contains(v2["service-info"], "CallerID:claimed-caller")
 			if tc.mode == logutil.RedactInfoLogON {
 				re.NotContains(string(lines[0]), "private-value")
+				re.NotContains(string(lines[0]), groupID)
+				re.Contains(v2["service-info"], "PathParam:?")
 			} else {
-				re.Contains(string(lines[0]), "private-value")
+				re.Contains(string(lines[0]), groupID)
+				if !tc.bodyless {
+					re.Contains(string(lines[0]), "private-value")
+				}
+				if tc.mode == logutil.RedactInfoLogMarker {
+					re.Contains(v2["service-info"], "PathParam:‹")
+				}
 			}
 		})
 	}
