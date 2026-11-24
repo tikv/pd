@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -1772,6 +1773,43 @@ func TestValidateBatchSplitRequest(t *testing.T) {
 				response.Ids[i] = split
 			}
 			require.LessOrEqual(t, response.Size(), MaxBatchSplitResponseSize)
+		})
+	}
+	// Exercise packed-peer and enclosing-message length prefix transitions as
+	// well as regions where the split count cap is stricter than the byte budget.
+	for _, peerCount := range []int{0, 1, 3, 5, 6, 7, 11, 12, 13, 1636, 1637, 1638, 1639, 32766} {
+		t.Run(fmt.Sprintf("wire-size-boundary-peers-%d", peerCount), func(t *testing.T) {
+			ids := make([]uint64, peerCount)
+			for i := range ids {
+				ids[i] = math.MaxUint64
+			}
+			region := &metapb.Region{Peers: make([]*metapb.Peer, peerCount)}
+			split := &pdpb.SplitID{NewRegionId: math.MaxUint64, NewPeerIds: ids}
+			response := &pdpb.AskBatchSplitResponse{Header: &pdpb.ResponseHeader{ClusterId: math.MaxUint64}}
+			headerSize := response.Size()
+			response.Ids = []*pdpb.SplitID{split}
+			splitSize := response.Size() - headerSize
+			limit := min(MaxBatchSplitCount, (MaxBatchSplitResponseSize-headerSize)/splitSize)
+			response.Ids = make([]*pdpb.SplitID, limit)
+			for i := range response.Ids {
+				response.Ids[i] = split
+			}
+			require.NoError(t, ValidateBatchSplitRequest(uint32(limit), region))
+			encoded, err := response.Marshal()
+			require.NoError(t, err)
+			require.LessOrEqual(t, len(encoded), MaxBatchSplitResponseSize)
+			schedulingResponse := &schedulingpb.AskBatchSplitResponse{
+				Header: &schedulingpb.ResponseHeader{ClusterId: math.MaxUint64},
+				Ids:    response.Ids,
+			}
+			encodedScheduling, err := schedulingResponse.Marshal()
+			require.NoError(t, err)
+			require.Len(t, encodedScheduling, len(encoded))
+			require.Error(t, ValidateBatchSplitRequest(uint32(limit+1), region))
+			if limit < MaxBatchSplitCount {
+				response.Ids = append(response.Ids, split)
+				require.Greater(t, response.Size(), MaxBatchSplitResponseSize)
+			}
 		})
 	}
 }
