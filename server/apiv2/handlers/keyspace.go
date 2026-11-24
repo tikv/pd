@@ -164,7 +164,7 @@ func LoadKeyspace(c *gin.Context) {
 			return
 		}
 		// keyspace has been checked in LoadKeyspace, so no need to check again.
-		groupID, err := groupManager.GetGroupByKeyspaceID(meta.GetId())
+		groupID, _, err := groupManager.GetGroupByKeyspaceID(meta.GetId())
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return

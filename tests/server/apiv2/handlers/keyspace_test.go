@@ -87,6 +87,56 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
 }
 
+func (suite *keyspaceTestSuite) TestRejectPendingCreateAndManualEnable() {
+	for _, stage := range []string{"waitSplitKeyspaceFailed", "saveKeyspaceMetaFailed"} {
+		suite.Run(stage, func() {
+			re := suite.Require()
+			request := &handlers.CreateKeyspaceParams{
+				Name:   "pending_http",
+				Config: map[string]string{"setting": "initial"},
+			}
+			if stage == "saveKeyspaceMetaFailed" {
+				request.Name = "pending_enable"
+			}
+			name := "github.com/tikv/pd/pkg/keyspace/" + stage
+			re.NoError(failpoint.Enable(name, "return(true)"))
+			// Ensure the fault is removed even if an assertion ends this test.
+			defer func() { re.NoError(failpoint.Disable(name)) }()
+			body, err := json.Marshal(request)
+			re.NoError(err)
+			resp, err := tests.TestDialClient.Post(suite.server.GetAddr()+keyspacesPrefix, "application/json", bytes.NewReader(body))
+			re.NoError(err)
+			re.Equal(http.StatusInternalServerError, resp.StatusCode)
+			var message string
+			re.NoError(json.NewDecoder(resp.Body).Decode(&message))
+			re.NoError(resp.Body.Close())
+			re.Contains(message, "manual enable")
+			pending := mustLoadKeyspaces(re, suite.server, request.Name)
+			re.Equal(keyspacepb.KeyspaceState_DISABLED, pending.GetState())
+			re.NotEmpty(pending.GetConfig()["creation_pending"])
+			re.NoError(failpoint.Disable(name))
+
+			request.Config["setting"] = "conflicting"
+			body, err = json.Marshal(request)
+			re.NoError(err)
+			resp, err = tests.TestDialClient.Post(suite.server.GetAddr()+keyspacesPrefix, "application/json", bytes.NewReader(body))
+			re.NoError(err)
+			re.Equal(http.StatusInternalServerError, resp.StatusCode)
+			re.NoError(json.NewDecoder(resp.Body).Decode(&message))
+			re.NoError(resp.Body.Close())
+			re.Contains(message, "already exists")
+			success, _ := sendUpdateStateRequest(re, suite.server, request.Name, &handlers.UpdateStateParam{State: "archived"})
+			re.False(success)
+			success, created := sendUpdateStateRequest(re, suite.server, request.Name, &handlers.UpdateStateParam{State: "enabled"})
+			re.True(success)
+			re.Equal(pending.GetId(), created.GetId())
+			re.Equal(keyspacepb.KeyspaceState_ENABLED, created.GetState())
+			re.Equal("initial", created.GetConfig()["setting"])
+			re.NotContains(created.GetConfig(), "creation_pending")
+		})
+	}
+}
+
 func (suite *keyspaceTestSuite) TestCreateLoadKeyspaceByID() {
 	re := suite.Require()
 	keyspaces := mustMakeTestKeyspacesByIDs(re, suite.server, 10)

@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -158,7 +159,12 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 			re.NoError(mgm.PatchStatus(ctx, groupID, &keyspace.MetaServiceGroupStatusPatch{Enabled: &enabled}))
 		}
 	}
-	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm, mgm)
+	cluster := mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg))
+	// The creation transaction and the labeler's post-commit reload must use
+	// the same storage, rather than the mock cluster's separate memory backend.
+	cluster.RegionLabeler, err = labeler.NewRegionLabeler(ctx, s, time.Hour)
+	re.NoError(err)
+	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, cluster, allocator, &config.KeyspaceConfig{}, kgm, mgm)
 	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager, mgm)
 	if opt.useEnabledKeyspaceIndex {
 		gcStateManager.SetEtcdClient(client)
