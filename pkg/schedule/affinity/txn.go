@@ -347,7 +347,7 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 		if m.targetWriter != nil {
 			m.RLock()
 			current := m.groups[groupID]
-			if current == nil || current != observed.groupInfoPtr || current.AffinityVer != observed.affinityVer {
+			if current.AffinityVer != observed.affinityVer {
 				m.RUnlock()
 				return m.GetAffinityGroupState(groupID), nil
 			}

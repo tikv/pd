@@ -78,7 +78,8 @@ func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, e
 		if target.ExpectedModRevision < 0 {
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("expected modification revision must be non-negative")
 		}
-		if target.LeaderStoreID == 0 || len(target.VoterStoreIDs) == 0 {
+		// AdjustGroup permits an entirely unset target when creating a group.
+		if target.LeaderStoreID == 0 && len(target.VoterStoreIDs) == 0 {
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
 		}
 		if err := m.AdjustGroup(&Group{ID: target.Expected.ID, LeaderStoreID: target.LeaderStoreID, VoterStoreIDs: target.VoterStoreIDs}); err != nil {
@@ -143,8 +144,11 @@ func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
 			// A retry can refresh an already persisted target once store conditions
 			// are known. Sync handles confirmation of local targets.
 			if changed := m.syncGroupTargetLocked(group, stored); written && !changed && !wasUnpersisted && m.storeConditionsKnown {
+				availability, deadline := group.GetAvailability(), group.degradedExpiredAt
 				m.setTargetAvailabilityLocked(group)
-				m.resetCountLocked(group)
+				if availability != group.GetAvailability() || deadline != group.degradedExpiredAt {
+					m.resetCountLocked(group)
+				}
 			}
 		}
 		m.Unlock()

@@ -47,6 +47,12 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+type targetWriterFunc func(context.Context, []affinity.GroupTarget) ([]string, error)
+
+func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	return f(ctx, targets)
+}
+
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
@@ -389,12 +395,6 @@ func TestAffinityGroupWatcherReloadsAfterCompaction(t *testing.T) {
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
 	failpointEnabled = false
-}
-
-type targetWriterFunc func(context.Context, []affinity.GroupTarget) ([]string, error)
-
-func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
-	return f(ctx, targets)
 }
 
 func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {

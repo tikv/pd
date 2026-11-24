@@ -53,18 +53,14 @@ func NewTargetWriter(httpClient *http.Client, getLeaderURL func() (string, error
 	return &TargetWriter{httpClient: httpClient, getLeaderURL: getLeaderURL, onFailure: onFailure, timeout: writeTimeout}
 }
 
-// WriteGroupTargets implements affinity.TargetWriter.
-func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
-	written, err := w.writeTargets(ctx, targets)
-	if err != nil {
-		w.onFailure()
-	}
-	return written, err
-}
-
-// writeTargets sends one request to the tracked PD leader. If it has become a
+// WriteGroupTargets sends one request to the tracked PD leader. If it has become a
 // follower, the v2 API Redirector forwards the request to the leader, adding one hop.
-func (w *TargetWriter) writeTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) (written []string, err error) {
+	defer func() {
+		if err != nil {
+			w.onFailure()
+		}
+	}()
 	leaderURL, err := w.getLeaderURL()
 	if err != nil {
 		return nil, errors.Annotate(affinity.ErrTargetWriterNotReady, err.Error())

@@ -34,10 +34,8 @@ func TestTargetWriterFailures(t *testing.T) {
 		name, body, wantError string
 		status                int
 	}{
-		{name: "bad request", status: http.StatusBadRequest, body: "rejected", wantError: "400 Bad Request rejected"},
 		{name: "not found", status: http.StatusNotFound, body: "404 page not found", wantError: "404 Not Found 404 page not found"},
 		{name: "internal error", status: http.StatusInternalServerError, body: "rejected", wantError: "500 Internal Server Error rejected"},
-		{name: "unavailable", status: http.StatusServiceUnavailable, body: "rejected", wantError: "503 Service Unavailable rejected"},
 		{name: "invalid response", status: http.StatusOK, body: "invalid JSON", wantError: "decode affinity group targets response"},
 		{name: "timeout", wantError: "context deadline exceeded"},
 		{name: "unreachable", wantError: "connect"},

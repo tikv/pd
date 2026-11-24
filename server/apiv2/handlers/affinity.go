@@ -389,6 +389,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 //
 //	@Tags		affinity-groups
 //	@Summary	Write leader and voter targets for affinity groups whose stored groups are unchanged.
+//	@Description	Each target commits independently, so an HTTP 500 on a later target leaves earlier commits in place.
 //	@Param		body	body	affinity.GroupTargetsRequest	true	"Targets with the groups they were decided from"
 //	@Produce	json
 //	@Success	200	{object}	affinity.GroupTargetsResponse	"IDs of the groups whose targets were written"

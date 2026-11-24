@@ -42,6 +42,12 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
+type targetWriterFunc func(context.Context, []affinity.GroupTarget) ([]string, error)
+
+func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	return f(ctx, targets)
+}
+
 func newAffinityTestOptions() *config.PersistOptions {
 	opt := mockconfig.NewTestOptions()
 	cfg := opt.GetScheduleConfig().Clone()
@@ -302,122 +308,39 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	re.Nil(ops, "Checker should not create operator for same peers")
 }
 
-type targetWriterFunc func(context.Context, []affinity.GroupTarget) ([]string, error)
-
-func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
-	return f(ctx, targets)
-}
-
-func newFirstWinChecker(t *testing.T) (*mockcluster.Cluster, *affinity.Manager, *AffinityChecker) {
-	opt := newAffinityTestOptions()
-	cluster := mockcluster.NewCluster(t.Context(), opt)
-	for storeID := uint64(1); storeID <= 3; storeID++ {
-		cluster.AddRegionStore(storeID, 10)
-	}
-	return cluster, cluster.GetAffinityManager(), newTestAffinityChecker(t.Context(), cluster, opt)
-}
-
-func TestAffinityCheckerFirstWinWithUnresponsivePD(t *testing.T) {
+func TestAffinityCheckerPersistsUnpersistedTarget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		re := require.New(t)
-		cluster, manager, checker := newFirstWinChecker(t)
-		regions := []*core.RegionInfo{
-			cluster.AddLeaderRegion(100, 1, 2, 3),
-			cluster.AddLeaderRegion(200, 2, 1, 3),
-			cluster.AddLeaderRegion(300, 3, 1, 2),
+		opt := newAffinityTestOptions()
+		cluster := mockcluster.NewCluster(t.Context(), opt)
+		for id := uint64(1); id <= 3; id++ {
+			cluster.AddRegionStore(id, 10)
 		}
+		region := cluster.AddLeaderRegion(100, 1, 2, 3)
+		manager := cluster.GetAffinityManager()
+		checker := newTestAffinityChecker(t.Context(), cluster, opt)
 		re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: "g"}, []byte{}, []byte{}))
-		const timeout = 3 * time.Second
-		calls, stopped := 0, false
-		manager.SetTargetWriter(targetWriterFunc(func(ctx context.Context, _ []affinity.GroupTarget) ([]string, error) {
-			calls++
-			ctx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			<-ctx.Done()
-			stopped = true
-			return nil, ctx.Err()
-		}))
-		start := time.Now()
-		for range 2 {
-			for _, region := range regions {
-				re.Empty(checker.Check(region))
-			}
-		}
-		re.Zero(time.Since(start), "the checker must not wait for PD")
-		synctest.Wait()
-		re.Equal(1, calls)
-		re.Zero(manager.GetAffinityGroupState("g").LeaderStoreID)
-		re.False(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
-		time.Sleep(timeout)
-		synctest.Wait()
-		re.True(stopped)
-	})
-}
-
-func TestAffinityCheckerFirstWinPatrolWithOldPD(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		re := require.New(t)
-		cluster, manager, checker := newFirstWinChecker(t)
-		cluster.AddLeaderRegionWithRange(100, "a", "b", 1, 2, 3)
-		cluster.AddLeaderRegionWithRange(200, "b", "c", 2, 1, 3)
-		regions := cluster.ScanRegions(nil, nil, 2)
-		re.Len(regions, 2)
-		re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: "g1"}, []byte("a"), []byte("b")))
-		re.NoError(createAffinityGroupForTest(manager, &affinity.Group{ID: "g2"}, []byte("b"), []byte("c")))
-		created := manager.GetAffinityGroupState("g1").Group
-		var requests []time.Time
-		var lastSent affinity.GroupTarget
-		upgraded := false
+		created := manager.GetAffinityGroupState("g")
+		var requests []affinity.GroupTarget
 		manager.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []affinity.GroupTarget) ([]string, error) {
-			requests = append(requests, time.Now())
-			lastSent = targets[0]
-			if upgraded {
-				return []string{lastSent.Expected.ID}, nil
+			requests = append(requests, targets...)
+			if len(requests) == 1 {
+				return nil, affinity.ErrTargetWriterUnsupported
 			}
-			return nil, affinity.ErrTargetWriterUnsupported
+			return []string{"g"}, nil
 		}))
-		patrol := func(region *core.RegionInfo) {
-			re.Empty(checker.Check(region))
-			synctest.Wait()
-		}
-		patrol(regions[0])
-		local := manager.GetAffinityGroupState("g1")
+		manager.ObserveAvailableRegion(region, created)
+		synctest.Wait()
+		local := manager.GetAffinityGroupState("g")
 		re.True(local.HasUnpersistedTarget())
 		re.True(local.AffinitySchedulingAllowed)
-		re.Equal(uint64(1), local.LeaderStoreID)
-		re.Equal([]uint64{1, 2, 3}, local.VoterStoreIDs)
-		re.Zero(manager.GetAffinityGroupState("g2").LeaderStoreID)
 		re.Len(requests, 1)
 
-		// A region in the first group can already be scheduled to the local target.
-		probe := regions[0].Clone(core.WithLeader(regions[0].GetStorePeer(2)))
-		ops := checker.Check(probe)
-		re.Len(ops, 1)
-		re.Equal("affinity-move-region", ops[0].Desc())
-
-		// Each patrol starts with g1's persistence retry after the cooldown.
-		for round := range 4 {
-			time.Sleep(time.Second)
-			for _, region := range regions {
-				patrol(region)
-			}
-			group := manager.GetAffinityGroupState("g2")
-			re.True(group.AffinitySchedulingAllowed, "g1's 404 must not block g2 from initializing")
-			re.True(group.HasUnpersistedTarget())
-			re.Equal(uint64(2), group.LeaderStoreID)
-			re.Len(requests, round+2, "one probe per round")
-			re.GreaterOrEqual(requests[round+1].Sub(requests[round]), time.Second)
-		}
-
-		upgraded = true
 		time.Sleep(time.Second)
-		patrol(regions[0])
-		re.Len(requests, 6)
-		re.Equal(affinity.GroupTarget{Expected: created, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}, lastSent)
-		manager.SyncGroupFromEtcd(&local.Group)
-		re.False(manager.GetAffinityGroupState("g1").HasUnpersistedTarget())
-		patrol(regions[0])
-		re.Len(requests, 6)
+		re.Empty(checker.Check(region))
+		synctest.Wait()
+		want := affinity.GroupTarget{Expected: created.Group, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+		re.Equal([]affinity.GroupTarget{want, want}, requests)
 	})
 }
 

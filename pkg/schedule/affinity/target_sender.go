@@ -34,7 +34,7 @@ func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGr
 	now := time.Now()
 	if now.Before(m.targetEndpointUnsupportedUntil) {
 		m.targetWriteMutex.Unlock()
-		if !persistOnly && m.ctx.Err() == nil {
+		if !persistOnly {
 			m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
 		}
 		return
@@ -54,9 +54,7 @@ func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGr
 		unsupported := errors.Is(err, ErrTargetWriterUnsupported)
 		if unsupported && !persistOnly {
 			m.metaMutex.Lock()
-			if m.ctx.Err() == nil {
-				m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
-			}
+			m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
 			m.metaMutex.Unlock()
 		}
 		m.targetWriteMutex.Lock()
@@ -82,9 +80,6 @@ func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGr
 // endpoint. Caller holds metaMutex.
 func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64) {
 	voterStoreIDs := sortedStoreIDs(target.VoterStoreIDs)
-	if target.LeaderStoreID == 0 || len(voterStoreIDs) == 0 {
-		return
-	}
 
 	m.Lock()
 	defer m.Unlock()
