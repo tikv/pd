@@ -119,7 +119,6 @@ func TestStarterNativeBRBarrierOnLeaderChange(t *testing.T) {
 	store := oldLeader.GetServer().GetStorage()
 	const id = keypath.NativeBRServiceSafePointID
 	source := keypath.ServiceGCSafePointPath(id)
-	re.NoError(store.Save(keypath.GCMigrationCutoffPath(), "1"))
 	expires := time.Now().Add(12 * time.Hour).Unix()
 	re.NoError(store.Save(source, fmt.Sprintf(`{"service_id":"native_br","safe_point":100,"expired_at":%d}`, expires)))
 	re.NoError(oldLeader.ResignLeaderWithRetry())

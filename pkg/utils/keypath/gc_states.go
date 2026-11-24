@@ -25,11 +25,6 @@ func GCStateRevisionPath() string {
 	return fmt.Sprintf(gcStateRevisionPathFormat, ClusterID())
 }
 
-// GCMigrationCutoffPath returns the key whose creation revision is the cutoff for Starter GC migration.
-func GCMigrationCutoffPath() string {
-	return fmt.Sprintf("/pd/%d/gc/migration_cutoff", ClusterID())
-}
-
 // GCSafePointPath returns the key path of the GC safe point.
 // Please note that the value format differs between the NullKeyspace and other keyspaces.
 func GCSafePointPath(keyspaceID uint32) string {

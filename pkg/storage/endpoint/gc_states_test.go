@@ -69,8 +69,6 @@ func TestMigrateNativeBRBarrier(t *testing.T) {
 			store := NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
 			p := store.GetGCStateProvider()
 			ctx := t.Context()
-			re.NoError(store.Save(keypath.GCMigrationCutoffPath(), "1"))
-			// Starter can renew the lease after its GC migration cutoff.
 			re.NoError(store.Save(source, fmt.Sprintf(`{"service_id":"native_br","safe_point":100,"expired_at":%d}`, tc.expiresAt)))
 			if tc.existing {
 				re.NoError(p.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
@@ -116,16 +114,7 @@ func TestMigrateNativeBRBarrierLeavesScopedBarrier(t *testing.T) {
 	p := store.GetGCStateProvider()
 	ctx := t.Context()
 	const id = keypath.NativeBRServiceSafePointID
-	source := keypath.ServiceGCSafePointPath(id)
-	value := `{"service_id":"native_br","safe_point":100,"expired_at":9223372036854775807}`
-	re.NoError(store.Save(source, value))
-	re.NoError(p.MigrateNativeBRBarrier(ctx, client))
-	got, err := store.Load(source)
-	re.NoError(err)
-	re.Equal(value, got)
-
 	// A scoped barrier created by new PD uses the same key and encoding as the Starter record.
-	re.NoError(store.Save(keypath.GCMigrationCutoffPath(), "1"))
 	re.NoError(p.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
 		return wb.SetGCBarrier(constant.NullKeyspaceID, NewGCBarrier(id, 101, nil))
 	}))

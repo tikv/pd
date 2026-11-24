@@ -418,18 +418,13 @@ func (p GCStateProvider) MigrateNativeBRBarrier(ctx context.Context, client *cli
 	if err != nil || revision == 0 {
 		return err
 	}
-	// Old Starter can renew after the upgrade marker is written. The first native GC
-	// write creates the GC revision key; a scoped barrier written since then must stay scoped.
-	ctx, cancel := context.WithTimeout(ctx, etcdutil.DefaultRequestTimeout)
-	defer cancel()
-	resp, err := client.Txn(ctx).
-		If(clientv3.Compare(clientv3.Value(keypath.GCMigrationCutoffPath()), "=", "1")).
-		Then(clientv3.OpGet(keypath.GCStateRevisionPath())).Commit()
-	if err != nil || !resp.Succeeded {
+	// The first native GC write creates the GC revision key. Later writes to the
+	// legacy path belong to the scoped barrier API, which uses the same encoding.
+	resp, err := etcdutil.EtcdKVGetWithContext(ctx, client, keypath.GCStateRevisionPath())
+	if err != nil {
 		return err
 	}
-	nativeRevision := resp.Responses[0].GetResponseRange().Kvs
-	if len(nativeRevision) != 0 && revision >= nativeRevision[0].CreateRevision {
+	if len(resp.Kvs) != 0 && revision >= resp.Kvs[0].CreateRevision {
 		return nil
 	}
 	var legacy ServiceSafePoint
