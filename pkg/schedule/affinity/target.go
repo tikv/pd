@@ -34,9 +34,11 @@ var ErrTargetWriterUnsupported = errors.New("affinity target endpoint is unsuppo
 // GroupTarget is a target decided from the persisted group in Expected.
 // NOTE: This type is exported by HTTP API.
 type GroupTarget struct {
-	Expected      Group    `json:"expected"`
-	LeaderStoreID uint64   `json:"leader_store_id"`
-	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+	Expected Group `json:"expected"`
+	// ExpectedModRevision is the observed etcd key revision. Zero compares only the group contents.
+	ExpectedModRevision int64    `json:"expected_mod_revision,omitempty"`
+	LeaderStoreID       uint64   `json:"leader_store_id"`
+	VoterStoreIDs       []uint64 `json:"voter_store_ids"`
 }
 
 // GroupTargetsRequest is the body of the conditional target API.
@@ -73,6 +75,9 @@ func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, e
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("duplicate group " + target.Expected.ID)
 		}
 		seen[target.Expected.ID] = struct{}{}
+		if target.ExpectedModRevision < 0 {
+			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("expected modification revision must be non-negative")
+		}
 		if target.LeaderStoreID == 0 || len(target.VoterStoreIDs) == 0 {
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
 		}
@@ -105,7 +110,7 @@ func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
 	var stored *Group
 	written := false
 	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		value, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
+		value, revision, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
 		if err != nil || value == "" {
 			return err
 		}
@@ -116,10 +121,11 @@ func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
 		group.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
 		stored = group
 		result := target.result()
+		revisionMatches := target.ExpectedModRevision == 0 || target.ExpectedModRevision == revision
 		switch {
 		case sameStoredGroup(group, result):
 			written = true
-		case sameStoredGroup(group, &target.Expected):
+		case revisionMatches && sameStoredGroup(group, &target.Expected):
 			if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
 				return err
 			}

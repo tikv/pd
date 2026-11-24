@@ -357,15 +357,20 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 			if !conditionsKnown && !group.targetUnpersisted && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
 				return group, nil
 			}
-			target := GroupTarget{Expected: expected, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
+			target := GroupTarget{
+				Expected:            expected,
+				ExpectedModRevision: observedModRevision,
+				LeaderStoreID:       leaderStoreID,
+				VoterStoreIDs:       voterStoreIDs,
+			}
 			persistOnly := group.AffinitySchedulingAllowed && group.targetUnpersisted
 			result := target.result()
 			matchesStored := sameStoredGroup(&target.Expected, result)
 			if !group.AffinitySchedulingAllowed && (matchesStored || sameStoredGroup(&group.Group, result)) {
-				m.applyLocalObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, observedModRevision)
+				m.applyLocalObservedTarget(target, observed.groupInfoPtr, observed.affinityVer)
 			}
 			if !matchesStored {
-				m.sendObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, observedModRevision, persistOnly)
+				m.sendObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, persistOnly)
 			}
 			return m.GetAffinityGroupState(groupID), nil
 		}

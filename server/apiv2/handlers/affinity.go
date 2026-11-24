@@ -384,7 +384,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 }
 
 // UpdateAffinityGroupTargets writes leader and voter targets for several affinity groups.
-// A target is written only if the stored group still equals its expected group.
+// A target is written only if the stored group matches the expected contents and any supplied modification revision.
 // The scheduling service uses it to store the targets it decides.
 //
 //	@Tags		affinity-groups

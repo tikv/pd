@@ -1116,20 +1116,25 @@ func TestTargetCASAndLostReplyWithEtcd(t *testing.T) {
 	m.applyStoreConditions(map[uint64]storeCondition{})
 
 	target := targetFor(m, "g", 3, 1, 2, 3)
+	key := keypath.AffinityGroupPath("g")
+	expected, err := client.Get(t.Context(), key)
+	re.NoError(err)
+	re.Len(expected.Kvs, 1)
+	target.ExpectedModRevision = expected.Kvs[0].ModRevision
 	wrapped.loseReply = true
 	_, err = m.UpdateAffinityGroupTargets([]GroupTarget{target})
 	re.ErrorContains(err, "committed reply lost")
 	re.Equal(uint64(2), m.GetAffinityGroupState("g").LeaderStoreID)
 	re.Equal(uint64(3), loadStoredGroup(re, store, "g").LeaderStoreID)
 	wrapped.loseReply = false
-	before, err := client.Get(t.Context(), keypath.AffinityGroupPath("g"))
+	before, err := client.Get(t.Context(), key)
 	re.NoError(err)
 	target.Expected.VoterStoreIDs = []uint64{3, 2, 1}
 	written, err = m.UpdateAffinityGroupTargets([]GroupTarget{target})
 	re.NoError(err)
 	re.Equal([]string{"g"}, written)
 	re.Equal(*loadStoredGroup(re, store, "g"), m.GetAffinityGroupState("g").Group)
-	after, err := client.Get(t.Context(), keypath.AffinityGroupPath("g"))
+	after, err := client.Get(t.Context(), key)
 	re.NoError(err)
 	re.Equal(before.Kvs[0].ModRevision, after.Kvs[0].ModRevision, "idempotent retries do not put again")
 }

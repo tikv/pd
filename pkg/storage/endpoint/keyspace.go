@@ -72,7 +72,7 @@ func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.Key
 		err     error
 	)
 	if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
-		metaVal, err = revisionTxn.LoadWithRevision(metaPath)
+		metaVal, _, err = revisionTxn.LoadWithRevision(metaPath)
 	} else {
 		metaVal, err = txn.Load(metaPath)
 	}

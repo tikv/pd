@@ -25,8 +25,8 @@ import (
 type AffinityStorage interface {
 	// LoadAffinityGroup loads a single affinity group as a raw JSON string.
 	LoadAffinityGroup(groupID string) (string, error)
-	// LoadAffinityGroupInTxn loads a single affinity group within a transaction.
-	LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, error)
+	// LoadAffinityGroupInTxn loads a group and its modification revision (zero if unavailable).
+	LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, int64, error)
 	// LoadAllAffinityGroups loads all affinity groups, passing raw key/value strings to the callback.
 	LoadAllAffinityGroups(f func(k, v string)) error
 
@@ -57,9 +57,14 @@ func (se *StorageEndpoint) LoadAffinityGroup(groupID string) (string, error) {
 	return se.Load(keypath.AffinityGroupPath(groupID))
 }
 
-// LoadAffinityGroupInTxn loads the raw group value in the caller's transaction.
-func (*StorageEndpoint) LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, error) {
-	return txn.Load(keypath.AffinityGroupPath(groupID))
+// LoadAffinityGroupInTxn loads the raw group value and guards its revision on etcd.
+func (*StorageEndpoint) LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, int64, error) {
+	key := keypath.AffinityGroupPath(groupID)
+	if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
+		return revisionTxn.LoadWithRevision(key)
+	}
+	value, err := txn.Load(key)
+	return value, 0, err
 }
 
 // LoadAllAffinityGroups loads all affinity group configurations from storage.

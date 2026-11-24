@@ -183,7 +183,7 @@ func (*StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup
 		err   error
 	)
 	if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
-		value, err = revisionTxn.LoadWithRevision(key)
+		value, _, err = revisionTxn.LoadWithRevision(key)
 	} else {
 		value, err = txn.Load(key)
 	}
