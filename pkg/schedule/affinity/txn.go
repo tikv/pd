@@ -807,7 +807,7 @@ func (m *Manager) collectRangeConflictsLocked() map[string]struct{} {
 
 // reconcileRangeConflictsLocked preserves the raw ranges for administrative
 // repairs, but excludes every conflicting group from affinity scheduling. It
-// logs the groups that start or stop conflicting, at the error level if any
+// logs the groups that start or stop conflicting, at the warn level if any
 // group starts conflicting.
 // Both metaMutex and the manager write lock must be held.
 func (m *Manager) reconcileRangeConflictsLocked(conflicts map[string]struct{}) {
@@ -829,7 +829,7 @@ func (m *Manager) reconcileRangeConflictsLocked(conflicts map[string]struct{}) {
 	slices.Sort(conflicting)
 	slices.Sort(resolved)
 	if len(conflicting) > 0 {
-		log.Error("overlapping affinity key ranges; delete or update conflicting groups to restore affinity scheduling",
+		log.Warn("overlapping affinity key ranges; delete or update conflicting groups to restore affinity scheduling",
 			zap.Strings("newly-conflicting-group-ids", conflicting),
 			zap.Strings("resolved-group-ids", resolved))
 	} else if len(resolved) > 0 {

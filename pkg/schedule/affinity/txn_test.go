@@ -318,7 +318,7 @@ func TestLoadOverlappingAffinityRanges(t *testing.T) {
 				return data
 			}
 			before := snapshot()
-			logFile := testutil.InitTempFileLogger(t, "error")
+			logFile := testutil.InitTempFileLogger(t, "warn")
 			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 			re.NoError(err)
 			manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
@@ -341,6 +341,7 @@ func TestLoadOverlappingAffinityRanges(t *testing.T) {
 			logs, err := os.ReadFile(logFile)
 			re.NoError(err)
 			re.Equal(1, strings.Count(string(logs), "overlapping affinity key ranges"))
+			re.Regexp(`\[WARN\][^\n]*overlapping affinity key ranges`, string(logs))
 			for _, change := range testCase.groups {
 				re.Contains(string(logs), change.GroupID)
 			}
