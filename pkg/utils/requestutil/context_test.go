@@ -124,10 +124,11 @@ func TestRequestInfoStringRedactEmptyFields(t *testing.T) {
 		redact    logutil.RedactInfoLogType
 		wantQuery string
 		wantBody  string
+		wantPath  string
 	}{
-		{name: "off", redact: logutil.RedactInfoLogOFF, wantQuery: "query-secret", wantBody: "body-secret"},
-		{name: "on", redact: logutil.RedactInfoLogON, wantQuery: "?", wantBody: "?"},
-		{name: "marker", redact: logutil.RedactInfoLogMarker, wantQuery: "‹query-secret›", wantBody: "‹body-secret›"},
+		{name: "off", redact: logutil.RedactInfoLogOFF, wantQuery: "query-secret", wantBody: "body-secret", wantPath: "path-secret"},
+		{name: "on", redact: logutil.RedactInfoLogON, wantQuery: "?", wantBody: "?", wantPath: "?"},
+		{name: "marker", redact: logutil.RedactInfoLogMarker, wantQuery: "‹query-secret›", wantBody: "‹body-secret›", wantPath: "‹path-secret›"},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			re := require.New(t)
@@ -136,16 +137,19 @@ func TestRequestInfoStringRedactEmptyFields(t *testing.T) {
 				name     string
 				urlParam string
 				body     string
+				path     string
 				want     string
 			}{
 				{name: "both empty", want: ", URLParam:, BodyParam:}"},
 				{name: "empty body", urlParam: "query-secret", want: ", URLParam:" + mode.wantQuery + ", BodyParam:}"},
 				{name: "empty query", body: "body-secret", want: ", URLParam:, BodyParam:" + mode.wantBody + "}"},
+				{name: "path only", path: "path-secret", want: ", URLParam:, BodyParam:, PathParam:" + mode.wantPath + "}"},
 			} {
-				info := RequestInfo{URLParam: testCase.urlParam, BodyParam: testCase.body}
+				info := RequestInfo{URLParam: testCase.urlParam, BodyParam: testCase.body, PathParam: testCase.path}
 				re.Contains(info.String(), testCase.want, testCase.name)
 				re.Equal(testCase.urlParam, info.URLParam, testCase.name)
 				re.Equal(testCase.body, info.BodyParam, testCase.name)
+				re.Equal(testCase.path, info.PathParam, testCase.name)
 			}
 
 			req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test", nil)

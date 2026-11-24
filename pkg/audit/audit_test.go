@@ -33,6 +33,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
@@ -105,6 +106,15 @@ func TestPrometheusBackend(t *testing.T) {
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.True(backend.ProcessHTTPRequest(req))
 
+	var metric dto.Metric
+	re.NoError(serviceAuditHistogramTest.WithLabelValues("test", "HTTP").(prometheus.Metric).Write(&metric))
+	legacyDuration := float64(3 * (endTime - info.StartTimeStamp))
+	re.Equal(legacyDuration, metric.GetHistogram().GetSampleSum())
+	req = req.WithContext(requestutil.WithRequestDuration(req.Context(), 125*time.Millisecond))
+	re.True(backend.ProcessHTTPRequest(req))
+	re.NoError(serviceAuditHistogramTest.WithLabelValues("test", "HTTP").(prometheus.Metric).Write(&metric))
+	re.Equal(legacyDuration+0.125, metric.GetHistogram().GetSampleSum())
+
 	req, err = http.NewRequest(http.MethodGet, ts.URL, http.NoBody)
 	re.NoError(err)
 	resp, err := http.DefaultClient.Do(req)
@@ -176,6 +186,74 @@ func captureAuditJSON(t *testing.T) *bytes.Buffer {
 	require.NoError(t, err)
 	t.Cleanup(log.ReplaceGlobals(logger, props))
 	return output
+}
+
+func TestHTTPAuditLogLevelChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		initial zapcore.Level
+		updated zapcore.Level
+		panic   bool
+		after   bool
+		mode    logutil.RedactInfoLogType
+	}{
+		{name: "raise", initial: zap.InfoLevel, updated: zap.ErrorLevel},
+		{name: "lower", initial: zap.ErrorLevel, updated: zap.InfoLevel},
+		{name: "unchanged info", initial: zap.InfoLevel, updated: zap.InfoLevel},
+		{name: "unchanged error", initial: zap.ErrorLevel, updated: zap.ErrorLevel},
+		{name: "raise and panic", initial: zap.InfoLevel, updated: zap.ErrorLevel, panic: true},
+		{name: "marker suppressed", initial: zap.ErrorLevel, updated: zap.InfoLevel, mode: logutil.RedactInfoLogMarker},
+		{name: "after handler lower", initial: zap.ErrorLevel, updated: zap.InfoLevel, after: true},
+		{name: "after handler raise", initial: zap.InfoLevel, updated: zap.ErrorLevel, after: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			var logger *zap.Logger
+			var props *log.ZapProperties
+			re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, tc.mode))
+			t.Cleanup(func() { re.NoError(logutil.SetupLogger(&log.Config{}, &logger, &props, logutil.RedactInfoLogOFF)) })
+			output := captureAuditJSON(t)
+			log.SetLevel(tc.initial)
+			request := httptest.NewRequest(http.MethodPost, "/selected", strings.NewReader("request-body"))
+			originalBody := request.Body
+			recorder := httptest.NewRecorder()
+			serve := func() {
+				ProcessHTTPRequest(recorder, request, &BackendLabels{Labels: []string{LocalLogLabel}},
+					[]Backend{NewLocalLogBackend(!tc.after)}, func(w http.ResponseWriter, r *http.Request) {
+						if tc.initial == zap.ErrorLevel && !tc.after {
+							re.Equal(originalBody, r.Body, "suppressed logs must not buffer the body")
+						}
+						data, err := io.ReadAll(r.Body)
+						re.NoError(err)
+						re.Equal("request-body", string(data))
+						log.SetLevel(tc.updated)
+						if tc.panic {
+							panic("handler failed")
+						}
+						w.WriteHeader(http.StatusNoContent)
+					})
+			}
+			if tc.panic {
+				re.PanicsWithValue("handler failed", serve)
+			} else {
+				serve()
+				re.Equal(http.StatusNoContent, recorder.Code)
+			}
+			re.Equal(tc.updated, log.GetLevel())
+			level := tc.initial
+			if tc.after {
+				level = tc.updated
+			}
+			if level == zap.ErrorLevel {
+				re.Empty(output.String())
+				return
+			}
+			var entry map[string]any
+			re.NoError(json.Unmarshal(output.Bytes(), &entry))
+			re.Equal("audit log", entry["message"])
+			re.Contains(entry["service-info"], "BodyParam:request-body")
+		})
+	}
 }
 
 func TestLocalLogBackendConnectionOrigin(t *testing.T) {

@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -30,7 +31,7 @@ import (
 func RegisterSafePoint(r *gin.RouterGroup) {
 	router := r.Group("gc/safepoint")
 	router.Use(middlewares.BootstrapChecker())
-	router.GET("/:keyspaceID", LoadGCSafePoint)
+	router.GET("/:keyspaceID", middlewares.Audit("LoadGCSafePoint", audit.PrometheusHistogram), LoadGCSafePoint)
 }
 
 // GCSafePoint is the response structure for GC safe point.
