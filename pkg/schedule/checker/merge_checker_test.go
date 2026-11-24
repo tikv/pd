@@ -683,6 +683,18 @@ func TestMergeCheckerSkipsActiveAffinityGroup(t *testing.T) {
 			re.False(AllowMerge(cluster, source, target))
 			re.False(AllowMerge(cluster, target, source))
 
+			// A healthy region with matching voters would restore the degraded group.
+			_, err := manager.UpdateAffinityGroupPeers("test", 1, []uint64{1, 2, 4})
+			re.NoError(err)
+			manager.DegradeAffinityGroup("test")
+			state := manager.GetAffinityGroupState("test")
+			re.False(state.AffinitySchedulingAllowed)
+			re.False(state.RegularSchedulingAllowed)
+			re.Nil(affinityChecker.Check(source))
+			re.False(affinityFilter.Select(source).IsOK())
+			re.Nil(mergeChecker.Check(source))
+			re.False(AllowMerge(cluster, source, target))
+
 			manager.ExpireAffinityGroup("test")
 			re.True(manager.GetAffinityGroupState("test").RegularSchedulingAllowed)
 			re.True(AllowMerge(cluster, source, target))
