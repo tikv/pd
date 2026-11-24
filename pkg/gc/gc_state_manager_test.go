@@ -1585,13 +1585,15 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierSkipsKeyspaces() {
 	re.Equal(b.BarrierTS, inherited.BarrierTS)
 }
 
-func (s *gcStateManagerTestSuite) TestGlobalGCBarrierRechecksFloorOnRevisionConflict() {
+func (s *gcStateManagerTestSuite) prepareGlobalGCBarrierRevisionConflict(ctx context.Context, now time.Time) {
+	s.T().Helper()
 	re := s.Require()
-	ctx := context.Background()
-	now := time.Now()
 	initial, err := s.manager.SetGlobalGCBarrier(ctx, "source", 0, time.Hour, now)
 	re.NoError(err)
-	// Another GC transaction removes the last active barrier between the read of M and the put.
+	re.Equal(gcTestTS(1), initial.BarrierTS)
+	setTestTSOWindow(s.T(), s.storage, 2)
+
+	// Remove the last active barrier after the request reads it and before its first commit.
 	store := &barrierMetricsTestKV{Base: s.storage.Base}
 	store.beforeCommit = sync.OnceFunc(func() {
 		re.NoError(s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
@@ -1599,16 +1601,29 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierRechecksFloorOnRevisionConf
 		}))
 	})
 	s.manager.gcMetaStorage = endpoint.NewStorageEndpoint(store, nil).GetGCStateProvider()
-	setTestTSOWindow(s.T(), s.storage, 2)
-	_, err = s.manager.SetGlobalGCBarrier(ctx, "copy", initial.BarrierTS, time.Hour, now)
+}
+
+func (s *gcStateManagerTestSuite) TestGlobalGCBarrierRechecksFloorOnRevisionConflict() {
+	re := s.Require()
+	ctx := context.Background()
+	now := time.Now()
+	s.prepareGlobalGCBarrierRevisionConflict(ctx, now)
+
+	_, err := s.manager.SetGlobalGCBarrier(ctx, "copy", gcTestTS(1), time.Hour, now)
 	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSUnsafe)
 	re.Nil(s.getGlobalGCBarrier("copy"))
+}
 
-	store.beforeCommit = nil
+func (s *gcStateManagerTestSuite) TestGlobalGCBarrierReselectsTSOnRevisionConflict() {
+	re := s.Require()
+	ctx := context.Background()
+	now := time.Now()
+	s.prepareGlobalGCBarrierRevisionConflict(ctx, now)
+
 	b, err := s.manager.SetGlobalGCBarrier(ctx, "copy", 0, time.Hour, now)
 	re.NoError(err)
-	re.Greater(b.BarrierTS, initial.BarrierTS)
 	re.Equal(gcTestTS(2), b.BarrierTS)
+	re.Equal(b, s.getGlobalGCBarrier("copy"))
 }
 
 func (s *gcStateManagerTestSuite) TestQueuedGlobalGCBarrierUsesCurrentTime() {
