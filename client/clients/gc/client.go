@@ -140,8 +140,10 @@ type GCStatesClient interface {
 	// TSO window bound and the unified GC txn safe point. An explicit timestamp must meet the same bound.
 	// On rejection the existing timestamp and expiration are preserved.
 	//
-	// During a rolling upgrade, older PD leaders may treat zero as an explicit timestamp.
-	// Callers can rely on automatic selection once all eligible PD leaders support it.
+	// During a rolling upgrade, wait until all eligible PD leaders support automatic selection
+	// before passing zero. In deployments with a separate TSO service, upgrade every pd-tso
+	// instance to a version that retains deleted groups' TSO windows before resuming GC or
+	// relying on the window bound for either explicit or automatically selected timestamps.
 	//
 	// The returned BarrierTS is the timestamp stored. Pass it explicitly to renew at that point.
 	// It may be ahead of timestamps already issued. Obtain a read or backup timestamp separately
