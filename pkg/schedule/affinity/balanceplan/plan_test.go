@@ -30,311 +30,217 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-// general starts every group on stores 0..replicas-1; store s is in zone s%zones.
-func general(groups, stores, replicas, zones int) *Input {
-	loc, ids := make([][]int32, stores), make([]int, stores)
-	for s := range stores {
-		ids[s], loc[s] = s, []int32{int32(s % zones)}
+// general assigns voters in rule order, starting at store 0.
+// A positive zone count gives store s the location s % zones.
+func general(groups, stores, zones int, counts ...int) *Input {
+	ids := make([]int, stores)
+	var loc [][]int32
+	if zones > 0 {
+		loc = deepPaths(stores, 1, func(s int) int { return s % zones })
 	}
-	rule := &Rule{Role: RoleVoter, Count: replicas, Stores: ids, Location: loc}
+	for s := range ids {
+		ids[s] = s
+	}
+	rules := make([]*Rule, len(counts))
+	var ruleOf []int
+	for ri, count := range counts {
+		rules[ri] = &Rule{Count: count, Stores: ids, Location: loc}
+		ruleOf = append(ruleOf, slices.Repeat([]int{ri}, count)...)
+	}
 	in := &Input{Stores: stores, BaseVoters: make([]int, stores), BaseLeaders: make([]int, stores)}
 	can := allTrue(stores)
 	for range groups {
-		in.Groups = append(in.Groups, Group{Rules: []*Rule{rule}, Voters: slices.Clone(ids[:replicas]),
-			RuleOf: make([]int, replicas), Leader: 0, CanLead: can})
+		in.Groups = append(in.Groups, Group{
+			Rules: rules, Voters: slices.Clone(ids[:len(ruleOf)]), RuleOf: slices.Clone(ruleOf), CanLead: can,
+		})
 	}
 	return in
 }
 
-// broad uses one voter per zone, concentrated or round-robin, with optional leader stores.
-func broad(n, perzone int, leaderStores []int, concentrated bool) *Input {
-	in := general(n, 3*perzone, 3, 3)
-	for s := range in.Stores {
-		in.Groups[0].Rules[0].Location[s][0] = int32(s / perzone)
-	}
-	can := allTrue(in.Stores)
-	if leaderStores != nil {
-		clear(can)
-		for _, s := range leaderStores {
-			can[s] = true
-		}
-	}
-	for i := range in.Groups {
-		v := []int{0, perzone, 2 * perzone}
-		if !concentrated {
-			v = []int{i % perzone, perzone + (i/3)%perzone, 2*perzone + (i/9)%perzone}
-		}
-		leader := slices.IndexFunc(v, func(s int) bool { return can[s] })
-		if leader < 0 {
-			v[0], leader = leaderStores[0], 0
-		}
-		in.Groups[i].Voters, in.Groups[i].Leader, in.Groups[i].CanLead = v, v[leader], can
-	}
-	return in
-}
-
-// bottleneck lets 90% of the groups use only stores 0 and 1 in zone 0; the
-// layout already attains the voter optimum.
-func bottleneck(n, perzone int) *Input {
-	in := broad(n, perzone, nil, false)
-	open := in.Groups[0].Rules[0]
-	narrow := &Rule{Role: RoleVoter, Count: 3, Stores: append([]int{0, 1}, open.Stores[perzone:]...), Location: open.Location}
-	restricted := n * 9 / 10
-	for i := range in.Groups {
-		g := &in.Groups[i]
-		g.Voters = []int{2 + (i-restricted)%(perzone-2), perzone + i%perzone, 2*perzone + i%perzone}
-		if i < restricted {
-			g.Rules, g.Voters[0] = []*Rule{narrow}, i%2
-		}
-		g.Leader = g.Voters[1+i%2]
-	}
-	return in
-}
-
-// hosts places 3 replicas over 2 zones with host isolation: each zone has
-// hostsPerZone hosts of 3 stores.
-func hosts(groups, hostsPerZone int) *Input {
-	stores := 2 * hostsPerZone * 3
-	in := general(groups, stores, 3, 2)
-	for s, loc := range in.Groups[0].Rules[0].Location {
-		loc[0] = int32(s / (stores / 2))
-		in.Groups[0].Rules[0].Location[s] = append(loc, int32(s/3))
-	}
-	for i := range in.Groups {
-		in.Groups[i].Voters = []int{0, 3, stores / 2}
-	}
-	return in
-}
-
-// primary is the placement policy shape: a leader in zone 0 and two more
-// voters, either outside zone 0 or anywhere (overlapping the leader rule).
-func primary(groups, perzone int, overlap bool) *Input {
-	in := broad(groups, perzone, nil, true)
-	all := in.Groups[0].Rules[0]
-	leader := &Rule{Role: RoleLeader, Count: 1, Stores: all.Stores[:perzone], Location: all.Location}
-	rest := &Rule{Role: RoleFollower, Count: 2, Stores: all.Stores[perzone:], Location: all.Location}
-	if overlap {
-		rest = &Rule{Role: RoleVoter, Count: 2, Stores: all.Stores, Location: all.Location}
-	}
-	for i := range in.Groups {
-		in.Groups[i].Rules, in.Groups[i].RuleOf = []*Rule{leader, rest}, []int{0, 1, 1}
-	}
-	return in
-}
-
-// Choosing the voter rule's cheapest store first takes the follower's only store.
-func overlapInput() *Input {
-	rules := []*Rule{
-		{Role: RoleLeader, Count: 1, Stores: []int{0, 3}},
-		{Role: RoleVoter, Count: 1, Stores: []int{1, 2}},
-		{Role: RoleFollower, Count: 1, Stores: []int{1}},
-	}
-	return &Input{Stores: 5, BaseVoters: []int{4, 0, 4, 0, 4}, BaseLeaders: []int{4, 0, 0, 0, 0},
-		Groups: []Group{{Rules: rules, Voters: []int{0, 2, 1}, RuleOf: []int{0, 1, 2}, Leader: 0,
-			CanLead: []bool{true, false, false, true, false}}}}
+func singleGroup(stores, zones int, counts ...int) (*Input, *Group) {
+	in := general(1, stores, zones, counts...)
+	return in, &in.Groups[0]
 }
 
 func TestOverlappingRulesFindImprovement(t *testing.T) {
-	re := require.New(t)
-	r := Plan(overlapInput(), Options{})
-	re.Equal(Score{67, 25}, r.Baseline)
-	re.Equal(Score{59, 17}, r.Score)
-	re.Equal(3, r.Leaders[0])
-	re.ElementsMatch([]int{1, 2, 3}, r.Voters[0])
+	// The cheapest voter store is also the follower's only store. Include
+	// duplicate, unsorted stores to exercise normalization of the input.
+	in, g := singleGroup(5, 1, 3)
+	g.Rules = []*Rule{
+		{Role: RoleLeader, Count: 1, Stores: []int{0, 3}},
+		{Role: RoleVoter, Count: 1, Stores: []int{2, 1, 2}},
+		{Role: RoleFollower, Count: 1, Stores: []int{1}},
+	}
+	g.Voters, g.RuleOf = []int{0, 2, 1}, []int{0, 1, 2}
+	g.CanLead = []bool{true, false, false, true, false}
+	in.BaseVoters, in.BaseLeaders = []int{4, 0, 4, 0, 4}, []int{4, 0, 0, 0, 0}
+	r := Plan(in, Options{})
+	require.Equal(t, Score{67, 25}, r.Baseline)
+	require.Equal(t, Score{59, 17}, r.Score)
+	require.Equal(t, 3, r.Leaders[0])
+	require.ElementsMatch(t, []int{1, 2, 3}, r.Voters[0])
+	require.Equal(t, []int{0, 2, 1}, g.Voters)
+	require.Equal(t, []int{2, 1, 2}, g.Rules[1].Stores)
+	require.Zero(t, g.Rules[1].level)
+	require.Nil(t, g.Rules[1].domainOf)
 }
 
 func TestOverlappingIsolationAllowsLeaderBalance(t *testing.T) {
-	re := require.New(t)
-	in := general(2, 4, 4, 1)
-	rule := in.Groups[0].Rules[0]
-	rule.Count, rule.Location[3][0] = 2, 1
-	other := *rule
-	for i := range in.Groups {
-		in.Groups[i].Rules, in.Groups[i].RuleOf = []*Rule{rule, &other}, []int{0, 0, 1, 1}
-	}
+	in := general(2, 4, 1, 2, 2)
+	in.Groups[0].Rules[0].Location[3][0] = 1
 	r := Plan(in, Options{})
-	re.Equal(Score{16, 4}, r.Baseline)
-	re.Equal(Score{16, 2}, r.Score)
-	changed := 0
+	require.Equal(t, Score{16, 4}, r.Baseline)
+	require.Equal(t, Score{16, 2}, r.Score)
 	for i, g := range in.Groups {
-		re.Equal(g.Voters, r.Voters[i])
-		if r.Leaders[i] != g.Leader {
-			changed++
-		}
+		require.Equal(t, g.Voters, r.Voters[i])
 	}
-	re.Equal(1, changed)
+	require.Equal(t, 1, r.Changed)
 }
 
-// leaderChain has balanced voters, and its leaders reach the optimum only by two
-// transfers in a row: store 0 leads two groups with voters on stores 0 and 1,
-// store 1 leads one group with voters on stores 1 and 2. Either transfer alone
-// only ties.
-func leaderChain() *Input {
-	rule := &Rule{Count: 2, Stores: []int{0, 1, 2}}
-	in := &Input{Stores: 3, BaseVoters: []int{1, 0, 2}, BaseLeaders: make([]int, 3)}
-	for _, v := range [][]int{{0, 1}, {0, 1}, {1, 2}} {
-		in.Groups = append(in.Groups, Group{Rules: []*Rule{rule}, Voters: v, RuleOf: []int{0, 0},
-			Leader: v[0], CanLead: allTrue(3)})
+func leaderLayout(stores int, voters ...[]int) *Input {
+	in := general(len(voters), stores, 0, 2)
+	for i, v := range voters {
+		in.Groups[i].Voters, in.Groups[i].Leader = v, v[0]
 	}
 	return in
 }
 
+// Either transfer ties on its own; together they move one leader from 0 to 2.
 func TestLeaderChains(t *testing.T) {
-	for _, c := range []struct {
-		name    string
-		modify  func(g *Group)
-		want    Score
-		stop    StopReason
-		changed int
-	}{
-		{"chain", func(*Group) {}, Score{27, 3}, StopGreedy, 2},
-		{"cannot lead", func(g *Group) { g.CanLead = []bool{true, true, false} }, Score{27, 5}, StopGreedy, 0},
-		{"pinned", func(g *Group) { g.LeaderPinned = true }, Score{27, 5}, StopGreedy, 0},
-		{"placement check", func(g *Group) {
-			g.CheckTarget = func(_ []int, leader int, _ int64) TargetFeedback {
-				if leader == 2 {
-					return TargetFeedback{Status: TargetRejected}
+	for _, name := range []string{"chain", "cannot lead", "pinned", "placement check", "follower"} {
+		t.Run(name, func(t *testing.T) {
+			in := leaderLayout(3, []int{0, 1}, []int{0, 1}, []int{1, 2})
+			in.BaseVoters = []int{1, 0, 2}
+			g := &in.Groups[2]
+			want, changed := Score{27, 5}, 0
+			switch name {
+			case "chain":
+				want, changed = Score{27, 3}, 2
+			case "cannot lead":
+				g.CanLead = []bool{true, true, false}
+			case "pinned":
+				g.LeaderPinned = true
+			case "placement check":
+				g.CheckTarget = func(_ []int, leader int, _ int64) TargetFeedback {
+					if leader == 2 {
+						return TargetFeedback{Status: TargetRejected}
+					}
+					return TargetFeedback{}
 				}
-				return TargetFeedback{}
+			case "follower":
+				g.Rules = []*Rule{{Count: 1, Stores: []int{1}}, {Role: RoleFollower, Count: 1, Stores: []int{2}}}
+				g.RuleOf = []int{0, 1}
 			}
-		}, Score{27, 5}, StopGreedy, 0},
-		{"follower", func(g *Group) {
-			g.Rules = []*Rule{{Count: 1, Stores: []int{1}}, {Role: RoleFollower, Count: 1, Stores: []int{2}}}
-			g.RuleOf = []int{0, 1}
-		}, Score{27, 5}, StopGreedy, 0},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			re := require.New(t)
-			in := leaderChain()
-			c.modify(&in.Groups[2])
 			r := Plan(in, Options{})
-			re.Equal(Score{27, 5}, r.Baseline)
-			re.Equal(c.want, r.Score)
-			re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score)
-			re.Equal(c.stop, r.Stop)
-			re.Equal(c.changed, r.Changed)
-			for i, g := range in.Groups {
-				re.Equal(g.Voters, r.Voters[i])
-			}
+			require.Equal(t, Score{27, 5}, r.Baseline)
+			require.Equal(t, want, r.Score)
+			require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score)
+			require.Equal(t, StopGreedy, r.Stop)
+			require.Equal(t, changed, r.Changed)
+			require.Equal(t, [][]int{{0, 1}, {0, 1}, {1, 2}}, r.Voters)
 		})
 	}
 }
 
-// A cutoff keeps the transfer paths already moved. Store 0 leads three groups
-// with voters on stores 0 and 1, and store 1 leads two groups with voters on
-// stores 1 and 2 or 3. Both paths pass store 1, so they take two rounds.
+// Both paths pass through store 1, so a cutoff after one round keeps one transfer path.
 func TestLeaderChainStops(t *testing.T) {
-	for _, c := range []struct {
-		name   string
-		reason StopReason
-		delta  int64
-	}{{"complete", "", -6}, {"canceled", StopCanceled, -4}, {"budget", StopBudget, -4}} {
-		t.Run(c.name, func(t *testing.T) {
-			re := require.New(t)
-			rule := &Rule{Count: 2, Stores: []int{0, 1, 2, 3}}
-			in := &Input{Stores: 4, BaseVoters: []int{2, 0, 4, 4}, BaseLeaders: make([]int, 4)}
-			for _, v := range [][]int{{0, 1}, {0, 1}, {0, 1}, {1, 2}, {1, 3}} {
-				in.Groups = append(in.Groups, Group{Rules: []*Rule{rule}, Voters: v, RuleOf: []int{0, 0},
-					Leader: v[0], CanLead: allTrue(4)})
-			}
-			p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
+	for reason, delta := range map[StopReason]int64{"": -6, StopCanceled: -4, StopBudget: -4} {
+		t.Run(string(reason), func(t *testing.T) {
+			in := leaderLayout(4, []int{0, 1}, []int{0, 1}, []int{0, 1}, []int{1, 2}, []int{1, 3})
+			in.BaseVoters = []int{2, 0, 4, 4}
+			p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
 			_, leaders := p.layout()
 			before := p.score()
-			switch c.reason {
+			switch reason {
 			case StopCanceled:
-				// Checked on entry, then before every round: one round runs.
 				checks := 0
-				p.opt.Cancel = func() bool { checks++; return checks > 2 }
+				p.opt.Cancel = func() bool {
+					checks++
+					return checks > 2 // Entry and the first round can run.
+				}
 			case StopBudget:
-				// Entry charges the 2 voters of each of the 5 groups; one round runs.
-				p.opt.WorkBudget = p.work + 11
+				p.opt.WorkBudget = p.work + 11 // Entry charges ten voters.
 			}
 			d := p.chainLeaders(leaders)
-			re.Equal(c.reason, p.stop)
-			re.Equal(c.delta, d)
+			require.Equal(t, reason, p.stop)
+			require.Equal(t, delta, d)
 			voters, working := p.layout()
-			re.Equal(working, leaders)
-			re.Equal(Score{before.Voter, before.Leader + d}, p.score())
-			re.Equal(p.score(), scoreOf(in, voters, leaders))
+			require.Equal(t, working, leaders)
+			require.Equal(t, Score{before.Voter, before.Leader + d}, p.score())
+			require.Equal(t, p.score(), scoreOf(in, voters, leaders))
 		})
 	}
 }
 
-// Nine location levels are accepted by PD; the planner must not panic.
-func TestDeepLocationLabels(t *testing.T) {
-	re := require.New(t)
-	in := general(2, 6, 3, 2)
-	loc := make([][]int32, 6)
+func deepPaths(stores, depth int, domain func(int) int) [][]int32 {
+	loc := make([][]int32, stores)
 	for s := range loc {
-		loc[s] = make([]int32, 9)
-		loc[s][8] = int32(s % 2)
+		loc[s] = make([]int32, depth)
+		loc[s][depth-1] = int32(domain(s))
 	}
-	in.Groups[0].Rules[0].Location = loc
-	r := Plan(in, Options{})
-	re.False(r.Baseline.Less(r.Score))
-	re.True(r.Score.Less(r.Baseline))
-	re.Equal(2.0, isolationScore(loc, r.Voters[0], 9))
+	return loc
 }
 
-func TestUnsupportedGroupsStayFixed(t *testing.T) {
-	re := require.New(t)
-	in := general(3, 40, 15, 3)
-	in.Groups[1].Voters, in.Groups[1].RuleOf = in.Groups[1].Voters[:3], in.Groups[1].RuleOf[:3]
-	deep := general(1, 40, 3, 3).Groups[0]
-	for s := range deep.Rules[0].Location {
-		deep.Rules[0].Location[s] = make([]int32, maxDepth+1)
-	}
-	in.Groups = append(in.Groups, deep)
+func TestDeepLocationLabels(t *testing.T) {
+	in := general(2, 6, 2, 3)
+	loc := deepPaths(in.Stores, 9, func(s int) int { return s % 2 })
+	in.Groups[0].Rules[0].Location = loc
 	r := Plan(in, Options{})
-	re.Equal(StopNoGroups, r.Stop)
-	for i := range in.Groups {
-		re.Equal(in.Groups[i].Voters, r.Voters[i])
-		re.Equal(in.Groups[i].Leader, r.Leaders[i])
+	require.True(t, r.Score.Less(r.Baseline))
+	require.Equal(t, 2.0, isolationScore(loc, r.Voters[0], 9))
+}
+
+func checkNoGroups(t *testing.T, in *Input) {
+	t.Helper()
+	r := Plan(in, Options{})
+	require.Equal(t, StopNoGroups, r.Stop)
+	require.Equal(t, r.Baseline, r.Score)
+	for i, g := range in.Groups {
+		require.Equal(t, g.Voters, r.Voters[i])
+		require.Equal(t, g.Leader, r.Leaders[i])
 	}
-	in.Groups = []Group{deep}
-	re.Equal(StopNoGroups, Plan(in, Options{}).Stop)
 }
 
 func TestHardIsolationScaleOut(t *testing.T) {
-	re := require.New(t)
-	in := general(4, 6, 4, 1)
+	in := general(4, 6, 1, 4)
 	rule := in.Groups[0].Rules[0]
 	rule.Location = [][]int32{{1, 1}, {1, 2}, {1, 3}, {2, 4}, {2, 4}, {1, 5}}
 	rule.IsolationDepth = 2
 	for i := range in.Groups {
 		in.Groups[i].CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
-			re.True(meetsIsolation(rule, voters), "illegal candidate: %v", voters)
+			require.True(t, meetsIsolation(rule, voters), "illegal candidate: %v", voters)
 			return TargetFeedback{}
 		}
 	}
 	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
 	g := &p.gs[0]
 	iso, ok := p.isolation(g, 0)
-	re.True(ok)
-	re.Equal([maxDepth]int32{3}, iso.pairs)
+	require.True(t, ok)
+	require.Equal(t, [maxDepth]int32{3}, iso.pairs)
 	_, ok = p.pickRule(g, 0, []int{3, 4}, nil, true)
-	re.False(ok, "two mandatory peers cannot share dc2/z4")
+	require.False(t, ok, "two mandatory peers cannot share dc2/z4")
 	for _, voters := range [][]int{{0, 1, 3, 4}, {0, 1, 4, 5}} {
 		sol := p.assignTarget(g, voters, &ruleSearch{p: p})
-		re.Equal(meetsIsolation(rule, voters), sol.ok, "repair: %v", voters)
+		require.Equal(t, meetsIsolation(rule, voters), sol.ok, "repair: %v", voters)
 	}
 	r := Plan(in, Options{Seed: 7})
-	re.Equal(int64(64), r.Baseline.Voter)
-	re.Equal(int64(44), r.Score.Voter)
+	require.Equal(t, int64(64), r.Baseline.Voter)
+	require.Equal(t, int64(44), r.Score.Voter)
 	loads := make([]int, in.Stores)
 	for i, voters := range r.Voters {
-		re.True(matchesTarget(legalTargets(in, i), voters, nil, r.Leaders[i]))
+		require.True(t, matchesTarget(legalTargets(in, i), voters, nil, r.Leaders[i]))
 		for _, s := range voters {
 			loads[s]++
 		}
 	}
-	re.Equal([]int{3, 3, 3, 2, 2, 3}, loads)
-	re.True(slices.ContainsFunc(r.Voters, func(v []int) bool {
-		return slices.Contains(v, 0) && slices.Contains(v, 1) && slices.Contains(v, 5)
+	require.Equal(t, []int{3, 3, 3, 2, 2, 3}, loads)
+	require.True(t, slices.ContainsFunc(r.Voters, func(v []int) bool {
+		return sameSet(v, []int{0, 1, 3, 5}) || sameSet(v, []int{0, 1, 4, 5})
 	}), "a target must use z1, z2, z5 and z4")
 }
 
 func TestHardIsolationPaths(t *testing.T) {
+	deep := deepPaths(4, maxDepth, func(s int) int { return s / 2 })
 	for _, c := range []struct {
 		name     string
 		location [][]int32
@@ -346,10 +252,10 @@ func TestHardIsolationPaths(t *testing.T) {
 		{"first level", [][]int32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}, 1, []int{0, 2}, []int{4, 0, 4, 0}, []int{1, 3}},
 		{"full path", [][]int32{{0, 0}, {0, 1}, {1, 0}, {1, 1}}, 2, []int{0, 1, 2}, []int{0, 0, 4, 0}, []int{0, 1, 3}},
 		{"shared prefix", [][]int32{{0, 0, 0}, {0, 0, 1}, {0, 1, 0}, {0, 1, 1}}, 2, []int{0, 2}, []int{4, 0, 4, 0}, []int{1, 3}},
+		{"maximum depth", deep, maxDepth, []int{0, 2}, []int{4, 0, 4, 0}, []int{1, 3}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			in := general(1, len(c.location), len(c.voters), 1)
-			g := &in.Groups[0]
+			in, g := singleGroup(len(c.location), 1, len(c.voters))
 			g.Voters, g.Rules[0].Location, g.Rules[0].IsolationDepth = c.voters, c.location, c.depth
 			in.BaseVoters = c.base
 			r := Plan(in, Options{})
@@ -369,114 +275,77 @@ func TestHardIsolationPaths(t *testing.T) {
 			})
 		})
 	}
-	// Shared levels may be skipped all the way to the maximum supported depth.
-	in := general(1, 4, 2, 1)
-	for s := range in.Stores {
-		path := make([]int32, maxDepth)
-		path[maxDepth-1] = int32(s / 2)
-		in.Groups[0].Rules[0].Location[s] = path
-	}
-	in.Groups[0].Rules[0].IsolationDepth = maxDepth
-	in.Groups[0].Voters = []int{0, 2}
-	in.BaseVoters = []int{4, 0, 4, 0}
-	require.ElementsMatch(t, []int{1, 3}, Plan(in, Options{}).Voters[0])
 }
 
-func TestUnsupportedIsolationStaysFixed(t *testing.T) {
-	for _, name := range []string{"negative", "too deep", "no labels", "infeasible count", "current collision", "pinned collision"} {
-		t.Run(name, func(t *testing.T) {
-			in := general(2, 6, 3, 3)
+func TestUnsupportedGroupsStayFixed(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		count    int
+		depth    int
+		location [][]int32
+		forced   []int
+	}{
+		{"rule count mismatch", 4, 1, [][]int32{{0}, {1}, {2}, {0}, {1}, {2}}, nil},
+		{"too many labels", 3, 1, deepPaths(6, maxDepth+1, func(int) int { return 0 }), nil},
+		{"negative", 3, -1, [][]int32{{0}, {1}, {2}, {0}, {1}, {2}}, nil},
+		{"too deep", 3, 2, [][]int32{{0}, {1}, {2}, {0}, {1}, {2}}, nil},
+		{"no labels", 3, 1, nil, nil},
+		{"infeasible count", 3, 1, [][]int32{{0}, {1}, {0}, {1}, {0}, {1}}, nil},
+		{"current collision", 3, 1, [][]int32{{0}, {0}, {2}, {0}, {1}, {2}}, nil},
+		{"pinned collision", 3, 1, [][]int32{{0}, {0}, {2}, {0}, {1}, {2}}, []int{1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := general(2, 6, 0, 3)
 			rule := in.Groups[0].Rules[0]
-			rule.IsolationDepth = 1
-			switch name {
-			case "negative":
-				rule.IsolationDepth = -1
-			case "too deep":
-				rule.IsolationDepth = 2
-			case "no labels":
-				rule.Location = nil
-			case "infeasible count":
-				for s := range in.Stores {
-					rule.Location[s][0] = int32(s % 2)
-				}
-			default:
-				rule.Location[1][0] = 0
-				if name == "pinned collision" {
-					for i := range in.Groups {
-						in.Groups[i].Forced, in.Groups[i].LeaderPinned = []int{1}, true
-					}
-				}
+			rule.Count, rule.IsolationDepth, rule.Location = tc.count, tc.depth, tc.location
+			for i := range in.Groups {
+				in.Groups[i].Forced, in.Groups[i].LeaderPinned = tc.forced, len(tc.forced) > 0
 			}
-			r := Plan(in, Options{})
-			require.Equal(t, StopNoGroups, r.Stop)
-			require.Equal(t, r.Baseline, r.Score)
-			for i, g := range in.Groups {
-				require.Equal(t, g.Voters, r.Voters[i])
-				require.Equal(t, g.Leader, r.Leaders[i])
-			}
+			checkNoGroups(t, in)
 		})
 	}
+	checkNoGroups(t, general(3, 40, 3, 15))
 }
 
-// General isolation must count candidate scans and respect the work budget.
+// General isolation must count scans and stop within one visit of the budget.
 func TestGeneralShapesAreBounded(t *testing.T) {
-	re := require.New(t)
 	for _, c := range []struct {
 		replicas, zones int
-	}{{3, 2}, {5, 3}} {
-		r := Plan(general(100, 300, c.replicas, c.zones), Options{})
-		re.Equal(StopGreedy, r.Stop, "%+v", c)
-		re.LessOrEqual(r.Work, int64(DefaultWorkBudget), "%+v", c)
-		re.False(r.Baseline.Less(r.Score), "%+v", c)
+		budget, ceiling int64
+		stop            StopReason
+	}{
+		{3, 2, 0, DefaultWorkBudget, StopGreedy},
+		{5, 3, 0, DefaultWorkBudget, StopGreedy},
+		{3, 2, 50_000, 51_999, StopBudget},
+	} {
+		r := Plan(general(100, 300, c.zones, c.replicas), Options{WorkBudget: c.budget})
+		require.Equal(t, c.stop, r.Stop, "%+v", c)
+		require.LessOrEqual(t, r.Work, c.ceiling, "%+v", c)
+		require.False(t, r.Baseline.Less(r.Score), "%+v", c)
 	}
-	opt := Options{WorkBudget: 50_000}
-	r := Plan(general(100, 300, 3, 2), opt)
-	re.Equal(StopBudget, r.Stop)
-	re.Less(r.Work, opt.WorkBudget+2_000) // stops at the next visit
-	re.False(r.Baseline.Less(r.Score))
 }
 
 // Other tables' counts break ties without changing this table's score.
 func TestOtherTablesSpreadTies(t *testing.T) {
-	re := require.New(t)
-	alone := Plan(general(4, 30, 3, 3), Options{})
+
 	in := general(4, 30, 3, 3)
+	alone := Plan(in, Options{})
 	in.OtherVoters, in.OtherLeaders = make([]int, 30), make([]int, 30)
 	for s := 3; s < 15; s++ {
 		in.OtherVoters[s], in.OtherLeaders[s] = 5, 2 // used by other tables
 	}
 	r := Plan(in, Options{})
-	moved := 0
-	for _, v := range r.Voters {
-		for _, s := range v {
-			if s >= 3 {
-				moved++
-				re.Zero(in.OtherVoters[s], "store %d is busy in other tables", s)
-			}
-		}
+	require.Positive(t, r.Changed)
+	for _, voters := range r.Voters {
+		require.False(t, slices.ContainsFunc(voters, func(store int) bool { return in.OtherVoters[store] != 0 }), "busy store in %v", voters)
 	}
-	re.Positive(moved)
-	re.Equal(alone.Score, r.Score) // only ties change
-}
-
-func TestGreedyKeepsTiedTargets(t *testing.T) {
-	re := require.New(t)
-	in := revertChain(32)
-	p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
-	baseline := p.score()
-	voters, leaders, score := p.greedy(0)
-	re.True(score.Less(baseline))
-	for i, g := range in.Groups[:32] {
-		re.Equal(g.Voters, voters[i])
-		re.Equal(g.Leader, leaders[i])
-	}
+	require.Equal(t, alone.Score, r.Score) // only ties change
 }
 
 func TestScaleOutKeepsExistingTargets(t *testing.T) {
 	const groups, stores = 900, 300
 	for _, replicas := range []int{3, 5} {
-		re := require.New(t)
-		in := general(groups, stores+1, replicas, replicas/2+1)
+		in := general(groups, stores+1, replicas/2+1, replicas)
 		for i := range in.Groups {
 			g := &in.Groups[i]
 			for k := range g.Voters {
@@ -485,7 +354,7 @@ func TestScaleOutKeepsExistingTargets(t *testing.T) {
 			g.Leader = i % stores
 		}
 		r := Plan(in, Options{Seed: 4242})
-		re.True(r.Score.Less(r.Baseline))
+		require.True(t, r.Score.Less(r.Baseline))
 		moves := 0
 		for i, g := range in.Groups {
 			for _, s := range r.Voters[i] {
@@ -494,156 +363,91 @@ func TestScaleOutKeepsExistingTargets(t *testing.T) {
 				}
 			}
 		}
-		re.Positive(moves)
-		re.LessOrEqual(moves, 3*groups*replicas/stores)
+		require.Positive(t, moves)
+		require.LessOrEqual(t, moves, 3*groups*replicas/stores)
 	}
 }
 
-func TestPlanKeepsInput(t *testing.T) {
-	re := require.New(t)
-	in := overlapInput()
-	in.Groups[0].Rules[1].Stores = []int{2, 1, 2} // unsorted with a duplicate
-	voters, stores := slices.Clone(in.Groups[0].Voters), slices.Clone(in.Groups[0].Rules[1].Stores)
-	Plan(in, Options{})
-	re.Equal(voters, in.Groups[0].Voters)
-	re.Equal(stores, in.Groups[0].Rules[1].Stores)
-	re.Zero(in.Groups[0].Rules[1].level)
-	re.Nil(in.Groups[0].Rules[1].domainOf)
-}
-
-func TestExcludedStoreKeepsOtherTargets(t *testing.T) {
-	re := require.New(t)
-	in := general(1, 5, 3, 1)
-	in.Groups[0].Rules[0].Location, in.Groups[0].RuleOf = nil, nil
-	in.BaseVoters, in.BaseLeaders = []int{1, 1, 1, 0, 0}, []int{1, 0, 0, 0, 0}
-	re.Contains(Plan(in, Options{}).Voters[0], 3)
-	in.Groups[0].Exclude = []int{3}
-	r := Plan(in, Options{})
-	re.True(r.Score.Less(r.Baseline))
-	re.NotContains(r.Voters[0], 3)
-}
-
-// Forced assignments over overlapping rules must share search bounds per visit.
-func TestForcedAssignmentsAreBounded(t *testing.T) {
-	re := require.New(t)
+// Forced and unforced searches share bounds across all overlapping rules.
+func TestOverlappingSearchBounds(t *testing.T) {
 	const stores = 300
-	for _, c := range []struct{ rules, count, forced int }{{3, 4, 11}, {30, 1, 29}} {
-		in := general(1, stores, c.rules*c.count, 1)
-		g := &in.Groups[0]
-		all := g.Rules[0].Stores
-		g.Rules = nil
-		for range c.rules {
-			g.Rules = append(g.Rules, &Rule{Count: c.count, Stores: all})
-		}
-		g.Forced = slices.Clone(g.Voters[:c.forced])
-		for k, s := range g.Voters {
-			g.RuleOf[k] = s / c.count
-			in.BaseVoters[s] = 1
-		}
-		in.BaseLeaders[0] = 1
-		r := Plan(in, Options{})
-		re.Less(r.Work/int64(r.Visits), int64(DefaultWorkBudget/10), "one visit must stay a small part of the budget")
-		re.LessOrEqual(r.Work, int64(DefaultWorkBudget+DefaultWorkBudget/10))
-		re.True(r.Score.Less(r.Baseline), "%v -> %v", r.Baseline, r.Score)
-		for _, s := range g.Forced {
-			re.Contains(r.Voters[0], s)
-		}
-	}
-}
-
-func TestUnforcedSearchRespectsStop(t *testing.T) {
-	const stores, rules = 300, 30
-	for _, stop := range []StopReason{StopCanceled, StopBudget} {
-		t.Run(string(stop), func(t *testing.T) {
-			re := require.New(t)
-			in := general(1, stores, rules, 1)
-			g := &in.Groups[0]
-			all := g.Rules[0].Stores
-			g.Rules = nil
-			for ri := range rules {
-				g.Rules = append(g.Rules, &Rule{Count: 1, Stores: all})
-				g.RuleOf[ri], in.BaseVoters[ri] = ri, 1
+	for _, c := range []struct {
+		rules, count, forced int
+		stop                 StopReason
+	}{{3, 4, 11, StopGreedy}, {30, 1, 29, StopGreedy}, {30, 1, 0, StopCanceled}, {30, 1, 0, StopBudget}} {
+		t.Run(string(c.stop)+"/"+strconv.Itoa(c.forced), func(t *testing.T) {
+			in, g := singleGroup(stores, 0, slices.Repeat([]int{c.count}, c.rules)...)
+			g.Forced = g.Voters[:c.forced]
+			for _, store := range g.Voters {
+				in.BaseVoters[store] = 1
 			}
 			in.BaseLeaders[0] = 1
-			checks := 0
-			opt := Options{Cancel: func() bool {
-				checks++
-				return stop == StopCanceled && checks >= 2
-			}}
-			if stop == StopBudget {
+			opt := Options{}
+			switch c.stop {
+			case StopBudget:
 				opt.WorkBudget = 1000
+			case StopCanceled:
+				checks := 0
+				opt.Cancel = func() bool {
+					checks++
+					return checks >= 2
+				}
 			}
 			r := Plan(in, opt)
-			t.Logf("visits=%d work=%d checks=%d stop=%s", r.Visits, r.Work, checks, r.Stop)
-			re.Equal(stop, r.Stop)
-			re.Equal(1, r.Visits)
-			// Stopping inside the greedy keeps a complete, consistent layout.
-			re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score)
-			re.False(r.Baseline.Less(r.Score))
-			// Allow one complete root, its isolation calculation, and the
-			// leader-only fallback when the interrupted search finds no target.
-			re.LessOrEqual(r.Work, int64(2*rules*stores+rules))
+			if c.forced > 0 {
+				require.Less(t, r.Work/int64(r.Visits), int64(DefaultWorkBudget/10))
+				require.LessOrEqual(t, r.Work, int64(DefaultWorkBudget+DefaultWorkBudget/10))
+				require.True(t, r.Score.Less(r.Baseline))
+				require.Subset(t, r.Voters[0], g.Forced)
+			} else {
+				require.Equal(t, c.stop, r.Stop)
+				require.Equal(t, 1, r.Visits)
+				require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score)
+				require.False(t, r.Baseline.Less(r.Score))
+				// One root can finish its scans before the next cutoff check.
+				require.LessOrEqual(t, r.Work, int64(2*c.rules*stores+c.rules))
+			}
 		})
-	}
-}
-
-// initialize places groups in input order using only the preceding groups' loads.
-func initialize(in *Input) {
-	placed := &Input{Stores: in.Stores, BaseVoters: slices.Clone(in.BaseVoters), BaseLeaders: slices.Clone(in.BaseLeaders)}
-	for i := range in.Groups {
-		one := *placed
-		one.Groups = []Group{in.Groups[i]}
-		r := Plan(&one, Options{Sweeps: 1})
-		in.Groups[i].Voters, in.Groups[i].Leader = r.Voters[0], r.Leaders[0]
-		for _, s := range r.Voters[0] {
-			placed.BaseVoters[s]++
-		}
-		placed.BaseLeaders[r.Leaders[0]]++
 	}
 }
 
 // Whole-table balancing and initialization one group at a time attain the optimum.
 func TestBroadLifecycle(t *testing.T) {
 	for _, c := range []struct {
-		n       int
-		leaders []int
-		want    Score
+		n          int
+		restricted bool
+		want       Score
 	}{
-		{36, nil, Score{972, 108}},
-		{36, []int{0, 4, 8}, Score{1008, 432}},
-		{128, []int{0, 4, 8}, Score{12746, 5462}},
+		{36, false, Score{972, 108}},
+		{36, true, Score{1008, 432}},
+		{128, true, Score{12746, 5462}},
 	} {
-		re := require.New(t)
-		in := broad(c.n, 4, c.leaders, true)
+		in := general(c.n, 12, 3, 3)
+		if c.restricted {
+			clear(in.Groups[0].CanLead[3:]) // One leader store per zone.
+		}
 		r := Plan(in, Options{})
-		re.Equal(StopGreedy, r.Stop)
-		re.Equal(c.want, r.Score)
-		initialize(in)
+		require.Equal(t, StopGreedy, r.Stop)
+		require.Equal(t, c.want, r.Score)
+		placed := &Input{Stores: in.Stores, BaseVoters: make([]int, in.Stores), BaseLeaders: make([]int, in.Stores)}
+		for i := range in.Groups {
+			placed.Groups = in.Groups[i : i+1]
+			one := Plan(placed, Options{Sweeps: 1})
+			in.Groups[i].Voters, in.Groups[i].Leader = one.Voters[0], one.Leaders[0]
+			for _, store := range one.Voters[0] {
+				placed.BaseVoters[store]++
+			}
+			placed.BaseLeaders[one.Leaders[0]]++
+		}
 		again := Plan(in, Options{Seed: 1})
-		re.Equal(StopGreedy, again.Stop)
-		re.Equal(c.want, again.Score)
+		require.Equal(t, StopGreedy, again.Stop)
+		require.Equal(t, c.want, again.Score)
 	}
 }
 
 func BenchmarkPlan(b *testing.B) {
-	for _, bc := range []struct {
-		name string
-		in   func() *Input
-	}{
-		{"one_per_zone/concentrated_1000x300", func() *Input { return broad(1000, 100, nil, true) }},
-		{"one_per_zone/balanced_1000x300", func() *Input { return broad(1000, 100, nil, false) }},
-		{"leader_on_3_stores/1000x12", func() *Input { return broad(1000, 4, []int{0, 4, 8}, true) }},
-		{"3_replicas_2_zones/1000x300", func() *Input { return general(1000, 300, 3, 2) }},
-		{"5_replicas_3_zones/1000x300", func() *Input { return general(1000, 300, 5, 3) }},
-		{"restricted_90pct/1000x300", func() *Input { return bottleneck(1000, 100) }},
-		{"zone_host/1000x300", func() *Input { return hosts(1000, 50) }},
-		{"leader_rule_followers/1000x300", func() *Input { return primary(1000, 100, false) }},
-		{"leader_rule_overlapping_voters/1000x300", func() *Input { return primary(1000, 100, true) }},
-		{"five_zones/repair_1000x300", func() *Input { return fiveZones(false, true) }},
-		{"five_zones/balanced_1000x300", func() *Input { return fiveZones(true, false) }},
-	} {
-		b.Run(bc.name, func(b *testing.B) {
-			in := bc.in()
+	bench := func(name string, in *Input) {
+		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				r := Plan(in, Options{Seed: 7})
@@ -651,315 +455,292 @@ func BenchmarkPlan(b *testing.B) {
 			}
 		})
 	}
+	const groups = 1000
+	bench("one_per_zone/concentrated_1000x300", general(groups, 300, 3, 3))
+	restricted := general(groups, 12, 3, 3)
+	clear(restricted.Groups[0].CanLead[3:])
+	bench("leader_on_3_stores/1000x12", restricted)
+	bench("3_replicas_2_zones/1000x300", general(groups, 300, 2, 3))
+	bench("5_replicas_3_zones/1000x300", general(groups, 300, 3, 5))
+	bench("five_zones/repair_1000x300", fiveZones(false))
+	bench("five_zones/balanced_1000x300", fiveZones(true))
+}
+
+func rejectWithReplacement(store int, candidates []int) TargetFeedback {
+	return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: store, Candidates: candidates}}}
 }
 
 func TestDirectedPlacementFeedback(t *testing.T) {
-	in := general(12, 9, 3, 1)
-	for i := range in.Groups {
-		in.Groups[i].CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
-			if slices.Contains(voters, 3) {
-				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: 3, Candidates: []int{4, 5, 6, 7, 8}}}, Work: 9}
-			}
-			return TargetFeedback{Work: 9}
+	in := general(12, 9, 0, 3)
+	feedback := rejectWithReplacement(3, []int{4, 5, 6, 7, 8})
+	feedback.Work = 9
+	hasRejectedStore := func(voters []int) bool { return slices.Contains(voters, 3) }
+	check := func(voters []int, _ int, _ int64) TargetFeedback {
+		if hasRejectedStore(voters) {
+			return feedback
 		}
+		return TargetFeedback{Work: 9}
 	}
-	r := Plan(in, Options{Seed: 7})
+	for i := range in.Groups {
+		in.Groups[i].RuleOf, in.Groups[i].CheckTarget = nil, check
+	}
+	opt := Options{Seed: 7}
+	r := Plan(in, opt)
 	require.Less(t, r.Score.Voter, r.Baseline.Voter)
 	require.Equal(t, StopGreedy, r.Stop)
-	for _, voters := range r.Voters {
-		require.NotContains(t, voters, 3)
-	}
+	require.False(t, slices.ContainsFunc(r.Voters, hasRejectedStore))
 	require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score)
-	t.Logf("single-rule feedback: %v -> %v changed=%d stop=%s work=%d", r.Baseline, r.Score, r.Changed, r.Stop, r.Work)
-	for i := range in.Groups {
-		in.Groups[i].CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
-			if slices.Contains(voters, 3) {
-				return TargetFeedback{Status: TargetTemporarilyBlocked, Work: 9}
-			}
-			return TargetFeedback{Work: 9}
-		}
-	}
-	blocked := Plan(in, Options{Seed: 7})
+
+	feedback = TargetFeedback{Status: TargetTemporarilyBlocked, Work: 9}
+	blocked := Plan(in, opt)
 	require.True(t, blocked.TemporarilyBlocked)
 	require.Equal(t, blocked.Baseline.Voter, blocked.Score.Voter)
 	for i := range in.Groups {
 		in.Groups[i].CheckTarget = nil
+		require.Empty(t, in.Groups[i].Exclude)
 	}
-	recovered := Plan(in, Options{Seed: 7})
+	recovered := Plan(in, opt)
 	require.Less(t, recovered.Score.Voter, blocked.Score.Voter)
 	require.False(t, recovered.TemporarilyBlocked)
-	// No feedback was persisted in the input, including Exclude.
-	for _, g := range in.Groups {
-		require.Empty(t, g.Exclude)
+	require.True(t, slices.ContainsFunc(recovered.Voters, hasRejectedStore))
+
+	for i := range in.Groups {
+		in.Groups[i].Exclude = []int{3}
 	}
+	excluded := Plan(in, opt)
+	require.True(t, excluded.Score.Less(excluded.Baseline))
+	require.False(t, slices.ContainsFunc(excluded.Voters, hasRejectedStore))
 }
 
-func TestTargetFeedbackAtStop(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		stop   StopReason
-		status TargetStatus
+func TestPlacementCutoffs(t *testing.T) {
+	for _, c := range []struct {
+		name, kind string
+		size       int
+		stop       StopReason
+		status     TargetStatus
+		calls      int
+		limited    bool
+		reserve    int64
 	}{
-		{"satisfied at budget", StopBudget, TargetSatisfied},
-		{"satisfied at cancellation", StopCanceled, TargetSatisfied},
-		{"blocked at budget", StopBudget, TargetTemporarilyBlocked},
-		{"blocked at cancellation", StopCanceled, TargetTemporarilyBlocked},
+		{"satisfied at budget", "feedback", 3, StopBudget, TargetSatisfied, 1, false, 0},
+		{"satisfied at cancellation", "feedback", 3, StopCanceled, TargetSatisfied, 1, false, 0},
+		{"blocked at budget", "feedback", 3, StopBudget, TargetTemporarilyBlocked, 1, false, 0},
+		{"blocked at cancellation", "feedback", 3, StopCanceled, TargetTemporarilyBlocked, 1, false, 0},
+		{"repair node limit", "repair", 90, StopGreedy, TargetRejected, maxSearchNodes, true, 0},
+		{"budget during assignment", "repair", 90, StopBudget, TargetRejected, 1, true, 2},
+		{"budget before assignment", "repair", 90, StopBudget, TargetRejected, 1, true, 0},
+		{"canceled repair", "repair", 90, StopCanceled, TargetRejected, 1, true, 0},
+		{"no replacements at budget", "repair", 90, StopBudget, TargetRejected, 1, false, 0},
+		{"last node", "node boundary", maxSearchNodes - 1, StopGreedy, TargetRejected, 1, false, 0},
+		{"pending replacement", "node boundary", maxSearchNodes, StopGreedy, TargetRejected, 1, true, 0},
+		// Each unassignable replacement uses one enqueue scan and four membership checks.
+		{"last node at budget", "node boundary", maxSearchNodes - 1, StopBudget, TargetRejected, 1, false, 5 * (maxSearchNodes - 1)},
+		{"leaves at budget", "leaves", 3, StopBudget, TargetRejected, 1, true, 0},
+		{"leaves at cancellation", "leaves", 3, StopCanceled, TargetRejected, 1, true, 0},
+		{"duplicate leaf", "leaves", 2, StopBudget, TargetRejected, 1, false, 0},
+		{"complete checks", "leaves", 3, StopGreedy, TargetRejected, 2, false, 0},
+		{"exhausted rule search", "rule search", 5, StopGreedy, TargetRejected, 32, false, 0},
+		{"rule search cut off", "rule search", 6, StopGreedy, TargetRejected, 32, true, 0},
+		{"rule search temporarily blocked", "rule search", 6, StopGreedy, TargetTemporarilyBlocked, 32, false, 0},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			in := general(1, 3, 2, 1)
-			g := &in.Groups[0]
-			g.LeaderPinned = true
-			in.BaseVoters[1] = 5
-			calls, canceled := 0, false
+		t.Run(c.name, func(t *testing.T) {
+			stores, replicas := c.size, 2
+			switch c.kind {
+			case "node boundary":
+				stores = 3 + c.size
+			case "leaves":
+				stores, replicas = 6, 3
+			case "rule search":
+				stores, replicas = 1+3*c.size, 1+2*c.size
+			}
+			in, g := singleGroup(stores, 1, replicas)
+			all := g.Rules[0].Stores
+			if c.kind == "feedback" || c.kind == "repair" {
+				g.LeaderPinned, in.BaseVoters[1] = true, 5
+			} else {
+				g.Rules = []*Rule{{Role: RoleLeader, Count: 1, Stores: []int{0}}}
+				// Five competing pairs use 63 nodes. A sixth sets rs.limited.
+				for ri := 1; ri < replicas; ri++ {
+					voter, allowed := ri, []int{1, 2}
+					switch c.kind {
+					case "leaves":
+						voter, allowed = ri+3, []int{1, 2 + (ri-1)*(c.size-2)}
+					case "rule search":
+						cheap := 1 + 3*((ri-1)/2)
+						voter = cheap + 1 + (ri-1)%2
+						allowed = []int{cheap, voter}
+					}
+					g.Rules = append(g.Rules, &Rule{Role: RoleFollower, Count: 1, Stores: allowed})
+					g.Voters[ri], g.RuleOf[ri], in.BaseVoters[voter] = voter, ri, 5
+				}
+			}
+			calls := 0
 			g.CheckTarget = func(voters []int, _ int, limit int64) TargetFeedback {
 				calls++
-				require.ElementsMatch(t, []int{0, 2}, voters)
-				if tc.stop == StopBudget {
-					return TargetFeedback{Status: tc.status, Work: limit}
+				if c.kind == "leaves" && calls > 1 {
+					return TargetFeedback{}
 				}
-				canceled = true
-				return TargetFeedback{Status: tc.status}
+				f := TargetFeedback{Status: c.status}
+				switch c.kind {
+				case "feedback", "node boundary":
+					require.ElementsMatch(t, []int{0, 2}, voters)
+					if c.kind == "node boundary" {
+						f.Replace = []StoreReplacement{{Old: 2, Candidates: all[3:]}}
+
+					}
+				case "repair":
+					if c.name != "no replacements at budget" {
+						store := max(voters[0], voters[1])
+						f.Replace = []StoreReplacement{{Old: store, Candidates: []int{store + 1}}}
+					}
+
+				}
+				if c.stop == StopBudget {
+					f.Work = limit - c.reserve
+				}
+				return f
 			}
-			r := Plan(in, Options{Sweeps: 1, Cancel: func() bool { return canceled }})
-			require.Equal(t, 1, calls)
-			require.Equal(t, tc.stop, r.Stop)
-			require.Equal(t, tc.status == TargetTemporarilyBlocked, r.TemporarilyBlocked)
-			require.False(t, r.PlacementLimited)
-			if tc.status == TargetSatisfied {
+			opt := Options{Sweeps: 1, Cancel: func() bool { return calls > 0 && c.stop == StopCanceled }}
+			if c.kind == "repair" && c.stop != StopGreedy {
+				opt.WorkBudget = 1000
+			}
+			r := Plan(in, opt)
+			require.Equal(t, c.calls, calls)
+			require.Equal(t, c.stop, r.Stop)
+			require.Equal(t, c.limited, r.PlacementLimited)
+			require.Equal(t, c.status == TargetTemporarilyBlocked, r.TemporarilyBlocked)
+			require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score)
+			require.Empty(t, g.Exclude)
+			switch {
+			case c.status == TargetSatisfied:
 				require.ElementsMatch(t, []int{0, 2}, r.Voters[0])
 				require.True(t, r.Score.Less(r.Baseline))
-			} else {
-				require.Equal(t, g.Voters, r.Voters[0])
+			case c.kind == "leaves" && c.stop == StopGreedy:
+				require.True(t, r.Score.Less(r.Baseline))
+			default:
+				require.Equal(t, r.Baseline, r.Score)
+				require.Zero(t, r.Changed)
 			}
-			require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score)
 		})
 	}
 }
 
-// Exhausted, cyclic and non-improving branches leave legal siblings reachable.
+// Exhausted, cyclic and deep branches leave siblings and later domains reachable.
 func TestDirectedRepairAlternatives(t *testing.T) {
+	const perZone = maxSearchNodes + 1
+	deep := map[int][]int{2: {3, 4}, 3: {71}}
+	for store := 4; store < 71; store++ {
+		deep[store] = []int{store + 1}
+	}
 	for _, c := range []struct {
-		name       string
-		candidates []int
-		next, want int
+		name         string
+		stores, want int
+		next         map[int][]int
 	}{
-		{"no alternatives", nil, 2, 1},
-		{"cycle", []int{3}, 2, 1},
-		{"cyclic sibling", []int{3, 4}, 2, 4},
-		{"unchanged sibling", []int{3, 4}, 1, 4},
+		{"no alternatives", 5, 1, map[int][]int{2: nil}},
+		{"cycle", 5, 1, map[int][]int{2: {3}, 3: {2}}},
+		{"cyclic sibling", 5, 4, map[int][]int{2: {3, 4}, 3: {2}}},
+		{"unchanged sibling", 5, 4, map[int][]int{2: {3, 4}, 3: {1}}},
+		{"deep chain", 72, 71, deep},
+		{"domain representatives", 4 * perZone, 3*perZone + 1, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			in := general(1, 5, 2, 1)
-			in.Groups[0].LeaderPinned = true
-			in.BaseVoters[1] = 5
-			calls := 0
-			in.Groups[0].CheckTarget = func(v []int, _ int, _ int64) TargetFeedback {
-				calls++
-				switch {
-				case slices.Contains(v, 2):
-					return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: 2, Candidates: c.candidates}}}
-				case slices.Contains(v, 3):
-					return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: 3, Candidates: []int{c.next}}}}
-				default:
-					return TargetFeedback{}
+			in, g := singleGroup(c.stores, 1, 2)
+			g.LeaderPinned, in.BaseVoters[1] = true, 5
+			next, width := c.next, 1
+			opt := Options{Seed: 7}
+			if next == nil {
+				// Every candidate in zone 2 is rejected. Zone 3 must still
+				// get a turn even though zone 2 alone can fill the node budget.
+				width, opt.Sweeps = perZone, 1
+				rule := g.Rules[0]
+				for store := range in.Stores {
+					rule.Location[store][0], in.BaseVoters[store] = int32(store/width), store/width
 				}
+				g.Voters[1] = 3 * width
+				in.BaseVoters[g.Voters[1]]++
+				next = map[int][]int{1: rule.Stores[2*width:], 2: nil}
 			}
-			r := Plan(in, Options{Seed: 7})
+			calls := 0
+			g.CheckTarget = func(v []int, _ int, _ int64) TargetFeedback {
+				calls++
+				store := max(v[0], v[1])
+				if candidates, reject := next[store/width]; reject {
+					return rejectWithReplacement(store, candidates)
+				}
+				return TargetFeedback{}
+			}
+			r := Plan(in, opt)
 			require.ElementsMatch(t, []int{0, c.want}, r.Voters[0])
 			require.Equal(t, 0, r.Leaders[0])
-			require.Equal(t, c.want == 4, r.Score.Less(r.Baseline))
+			require.Equal(t, c.want != 1, r.Score.Less(r.Baseline))
 			require.False(t, r.PlacementLimited)
 			require.False(t, r.TemporarilyBlocked)
 			require.Less(t, calls, 10)
-			require.Empty(t, in.Groups[0].Exclude)
+			require.Empty(t, g.Exclude)
 		})
 	}
 }
 
-// A queued sibling needs a second replacement; a 65-step failed chain must not starve it.
-func TestDirectedRepairDeepChain(t *testing.T) {
-	in := general(1, 72, 2, 1)
-	in.Groups[0].LeaderPinned = true
-	in.BaseVoters[1] = 5
-	calls := 0
-	in.Groups[0].CheckTarget = func(v []int, _ int, _ int64) TargetFeedback {
-		calls++
-		for _, s := range v {
-			if s == 2 {
-				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: s, Candidates: []int{3, 4}}}}
-			}
-			if s == 3 {
-				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: s, Candidates: []int{71}}}}
-			}
-			if s >= 4 && s < 71 {
-				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: s, Candidates: []int{s + 1}}}}
+// The relaxed picks cover only three zones. Feedback offers stores in the missing zones.
+func fiveZones(balanced bool) *Input {
+	in := general(1000, 300, 5, 2, 3)
+	first, rest := in.Groups[0].Rules[0], in.Groups[0].Rules[1]
+	first.Stores = first.Stores[:120]
+	for s := range in.Stores {
+		rest.Location[s][0] = int32(s / 60)
+	}
+	check := func(voters []int, _ int, _ int64) TargetFeedback {
+		var counts [5]int
+		for _, store := range voters {
+			counts[store/60]++
+		}
+		var candidates []int
+		for zone, count := range counts {
+			if count == 0 {
+				candidates = append(candidates, rest.Stores[zone*60:(zone+1)*60]...)
 			}
 		}
-		return TargetFeedback{}
+		f := TargetFeedback{}
+		var reserved [2]bool
+		for _, store := range voters {
+			zone := store / 60
+			if zone < len(reserved) && !reserved[zone] {
+				reserved[zone] = true
+			} else if counts[zone] > 1 {
+				f.Replace = append(f.Replace, StoreReplacement{Old: store, Candidates: candidates})
+			}
+		}
+		if len(f.Replace) > 0 {
+			f.Status, f.Work = TargetRejected, 300
+		}
+		return f
 	}
-	r := Plan(in, Options{Seed: 7})
-	t.Logf("direct sibling versus long branch: score=%v voters=%v calls=%d limited=%v", r.Score, r.Voters, calls, r.PlacementLimited)
-	require.True(t, r.Score.Less(r.Baseline))
-	require.Contains(t, r.Voters[0], 71)
-	require.Less(t, calls, 10)
-	require.False(t, r.PlacementLimited)
-}
-
-func TestDirectedRepairStops(t *testing.T) {
-	for _, reason := range []string{"nodes", "assignment", "callback", "canceled", "no alternatives"} {
-		t.Run(reason, func(t *testing.T) {
-			in := general(1, 90, 2, 1)
-			in.Groups[0].LeaderPinned = true
-			in.BaseVoters[1] = 5
-			calls, canceled := 0, false
-			in.Groups[0].CheckTarget = func(v []int, _ int, limit int64) TargetFeedback {
-				calls++
-				if slices.Contains(v, 1) {
-					return TargetFeedback{}
-				}
-				f := TargetFeedback{Status: TargetRejected, Work: 1}
-				for _, s := range v {
-					if s != 0 && reason != "no alternatives" {
-						f.Replace = []StoreReplacement{{Old: s, Candidates: []int{s + 1}}}
-					}
-				}
-				switch reason {
-				case "assignment":
-					f.Work = limit - 2 // The remaining work ends inside assignTarget.
-				case "callback", "no alternatives":
-					f.Work = limit
-				case "canceled":
-					canceled = true
-				}
-				return f
-			}
-			budget := int64(1000)
-			if reason == "nodes" {
-				budget = DefaultWorkBudget
-			}
-			r := Plan(in, Options{WorkBudget: budget, Cancel: func() bool { return canceled }})
-			wantStop := StopBudget
-			switch reason {
-			case "nodes":
-				wantStop = StopGreedy
-			case "canceled":
-				wantStop = StopCanceled
-			}
-			require.Equal(t, wantStop, r.Stop)
-			require.Equal(t, reason != "no alternatives", r.PlacementLimited)
-			require.Equal(t, r.Baseline, r.Score)
-			require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score)
-			require.False(t, r.TemporarilyBlocked)
-			require.LessOrEqual(t, calls, maxSearchNodes)
-			require.Empty(t, in.Groups[0].Exclude)
-		})
-	}
-}
-
-func TestDirectedRepairNodeBoundary(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		candidates  int
-		stop        StopReason
-		wantLimited bool
-	}{
-		{"last node", maxSearchNodes - 1, StopGreedy, false},
-		{"pending replacement", maxSearchNodes, StopGreedy, true},
-		{"last node at budget", maxSearchNodes - 1, StopBudget, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			in := general(1, 3+tc.candidates, 2, 1)
-			g := &in.Groups[0]
-			candidates := g.Rules[0].Stores[3:]
-			g.Rules = []*Rule{
-				{Role: RoleLeader, Count: 1, Stores: []int{0}},
-				{Role: RoleFollower, Count: 1, Stores: []int{1, 2}},
-			}
-			g.RuleOf[1] = 1
-			in.BaseVoters[1] = 5
-			calls := 0
-			g.CheckTarget = func(voters []int, _ int, limit int64) TargetFeedback {
-				calls++
-				require.ElementsMatch(t, []int{0, 2}, voters)
-				feedback := TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: 2, Candidates: candidates}}}
-				if tc.stop == StopBudget {
-					// Each replacement takes one scan to queue and one membership
-					// check per voter and rule to prove it is unassignable.
-					feedback.Work = limit - int64(tc.candidates*(1+len(g.Voters)*len(g.Rules)))
-				}
-				return feedback
-			}
-			r := Plan(in, Options{Sweeps: 1})
-			require.Equal(t, 1, calls)
-			require.Equal(t, tc.stop, r.Stop)
-			require.Equal(t, tc.wantLimited, r.PlacementLimited)
-			require.Zero(t, r.Changed)
-		})
-	}
-}
-
-// Two overlapping voter rules need two replacements when their relaxed picks
-// cover only three zones. The callback offers every store in the missing zones.
-func fiveZones(balanced, feedback bool) *Input {
-	in := general(1000, 300, 5, 5)
-	all := in.Groups[0].Rules[0]
-	for s := range in.Stores {
-		all.Location[s][0] = int32(s / 60)
-	}
-	rules := []*Rule{{Count: 2, Stores: all.Stores[:120], Location: all.Location}, {Count: 3, Stores: all.Stores, Location: all.Location}}
 	for i := range in.Groups {
 		g := &in.Groups[i]
-		g.Rules, g.RuleOf, g.Voters = rules, []int{0, 0, 1, 1, 1}, []int{0, 60, 120, 180, 240}
+		g.Voters = []int{0, 60, 120, 180, 240}
 		if balanced {
-			for z := range g.Voters {
-				g.Voters[z] += i % 60
+			for zone := range g.Voters {
+				g.Voters[zone] += i % 60
 			}
 			g.Leader = g.Voters[(i/60)%5]
-		}
-		if feedback {
-			g.CheckTarget = func(v []int, _ int, _ int64) TargetFeedback {
-				var counts [5]int
-				for _, s := range v {
-					counts[s/60]++
-				}
-				var candidates []int
-				for z, n := range counts {
-					if n == 0 {
-						candidates = append(candidates, all.Stores[z*60:(z+1)*60]...)
-					}
-				}
-				f := TargetFeedback{}
-				var reserved [2]bool
-				for _, s := range v {
-					z := s / 60
-					if z < 2 && !reserved[z] {
-						reserved[z] = true
-					} else if counts[z] > 1 {
-						f.Status, f.Work = TargetRejected, 300
-						f.Replace = append(f.Replace, StoreReplacement{Old: s, Candidates: candidates})
-					}
-				}
-				return f
-			}
+		} else {
+			g.CheckTarget = check
 		}
 	}
 	return in
 }
 
 func TestFiveZoneConvergence(t *testing.T) {
-	in := fiveZones(false, true)
+	in := fiveZones(false)
 	var r Result
-	for round := range 6 {
+	for range 6 {
 		r = Plan(in, Options{Seed: 7})
-		t.Logf("round=%d score=%v work=%d stop=%s changed=%d limited=%v", round, r.Score, r.Work, r.Stop, r.Changed, r.PlacementLimited)
 		for i := range in.Groups {
 			var zones [5]int
 			for k, s := range r.Voters[i] {
 				zones[s/60]++
-				in.Groups[i].RuleOf[k] = 1
-				if s < 120 {
-					in.Groups[i].RuleOf[k] = 0
-				}
+				in.Groups[i].RuleOf[k] = min(1, s/120)
 			}
 			require.Equal(t, [5]int{1, 1, 1, 1, 1}, zones)
 			in.Groups[i].Voters, in.Groups[i].Leader = r.Voters[i], r.Leaders[i]
@@ -974,8 +755,7 @@ func TestFiveZoneConvergence(t *testing.T) {
 }
 
 func TestFiveZoneConvergedBudget(t *testing.T) {
-	r := Plan(fiveZones(true, false), Options{Seed: 7})
-	t.Logf("score=%v work=%d stop=%s changed=%d", r.Score, r.Work, r.Stop, r.Changed)
+	r := Plan(fiveZones(true), Options{Seed: 7})
 	require.Equal(t, int64(83400), r.Score.Voter)
 	require.Zero(t, r.Changed)
 	require.Equal(t, StopGreedy, r.Stop)
@@ -983,11 +763,10 @@ func TestFiveZoneConvergedBudget(t *testing.T) {
 }
 
 func TestCompleteLeavesBeforeRepairs(t *testing.T) {
-	in := general(1, 70, 2, 1)
-	g := &in.Groups[0]
+	in, g := singleGroup(70, 0, 1, 1)
 	all := g.Rules[0].Stores
-	g.Rules = []*Rule{{Role: RoleLeader, Count: 1, Stores: all}, {Role: RoleFollower, Count: 1, Stores: all}}
-	g.Voters, g.RuleOf, g.Leader = []int{69, 68}, []int{0, 1}, 69
+	g.Rules[0].Role, g.Rules[1].Role = RoleLeader, RoleFollower
+	g.Voters, g.Leader = []int{69, 68}, 69
 	in.BaseVoters[68], in.BaseVoters[69] = 100, 100
 	calls := 0
 	g.CheckTarget = func(v []int, leader int, _ int64) TargetFeedback {
@@ -995,12 +774,8 @@ func TestCompleteLeavesBeforeRepairs(t *testing.T) {
 		if sameSet(v, g.Voters) || leader == 1 && sameSet(v, []int{0, 1}) {
 			return TargetFeedback{}
 		}
-		for _, s := range v {
-			if s != leader {
-				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: s, Candidates: all[2:68]}}}
-			}
-		}
-		return TargetFeedback{Status: TargetRejected}
+		follower := v[1-slices.Index(v, leader)]
+		return rejectWithReplacement(follower, all[2:68])
 	}
 	r := Plan(in, Options{Sweeps: 1})
 	require.ElementsMatch(t, []int{0, 1}, r.Voters[0])
@@ -1008,99 +783,12 @@ func TestCompleteLeavesBeforeRepairs(t *testing.T) {
 	require.Less(t, calls, 5)
 }
 
-func TestCompleteLeavesStoppedAfterRejection(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		stop        StopReason
-		otherStore  int
-		wantCalls   int
-		wantLimited bool
-	}{
-		{"budget", StopBudget, 3, 1, true},
-		{"canceled", StopCanceled, 3, 1, true},
-		{"duplicate leaf", StopBudget, 2, 1, false},
-		{"complete checks", StopGreedy, 3, 2, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			in := general(1, 6, 3, 1)
-			g := &in.Groups[0]
-			g.Rules = []*Rule{
-				{Role: RoleLeader, Count: 1, Stores: []int{0}},
-				{Role: RoleFollower, Count: 1, Stores: []int{1, 2}},
-				{Role: RoleFollower, Count: 1, Stores: []int{1, tc.otherStore}},
-			}
-			g.Voters, g.RuleOf = []int{0, 4, 5}, []int{0, 1, 2}
-			in.BaseVoters[4], in.BaseVoters[5] = 5, 5
-			calls, canceled := 0, false
-			g.CheckTarget = func(_ []int, _ int, limit int64) TargetFeedback {
-				calls++
-				if calls > 1 {
-					return TargetFeedback{Status: TargetSatisfied}
-				}
-				feedback := TargetFeedback{Status: TargetRejected}
-				if tc.stop == StopBudget {
-					feedback.Work = limit
-				}
-				canceled = tc.stop == StopCanceled
-				return feedback
-			}
-			r := Plan(in, Options{Sweeps: 1, Cancel: func() bool { return canceled }})
-			require.Equal(t, tc.wantCalls, calls)
-			require.Equal(t, tc.stop, r.Stop)
-			require.Equal(t, tc.wantLimited, r.PlacementLimited)
-			require.Equal(t, tc.stop == StopGreedy, r.Score.Less(r.Baseline))
-		})
-	}
-}
-
-func TestCompleteLeavesAfterRuleSearchCutoff(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		pairs       int
-		status      TargetStatus
-		wantLimited bool
-	}{
-		{"exhausted", 5, TargetRejected, false},
-		{"cut off", 6, TargetRejected, true},
-		{"temporarily blocked", 6, TargetTemporarilyBlocked, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			in := general(1, 1+3*tc.pairs, 1+2*tc.pairs, 1)
-			g := &in.Groups[0]
-			g.Rules = []*Rule{{Role: RoleLeader, Count: 1, Stores: []int{0}}}
-			// Each pair competes for one cheap store and can fill either rule
-			// first. Five pairs take 63 nodes. Six leave a branch unsearched.
-			for i := range tc.pairs {
-				cheap := 1 + 3*i
-				for j := 1; j <= 2; j++ {
-					store, ri := cheap+j, len(g.Rules)
-					g.Rules = append(g.Rules, &Rule{Role: RoleFollower, Count: 1, Stores: []int{cheap, store}})
-					g.Voters[ri], g.RuleOf[ri] = store, ri
-					in.BaseVoters[store] = 5
-				}
-			}
-			calls := 0
-			g.CheckTarget = func(_ []int, _ int, _ int64) TargetFeedback {
-				calls++
-				return TargetFeedback{Status: tc.status}
-			}
-			r := Plan(in, Options{Sweeps: 1})
-			require.Equal(t, 32, calls)
-			require.Equal(t, StopGreedy, r.Stop)
-			require.Equal(t, tc.wantLimited, r.PlacementLimited)
-			require.Equal(t, tc.status == TargetTemporarilyBlocked, r.TemporarilyBlocked)
-			require.Zero(t, r.Changed)
-		})
-	}
-}
-
 func TestTwoReplacements(t *testing.T) {
-	in := general(1, 6, 3, 1)
-	g := &in.Groups[0]
-	g.Rules = []*Rule{{Count: 1, Stores: []int{0}}, {Count: 1, Stores: []int{1, 2, 3}}, {Count: 1, Stores: []int{4, 5}}}
-	g.Voters, g.RuleOf, g.LeaderPinned = []int{0, 2, 5}, []int{0, 1, 2}, true
+	in, g := singleGroup(6, 0, 1, 1, 1)
+	g.Rules[0].Stores, g.Rules[1].Stores, g.Rules[2].Stores = []int{0}, []int{1, 2, 3}, []int{4, 5}
+	g.Voters, g.LeaderPinned = []int{0, 2, 5}, true
 	in.BaseVoters, in.BaseLeaders = []int{5, 0, 5, 0, 0, 5}, []int{5, 0, 0, 0, 0, 0}
-	for _, depth := range []int{1, 2} {
+	for depth, want := range map[int]Score{1: {108, 36}, 2: {98, 36}} {
 		g.CheckTarget = func(v []int, _ int, _ int64) TargetFeedback {
 			if sameSet(v, g.Voters) || sameSet(v, []int{0, 3, 5}) {
 				return TargetFeedback{}
@@ -1112,65 +800,63 @@ func TestTwoReplacements(t *testing.T) {
 			return f
 		}
 		r := Plan(in, Options{})
-		want := Score{108, 36}
-		if depth == 2 {
-			want.Voter = 98
-		}
 		require.Equal(t, want, r.Score, "repair depth %d", depth)
 	}
 }
 
 func TestLeaderChecks(t *testing.T) {
-	for name, work := range map[string]int64{"return edge": 0, "accepted over budget": 1000} {
-		t.Run(name, func(t *testing.T) {
-			in := &Input{Stores: 5, BaseLeaders: []int{1, 1, 2, 1, 0}}
-			for _, v := range [][]int{{0, 1}, {0, 4}, {2, 3}, {3, 1}, {0, 4}} {
-				g := Group{Rules: []*Rule{{Count: 2, Stores: v}}, Voters: v, Leader: v[0], CanLead: allTrue(5)}
-				g.CheckTarget = func(_ []int, leader int, _ int64) TargetFeedback {
-					require.NotEqual(t, v[0], leader, "the current leader needs no check")
-					return TargetFeedback{Work: work}
-				}
-				in.Groups = append(in.Groups, g)
-			}
-			p := newPlanner(in, Options{WorkBudget: 100})
-			_, leaders := p.layout()
-			delta := p.chainLeaders(leaders)
-			require.False(t, p.placementLimited)
-			if work > 0 {
-				require.Equal(t, StopBudget, p.stop)
-			} else {
-				require.Equal(t, int64(-10), delta, "later rounds must allow returning to an original leader")
-			}
-		})
+	in := leaderLayout(5, []int{0, 1}, []int{0, 4}, []int{2, 3}, []int{3, 1}, []int{0, 4})
+	in.BaseLeaders = []int{1, 1, 2, 1, 0}
+	var work int64
+	for i := range in.Groups {
+		g := &in.Groups[i]
+		g.Rules = []*Rule{{Count: 2, Stores: g.Voters}}
+		g.CheckTarget = func(_ []int, leader int, _ int64) TargetFeedback {
+			require.NotEqual(t, g.Leader, leader, "the current leader needs no check")
+			return TargetFeedback{Work: work}
+		}
+	}
+	for _, work = range []int64{0, 1000} {
+		p := newPlanner(in, Options{WorkBudget: 100})
+		_, leaders := p.layout()
+		delta := p.chainLeaders(leaders)
+		require.False(t, p.placementLimited)
+		if work == 0 {
+			require.Equal(t, int64(-10), delta, "later rounds allow returning to the input leader")
+		} else {
+			require.Equal(t, StopBudget, p.stop)
+		}
 	}
 }
 
-// revertChain has a neutral chain and an independent improvement.
-func revertChain(groups int) *Input {
-	n := groups + 3
-	in := &Input{Stores: n, BaseVoters: make([]int, n), BaseLeaders: make([]int, n)}
-	can := allTrue(n)
-	for i := range groups {
-		in.Groups = append(in.Groups, Group{Rules: []*Rule{{Count: 1, Stores: []int{i, i + 1}}},
-			Voters: []int{i + 1}, Leader: i + 1, CanLead: can})
-	}
-	in.BaseVoters[groups+1], in.BaseLeaders[groups+1] = 1, 1
-	in.Groups = append(in.Groups, Group{Rules: []*Rule{{Count: 1, Stores: []int{groups + 1, groups + 2}}},
-		Voters: []int{groups + 1}, Leader: groups + 1, CanLead: can})
-	return in
-}
-
-func TestRevertChainStops(t *testing.T) {
+func TestRevertChain(t *testing.T) {
 	const groups = 32
+	in := general(groups+1, groups+3, 0, 1)
+	for i := range in.Groups {
+		g := &in.Groups[i]
+		g.Voters[0], g.Leader = i+1, i+1
+		g.Rules = []*Rule{{Count: 1, Stores: []int{i, i + 1}}}
+	}
+	in.Groups[groups].Rules[0].Stores = []int{groups + 1, groups + 2}
+	in.BaseVoters[groups+1], in.BaseLeaders[groups+1] = 1, 1
+
+	t.Run("greedy keeps ties", func(t *testing.T) {
+		p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
+		baseline := p.score()
+		voters, leaders, score := p.greedy(0)
+		require.True(t, score.Less(baseline))
+		for i, g := range in.Groups[:groups] {
+			require.Equal(t, g.Voters, voters[i])
+			require.Equal(t, g.Leader, leaders[i])
+		}
+	})
 	for _, reason := range []StopReason{StopBudget, StopCanceled} {
 		for _, c := range []struct {
 			trials      int
 			limit, work int64
 		}{{0, 0, 0}, {17, 133, 136}, {groups, 252, 252}} {
 			t.Run(string(reason)+"/"+strconv.Itoa(c.trials), func(t *testing.T) {
-				re := require.New(t)
-				in := revertChain(groups)
-				p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
+				p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
 				origV, origL := p.layout()
 				// Only the last shifted group can revert per pass.
 				for i := range groups {
@@ -1186,68 +872,57 @@ func TestRevertChainStops(t *testing.T) {
 				}
 				// Re-entry after stopping must not process another trial.
 				for range 2 {
-					re.Equal(best, p.revert(origV, origL, voters, leaders))
-					re.Equal(reason, p.stop)
-					re.Equal(c.trials, p.visits)
-					re.Equal(c.work, p.work) // Rejected trials restore four load entries.
-					re.Equal(best, scoreOf(in, voters, leaders))
+					require.Equal(t, best, p.revert(origV, origL, voters, leaders))
+					require.Equal(t, reason, p.stop)
+					require.Equal(t, c.trials, p.visits)
+					require.Equal(t, c.work, p.work) // Rejected trials restore four load entries.
+					require.Equal(t, best, scoreOf(in, voters, leaders))
 				}
 				for i := range in.Groups {
-					re.True(matchesTarget(legalTargets(in, i), voters[i], nil, leaders[i]))
+					require.True(t, matchesTarget(legalTargets(in, i), voters[i], nil, leaders[i]))
 				}
 				if c.trials == groups {
-					re.Equal(origV[groups-1], voters[groups-1])
-					re.Equal(origL[groups-1], leaders[groups-1])
+					require.Equal(t, origV[groups-1], voters[groups-1])
+					require.Equal(t, origL[groups-1], leaders[groups-1])
 				}
 			})
 		}
 	}
 }
 
-// A reversion restores the rule assignment of the input voters, which the
-// leader transfers read. The chooser lists voters in rule order; the input
-// may not.
+// Revert restores the original rule assignment for subsequent leader transfers.
 func TestRevertRestoresRuleAssignment(t *testing.T) {
-	re := require.New(t)
 	rules := []*Rule{
 		{Role: RoleLeader, Count: 1, Stores: []int{0, 1}},
 		{Role: RoleFollower, Count: 1, Stores: []int{2, 3}},
 	}
-	in := &Input{Stores: 4, BaseVoters: make([]int, 4), BaseLeaders: make([]int, 4), Groups: []Group{{
-		Rules: rules, Voters: []int{2, 0}, RuleOf: []int{1, 0}, Leader: 0, CanLead: allTrue(4)}}}
-	p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
+	in := general(1, 4, 1, 2)
+	in.Groups[0].Rules, in.Groups[0].Voters, in.Groups[0].RuleOf = rules, []int{2, 0}, []int{1, 0}
+	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
 	origV, origL := p.layout()
 	// Another target with the same score, as the chooser returns it.
 	g := &p.gs[0]
 	p.move(g, []int{1, 3}, 1)
 	g.curRule = []int{0, 1}
 	voters, leaders := p.layout()
-	re.Equal(Score{2, 1}, p.revert(origV, origL, voters, leaders))
-	re.Equal([]int{2, 0}, g.cur)
-	re.Equal([]int{1, 0}, g.curRule)
+	require.Equal(t, Score{2, 1}, p.revert(origV, origL, voters, leaders))
+	require.Equal(t, []int{2, 0}, g.cur)
+	require.Equal(t, []int{1, 0}, g.curRule)
 }
 
 // Fixed voters can assign their leader to any voter rule, not just the first.
 func TestAssignTargetChoosesCheapestLeaderRule(t *testing.T) {
-	re := require.New(t)
-	in := &Input{Stores: 3, BaseLeaders: []int{0, 4, 8}, Groups: []Group{{
-		Rules: []*Rule{
-			{Count: 1, Stores: []int{2}},
-			{Count: 1, Stores: []int{0, 2}},
-			{Count: 1, Stores: []int{0, 1, 2}},
-		},
-		Voters: []int{0, 2, 1}, RuleOf: []int{1, 0, 2}, Leader: 2, CanLead: allTrue(3),
-	}}}
+	in, g := singleGroup(3, 0, 1, 1, 1)
+	in.BaseLeaders = []int{0, 4, 8}
+	g.Rules[0].Stores, g.Rules[1].Stores = []int{2}, []int{0, 2}
+	g.Voters, g.RuleOf, g.Leader = []int{0, 2, 1}, []int{1, 0, 2}, 2
 	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
-	g := &p.gs[0]
-	// Search visits [1, 0, 2] by increasing number of matching rules.
-	// The result pairs each voter with its rule independently of that order.
-	sol := p.assignTarget(g, g.Voters, &ruleSearch{p: p})
-	re.True(sol.ok)
-	re.Equal([]int{0, 2, 1}, in.Groups[0].Voters)
-	re.Equal(0, sol.leader, "the second voter rule has the cheapest leader")
-	re.Equal([]int{2, 0, 1}, sol.voters)
-	re.Equal([]int{0, 1, 2}, sol.rules)
+	sol := p.assignTarget(&p.gs[0], g.Voters, &ruleSearch{p: p})
+	require.True(t, sol.ok)
+	require.Equal(t, []int{0, 2, 1}, g.Voters)
+	require.Equal(t, 0, sol.leader)
+	require.Equal(t, []int{2, 0, 1}, sol.voters)
+	require.Equal(t, []int{0, 1, 2}, sol.rules)
 }
 
 func TestInvalidLeaderRulesStayFixed(t *testing.T) {
@@ -1264,200 +939,213 @@ func TestInvalidLeaderRulesStayFixed(t *testing.T) {
 		{"empty leader rule", []*Rule{{Role: RoleVoter, Count: 2}, {Role: RoleLeader, Count: 0}}, []int{0, 0}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
 			g := Group{Rules: tc.rules, RuleOf: tc.ruleOf, Voters: []int{0, 1}, Leader: 0, CanLead: allTrue(2)}
-			result := Plan(&Input{Stores: 2, Groups: []Group{g}}, Options{})
-			re.Equal(StopNoGroups, result.Stop)
-			re.Equal(g.Voters, result.Voters[0])
-			re.Equal(g.Leader, result.Leaders[0])
+			checkNoGroups(t, &Input{Stores: 2, Groups: []Group{g}})
 		})
 	}
 }
 
-// Repair candidates have independent assignment budgets, even with overlapping rules.
-func TestAssignTargetRepairBudget(t *testing.T) {
-	in := general(1, 20, 5, 1)
-	g := &in.Groups[0]
-	stores := g.Rules[0].Stores
-	g.Rules = []*Rule{
-		{Role: RoleVoter, Count: 2, Stores: stores},
-		{Role: RoleVoter, Count: 2, Stores: stores},
-		{Role: RoleVoter, Count: 1, Stores: stores},
+func TestAssignTargetBudgets(t *testing.T) {
+	for _, c := range []struct {
+		name         string
+		rules, count int
+		budget       int64
+		stop         StopReason
+		ok           bool
+		steps        int
+	}{
+		{"assignments", 5, 1, DefaultWorkBudget, "", true, 1},
+		{"steps", 6, 2, DefaultWorkBudget, "", false, 1},
+		{"canceled", 5, 1, DefaultWorkBudget, StopCanceled, false, 0},
+		{"initial work exhausted", 5, 1, 0, StopBudget, false, 0},
+		{"membership scan", 8, 1, 5, StopBudget, false, 1},
+		{"backtracking", 8, 1, 200, StopBudget, false, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in, g := singleGroup(30, 2, slices.Repeat([]int{c.count}, c.rules)...)
+			voters := g.Voters
+			switch {
+			case c.count == 2:
+				// No complete assignment reaches the best isolation.
+				voters = []int{0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22}
+			case c.rules == 8:
+				// Eight newcomers compete for seven seats, leaving no complete assignment.
+				voters = g.Rules[0].Stores[c.rules : 2*c.rules]
+				for _, rule := range g.Rules[:c.rules-1] {
+					rule.Stores, rule.Location = voters, nil
+				}
+				g.Rules[c.rules-1] = &Rule{Count: 1}
+			}
+			p := newPlanner(in, Options{WorkBudget: c.budget, Cancel: func() bool { return c.stop == StopCanceled }})
+			rs := ruleSearch{p: p}
+			sol := p.assignTarget(&p.gs[0], voters, &rs)
+			require.Equal(t, c.ok, sol.ok)
+			require.True(t, p.placementLimited)
+			require.Zero(t, rs.nodes)
+			require.Equal(t, c.stop, p.stop)
+			if c.stop == StopBudget {
+				require.Equal(t, c.budget, p.work)
+			}
+			require.Equal(t, c.steps, rs.steps)
+		})
 	}
-	g.RuleOf = []int{0, 0, 1, 1, 2}
-	// Four forced voters leave enough outer search nodes for all eight repairs.
+	t.Run("independent repairs", checkRepairBudget)
+	t.Run("cached fixed work", func(t *testing.T) {
+		in, g := singleGroup(300, 3, 2, 2, 1)
+		for s := range in.Stores {
+			g.Rules[0].Location[s] = []int32{int32(s % 3), int32(s % 15), int32(s)}
+		}
+		g.Voters = []int{0, 1, 3, 4, 2}
+		p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
+		state := &p.gs[0]
+		for ri := range g.Rules {
+			_, ok := p.isolation(state, ri)
+			require.True(t, ok)
+		}
+		work := p.work
+		sol := p.assignTarget(state, g.Voters, &ruleSearch{p: p})
+		require.True(t, sol.ok)
+		require.ElementsMatch(t, g.Voters, sol.voters)
+		require.Less(t, p.work-work, int64(500), "cached assignments only scan the fixed voters")
+	})
+
+	t.Run("unassignable replacements", func(t *testing.T) {
+		const groups, rules, budget = 100, 8, 30_000
+		in := general(groups, 2*rules+32, 0, slices.Repeat([]int{1}, rules)...)
+		g := &in.Groups[0]
+		all := g.Rules[0].Stores
+		for ri, rule := range g.Rules {
+			rule.Stores = all[rules : rules+ri+1]
+			in.BaseVoters[ri], in.BaseVoters[rules+ri] = 2*rules, rules-ri
+		}
+		g.Rules[0].Role = RoleLeader
+		check := func(voters []int, _ int, _ int64) TargetFeedback {
+			if sameSet(voters, g.Voters) {
+				return TargetFeedback{}
+			}
+			return rejectWithReplacement(voters[rules-1], all[2*rules:])
+		}
+		for i := range in.Groups {
+			in.Groups[i].CheckTarget = check
+		}
+		bounded, full := Plan(in, Options{WorkBudget: budget}), Plan(in, Options{})
+		require.Equal(t, StopBudget, bounded.Stop)
+		require.True(t, bounded.PlacementLimited)
+		require.Less(t, bounded.Visits, groups)
+		require.GreaterOrEqual(t, bounded.Work, int64(budget))
+		require.Equal(t, StopGreedy, full.Stop)
+		require.False(t, full.PlacementLimited, "a replacement that fits no rule is fully explored")
+		require.Greater(t, full.Work, bounded.Work)
+	})
+}
+
+func checkRepairBudget(t *testing.T) {
+	in, g := singleGroup(20, 1, 2, 2, 1)
 	g.Forced, g.LeaderPinned = []int{0, 1, 2, 3}, true
-	for s := range 5 {
-		in.BaseVoters[s] = 10
+	for _, store := range g.Voters {
+		in.BaseVoters[store] = 10
 	}
 	var tried []int
-	g.CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
-		if slices.Contains(voters, 4) {
+	g.CheckTarget = func(v []int, _ int, _ int64) TargetFeedback {
+		store := slices.Max(v)
+		switch {
+		case store == 4:
 			return TargetFeedback{}
-		}
-		for s := 10; s <= 17; s++ {
-			if slices.Contains(voters, s) {
-				tried = append(tried, s)
-				if s == 15 {
-					return TargetFeedback{}
-				}
-				return TargetFeedback{Status: TargetRejected}
+		case store < 10:
+			return rejectWithReplacement(store, g.Rules[0].Stores[10:18])
+		default:
+			tried = append(tried, store)
+			if store == 15 {
+				return TargetFeedback{}
 			}
+			return TargetFeedback{Status: TargetRejected}
 		}
-		return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{
-			{Old: voters[len(voters)-1], Candidates: []int{10, 11, 12, 13, 14, 15, 16, 17}},
-		}}
 	}
 	r := Plan(in, Options{Seed: 7})
-	t.Logf("repair: changed=%d limited=%v work=%d tried=%v voters=%v", r.Changed, r.PlacementLimited, r.Work, tried, r.Voters[0])
 	require.Equal(t, 1, r.Changed)
 	require.Contains(t, r.Voters[0], 15)
-	require.GreaterOrEqual(t, len(tried), 6)
-	require.Equal(t, []int{10, 11, 12, 13, 14, 15}, tried[:6])
 	require.True(t, r.Score.Less(r.Baseline))
 	require.False(t, r.PlacementLimited)
-
+	want := []int{10, 11, 12, 13, 14, 15}
+	require.GreaterOrEqual(t, len(tried), len(want))
+	require.Equal(t, want, tried[:len(want)])
 	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
-	rs := &ruleSearch{p: p}
-	sol := p.assignTarget(&p.gs[0], []int{0, 1, 2, 3, 15}, rs)
-	require.True(t, sol.ok)
-	require.LessOrEqual(t, rs.steps, 1, "internal assignments must not consume later repairs' steps")
+	rs := ruleSearch{p: p}
+	require.True(t, p.assignTarget(&p.gs[0], []int{0, 1, 2, 3, 15}, &rs).ok)
+	require.Equal(t, 1, rs.steps, "internal assignments must not consume later repair steps")
 }
 
-func TestAssignTargetFixedWork(t *testing.T) {
-	in := general(1, 300, 5, 3)
-	g := &in.Groups[0]
+// fullRulePick keeps the full candidate scan as a reference for fixed-rule picks.
+func fullRulePick(p *planner, g *groupState, must, forbid []int, host int) choice {
 	r := g.Rules[0]
-	for s := range in.Stores {
-		r.Location[s] = []int32{int32(s % 3), int32(s % 15), int32(s)} // zone, rack, host
-	}
-	g.Rules = []*Rule{
-		{Role: RoleVoter, Count: 2, Stores: r.Stores, Location: r.Location},
-		{Role: RoleVoter, Count: 2, Stores: r.Stores, Location: r.Location},
-		{Role: RoleVoter, Count: 1, Stores: r.Stores, Location: r.Location},
-	}
-	g.Voters, g.RuleOf = []int{0, 1, 3, 4, 2}, []int{0, 0, 1, 1, 2}
-	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
-	for ri := range g.Rules {
-		_, ok := p.isolation(&p.gs[0], ri)
-		require.True(t, ok)
-	}
-	p.work = 0
-	sol := p.assignTarget(&p.gs[0], g.Voters, &ruleSearch{p: p})
-	t.Logf("fixed five-voter assignment on 300 stores: work=%d", p.work)
-	require.True(t, sol.ok)
-	require.ElementsMatch(t, g.Voters, sol.voters)
-	require.Less(t, p.work, int64(500), "cached fixed assignments must only scan their five voters")
-}
-
-func TestAssignTargetLimits(t *testing.T) {
-	for _, reason := range []string{"assignments", "steps", "canceled", "work"} {
-		t.Run(reason, func(t *testing.T) {
-			count, rules := 1, 5
-			if reason == "steps" {
-				count, rules = 2, 6
-			}
-			in := general(1, 30, count*rules, 2)
-			g := &in.Groups[0]
-			base := g.Rules[0]
-			g.Rules = nil
-			for range rules {
-				g.Rules = append(g.Rules, &Rule{Role: RoleVoter, Count: count, Stores: base.Stores, Location: base.Location})
-			}
-			for k := range g.RuleOf {
-				g.RuleOf[k] = k / count
-			}
-			voters := slices.Clone(g.Voters)
-			if reason == "steps" {
-				// Every complete assignment misses the best isolation, so the
-				// step budget must stop the search before the valid-leaf bound.
-				for i := range voters {
-					voters[i] = 2 * i
-				}
-			}
-			p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget, Cancel: func() bool { return reason == "canceled" }})
-			if reason == "work" {
-				p.work = p.opt.WorkBudget
-			}
-			rs := &ruleSearch{p: p}
-			sol := p.assignTarget(&p.gs[0], voters, rs)
-			require.Equal(t, reason == "assignments", sol.ok)
-			require.True(t, p.placementLimited)
-			require.LessOrEqual(t, rs.steps, 1)
-			require.Zero(t, rs.nodes)
-		})
-	}
-}
-
-// fullRulePick retains the full candidate scan as a reference for fixed-rule picks.
-func fullRulePick(p *planner, g *groupState, ri int, must, forbid []int, host bool) (choice, bool) {
-	r := g.Rules[ri]
-	target, ok := p.isolation(g, ri)
-	if !ok {
-		return choice{}, false
-	}
-	cands := p.candidates(nil, g, ri, func(s int) bool { return slices.Contains(forbid, s) })
-	for _, s := range must {
-		if !slices.Contains(cands, s) {
-			return choice{}, false
-		}
+	cands := p.candidates(nil, g, 0, func(s int) bool { return slices.Contains(forbid, s) })
+	if slices.ContainsFunc(must, func(s int) bool { return !slices.Contains(cands, s) }) {
+		return choice{}
 	}
 	var lead func(int) bool
-	if host {
+	if host == 1 {
 		lead = func(s int) bool { return p.leaderCapable(g, r, s) && (!g.LeaderPinned || s == g.Leader) }
 	}
-	picks := p.pickAll(g, r, cands, must, 0, r.Count, lead)
-	c := picks[0][r.Count]
-	if host {
-		c = picks[1][r.Count]
-	}
-	return c, c.ok && c.v.cmpIsolation(target) == 0
+	target, ok := p.isolation(g, 0)
+	c := p.pickAll(g, r, cands, must, 0, r.Count, lead)[host][r.Count]
+	c.ok = ok && c.ok && c.v.cmpIsolation(target) == 0
+	return c
 }
 
-func TestPickRuleFixedMatchesFullScan(t *testing.T) {
+func TestPickRuleFixed(t *testing.T) {
+	membership, g := singleGroup(8, 0, 2, 1)
+	g.Rules[0].Stores, g.Rules[1].Stores = []int{3, 4, 5}, []int{6}
+	g.Exclude = []int{4}
+	p := newPlanner(membership, Options{WorkBudget: DefaultWorkBudget})
+	state := &p.gs[0]
+	for ri := range g.Rules {
+		candidates := p.candidates(nil, state, ri, nil)
+		for store := range membership.Stores {
+			accepted := p.accepts(state, ri, store) && !slices.Contains(g.Exclude, store)
+			require.Equal(t, slices.Contains(candidates, store), accepted, "rule %d store %d", ri, store)
+		}
+	}
+	// Original voter and shared member; then wrong rule, nonmember,
+	// excluded, forbidden and duplicate.
+	for _, store := range []int{1, 3, 2, 7, 4, 5, 0} {
+		_, ok := p.pickRule(state, 0, []int{store, 0}, []int{5}, false)
+		require.Equal(t, store == 1 || store == 3, ok, "mandatory store %d", store)
+	}
+
 	rng := rand.New(rand.NewPCG(17, 38))
 	for i := range 400 {
-		in := general(1, 300, 1+rng.IntN(maxCount), 1)
-		original := &in.Groups[0]
-		r := original.Rules[0]
-		for s := range in.Stores {
-			zone := s % 5
-			switch i % 3 {
-			case 0:
-				zone = 0 // Exercise recursive picks below a shared prefix.
-			case 1:
-				zone = s // Many domains and only a few mandatory stores.
-			}
-			r.Location[s] = []int32{int32(zone), int32(s % 25), int32(s)}
-			in.BaseVoters[s], in.BaseLeaders[s] = rng.IntN(9), rng.IntN(5)
-			original.CanLead[s] = rng.IntN(2) == 0
+		in, g := singleGroup(300, 1, 1+rng.IntN(maxCount))
+		r := g.Rules[0]
+		for store := range in.Stores {
+			zone := []int{0, store, store % 5}[i%3] // shared prefix, unique or repeated zones
+			r.Location[store] = []int32{int32(zone), int32(store % 25), int32(store)}
+			in.BaseVoters[store], in.BaseLeaders[store] = rng.IntN(9), rng.IntN(5)
+			g.CanLead[store] = rng.IntN(2) == 0
 		}
 		r.IsolationDepth = []int{0, 2, 3}[i%3]
-		// Original voters remain candidates even outside the shared store list.
-		r.Stores = r.Stores[maxCount:]
-		original.Exclude = []int{298}
-		original.LeaderPinned = i%4 == 0
+		r.Stores = r.Stores[maxCount:] // Original voters remain eligible.
+		g.Exclude, g.LeaderPinned = []int{298}, i%4 == 0
 		p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
 		require.Len(t, p.gs, 1)
-		g := &p.gs[0]
-		g.startV, g.startLd = g.Voters, g.Leader
+		state := &p.gs[0]
+		state.startV, state.startLd = g.Voters, g.Leader
 		forbid := []int{299}
-		for _, host := range []bool{false, true} {
-			full, ok := fullRulePick(p, g, 0, nil, forbid, host)
-			require.True(t, ok)
+		for host := range 2 {
+			full := fullRulePick(p, state, nil, forbid, host)
+			require.True(t, full.ok)
 			must := slices.Clone(full.sel)
 			if i%2 == 0 {
 				must = rng.Perm(in.Stores)[:r.Count]
 			}
 			rng.Shuffle(len(must), func(a, b int) { must[a], must[b] = must[b], must[a] })
 			before := slices.Clone(must)
-			want, wantOK := fullRulePick(p, g, 0, must, forbid, host)
+			want := fullRulePick(p, state, must, forbid, host)
 			work := p.work
-			got, gotOK := p.pickRule(g, 0, must, forbid, host)
-			require.Equal(t, wantOK, gotOK, "case %d host=%v must=%v", i, host, must)
-			if gotOK {
-				require.Equal(t, want.v, got.v, "case %d host=%v", i, host)
-				require.Equal(t, want.leader, got.leader, "case %d host=%v", i, host)
+			got, ok := p.pickRule(state, 0, must, forbid, host == 1)
+			require.Equal(t, want.ok, ok, "case %d host=%d must=%v", i, host, must)
+			if ok {
+				require.Equal(t, want.v, got.v, "case %d host=%d", i, host)
+				require.Equal(t, want.leader, got.leader)
 				require.ElementsMatch(t, want.sel, got.sel)
 			}
 			require.Equal(t, before, must)
@@ -1466,164 +1154,24 @@ func TestPickRuleFixedMatchesFullScan(t *testing.T) {
 	}
 }
 
-func TestPickRuleFixedMembership(t *testing.T) {
-	in := general(1, 8, 3, 1)
-	g := &in.Groups[0]
-	g.Rules = []*Rule{{Role: RoleVoter, Count: 2, Stores: []int{3, 4, 5}}, {Role: RoleVoter, Count: 1, Stores: []int{6}}}
-	g.RuleOf = []int{0, 0, 1}
-	g.Exclude = []int{4}
-	p := newPlanner(in, Options{WorkBudget: DefaultWorkBudget})
-	for _, tc := range []struct {
-		name string
-		must []int
-		ok   bool
-	}{
-		{"original voters", []int{1, 0}, true},
-		{"shared member", []int{3, 0}, true},
-		{"other rule's original voter", []int{2, 0}, false},
-		{"nonmember", []int{7, 0}, false},
-		{"excluded", []int{4, 0}, false},
-		{"forbidden", []int{5, 0}, false},
-		{"duplicate", []int{0, 0}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, ok := p.pickRule(&p.gs[0], 0, tc.must, []int{5}, false)
-			require.Equal(t, tc.ok, ok)
-		})
-	}
-	for ri := range g.Rules {
-		cands := p.candidates(nil, &p.gs[0], ri, nil)
-		for s := range in.Stores {
-			require.Equal(t, slices.Contains(cands, s), p.accepts(&p.gs[0], ri, s) && !slices.Contains(g.Exclude, s))
-		}
-	}
-}
-
 func TestEmptyRuleOfSlice(t *testing.T) {
-	re := require.New(t)
-	in := general(3, 4, 2, 1)
-	in.BaseVoters = []int{4, 4, 0, 0}
-	in.BaseLeaders = []int{3, 0, 0, 0}
+	in := general(3, 4, 1, 2)
+	in.BaseVoters, in.BaseLeaders = []int{4, 4, 4, 0}, []int{3, 0, 0, 0}
 	for i := range in.Groups {
-		in.Groups[i].RuleOf = []int{}
+		in.Groups[i].RuleOf = in.Groups[i].RuleOf[:0]
 	}
 	// Keep one group's voters fixed so visitLeader and chainLeaders read the
 	// initial rule slice directly, and give another a tied improvement to revert.
 	in.Groups[1].Forced = []int{0, 1}
 	in.Groups[2].Rules = []*Rule{{Count: 2, Stores: []int{0, 1, 2}}}
-	in.BaseVoters[2] = 4
 	r := Plan(in, Options{Seed: 7})
-	re.Equal(StopGreedy, r.Stop)
-	re.True(r.Score.Less(r.Baseline))
-	re.Equal(scoreOf(in, r.Voters, r.Leaders), r.Score)
-	re.ElementsMatch([]int{2, 3}, r.Voters[0])
-	re.ElementsMatch([]int{0, 1}, r.Voters[1])
-	re.Equal(1, r.Leaders[1])
-	for i := range in.Groups {
-		re.NotNil(in.Groups[i].RuleOf)
-		re.Empty(in.Groups[i].RuleOf)
-	}
-}
-
-// Zone 0 holds the pinned leader. A placement check rejects zone 1 and
-// offers zones 2 and 3, but a second constraint rejects every store in zone 2.
-func TestDirectedRepairDomainRepresentatives(t *testing.T) {
-	const perZone = maxSearchNodes + 1
-	in := general(1, 4*perZone, 2, 4)
-	g := &in.Groups[0]
-	rule := g.Rules[0]
-	for s := range in.Stores {
-		rule.Location[s][0] = int32(s / perZone)
-		in.BaseVoters[s] = s / perZone
-	}
-	g.LeaderPinned = true
-	g.Voters[1] = 3 * perZone
-	in.BaseVoters[g.Voters[1]]++ // A different zone 3 store would improve the score.
-	g.CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
-		s := max(voters[0], voters[1]) // The pinned leader is store 0.
-		switch s / perZone {
-		case 1:
-			return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{{Old: s, Candidates: rule.Stores[2*perZone:]}}}
-		case 2:
-			return TargetFeedback{Status: TargetRejected}
-		default:
-			return TargetFeedback{}
-		}
-	}
-	r := Plan(in, Options{Sweeps: 1, Seed: 7})
-	require.ElementsMatch(t, []int{0, 3*perZone + 1}, r.Voters[0])
-	require.False(t, r.PlacementLimited)
+	require.Equal(t, StopGreedy, r.Stop)
 	require.True(t, r.Score.Less(r.Baseline))
-}
-
-func TestAssignTargetChargesEnumerationWork(t *testing.T) {
-	t.Run("unassignable replacements", func(t *testing.T) {
-		const groups, rules, candidates = 100, 8, 32
-		in := general(groups, 2*rules+candidates, rules, 1)
-		all := in.Groups[0].Rules[0].Stores
-		shared := make([]*Rule, rules)
-		for ri := range rules {
-			// Each overlapping rule has a distinct cheapest store. None
-			// admits any of the replacements offered for that target.
-			shared[ri] = &Rule{Count: 1, Stores: all[rules : rules+ri+1]}
-			in.BaseVoters[ri] = 2 * rules
-			in.BaseVoters[rules+ri] = rules - ri
-		}
-		shared[0].Role = RoleLeader
-		for i := range in.Groups {
-			g := &in.Groups[i]
-			g.Rules = shared
-			for k := range g.Voters {
-				g.RuleOf[k] = k
-			}
-			g.CheckTarget = func(voters []int, _ int, _ int64) TargetFeedback {
-				if sameSet(voters, g.Voters) {
-					return TargetFeedback{}
-				}
-				return TargetFeedback{Status: TargetRejected, Replace: []StoreReplacement{
-					{Old: voters[rules-1], Candidates: all[2*rules:]},
-				}}
-			}
-		}
-
-		const budget = 30_000
-		bounded := Plan(in, Options{WorkBudget: budget})
-		require.Equal(t, StopBudget, bounded.Stop)
-		require.True(t, bounded.PlacementLimited)
-		require.Less(t, bounded.Visits, groups)
-		require.GreaterOrEqual(t, bounded.Work, int64(budget))
-
-		full := Plan(in, Options{})
-		require.Equal(t, StopGreedy, full.Stop)
-		require.False(t, full.PlacementLimited, "a replacement that fits no rule is fully explored")
-		require.Greater(t, full.Work, bounded.Work)
-		t.Logf("bounded work=%d visits=%d; full work=%d visits=%d", bounded.Work, bounded.Visits, full.Work, full.Visits)
-	})
-
-	t.Run("overlapping enumeration", func(t *testing.T) {
-		const rules = 8
-		in := general(1, 2*rules, rules, 1)
-		g := &in.Groups[0]
-		voters := g.Rules[0].Stores[rules:]
-		g.Rules = make([]*Rule, rules)
-		for ri := range rules {
-			g.RuleOf[ri] = ri
-			g.Rules[ri] = &Rule{Count: 1}
-			if ri < rules-1 {
-				g.Rules[ri].Stores = voters
-			}
-		}
-		// Each new voter fits seven rules, but eight voters cannot fill
-		// seven seats. No complete assignment reaches pickRule.
-		for _, budget := range []int64{5, 200} { // Cut off the membership scan, then backtracking.
-			p := newPlanner(in, Options{WorkBudget: budget})
-			rs := &ruleSearch{p: p}
-			sol := p.assignTarget(&p.gs[0], voters, rs)
-			require.False(t, sol.ok)
-			require.Equal(t, StopBudget, p.stop)
-			require.Equal(t, budget, p.work)
-			require.True(t, p.placementLimited)
-			require.Equal(t, 1, rs.steps)
-		}
-	})
+	require.Equal(t, scoreOf(in, r.Voters, r.Leaders), r.Score)
+	require.ElementsMatch(t, []int{2, 3}, r.Voters[0])
+	require.ElementsMatch(t, []int{0, 1}, r.Voters[1])
+	require.Equal(t, 1, r.Leaders[1])
+	for _, g := range in.Groups {
+		require.Equal(t, []int{}, g.RuleOf)
+	}
 }
