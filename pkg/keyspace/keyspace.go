@@ -275,11 +275,11 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err := validateName(request.Name); err != nil {
 		return nil, err
 	}
-	var err error
-	request.Config, err = prepareNewGCConfig(request.Config)
+	validatedConfig, err := prepareNewGCConfig(request.Config)
 	if err != nil {
 		return nil, err
 	}
+	request.Config = validatedConfig
 	// Check if keyspace with that name already exists before allocating ID.
 	// This prevents unnecessary ID allocation when the name already exists.
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -424,11 +424,11 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	if err := validateName(name); err != nil {
 		return nil, err
 	}
-	var err error
-	request.Config, err = prepareNewGCConfig(request.Config)
+	validatedConfig, err := prepareNewGCConfig(request.Config)
 	if err != nil {
 		return nil, err
 	}
+	request.Config = validatedConfig
 	// Check if keyspace with that name or ID already exists before processing.
 	// This provides early validation and better error handling.
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {

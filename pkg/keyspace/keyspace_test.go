@@ -1480,7 +1480,7 @@ func (suite *keyspaceTestSuite) TestGCConfigCreationPolicy() {
 				{"mismatched", map[string]string{GCManagementType: incompatible}, errs.ErrKeyspaceGCModeMismatch},
 				{"empty", map[string]string{GCManagementType: ""}, errs.ErrKeyspaceGCConfigInvalid},
 				{"unknown", map[string]string{GCManagementType: "other"}, errs.ErrKeyspaceGCConfigInvalid},
-				{"legacy-v2", map[string]string{"safe_point_version": "v2"}, errs.ErrKeyspaceLegacyGCConfigUnsupported},
+				{"legacy-v2", map[string]string{"safe_point_version": "v2", "unrelated": "retained"}, errs.ErrKeyspaceLegacyGCConfigUnsupported},
 				{"legacy-empty", map[string]string{"safe_point_version": ""}, errs.ErrKeyspaceLegacyGCConfigUnsupported},
 				{"legacy-v1", map[string]string{GCManagementType: mode, "safe_point_version": "v1"}, errs.ErrKeyspaceLegacyGCConfigUnsupported},
 				// Successful requests also check that preceding rejections did not allocate IDs.
@@ -1499,9 +1499,21 @@ func (suite *keyspaceTestSuite) TestGCConfigCreationPolicy() {
 						if nextGen {
 							id += 100
 						}
-						meta, err = suite.manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: name, Config: maps.Clone(tc.config)})
+						req := &CreateKeyspaceByIDRequest{ID: &id, Name: name, Config: maps.Clone(tc.config)}
+						meta, err = suite.manager.CreateKeyspaceByID(req)
+						if tc.wantErr != nil {
+							re.ErrorIs(err, tc.wantErr)
+							re.Equal(tc.config, req.Config)
+							_, err = suite.manager.CreateKeyspaceByID(req)
+						}
 					} else {
-						meta, err = suite.manager.CreateKeyspace(&CreateKeyspaceRequest{Name: name, Config: maps.Clone(tc.config)})
+						req := &CreateKeyspaceRequest{Name: name, Config: maps.Clone(tc.config)}
+						meta, err = suite.manager.CreateKeyspace(req)
+						if tc.wantErr != nil {
+							re.ErrorIs(err, tc.wantErr)
+							re.Equal(tc.config, req.Config)
+							_, err = suite.manager.CreateKeyspace(req)
+						}
 					}
 					if tc.wantErr != nil {
 						re.ErrorIs(err, tc.wantErr)
