@@ -838,7 +838,7 @@ func (m *Manager) reconcileRangeConflictsLocked(conflicts map[string]struct{}) {
 }
 
 // loadRegionLabel rebuilds the mapping between groups and label rules after restart.
-// It should be called with the manager lock held.
+// Both metaMutex and the manager write lock must be held.
 func (m *Manager) loadRegionLabel() {
 	totalRanges := 0
 
