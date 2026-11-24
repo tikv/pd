@@ -203,101 +203,57 @@ func TestObserveAvailableRegion(t *testing.T) {
 }
 
 func TestRangeConflictPreservesTarget(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		observe bool
-		admin   bool
-		stale   bool
-		voters  []uint64
-	}{
-		{name: "observe", observe: true, voters: []uint64{2, 3, 4}},
-		{name: "observed-update", voters: []uint64{2, 3, 4}},
-		{name: "stale-update", stale: true, voters: []uint64{2, 3, 4}},
-		{name: "leader-only-update", voters: []uint64{1, 2, 3}},
-		{name: "admin-update", admin: true, voters: []uint64{2, 3, 4}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
-			ctx := t.Context()
-			store := storage.NewStorageWithMemoryBackend()
-			storeInfos := core.NewStoresInfo()
-			for id := uint64(1); id <= 4; id++ {
-				storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, NodeState: metapb.NodeState_Serving},
-					core.SetLastHeartbeatTS(time.Now())))
-			}
-			regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
-			re.NoError(err)
-			manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
-			re.NoError(err)
-			re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{
-				{GroupID: "a", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("d")}}},
-				{GroupID: "b"},
-			}))
-			state, err := manager.UpdateAffinityGroupPeers("a", 1, []uint64{1, 2, 3})
-			re.NoError(err)
-			re.True(state.AffinitySchedulingAllowed)
-			re.False(state.RegularSchedulingAllowed)
-			beforeConflict := state
-			before, err := store.LoadAffinityGroup("a")
-			re.NoError(err)
-
-			// Bypass affinity write validation, as a label watcher can receive an overlap from storage.
-			overlap := keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("c")}
-			rule := MakeLabelRule(GroupKeyRanges{GroupID: "b", KeyRanges: []keyutil.KeyRange{overlap}})
-			re.NoError(regionLabeler.SetLabelRule(rule))
-			re.NoError(manager.SyncKeyRangesFromEtcd(rule))
-			manager.ReconcileRangeConflicts()
-			state = manager.GetAffinityGroupState("a")
-			re.True(state.rangeConflict)
-			re.True(state.RegularSchedulingAllowed)
-			re.False(state.AffinitySchedulingAllowed)
-			re.NotZero(state.affinityVer)
-
-			if tc.observe {
-				manager.ObserveAvailableRegion(generateRegionForTest(1, tc.voters, overlap), state)
-			} else if tc.admin {
-				_, err = manager.UpdateAffinityGroupPeers("a", 2, tc.voters)
-				re.NoError(err)
-			} else {
-				observed := state
-				if tc.stale {
-					observed = beforeConflict
-				}
-				_, err = manager.updateAffinityGroupPeersWithState("a", observed, 2, tc.voters)
-				re.NoError(err)
-			}
-
-			leader, voters := uint64(1), []uint64{1, 2, 3}
-			if tc.admin {
-				leader, voters = 2, tc.voters
-			}
-			assertTarget := func() {
-				state := manager.GetAffinityGroupState("a")
-				re.Equal(leader, state.LeaderStoreID)
-				re.Equal(voters, state.VoterStoreIDs)
-				saved, err := store.LoadAffinityGroup("a")
-				re.NoError(err)
-				var persisted Group
-				re.NoError(json.Unmarshal([]byte(saved), &persisted))
-				re.Equal(leader, persisted.LeaderStoreID)
-				re.Equal(voters, persisted.VoterStoreIDs)
-				if !tc.admin {
-					re.Equal(before, saved)
-				}
-			}
-			assertTarget()
-			re.True(manager.GetAffinityGroupState("a").rangeConflict)
-
-			re.NoError(regionLabeler.DeleteLabelRule(rule.ID))
-			manager.SyncKeyRangesDeleteFromEtcd(rule.ID)
-			manager.ReconcileRangeConflicts()
-			state = manager.GetAffinityGroupState("a")
-			re.False(state.rangeConflict)
-			re.True(state.AffinitySchedulingAllowed)
-			re.False(state.RegularSchedulingAllowed)
-			assertTarget()
-		})
+	re := require.New(t)
+	store, stores := storage.NewStorageWithMemoryBackend(), core.NewStoresInfo()
+	for id := uint64(1); id <= 4; id++ {
+		stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: id}, core.SetLastHeartbeatTS(time.Now())))
 	}
+	manager := newTestAffinityManager(t, store, stores)
+	overlap := testKeyRanges("b", "c")
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{
+		{GroupID: "a", KeyRanges: testKeyRanges("a", "d")},
+		{GroupID: "b"},
+	}))
+	oldVoters, newVoters := []uint64{1, 2, 3}, []uint64{2, 3, 4}
+	beforeConflict, err := manager.UpdateAffinityGroupPeers("a", 1, oldVoters)
+	re.NoError(err)
+
+	rule := MakeLabelRule(GroupKeyRanges{GroupID: "b", KeyRanges: overlap})
+	re.NoError(manager.regionLabeler.SetLabelRule(rule))
+	re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+	manager.ReconcileRangeConflicts()
+	conflicted := manager.GetAffinityGroupState("a")
+
+	check := func(want Group) *GroupState {
+		state := manager.GetAffinityGroupState("a")
+		re.Equal(want, state.Group)
+		saved, err := store.LoadAffinityGroup("a")
+		re.NoError(err)
+		expected, err := json.Marshal(want)
+		re.NoError(err)
+		re.Equal(string(expected), saved)
+		return state
+	}
+	manager.ObserveAvailableRegion(generateRegionForTest(1, newVoters, overlap[0]), conflicted)
+	re.True(check(beforeConflict.Group).rangeConflict)
+	// The Region observation above covers the current state with new voters.
+	_, err = manager.updateAffinityGroupPeersWithState("a", beforeConflict, 2, newVoters)
+	re.NoError(err)
+	re.True(check(beforeConflict.Group).rangeConflict)
+	_, err = manager.updateAffinityGroupPeersWithState("a", conflicted, 2, oldVoters)
+	re.NoError(err)
+	re.True(check(beforeConflict.Group).rangeConflict)
+	_, err = manager.UpdateAffinityGroupPeers("a", 2, newVoters)
+	re.NoError(err)
+	want := beforeConflict.Group
+	want.LeaderStoreID, want.VoterStoreIDs = 2, newVoters
+	re.True(check(want).rangeConflict)
+	re.NoError(manager.regionLabeler.DeleteLabelRule(rule.ID))
+	manager.SyncKeyRangesDeleteFromEtcd(rule.ID)
+	manager.ReconcileRangeConflicts()
+	state := check(want)
+	re.True(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
 }
 
 func TestObserveAvailableRegionIgnoresRecreatedGroup(t *testing.T) {

@@ -77,84 +77,67 @@ func (suite *ruleTestSuite) TearDownSuite() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
-// TestAffinityOverlapStartup checks that PD and the scheduling service start with
-// persisted overlapping affinity ranges and resume the remaining group once the
-// conflict is repaired. Nonconflicting pairs cover initial load and live writes.
 func (suite *ruleTestSuite) TestAffinityOverlapStartup() {
 	re := suite.Require()
 	raftCluster := suite.pdLeaderServer.GetRaftCluster()
+	change := func(id, start, end string) affinity.GroupKeyRanges {
+		return affinity.GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte(start), EndKey: []byte(end)}}}
+	}
+	a, b := change("overlap-a", "a", "d"), change("overlap-b", "b", "c")
+	snapshot, watch := change("paired-snapshot", "x", "y"), change("paired-watch", "y", "z")
+	ids := []string{a.GroupID, b.GroupID, snapshot.GroupID, watch.GroupID}
+	// Persist the overlap before restarting PD.
 	store := raftCluster.GetStorage()
-	ranges := []affinity.GroupKeyRanges{
-		{GroupID: "overlap-a", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("d")}}},
-		{GroupID: "overlap-b", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("c")}}},
-	}
-	// Bypass the write validation to persist the overlap, then restart the
-	// RaftCluster so that PD loads it.
-	for _, groupRanges := range ranges {
-		re.NoError(store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-			if err := store.SaveAffinityGroup(txn, groupRanges.GroupID, &affinity.Group{
-				ID: groupRanges.GroupID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1},
-			}); err != nil {
-				return err
-			}
-			return store.SaveRegionRule(txn, affinity.GetLabelRuleID(groupRanges.GroupID), affinity.MakeLabelRule(groupRanges))
-		}))
-	}
+	re.NoError(store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		for _, group := range []affinity.GroupKeyRanges{a, b} {
+			id := group.GroupID
+			re.NoError(store.SaveAffinityGroup(txn, id, &affinity.Group{ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}))
+			re.NoError(store.SaveRegionRule(txn, affinity.GetLabelRuleID(id), affinity.MakeLabelRule(group)))
+		}
+		return nil
+	}))
 	raftCluster.Stop()
 	raftCluster.Wait()
 	re.NoError(raftCluster.Start(suite.pdLeaderServer.GetServer(), false))
-	re.True(raftCluster.IsRunning())
-	pdManager := raftCluster.GetAffinityManager()
-	ids := []string{"overlap-a", "overlap-b", "paired-snapshot", "paired-watch"}
-	defer func() { re.NoError(pdManager.DeleteAffinityGroups(ids, true)) }()
-	changes := []affinity.GroupKeyRanges{
-		{GroupID: "paired-snapshot", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("x"), EndKey: []byte("y")}}},
-		{GroupID: "paired-watch", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("y"), EndKey: []byte("z")}}},
-	}
-	re.NoError(pdManager.CreateAffinityGroups(changes[:1]))
+	pd := raftCluster.GetAffinityManager()
+	defer func() { re.NoError(pd.DeleteAffinityGroups(ids, true)) }()
+	re.NoError(pd.CreateAffinityGroups([]affinity.GroupKeyRanges{snapshot}))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	cluster := tc.WaitForPrimaryServing(re).GetCluster()
-	manager, regionLabeler := cluster.GetAffinityManager(), cluster.GetRegionLabeler()
-	re.NoError(pdManager.CreateAffinityGroups(changes[1:]))
-	testutil.Eventually(re, func() bool {
-		for _, change := range changes {
-			state := manager.GetAffinityGroupState(change.GroupID)
-			if state == nil || state.RangeCount != 1 || regionLabeler.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)) == nil {
-				return false
-			}
-		}
-		return true
-	})
-	region := core.NewRegionInfo(&metapb.Region{Id: 10, StartKey: []byte("b"), EndKey: []byte("c")}, nil)
-	for _, m := range []*affinity.Manager{pdManager, manager} {
-		for _, groupRanges := range ranges {
-			m.RestoreAffinityGroup(groupRanges.GroupID)
-			state := m.GetAffinityGroupState(groupRanges.GroupID)
-			re.NotNil(state)
+	mcs, rules := cluster.GetAffinityManager(), cluster.GetRegionLabeler()
+	re.NoError(pd.CreateAffinityGroups([]affinity.GroupKeyRanges{watch}))
+	for _, change := range []affinity.GroupKeyRanges{snapshot, watch} {
+		testutil.Eventually(re, func() bool {
+			state := mcs.GetAffinityGroupState(change.GroupID)
+			return state != nil && state.RangeCount == 1 && rules.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)) != nil
+		})
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 10, StartKey: b.KeyRanges[0].StartKey, EndKey: b.KeyRanges[0].EndKey}, nil)
+	for _, manager := range []*affinity.Manager{pd, mcs} {
+		for _, id := range ids[:2] {
+			manager.RestoreAffinityGroup(id)
+			state := manager.GetAffinityGroupState(id)
 			re.Equal(affinity.PhasePending, state.Phase)
 			re.False(state.AffinitySchedulingAllowed)
 			re.True(state.RegularSchedulingAllowed)
 			re.Equal(1, state.RangeCount)
 		}
-		group, _ := m.GetRegionAffinityGroupState(region)
+		group, _ := manager.GetRegionAffinityGroupState(region)
 		re.Nil(group)
 	}
-	re.NoError(pdManager.DeleteAffinityGroups([]string{"overlap-a"}, true))
+	re.NoError(pd.DeleteAffinityGroups(ids[:1], true))
 	testutil.Eventually(re, func() bool {
-		group, _ := manager.GetRegionAffinityGroupState(region)
-		return group != nil && group.ID == "overlap-b"
+		group, _ := mcs.GetRegionAffinityGroupState(region)
+		return group != nil && group.ID == b.GroupID
 	})
-	re.NoError(pdManager.DeleteAffinityGroups(ids, true))
-	testutil.Eventually(re, func() bool {
-		for _, id := range ids {
-			if manager.IsGroupExist(id) || regionLabeler.GetLabelRule(affinity.GetLabelRuleID(id)) != nil {
-				return false
-			}
-		}
-		return true
-	})
+	re.NoError(pd.DeleteAffinityGroups(ids, true))
+	for _, id := range ids {
+		testutil.Eventually(re, func() bool {
+			return !mcs.IsGroupExist(id) && rules.GetLabelRule(affinity.GetLabelRuleID(id)) == nil
+		})
+	}
 }
 
 func (suite *ruleTestSuite) TestRuleWatch() {
