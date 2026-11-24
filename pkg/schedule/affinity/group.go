@@ -174,6 +174,8 @@ type runtimeGroupInfo struct {
 	// persistedGroup holds the last stored group while Group holds a local target.
 	// It is nil when Group itself holds the stored target.
 	persistedGroup *Group
+	// modRevision is the last watched etcd revision of this group's stored target.
+	modRevision int64
 	// availability must be used together with degradedExpiredAt. Therefore, GetAvailability and SetAvailability must
 	// always be used to read or modify them, and availability must not be accessed directly.
 	availability groupAvailability

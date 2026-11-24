@@ -88,8 +88,6 @@ type Manager struct {
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
-	// groupModRevisions tracks the last etcd revision of each watched group's stored target.
-	groupModRevisions map[string]int64
 	// storeConditionsKnown is set when the first availability check records
 	// store conditions. Targets loaded or reapplied from storage start degraded
 	// while conditions are unknown.
@@ -127,7 +125,6 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
 		unavailableStores:   make(map[uint64]storeCondition),
-		groupModRevisions:   make(map[string]int64),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 		splitDeniedRegions:  cache.NewCache(splitDeniedRegionLimit, cache.LRUCache),
@@ -380,7 +377,6 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	m.labelRuleVer.Add(1)
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
-	delete(m.groupModRevisions, groupID)
 	if len(m.groups) == 0 {
 		m.unavailableStores = nil
 		m.storeConditionsKnown = false
@@ -567,7 +563,7 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 	existingGroup, exists := m.groups[group.ID]
 	matchesStored := false
 	if exists {
-		if modRevision > 0 && modRevision <= m.groupModRevisions[group.ID] {
+		if modRevision > 0 && modRevision <= existingGroup.modRevision {
 			m.RUnlock()
 			return
 		}
@@ -621,7 +617,7 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 		}
 	}
 	if modRevision > 0 {
-		m.groupModRevisions[group.ID] = modRevision
+		m.groups[group.ID].modRevision = modRevision
 	}
 	if !exists {
 		if labelRule != nil {
@@ -652,7 +648,6 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 	if groupInfo.CreateTimestamp != group.CreateTimestamp {
 		// The replacement happens under the same lock, so store conditions remain valid.
 		m.clearGroupCacheLocked(group.ID)
-		delete(m.groupModRevisions, group.ID)
 		m.setGroupLocked(group)
 		// The label watcher will not resend an unchanged rule for the new instance.
 		m.updateGroupLabelRuleLockedWithCount(group.ID, groupInfo.LabelRule, groupInfo.RangeCount, false)

@@ -95,7 +95,7 @@ func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *run
 		return
 	}
 	// A same-peers write can advance the revision without changing the affinity version.
-	if m.groupModRevisions[target.Expected.ID] != target.ExpectedModRevision {
+	if groupInfo.modRevision != target.ExpectedModRevision {
 		return
 	}
 	stored := groupInfo.storedGroup()

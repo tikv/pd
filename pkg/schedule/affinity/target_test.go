@@ -201,6 +201,7 @@ func TestSyncRecreatedAffinityGroup(t *testing.T) {
 			switch source {
 			case "watcher":
 				test.SyncGroupFromEtcdWithRevision(&recreated, 2)
+				test.SyncGroupFromEtcdWithRevision(&old, 1)
 			case "conflict":
 				test.write(nil, target)
 			case "written":
@@ -527,7 +528,7 @@ func TestFirstWinLateReply(t *testing.T) {
 					test.applyStoreConditions(nil)
 				}
 				test.SyncGroupFromEtcdWithRevision(&group, 2)
-				test.Equal(int64(2), test.groupModRevisions["g"])
+				test.Equal(int64(2), getGroupForTest(test.Assertions, test.Manager, "g").modRevision)
 				if healthy {
 					test.assertActive(&group, false)
 					test.Greater(test.state("g").affinityVer, before.affinityVer)

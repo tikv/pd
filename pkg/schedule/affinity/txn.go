@@ -345,14 +345,16 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 			return group, nil
 		}
 		if m.targetWriter != nil {
-			expected := group.Group
 			m.RLock()
-			conditionsKnown := m.storeConditionsKnown
-			observedModRevision := m.groupModRevisions[groupID]
-			if group.targetUnpersisted {
-				expected = m.groups[groupID].storedGroup()
-				expected.VoterStoreIDs = slices.Clone(expected.VoterStoreIDs)
+			current := m.groups[groupID]
+			if current == nil || current != observed.groupInfoPtr || current.AffinityVer != observed.affinityVer {
+				m.RUnlock()
+				return m.GetAffinityGroupState(groupID), nil
 			}
+			conditionsKnown := m.storeConditionsKnown
+			observedModRevision := current.modRevision
+			expected := current.storedGroup()
+			expected.VoterStoreIDs = slices.Clone(expected.VoterStoreIDs)
 			m.RUnlock()
 			if !conditionsKnown && !group.targetUnpersisted && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
 				return group, nil
