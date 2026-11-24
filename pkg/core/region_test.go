@@ -1653,6 +1653,123 @@ func TestResetRegionCache(t *testing.T) {
 	re.NotNil(regions.GetRegion(4))
 }
 
+func TestResetRegionCacheWithHeartbeat(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), SetSource(Heartbeat))
+	rootReset, resumeReset, resetDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	resume := sync.OnceFunc(func() { close(resumeReset) })
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/core/afterResetRegionRoot", func() {
+		close(rootReset)
+		<-resumeReset
+	}))
+	t.Cleanup(func() {
+		resume()
+		<-resetDone
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/afterResetRegionRoot"))
+	})
+	go func() {
+		regions.ResetRegionCache()
+		close(resetDone)
+	}()
+	<-rootReset
+
+	heartbeatDone := make(chan error, 1)
+	heartbeat := func() {
+		_, err := regions.CheckAndPutRootTree(ContextTODO(), region)
+		if err == nil {
+			regions.CheckAndPutSubTree(region)
+		}
+		heartbeatDone <- err
+	}
+	// If the root is writable between clears, finish the heartbeat before the
+	// subtree reset. Otherwise, let the heartbeat resume after the reset.
+	if regions.t.TryRLock() {
+		regions.t.RUnlock()
+		heartbeat()
+	} else {
+		go heartbeat()
+	}
+	resume()
+	<-resetDone
+	re.NoError(<-heartbeatDone)
+	re.Same(region, regions.GetRegion(1))
+	re.Equal(1, regions.GetStoreLeaderCount(1))
+	re.Equal(1, regions.GetStoreRegionCount(1))
+	re.Equal(int32(2), region.GetRef())
+	re.True(regions.IsRegionLeaderPrepared())
+}
+
+func TestResetRegionCacheWithPendingSubTree(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), SetSource(Heartbeat))
+	_, err := regions.CheckAndPutRootTree(ContextTODO(), region)
+	re.NoError(err)
+	regions.ResetRegionCache()
+	regions.CheckAndPutSubTree(region)
+	re.Zero(regions.GetTotalRegionCount())
+	re.Zero(regions.GetStoreRegionCount(1))
+
+	region = NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), SetSource(Heartbeat))
+	_, err = regions.CheckAndPutRootTree(ContextTODO(), region)
+	re.NoError(err)
+	regions.CheckAndPutSubTree(region)
+	re.Equal(1, regions.GetStoreLeaderCount(1))
+	re.Equal(int32(2), region.GetRef())
+	re.True(regions.IsRegionLeaderPrepared())
+}
+
+func TestResetRegionCacheConcurrentAccess(t *testing.T) {
+	regions := NewRegionsInfo()
+	const count = 64
+	start := make(chan struct{})
+	errors := make(chan error, count)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		<-start
+		for range count {
+			regions.ResetRegionCache()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := range count {
+			region := NewTestRegionInfo(uint64(i+1), 1, []byte{byte(i)}, []byte{byte(i + 1)}, SetSource(Heartbeat))
+			if _, err := regions.CheckAndPutRootTree(ContextTODO(), region); err != nil {
+				errors <- err
+				continue
+			}
+			regions.CheckAndPutSubTree(region)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for range count {
+			regions.IsRegionLeaderPrepared()
+			regions.GetStoreStats(1)
+		}
+	}()
+	close(start)
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		require.NoError(t, err)
+	}
+
+	regions.ResetRegionCache()
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), SetSource(Heartbeat))
+	_, err := regions.CheckAndPutRootTree(ContextTODO(), region)
+	require.NoError(t, err)
+	regions.CheckAndPutSubTree(region)
+	require.Equal(t, 1, regions.GetStoreLeaderCount(1))
+	require.True(t, regions.IsRegionLeaderPrepared())
+}
+
 func TestGetBucketMeta(t *testing.T) {
 	re := require.New(t)
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("d"))

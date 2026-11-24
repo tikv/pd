@@ -1485,11 +1485,12 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 // ResetRegionCache resets the regions info.
 func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
-	r.tree = newRegionTreeWithCountRef()
-	r.regions = make(map[uint64]*regionItem)
-	r.t.Unlock()
+	defer r.t.Unlock()
 	r.st.Lock()
 	defer r.st.Unlock()
+	r.tree = newRegionTreeWithCountRef()
+	r.regions = make(map[uint64]*regionItem)
+	failpoint.InjectCall("afterResetRegionRoot")
 	r.subRegions = make(map[uint64]*regionItem)
 	r.leaders = make(map[uint64]*regionTree)
 	r.followers = make(map[uint64]*regionTree)
