@@ -162,7 +162,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			if isWitnessEnabled(c.cluster) && core.IsVoter(peer) {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					ruleCheckerPromoteWitnessCounter.Inc()
-					return operator.CreateNonWitnessPeerOperator("promote-witness-for-down", c.cluster, region, witness)
+					return operator.CreatePromoteWitnessForDownOperator(c.cluster, region, witness)
 				}
 			}
 		}

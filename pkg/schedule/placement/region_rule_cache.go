@@ -135,6 +135,11 @@ func (manager *RegionRuleFitCacheManager) SetCache(storeSet StoreSet, region *co
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if cache, ok := manager.regionCaches[region.GetID()]; ok {
+		// An in-flight fit can finish after the checker rebuilds the entry
+		// with a different effective rule list.
+		if !rulesEqual(cache.rules, fit.rules) {
+			return
+		}
 		cache.hitCount++
 		if cache.hitCount >= minHitCountToCacheHit {
 			if !allStoresLive(storeSet, fit.regionStores) {
@@ -207,10 +212,9 @@ func rulesEqual(ruleCaches []ruleCache, rules []*Rule) bool {
 	if len(ruleCaches) != len(rules) {
 		return false
 	}
+	// FitRegion assigns peers in rule order, even when rule revisions match.
 	return slice.AllOf(ruleCaches, func(i int) bool {
-		return slice.AnyOf(rules, func(j int) bool {
-			return ruleCaches[i].ruleEqual(rules[j])
-		})
+		return ruleCaches[i].ruleEqual(rules[i])
 	})
 }
 
