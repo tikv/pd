@@ -17,6 +17,7 @@ package checker
 import (
 	"context"
 	"encoding/hex"
+	"strconv"
 	"testing"
 	"time"
 
@@ -614,8 +615,6 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 
 func TestAllowMergeCrossTable(t *testing.T) {
 	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
-	require.NoError(t, failpoint.Enable(modeFlag, "return(false)"))
-	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
 	ctx := t.Context()
 	cfg := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, cfg)
@@ -668,36 +667,41 @@ func TestAllowMergeCrossTable(t *testing.T) {
 	cases := []struct {
 		name            string
 		pair            adjacentPair
+		nextGen         bool
 		crossTableMerge bool
 		expectAllow     bool
 	}{
 		// Classic: different table IDs.
-		{"classic/diff-table/cross-enabled", classicDiffTable, true, true},
-		{"classic/diff-table/cross-disabled", classicDiffTable, false, false},
+		{"classic/diff-table/cross-enabled", classicDiffTable, false, true, true},
+		{"classic/diff-table/cross-disabled", classicDiffTable, false, false, false},
 		// Classic: same table ID (index + record).
-		{"classic/same-table/cross-enabled", classicSameTable, true, true},
-		{"classic/same-table/cross-disabled", classicSameTable, false, true},
+		{"classic/same-table/cross-enabled", classicSameTable, false, true, true},
+		{"classic/same-table/cross-disabled", classicSameTable, false, false, true},
 
 		// Same keyspace: different table IDs.
-		{"same-keyspace/diff-table/cross-enabled", sameKSDiffTable, true, true},
-		{"same-keyspace/diff-table/cross-disabled", sameKSDiffTable, false, false},
+		{"same-keyspace/diff-table/cross-enabled", sameKSDiffTable, false, true, true},
+		{"same-keyspace/diff-table/cross-disabled", sameKSDiffTable, false, false, false},
 		// Same keyspace: same table ID (index + record).
-		{"same-keyspace/same-table/cross-enabled", sameKSSameTable, true, true},
-		{"same-keyspace/same-table/cross-disabled", sameKSSameTable, false, true},
+		{"same-keyspace/same-table/cross-enabled", sameKSSameTable, false, true, true},
+		{"same-keyspace/same-table/cross-disabled", sameKSSameTable, false, false, true},
+		{"nextgen/same-keyspace/diff-table/cross-disabled", sameKSDiffTable, true, false, false},
+		{"nextgen/same-keyspace/same-table/cross-disabled", sameKSSameTable, true, false, true},
 
 		// Different keyspaces: same numeric table ID is not the same logical table.
 		// With cross-table enabled, merge is still allowed by policy (split keys
 		// from keyspace labels normally block this path in production).
-		{"diff-keyspace/same-table/cross-enabled", diffKSSameTable, true, true},
-		{"diff-keyspace/same-table/cross-disabled", diffKSSameTable, false, false},
+		{"diff-keyspace/same-table/cross-enabled", diffKSSameTable, false, true, true},
+		{"diff-keyspace/same-table/cross-disabled", diffKSSameTable, false, false, false},
 		// Different keyspaces: different table IDs.
-		{"diff-keyspace/diff-table/cross-enabled", diffKSDiffTable, true, true},
-		{"diff-keyspace/diff-table/cross-disabled", diffKSDiffTable, false, false},
+		{"diff-keyspace/diff-table/cross-enabled", diffKSDiffTable, false, true, true},
+		{"diff-keyspace/diff-table/cross-disabled", diffKSDiffTable, false, false, false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
+			re.NoError(failpoint.Enable(modeFlag, "return("+strconv.FormatBool(tc.nextGen)+")"))
+			t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
 			cluster.SetEnableCrossTableMerge(tc.crossTableMerge)
 			regionA := newRegionInfoWithBytes(1, tc.pair.startA, tc.pair.endA)
 			regionB := newRegionInfoWithBytes(2, tc.pair.startB, tc.pair.endB)
