@@ -149,26 +149,43 @@ func TestBatchAllocationExhaustion(t *testing.T) {
 	defer clean()
 	_, err := client.Put(t.Context(), leaderPath, memberVal)
 	require.NoError(t, err)
-	alloc := NewAllocator(&AllocatorParams{Client: client, Member: memberVal, Label: DefaultLabel})
-	require.NoError(t, alloc.SetBase(math.MaxUint64-5))
-	_, _, err = alloc.Alloc(6)
-	require.ErrorIs(t, err, errs.ErrIDExhausted)
-	last, count, err := alloc.Alloc(3)
-	require.NoError(t, err)
-	require.Equal(t, uint64(math.MaxUint64-2), last)
-	require.Equal(t, uint32(3), count)
-	last, count, err = alloc.Alloc(2)
-	require.NoError(t, err)
-	require.Equal(t, uint64(math.MaxUint64), last)
-	require.Equal(t, uint32(2), count)
-	_, _, err = alloc.Alloc(1)
-	require.ErrorIs(t, err, errs.ErrIDExhausted)
-	require.ErrorIs(t, alloc.Rebase(), errs.ErrIDExhausted)
-	require.NoError(t, alloc.SetBase(math.MaxUint64-10))
-	last, count, err = alloc.Alloc(1)
-	require.NoError(t, err)
-	require.Equal(t, uint64(math.MaxUint64-9), last)
-	require.Equal(t, uint32(1), count)
+	for _, label := range []label{DefaultLabel, KeyspaceLabel} {
+		t.Run(string(label), func(t *testing.T) {
+			params := &AllocatorParams{Client: client, Member: memberVal, Label: label}
+			alloc := NewAllocator(params).(*allocatorImpl)
+			end := alloc.effectiveEnd
+			require.NoError(t, alloc.SetBase(end-5))
+			_, _, err := alloc.Alloc(6)
+			require.ErrorIs(t, err, errs.ErrIDExhausted)
+			last, count, err := alloc.Alloc(3)
+			require.NoError(t, err)
+			require.Equal(t, end-2, last)
+			require.Equal(t, uint32(3), count)
+
+			// Restart must discard IDs left in the previous allocator's reserved window.
+			restarted := NewAllocator(params)
+			require.NoError(t, restarted.Rebase())
+			_, _, err = restarted.Alloc(1)
+			require.ErrorIs(t, err, errs.ErrIDExhausted)
+			stale := NewAllocator(&AllocatorParams{Client: client, Member: "stale-member", Label: label})
+			require.ErrorIs(t, stale.Rebase(), errs.ErrEtcdTxnConflict)
+
+			last, count, err = alloc.Alloc(2)
+			require.NoError(t, err)
+			require.Equal(t, end, last)
+			require.Equal(t, uint32(2), count)
+			_, _, err = alloc.Alloc(1)
+			require.ErrorIs(t, err, errs.ErrIDExhausted)
+			require.NoError(t, alloc.Rebase())
+			_, _, err = alloc.Alloc(1)
+			require.ErrorIs(t, err, errs.ErrIDExhausted)
+			require.NoError(t, alloc.SetBase(end-10))
+			last, count, err = alloc.Alloc(1)
+			require.NoError(t, err)
+			require.Equal(t, end-9, last)
+			require.Equal(t, uint32(1), count)
+		})
+	}
 }
 
 func TestBatchAllocationLeaderChange(t *testing.T) {

@@ -197,15 +197,17 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool, count uint32) error 
 		// after it. Otherwise discard the remainder to keep the batch contiguous.
 		base = alloc.base
 	}
-	required := max(uint64(count), 1)
-	if end >= alloc.effectiveEnd || required > alloc.effectiveEnd-base {
+	if end > alloc.effectiveEnd || uint64(count) > alloc.effectiveEnd-base {
 		return errs.ErrIDExhausted.FastGenByArgs()
 	}
-	needed := required - (end - base)
-	steps := (needed-1)/alloc.step + 1
 	newEnd := alloc.effectiveEnd
-	if steps <= (alloc.effectiveEnd-end)/alloc.step {
-		newEnd = end + steps*alloc.step
+	// An explicit Rebase at the limit still verifies leadership, with an empty window.
+	if end < alloc.effectiveEnd {
+		needed := max(uint64(count), 1) - (end - base)
+		steps := (needed-1)/alloc.step + 1
+		if steps <= (alloc.effectiveEnd-end)/alloc.step {
+			newEnd = end + steps*alloc.step
+		}
 	}
 
 	value := typeutil.Uint64ToBytes(newEnd)

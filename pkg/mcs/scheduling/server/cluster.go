@@ -422,19 +422,21 @@ func (c *Cluster) allocIDWithContext(ctx context.Context, count uint32) (uint64,
 	if err != nil {
 		return 0, 0, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	rpcCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	req := &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count}
 
 	failpoint.Inject("allocIDNonBatch", func() {
 		req = &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
 	})
-	resp, err := client.AllocID(ctx, req)
+	resp, err := client.AllocID(rpcCtx, req)
 	if err != nil {
-		c.triggerMembershipCheck()
+		if ctx.Err() == nil {
+			c.triggerMembershipCheck()
+		}
 		return 0, 0, err
 	}
-	if err := ctx.Err(); err != nil {
+	if err := rpcCtx.Err(); err != nil {
 		return 0, 0, err
 	}
 	if err := resp.GetHeader().GetError(); err != nil {

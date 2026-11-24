@@ -65,7 +65,7 @@ func TestAskBatchSplitRejectsInvalidRequestBeforeAllocation(t *testing.T) {
 		{"ID count overflow", core.MaxBatchSplitCount, 32767, true, "split response exceeds maximum"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
 			client := &splitScatterPDClient{next: 1000, allocErr: errors.New("unexpected split ID allocation")}
 			cluster.SwitchPDLeader(client)
 			region := newAffinitySplitTestRegion()
@@ -111,7 +111,7 @@ func TestAskBatchSplitRejectsInvalidRequestBeforeAllocation(t *testing.T) {
 func TestAskBatchSplitLegacyAllocation(t *testing.T) {
 	for _, count := range []uint32{0, 1, 3} {
 		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
-			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
 			client := &splitScatterPDClient{next: 1000, nonBatch: true}
 			cluster.SwitchPDLeader(client)
 			region := newAffinitySplitTestRegion()
@@ -161,6 +161,9 @@ func (c *splitScatterPDClient) AllocID(ctx context.Context, req *pdpb.AllocIDReq
 	c.calls++
 	if c.onAlloc != nil {
 		c.onAlloc(ctx, c.calls)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if c.headerErr != nil && c.calls == c.headerErrAt {
 		return &pdpb.AllocIDResponse{Header: &pdpb.ResponseHeader{Error: c.headerErr}}, nil
@@ -214,7 +217,7 @@ func waitHeartbeatStreamBound(t *testing.T, hbStreams *hbstream.HeartbeatStreams
 func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	re := require.New(t)
 
-	svc, cluster, stream := newTestSchedulingServiceForSplit(t)
+	svc, cluster, stream := newTestSchedulingServiceForSplit(t, true)
 
 	region := newAffinitySplitTestRegion()
 	cluster.PutRegion(region)
@@ -258,7 +261,7 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re := require.New(t)
 
-	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+	svc, cluster, _ := newTestSchedulingServiceForSplit(t, true)
 	cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000})
 
 	region := newAffinitySplitTestRegion()
@@ -277,6 +280,7 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 
 func newTestSchedulingServiceForSplit(
 	t *testing.T,
+	runHeartbeatStreams bool,
 ) (*Service, *Cluster, *captureHeartbeatStream) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -306,7 +310,12 @@ func newTestSchedulingServiceForSplit(
 	}
 
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	var hbStreams *hbstream.HeartbeatStreams
+	if runHeartbeatStreams {
+		hbStreams = hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	} else {
+		hbStreams = hbstream.NewTestHeartbeatStreams(ctx, basicCluster, false)
+	}
 	persistConfig := config.NewPersistConfig(
 		cfg,
 		cache.NewStringTTL(ctx, sc.DefaultGCInterval, sc.DefaultTTL),
@@ -369,7 +378,7 @@ func splitScatterPendingMetricValue(t *testing.T) float64 {
 func TestAskBatchSplitAllocationHeaderError(t *testing.T) {
 	for _, call := range []int{1, 2, 3} {
 		t.Run(strconv.Itoa(call), func(t *testing.T) {
-			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
 			client := &splitScatterPDClient{next: 1000, nonBatch: true, headerErr: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "id exhausted"}, headerErrAt: call}
 			cluster.SwitchPDLeader(client)
 			region := newAffinitySplitTestRegion()
@@ -385,7 +394,8 @@ func TestAskBatchSplitAllocationHeaderError(t *testing.T) {
 func TestAskBatchSplitAllocationCancellation(t *testing.T) {
 	for _, call := range []int{0, 1, 2, 3} {
 		t.Run(strconv.Itoa(call), func(t *testing.T) {
-			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
+			cluster.checkMembershipCh = make(chan struct{}, 1)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			if call == 0 {
@@ -404,6 +414,34 @@ func TestAskBatchSplitAllocationCancellation(t *testing.T) {
 			require.ErrorIs(t, err, context.Canceled)
 			require.Nil(t, resp)
 			require.Equal(t, call, client.calls)
+			require.Empty(t, cluster.checkMembershipCh)
+		})
+	}
+}
+
+func TestAllocIDRefreshesMembershipOnRPCError(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{"transport failure", errors.New("connection closed")},
+		{"RPC timeout", context.DeadlineExceeded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, cluster, _ := newTestSchedulingServiceForSplit(t, false)
+			cluster.checkMembershipCh = make(chan struct{}, 1)
+			client := &splitScatterPDClient{allocErr: test.err}
+			if errors.Is(test.err, context.DeadlineExceeded) {
+				client.onAlloc = func(ctx context.Context, _ int) {
+					<-ctx.Done()
+				}
+			}
+			cluster.SwitchPDLeader(client)
+			_, _, err := cluster.AllocID(1)
+			require.ErrorIs(t, err, test.err)
+			require.NoError(t, cluster.ctx.Err(), "the parent context must remain active")
+			require.Equal(t, 1, client.calls)
+			require.Len(t, cluster.checkMembershipCh, 1)
 		})
 	}
 }
@@ -420,7 +458,7 @@ func TestAskBatchSplitConstructionCancellation(t *testing.T) {
 		{"before legacy bookkeeping", true, 3, 3},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			svc, cluster, _ := newTestSchedulingServiceForSplit(t)
+			svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
 			client := &splitScatterPDClient{next: 1000, nonBatch: test.nonBatch}
 			cluster.SwitchPDLeader(client)
 			region := newAffinitySplitTestRegion()
