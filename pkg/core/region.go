@@ -1485,11 +1485,12 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 // ResetRegionCache resets the regions info.
 func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
-	r.tree = newRegionTreeWithCountRef()
-	r.regions = make(map[uint64]*regionItem)
-	r.t.Unlock()
+	defer r.t.Unlock()
 	r.st.Lock()
 	defer r.st.Unlock()
+	r.tree = newRegionTreeWithCountRef()
+	r.regions = make(map[uint64]*regionItem)
+	failpoint.InjectCall("afterResetRegionRoot")
 	r.subRegions = make(map[uint64]*regionItem)
 	r.leaders = make(map[uint64]*regionTree)
 	r.followers = make(map[uint64]*regionTree)
@@ -1949,6 +1950,20 @@ func (r *RegionsInfo) GetStoreLeaderCount(storeID uint64) int {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.leaders[storeID].length()
+}
+
+// IsRegionLeaderPrepared checks that the root and subtree counts agree and
+// every subtree Region has a leader. Cache updates remain asynchronous.
+func (r *RegionsInfo) IsRegionLeaderPrepared() bool {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	r.st.RLock()
+	defer r.st.RUnlock()
+	count := 0
+	for _, leaders := range r.leaders {
+		count += leaders.length()
+	}
+	return count == len(r.regions) && count == len(r.subRegions)
 }
 
 // GetStoreFollowerCount get the total count of a store's follower RegionInfo
