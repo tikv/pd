@@ -209,6 +209,60 @@ func TestObserveAvailableRegion(t *testing.T) {
 	re.True(state.AffinitySchedulingAllowed)
 }
 
+func TestRangeConflictPreservesTarget(t *testing.T) {
+	re := require.New(t)
+	store, stores := storage.NewStorageWithMemoryBackend(), core.NewStoresInfo()
+	for id := uint64(1); id <= 4; id++ {
+		stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: id}, core.SetLastHeartbeatTS(time.Now())))
+	}
+	manager := newTestAffinityManager(t, store, stores)
+	overlap := testKeyRanges("b", "c")
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{
+		{GroupID: "a", KeyRanges: testKeyRanges("a", "d")},
+		{GroupID: "b"},
+	}))
+	oldVoters, newVoters := []uint64{1, 2, 3}, []uint64{2, 3, 4}
+	beforeConflict, err := manager.UpdateAffinityGroupPeers("a", 1, oldVoters)
+	re.NoError(err)
+
+	rule := MakeLabelRule(GroupKeyRanges{GroupID: "b", KeyRanges: overlap})
+	re.NoError(manager.regionLabeler.SetLabelRule(rule))
+	re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+	manager.ReconcileRangeConflicts()
+	conflicted := manager.GetAffinityGroupState("a")
+
+	check := func(want Group) *GroupState {
+		state := manager.GetAffinityGroupState("a")
+		re.Equal(want, state.Group)
+		saved, err := store.LoadAffinityGroup("a")
+		re.NoError(err)
+		expected, err := json.Marshal(want)
+		re.NoError(err)
+		re.Equal(string(expected), saved)
+		return state
+	}
+	manager.ObserveAvailableRegion(generateRegionForTest(1, newVoters, overlap[0]), conflicted)
+	re.True(check(beforeConflict.Group).rangeConflict)
+	// The Region observation above covers the current state with new voters.
+	_, err = manager.updateAffinityGroupPeersWithState("a", beforeConflict, 2, newVoters)
+	re.NoError(err)
+	re.True(check(beforeConflict.Group).rangeConflict)
+	_, err = manager.updateAffinityGroupPeersWithState("a", conflicted, 2, oldVoters)
+	re.NoError(err)
+	re.True(check(beforeConflict.Group).rangeConflict)
+	_, err = manager.UpdateAffinityGroupPeers("a", 2, newVoters)
+	re.NoError(err)
+	want := beforeConflict.Group
+	want.LeaderStoreID, want.VoterStoreIDs = 2, newVoters
+	re.True(check(want).rangeConflict)
+	re.NoError(manager.regionLabeler.DeleteLabelRule(rule.ID))
+	manager.SyncKeyRangesDeleteFromEtcd(rule.ID)
+	manager.ReconcileRangeConflicts()
+	state := check(want)
+	re.True(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
+}
+
 func TestObserveAvailableRegionIgnoresRecreatedGroup(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()

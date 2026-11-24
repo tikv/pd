@@ -231,6 +231,18 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			m.SyncGroupFromEtcd(&Group{ID: "g1"})
 			return r
 		}},
+		{"group ranges conflict", func(t *testing.T, m *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
+			re := require.New(t)
+			re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g2"}}))
+			rule := MakeLabelRule(GroupKeyRanges{
+				GroupID: "g2", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("y")}},
+			})
+			re.NoError(m.regionLabeler.SetLabelRule(rule))
+			re.NoError(m.SyncKeyRangesFromEtcd(rule))
+			m.ReconcileRangeConflicts()
+			re.True(m.GetAffinityGroupState("g1").rangeConflict)
+			return r
+		}},
 		{"region crosses group boundary", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
 			return r.Clone(core.WithEndKey([]byte("zz")), core.WithIncVersion())
 		}},

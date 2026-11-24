@@ -74,20 +74,20 @@ func TestAffinityFirstWinPersistence(t *testing.T) {
 			}
 			pdManager, err := leader.GetServer().GetAffinityManager()
 			re.NoError(err)
-			startKey, endKey := []byte("b"), []byte("c")
+			keyRange := testutil.TxnKeyspaceRange([]byte("b"), []byte("c"))
 			if i == 1 {
-				startKey, endKey = []byte("d"), []byte("e")
+				keyRange = testutil.TxnKeyspaceRange([]byte("d"), []byte("e"))
 			}
 			// Avoid bootstrap keyspace boundaries, which require a TiKV split.
 			re.NoError(pdManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: id,
-				KeyRanges: []keyutil.KeyRange{{StartKey: startKey, EndKey: endKey}},
+				KeyRanges: []keyutil.KeyRange{keyRange},
 			}}))
 			testutil.Eventually(re, func() bool {
 				g := manager.GetAffinityGroupState(id)
 				return g != nil && g.RangeCount == 1 && cluster.GetStore(3) != nil
 			})
 			tests.MustPutRegionInfo(re, pd, core.NewRegionInfo(&metapb.Region{
-				Id: uint64(100 + i), StartKey: startKey, EndKey: endKey, Peers: peers,
+				Id: uint64(100 + i), StartKey: keyRange.StartKey, EndKey: keyRange.EndKey, Peers: peers,
 				RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 			}, peers[i], core.SetApproximateSize(1), core.SetApproximateKeys(1)))
 			testutil.Eventually(re, func() bool {

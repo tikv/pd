@@ -226,7 +226,7 @@ func (c *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	return true
 }
 
-// AllowMerge returns true if two regions can be merged according to the key type.
+// AllowMerge reports whether regular scheduling can merge two regions.
 func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) bool {
 	var start, end []byte
 	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
@@ -235,6 +235,15 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 		start, end = adjacent.GetStartKey(), region.GetEndKey()
 	} else {
 		return false
+	}
+
+	if manager := cluster.GetAffinityManager(); manager != nil {
+		for _, r := range []*core.RegionInfo{region, adjacent} {
+			group, _ := manager.GetRegionAffinityGroupState(r)
+			if group != nil && !group.RegularSchedulingAllowed {
+				return false
+			}
+		}
 	}
 
 	// The interface probe is used here to get the rule manager and region
