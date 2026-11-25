@@ -123,6 +123,34 @@ func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 	re.Equal(uint64(101), state.TxnSafePoint)
 }
 
+func TestStarterGCMigrationRejectsInvalidBarrierID(t *testing.T) {
+	re := require.New(t)
+	manager, destination, source, cutoff := newStarterGCAPIFixture(t, 1)
+	group, _ := recordStarterGroups(t, manager, destination, source)
+	txn, revision := readStarterSafePoint(t, manager, 1)
+	re.Less(revision, cutoff)
+	now := time.Now()
+
+	_, err := manager.SetGCBarrier(1, "", 200, time.Hour, now)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+	_, err = manager.SetGCBarrier(1, keypath.GCWorkerServiceSafePointID, 200, time.Hour, now)
+	re.ErrorIs(err, errs.ErrReservedGCBarrierID)
+	for _, ttl := range []int64{1, 0} {
+		_, _, err = manager.CompatibleUpdateServiceGCSafePoint(1, "", 200, ttl, now)
+		re.ErrorIs(err, errs.ErrInvalidArgument)
+	}
+	// TTL and keyspace errors retain precedence over barrier ID validation.
+	_, err = manager.SetGCBarrier(2, keypath.GCWorkerServiceSafePointID, 200, 0, now)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+	_, err = manager.SetGCBarrier(2, keypath.GCWorkerServiceSafePointID, 200, time.Hour, now)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+
+	re.Empty(group.requests)
+	afterTxn, afterRevision := readStarterSafePoint(t, manager, 1)
+	re.Equal(txn, afterTxn)
+	re.Equal(revision, afterRevision)
+}
+
 func TestStarterGCMigrationFirstWatch(t *testing.T) {
 	re := require.New(t)
 	manager, _, source, cutoff := newStarterGCAPIFixture(t, 1)

@@ -823,6 +823,9 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 	if err != nil {
 		return nil, err
 	}
+	if err := validateGCBarrierID(barrierID); err != nil {
+		return nil, err
+	}
 	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
 
 	if err := m.lockForTxnSafePoint(ctx, keyspaceID, &m.mu); err != nil {
@@ -833,16 +836,18 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 	return m.setGCBarrierImpl(ctx, keyspaceID, barrierID, barrierTS, ttl, now)
 }
 
-func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
-	// The barrier ID (or service ID of the service safe points) is reserved for keeping backward compatibility.
+func validateGCBarrierID(barrierID string) error {
+	// Legacy service safe point APIs use gc_worker to advance the txn safe point.
 	if barrierID == keypath.GCWorkerServiceSafePointID {
-		return nil, errs.ErrReservedGCBarrierID.GenWithStackByArgs(barrierID)
+		return errs.ErrReservedGCBarrierID.GenWithStackByArgs(barrierID)
 	}
-	// Disallow empty barrierID
-	if len(barrierID) == 0 {
-		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
+	if barrierID == "" {
+		return errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
 	}
+	return nil
+}
 
+func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
 	var expirationTime *time.Time = nil
 	if ttl < time.Duration(math.MaxInt64) {
 		t := now.Add(ttl)
@@ -888,6 +893,9 @@ func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*
 	if err != nil {
 		return nil, err
 	}
+	if err := validateGCBarrierID(barrierID); err != nil {
+		return nil, err
+	}
 	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
 
 	m.mu.Lock()
@@ -916,15 +924,6 @@ func (m *GCStateManager) ForceDeleteServiceGCSafePoint(serviceID string) error {
 }
 
 func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
-	// The barrier ID (or service ID of the service safe points) is reserved for keeping backward compatibility.
-	if barrierID == keypath.GCWorkerServiceSafePointID {
-		return nil, errs.ErrReservedGCBarrierID.GenWithStackByArgs(barrierID)
-	}
-	// Disallow empty barrierID
-	if len(barrierID) == 0 {
-		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
-	}
-
 	var deletedBarrier *endpoint.GCBarrier
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
@@ -1359,6 +1358,9 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 			}
 		}
 		return minServiceSafePoint, res.OldTxnSafePoint != res.NewTxnSafePoint, nil
+	}
+	if err := validateGCBarrierID(serviceID); err != nil {
+		return nil, false, err
 	}
 	if keyspaceID == constant.NullKeyspaceID {
 		m.mu.Lock()
