@@ -757,7 +757,7 @@ type rangeOrderStorage struct {
 func (s *rangeOrderStorage) SaveRegionRule(txn kv.Txn, id string, rule any) error {
 	s.operations = append(s.operations, id)
 	if id == s.failSaveID {
-		return fmt.Errorf("injected range storage failure")
+		return errors.New("injected range storage failure")
 	}
 	return s.Storage.SaveRegionRule(txn, id, rule)
 }
