@@ -395,7 +395,13 @@ func TestTSOFollowerProxy(t *testing.T) {
 	physical, logical, err := cli1.GetTS(ctx)
 	re.NoError(err)
 	lastTS := tsoutil.ComposeTS(physical, logical)
-	re.Greater(checkTS(re, cli2, lastTS), lastTS)
+	for i := range tsoRequestRound {
+		physical, logical, err = cli2.GetTS(ctx)
+		re.NoError(err, "follower proxy request %d after leader transfer", i)
+		ts := tsoutil.ComposeTS(physical, logical)
+		re.Greater(ts, lastTS)
+		lastTS = ts
+	}
 
 	followerServer := cluster.GetServer(cluster.GetFollower())
 	re.NoError(followerServer.Stop())
