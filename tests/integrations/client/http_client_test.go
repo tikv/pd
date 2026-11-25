@@ -1016,12 +1016,19 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	meta, err := suite.client.UpdateKeyspaceConfig(ctx, name, &pd.UpdateKeyspaceConfigParams{Config: map[string]*string{keyspace.GCManagementType: &mode}})
 	re.NoError(err)
 	re.Equal(mode, meta.Config[keyspace.GCManagementType])
-	for _, value := range []string{opposite, "test-type", ""} {
+	err = suite.client.UpdateKeyspaceGCManagementType(ctx, name, &pd.KeyspaceGCManagementTypeConfig{})
+	re.EqualError(err, "gc_management_type must not be empty")
+	for _, value := range []string{opposite, "test-type"} {
 		err = suite.client.UpdateKeyspaceGCManagementType(ctx, name, &pd.KeyspaceGCManagementTypeConfig{Config: pd.KeyspaceGCManagementType{GCManagementType: value}})
 		re.ErrorContains(err, "400 Bad Request")
 	}
-	legacy := "v2"
-	for _, patch := range []map[string]*string{{"safe_point_version": &legacy}, {"safe_point_version": nil}, {keyspace.GCManagementType: &opposite}} {
+	legacy, empty := "v2", ""
+	for _, patch := range []map[string]*string{
+		{"safe_point_version": &legacy},
+		{"safe_point_version": nil},
+		{keyspace.GCManagementType: &opposite},
+		{keyspace.GCManagementType: &empty},
+	} {
 		_, err = suite.client.UpdateKeyspaceConfig(ctx, name, &pd.UpdateKeyspaceConfigParams{Config: patch})
 		re.ErrorContains(err, "400 Bad Request")
 	}
