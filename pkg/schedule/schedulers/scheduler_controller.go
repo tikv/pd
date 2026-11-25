@@ -594,7 +594,7 @@ func (s *ScheduleController) cleanOnExit() {
 	s.Stop()
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
-	s.Scheduler.CleanConfig(s.cluster)
+	s.CleanConfig(s.cluster)
 }
 
 // Schedule tries to create some operators.
