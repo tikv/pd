@@ -407,7 +407,7 @@ func TestAvailabilityCheckWithUnchangedTombstone(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	now := time.Now()
-	for _, id := range []uint64{1, 3} {
+	for _, id := range []uint64{1, 3, 4} {
 		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, NodeState: metapb.NodeState_Serving},
 			core.SetLastHeartbeatTS(now)))
 	}
@@ -420,14 +420,34 @@ func TestAvailabilityCheckWithUnchangedTombstone(t *testing.T) {
 	// Cache the tombstone before any groups are synced.
 	manager.checkGroupsAvailability()
 	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3}})
-	manager.checkGroupsAvailability()
 	re.True(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
 	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
-	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
 
-	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}})
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 3}})
+	state := manager.GetAffinityGroupState("g")
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(3), state.LeaderStoreID)
+
+	store4 := storeInfos.GetStore(4)
+	storeInfos.PutStore(store4.Clone(core.SetLastHeartbeatTS(now.Add(-2 * time.Minute))))
+	manager.checkGroupsAvailability()
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 4}})
+	state = manager.GetAffinityGroupState("g")
+	re.False(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
+
+	storeInfos.PutStore(store4.Clone(core.SetLastHeartbeatTS(now.Add(-2 * time.Hour))))
 	manager.checkGroupsAvailability()
 	re.True(manager.GetAffinityGroupState("g").RegularSchedulingAllowed)
+
+	storeInfos.PutStore(store4)
+	manager.checkGroupsAvailability()
+	re.True(manager.GetAffinityGroupState("g").RegularSchedulingAllowed)
+
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3}})
+	state = manager.GetAffinityGroupState("g")
+	re.True(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
 	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
 }
 
@@ -465,7 +485,7 @@ func TestAvailabilityCheckWithoutGroups(t *testing.T) {
 	manager.SyncGroupFromEtcd(&Group{ID: "synced", LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
 	state := manager.GetAffinityGroupState("synced")
 	re.NotNil(state)
-	re.False(state.RegularSchedulingAllowed)
+	re.True(state.RegularSchedulingAllowed)
 	manager.checkGroupsAvailability()
 	re.True(manager.GetAffinityGroupState("synced").RegularSchedulingAllowed)
 	manager.checkGroupsAvailability()

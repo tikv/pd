@@ -166,8 +166,6 @@ type runtimeGroupInfo struct {
 	// availability must be used together with degradedExpiredAt. Therefore, GetAvailability and SetAvailability must
 	// always be used to read or modify them, and availability must not be accessed directly.
 	availability groupAvailability
-	// availabilityChecked records whether the current target has been checked against store conditions.
-	availabilityChecked bool
 	// degradedExpiredAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
 	degradedExpiredAt uint64
 	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
