@@ -108,7 +108,7 @@ pre-build: ${PD_SERVER_DEP}
 pd-server: pre-build
 	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
-pd-server-failpoint:
+pd-server-failpoint: install-test-tools
 	@$(FAILPOINT_ENABLE)
 	FAILPOINT=1 $(MAKE) pd-server || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
@@ -269,7 +269,7 @@ failpoint-disable: install-tools
 
 #### Test ####
 
-ut: pd-ut
+ut: install-test-tools pd-ut
 	@$(FAILPOINT_ENABLE)
 	# only run unit tests
 	./bin/pd-ut run --ignore tests --race --junitfile ./junitfile
