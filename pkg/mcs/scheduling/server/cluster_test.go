@@ -15,7 +15,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -32,38 +31,64 @@ import (
 )
 
 func TestUpdateBalanceRangeJobStatus(t *testing.T) {
-	re := require.New(t)
-	code := http.StatusOK
-	var body map[string]any
-	pd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		re.Equal(http.MethodPut, r.Method)
-		re.Equal("/pd/api/v1/scheduler-config/balance-range-scheduler/job/status", r.URL.Path)
-		re.Equal("true", r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader))
-		re.NoError(json.NewDecoder(r.Body).Decode(&body))
-		if code == http.StatusNotFound {
-			http.NotFound(w, r)
-			return
-		}
-		w.WriteHeader(code)
-	}))
-	defer pd.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	c := &Cluster{ctx: ctx, httpClient: pd.Client(), backendAddress: pd.URL}
-
-	create := time.Date(2026, time.November, 11, 1, 2, 3, 123456789, time.UTC)
-	re.NoError(c.UpdateBalanceRangeJobStatus(1, create, "running"))
-	re.Equal(map[string]any{"job-id": float64(1), "create": create.Format(time.RFC3339Nano), "status": "running"}, body)
-
-	// the PD hasn't registered the API, e.g. it hasn't been upgraded yet
-	code = http.StatusNotFound
-	err := c.UpdateBalanceRangeJobStatus(1, create, "finished")
-	re.Equal(schedulers.ErrBalanceRangeJobStatusUnsupported, errors.Cause(err))
-
-	code = http.StatusConflict
-	err = c.UpdateBalanceRangeJobStatus(1, create, "finished")
-	re.Error(err)
-	re.NotEqual(schedulers.ErrBalanceRangeJobStatusUnsupported, errors.Cause(err))
+	for _, tc := range []struct {
+		name   string
+		code   int
+		status string
+	}{
+		{name: "success", code: http.StatusOK, status: "running"},
+		{name: "unsupported", code: http.StatusNotFound, status: "finished"},
+		{name: "conflict", code: http.StatusConflict, status: "finished"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			type observation struct {
+				method string
+				path   string
+				header string
+				body   map[string]any
+				err    error
+			}
+			requests := make(chan observation, 1)
+			pd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				observed := observation{
+					method: r.Method,
+					path:   r.URL.Path,
+					header: r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader),
+				}
+				observed.err = json.NewDecoder(r.Body).Decode(&observed.body)
+				requests <- observed
+				if tc.code == http.StatusNotFound {
+					http.NotFound(w, r)
+					return
+				}
+				w.WriteHeader(tc.code)
+			}))
+			defer pd.Close()
+			c := &Cluster{ctx: t.Context(), httpClient: pd.Client(), backendAddress: pd.URL}
+			create := time.Date(2026, time.November, 11, 1, 2, 3, 123456789, time.UTC)
+			err := c.UpdateBalanceRangeJobStatus(1, create, tc.status)
+			switch tc.code {
+			case http.StatusOK:
+				re.NoError(err)
+			case http.StatusNotFound:
+				re.Equal(schedulers.ErrBalanceRangeJobStatusUnsupported, errors.Cause(err))
+			default:
+				re.Error(err)
+				re.NotEqual(schedulers.ErrBalanceRangeJobStatusUnsupported, errors.Cause(err))
+			}
+			select {
+			case observed := <-requests:
+				re.NoError(observed.err)
+				re.Equal(http.MethodPut, observed.method)
+				re.Equal("/pd/api/v1/scheduler-config/balance-range-scheduler/job/status", observed.path)
+				re.Equal("true", observed.header)
+				re.Equal(map[string]any{"job-id": float64(1), "create": create.Format(time.RFC3339Nano), "status": tc.status}, observed.body)
+			case <-time.After(requestTimeout):
+				t.Fatal("PD did not receive the status request")
+			}
+		})
+	}
 }
 
 func TestBalanceRangeJobStatusBackendRotation(t *testing.T) {
