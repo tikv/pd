@@ -61,10 +61,11 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.
 type CreateKeyspaceGroupParams struct {
+	// KeyspaceGroups defines groups to create with empty keyspace lists.
 	KeyspaceGroups []*endpoint.KeyspaceGroup `json:"keyspace-groups"`
 }
 
-// CreateKeyspaceGroups creates keyspace groups.
+// CreateKeyspaceGroups creates empty keyspace groups.
 func CreateKeyspaceGroups(c *gin.Context) {
 	createParams := &CreateKeyspaceGroupParams{}
 	err := c.BindJSON(createParams)
@@ -92,6 +93,10 @@ func CreateKeyspaceGroups(c *gin.Context) {
 		return
 	}
 	err = manager.CreateKeyspaceGroups(createParams.KeyspaceGroups)
+	if goerrors.Is(err, errs.ErrCreateNonEmptyKeyspaceGroup) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return

@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	goerrors "errors"
-	"maps"
 	"slices"
 	"strconv"
 	"sync"
@@ -841,21 +840,12 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 // - key -> null means the key must be absent.
 // - key -> "value" means the key must exist and equal "value".
 func (manager *Manager) UpdateKeyspaceConfigWithPreconditions(name string, mutations []*Mutation, preconditions map[string]*string) (*keyspacepb.KeyspaceMeta, error) {
-	return manager.updateKeyspaceConfigTxn(name, mutationsAffectKeyspaceGroupMembership(mutations), func(meta *keyspacepb.KeyspaceMeta) error {
+	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
 		if err := checkKeyspaceConfigPreconditions(meta.GetConfig(), preconditions); err != nil {
 			return err
 		}
 		return applyKeyspaceConfigMutationsWithGCPolicy(meta.Config, mutations)
 	})
-}
-
-func mutationsAffectKeyspaceGroupMembership(mutations []*Mutation) bool {
-	for _, mutation := range mutations {
-		if mutation.Key == UserKindKey || mutation.Key == TSOKeyspaceGroupIDKey {
-			return true
-		}
-	}
-	return false
 }
 
 func checkKeyspaceConfigPreconditions(config map[string]string, preconditions map[string]*string) error {
@@ -879,6 +869,9 @@ func checkKeyspaceConfigPreconditions(config map[string]string, preconditions ma
 
 func applyKeyspaceConfigMutations(config map[string]string, mutations []*Mutation) error {
 	for _, mutation := range mutations {
+		if mutation.Key == TSOKeyspaceGroupIDKey || mutation.Key == UserKindKey {
+			return errs.ErrReadOnlyTSOGroupConfig.FastGenByArgs(mutation.Key)
+		}
 		switch mutation.Op {
 		case OpPut:
 			config[mutation.Key] = mutation.Value
@@ -906,19 +899,9 @@ func (manager *Manager) runTxnWithMetaGroupLock(f func(txn kv.Txn) error) error 
 
 func (manager *Manager) updateKeyspaceConfigTxn(
 	name string,
-	mayUpdateKeyspaceGroup bool,
 	update func(meta *keyspacepb.KeyspaceMeta) error,
 ) (*keyspacepb.KeyspaceMeta, error) {
-	// Keep the lock order consistent with bulk keyspace removal, which holds the
-	// membership read lock before inspecting keyspace metadata. Only updates that
-	// can relocate a keyspace need to serialize with removal.
-	if mayUpdateKeyspaceGroup && manager.kgm != nil {
-		manager.kgm.membershipMutationLock.Lock()
-		defer manager.kgm.membershipMutationLock.Unlock()
-	}
-
 	var meta *keyspacepb.KeyspaceMeta
-	oldConfig := make(map[string]string)
 	txnFunc := func(txn kv.Txn) error {
 		// First get KeyspaceID from Name.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
@@ -946,20 +929,12 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 		if meta.GetConfig() == nil {
 			meta.Config = map[string]string{}
 		}
-		maps.Copy(oldConfig, meta.GetConfig())
-		// Update keyspace config.
+		oldMetaServiceGroup := meta.Config[MetaServiceGroupIDKey]
 		if err := update(meta); err != nil {
 			return err
 		}
 		delete(meta.Config, MetaServiceGroupAddressesKey)
-		newConfig := meta.GetConfig()
-		// Reassign the meta-service group before moving the TSO keyspace group.
-		// reassignKeyspaceLocked only stages its changes in txn (discarded if the
-		// txn doesn't commit), while UpdateKeyspaceGroup persists immediately. Doing
-		// the fallible meta-service validation first avoids leaving the TSO group move
-		// persisted but unreverted when the meta-service reassignment fails.
-		oldMetaServiceGroup := oldConfig[MetaServiceGroupIDKey]
-		newMetaServiceGroup := newConfig[MetaServiceGroupIDKey]
+		newMetaServiceGroup := meta.Config[MetaServiceGroupIDKey]
 		if manager.mgm != nil && oldMetaServiceGroup != newMetaServiceGroup {
 			// The read lock held by runTxnWithMetaGroupLock keeps this validation and
 			// the assignment update atomic with respect to UpdateGroupsSafely.
@@ -967,26 +942,7 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 				return err
 			}
 		}
-		oldUserKind := endpoint.StringUserKind(oldConfig[UserKindKey])
-		newUserKind := endpoint.StringUserKind(newConfig[UserKindKey])
-		oldID := oldConfig[TSOKeyspaceGroupIDKey]
-		newID := newConfig[TSOKeyspaceGroupIDKey]
-		needUpdate := oldUserKind != newUserKind || oldID != newID
-		if needUpdate && manager.kgm != nil {
-			if err := manager.kgm.updateKeyspaceGroupWithMembershipLockHeld(oldID, newID, oldUserKind, newUserKind, meta.GetId()); err != nil {
-				return err
-			}
-		}
-		// Save the updated keyspace meta.
-		if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
-			if needUpdate && manager.kgm != nil {
-				if err := manager.kgm.updateKeyspaceGroupWithMembershipLockHeld(newID, oldID, newUserKind, oldUserKind, meta.GetId()); err != nil {
-					log.Error("failed to revert keyspace group", zap.Error(err))
-				}
-			}
-			return err
-		}
-		return nil
+		return manager.store.SaveKeyspaceMeta(txn, meta)
 	}
 	err := manager.runTxnWithMetaGroupLock(txnFunc)
 	if err != nil {

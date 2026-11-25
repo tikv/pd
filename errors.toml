@@ -586,6 +586,11 @@ error = '''
 failed to unmarshal json
 '''
 
+["PD:keyspace:ErrCreateNonEmptyKeyspaceGroup"]
+error = '''
+create an empty keyspace group or use split to move existing keyspaces
+'''
+
 ["PD:keyspace:ErrExceedMaxEtcdTxnOps"]
 error = '''
 exceed max etcd txn operations
@@ -734,6 +739,11 @@ no available node
 ["PD:keyspace:ErrNodeNotInKeyspaceGroup"]
 error = '''
 the tso node is not in this keyspace group
+'''
+
+["PD:keyspace:ErrReadOnlyTSOGroupConfig"]
+error = '''
+keyspace config %s is read-only (use split or merge to move existing keyspaces)
 '''
 
 ["PD:keyspace:ErrRegionSplitFailed"]

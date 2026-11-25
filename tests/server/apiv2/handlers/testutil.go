@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/keyspace"
@@ -254,6 +255,42 @@ func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, 
 func MustCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceGroupParams) {
 	code, data := tryCreateKeyspaceGroup(re, server, request)
 	re.Equal(http.StatusOK, code, data)
+}
+
+// MustCreateKeyspaceGroupsWithNewKeyspaces creates empty groups, then creates
+// new test keyspaces assigned to those groups.
+func MustCreateKeyspaceGroupsWithNewKeyspaces(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceGroupParams) {
+	emptyGroups := &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: make([]*endpoint.KeyspaceGroup, 0, len(request.KeyspaceGroups)),
+	}
+	for _, group := range request.KeyspaceGroups {
+		emptyGroup := &endpoint.KeyspaceGroup{
+			ID: group.ID, UserKind: group.UserKind, Members: group.Members,
+		}
+		emptyGroups.KeyspaceGroups = append(emptyGroups.KeyspaceGroups, emptyGroup)
+	}
+	MustCreateKeyspaceGroup(re, server, emptyGroups)
+	for _, group := range request.KeyspaceGroups {
+		if len(group.Keyspaces) != 0 {
+			createKeyspacesWithTSOGroup(re, server, group.ID, group.UserKind, group.Keyspaces...)
+		}
+	}
+}
+
+func createKeyspacesWithTSOGroup(re *require.Assertions, server *tests.TestServer, groupID uint32, userKind string, ids ...uint32) []*keyspacepb.KeyspaceMeta {
+	const assignGroup = "github.com/tikv/pd/pkg/keyspace/assignToSpecificKeyspaceGroup"
+	const skipSplit = "github.com/tikv/pd/pkg/keyspace/skipSplitRegion"
+	re.NoError(failpoint.Enable(assignGroup, fmt.Sprintf("return(%d)", groupID)))
+	defer func() { re.NoError(failpoint.Disable(assignGroup)) }()
+	re.NoError(failpoint.Enable(skipSplit, "return(true)"))
+	defer func() { re.NoError(failpoint.Disable(skipSplit)) }()
+	metas := make([]*keyspacepb.KeyspaceMeta, 0, len(ids))
+	for _, id := range ids {
+		metas = append(metas, MustCreateKeyspaceByID(re, server, &handlers.CreateKeyspaceByIDParams{
+			ID: &id, Name: fmt.Sprintf("tso-fixture-%d", id), Config: map[string]string{keyspace.UserKindKey: userKind},
+		}))
+	}
+	return metas
 }
 
 // FailCreateKeyspaceGroupWithCode fails to create a keyspace group with HTTP API.

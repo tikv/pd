@@ -223,6 +223,10 @@ var (
 	ErrKeyspaceExists = errors.Normalize("keyspace already exists", errors.RFCCodeText("PD:keyspace:ErrKeyspaceExists"))
 	// ErrKeyspaceGroupExists indicates target keyspace group already exists.
 	ErrKeyspaceGroupExists = errors.Normalize("keyspace group already exists", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupExists"))
+	// ErrCreateNonEmptyKeyspaceGroup indicates group creation cannot assign keyspaces.
+	ErrCreateNonEmptyKeyspaceGroup = errors.Normalize("create an empty keyspace group or use split to move existing keyspaces", errors.RFCCodeText("PD:keyspace:ErrCreateNonEmptyKeyspaceGroup"))
+	// ErrReadOnlyTSOGroupConfig indicates an attempt to mutate a TSO group assignment field.
+	ErrReadOnlyTSOGroupConfig = errors.Normalize("keyspace config %s is read-only (use split or merge to move existing keyspaces)", errors.RFCCodeText("PD:keyspace:ErrReadOnlyTSOGroupConfig"))
 	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
 	ErrKeyspaceNotInKeyspaceGroup = errors.Normalize("keyspace is not in this keyspace group", errors.RFCCodeText("PD:keyspace:ErrKeyspaceNotInKeyspaceGroup"))
 	// ErrKeyspaceNotInAnyKeyspaceGroup is used to indicate target keyspace is not in any keyspace group.

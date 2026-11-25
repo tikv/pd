@@ -243,6 +243,71 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusInternalServerError)
 }
 
+func (suite *keyspaceGroupTestSuite) TestRejectTSOGroupConfigUpdates() {
+	re := suite.Require()
+	MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{ID: 1, UserKind: endpoint.Standard.String(), Members: make([]endpoint.KeyspaceGroupMember, mcsconstant.DefaultKeyspaceGroupReplicaCount)},
+			{ID: 2, UserKind: endpoint.Standard.String()},
+		},
+	})
+	created := createKeyspacesWithTSOGroup(re, suite.server, 1, endpoint.Standard.String(), 100)[0]
+	groupID := "2"
+	userKind := endpoint.Enterprise.String()
+	value := "new"
+	patches := []map[string]*string{
+		{keyspace.TSOKeyspaceGroupIDKey: &groupID},
+		{keyspace.TSOKeyspaceGroupIDKey: nil},
+		{keyspace.UserKindKey: &userKind},
+		{keyspace.UserKindKey: nil},
+	}
+	checkPatches := func(actualGroupID uint32) {
+		for _, patch := range patches {
+			patch["ordinary_config"] = &value
+			status, body, _ := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+				Config: patch,
+			})
+			re.Equal(http.StatusBadRequest, status, body)
+		}
+		group := MustLoadKeyspaceGroupByID(re, suite.server, actualGroupID)
+		re.Contains(group.Keyspaces, created.GetId())
+		re.Empty(MustLoadKeyspaceGroupByID(re, suite.server, 2).Keyspaces)
+		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
+		re.Equal(created.Config, loaded.Config)
+	}
+	checkPatches(1)
+
+	// A split updates membership while the original group ID remains in the keyspace config.
+	MustSplitKeyspaceGroup(re, suite.server, 1, &handlers.SplitKeyspaceGroupByIDParams{
+		NewID:     3,
+		Keyspaces: []uint32{created.GetId()},
+	})
+	MustFinishSplitKeyspaceGroup(re, suite.server, 3)
+	checkPatches(3)
+	re.Empty(MustLoadKeyspaceGroupByID(re, suite.server, 1).Keyspaces)
+
+	MustMergeKeyspaceGroup(re, suite.server, kgconstant.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
+		MergeList: []uint32{3},
+	})
+	checkPatches(kgconstant.DefaultKeyspaceGroupID)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRejectKeyspaceGroupCreationWithKeyspaces() {
+	re := suite.Require()
+	created := createKeyspacesWithTSOGroup(re, suite.server, kgconstant.DefaultKeyspaceGroupID, endpoint.Basic.String(), 100)[0]
+	for _, keyspaceID := range []uint32{created.GetId(), 100_000} {
+		kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{ID: 1},
+			{ID: 2, Keyspaces: []uint32{keyspaceID}},
+		}}
+		FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusBadRequest)
+		groups := MustLoadKeyspaceGroups(re, suite.server, "0", "0")
+		re.Len(groups, 1)
+		re.Equal(kgconstant.DefaultKeyspaceGroupID, groups[0].ID)
+		re.Contains(groups[0].Keyspaces, created.GetId())
+	}
+}
+
 func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 	re := suite.Require()
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -257,7 +322,7 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 		},
 	}}
 
-	MustCreateKeyspaceGroup(re, suite.server, kgs)
+	MustCreateKeyspaceGroupsWithNewKeyspaces(re, suite.server, kgs)
 	resp := MustLoadKeyspaceGroups(re, suite.server, "0", "0")
 	re.Len(resp, 3)
 	re.Equal([]uint32{111, 222}, resp[1].Keyspaces)
@@ -326,7 +391,7 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 		},
 	}}
 
-	MustCreateKeyspaceGroup(re, suite.server, kgs)
+	MustCreateKeyspaceGroupsWithNewKeyspaces(re, suite.server, kgs)
 	resp := MustLoadKeyspaceGroups(re, suite.server, "0", "0")
 	re.Len(resp, 2)
 	MustSplitKeyspaceGroup(re, suite.server, 1, &handlers.SplitKeyspaceGroupByIDParams{

@@ -507,50 +507,15 @@ func TestKeyspaceGroupUpdatesRebaseOnStorage(t *testing.T) {
 		re.Equal(storedGroup.Members, got.Members)
 		re.Equal(got, manager.groups[endpoint.Standard].Get(storedGroup.ID))
 	})
+}
 
-	t.Run("move between groups", func(t *testing.T) {
-		re := require.New(t)
-		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-		manager := NewKeyspaceGroupManager(t.Context(), store, nil)
-		defer manager.Close()
-
-		oldGroup := &endpoint.KeyspaceGroup{
-			ID:        1,
-			UserKind:  endpoint.Standard.String(),
-			Members:   []endpoint.KeyspaceGroupMember{{Address: "http://old-tso", Priority: 1}},
-			Keyspaces: []uint32{42, 43},
-		}
-		newGroup := &endpoint.KeyspaceGroup{
-			ID:        2,
-			UserKind:  endpoint.Standard.String(),
-			Members:   []endpoint.KeyspaceGroupMember{{Address: "http://new-tso", Priority: 2}},
-			Keyspaces: []uint32{44, 45},
-		}
-		re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
-			if err := store.SaveKeyspaceGroup(txn, oldGroup); err != nil {
-				return err
-			}
-			return store.SaveKeyspaceGroup(txn, newGroup)
-		}))
-		manager.groups[endpoint.Standard].Put(&endpoint.KeyspaceGroup{
-			ID: oldGroup.ID, UserKind: oldGroup.UserKind, Keyspaces: []uint32{42},
-		})
-		manager.groups[endpoint.Standard].Put(&endpoint.KeyspaceGroup{
-			ID: newGroup.ID, UserKind: newGroup.UserKind, Keyspaces: []uint32{44},
-		})
-
-		re.NoError(manager.UpdateKeyspaceGroup("1", "2", endpoint.Standard, endpoint.Standard, 42))
-		gotOld, err := manager.GetKeyspaceGroupByID(oldGroup.ID)
-		re.NoError(err)
-		gotNew, err := manager.GetKeyspaceGroupByID(newGroup.ID)
-		re.NoError(err)
-		re.Equal([]uint32{43}, gotOld.Keyspaces)
-		re.Equal([]uint32{42, 44, 45}, gotNew.Keyspaces)
-		re.Equal(oldGroup.Members, gotOld.Members)
-		re.Equal(newGroup.Members, gotNew.Members)
-		re.Equal(gotOld, manager.groups[endpoint.Standard].Get(oldGroup.ID))
-		re.Equal(gotNew, manager.groups[endpoint.Standard].Get(newGroup.ID))
-	})
+func seedKeyspaceGroups(re *require.Assertions, manager *GroupManager, groups []*endpoint.KeyspaceGroup) {
+	manager.Lock()
+	defer manager.Unlock()
+	re.NoError(manager.saveKeyspaceGroups(groups))
+	for _, group := range groups {
+		manager.putKeyspaceGroupToCacheLocked(group)
+	}
 }
 
 type keyspaceGroupTestSuite struct {
@@ -1002,11 +967,11 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRefreshesCaches
 		re.NoError(err)
 		re.NotEmpty(keyspaceName)
 	}
-	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+	seedKeyspaceGroups(re, suite.kgm, []*endpoint.KeyspaceGroup{{
 		ID:        1,
 		UserKind:  endpoint.Basic.String(),
 		Keyspaces: []uint32{1_000_001, 1_000_002, 1_000_003},
-	}}))
+	}})
 
 	store, ok := suite.kgm.store.(*endpoint.StorageEndpoint)
 	re.True(ok)
@@ -1275,90 +1240,6 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersInBatch(
 	re.NoError(err)
 }
 
-func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDeadlockConfigGroupMove() {
-	re := suite.Require()
-	enabled, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
-		Name:       "concurrent_cfg_move",
-		Config:     map[string]string{},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
-		ID:       1,
-		UserKind: endpoint.Basic.String(),
-	}}))
-
-	// Hold the per-keyspace metadata lock so the config update and removal reach
-	// their manager-lock boundaries in a deterministic order.
-	suite.kg.metaLock.Lock(enabled.GetId())
-	metaLocked := true
-	defer func() {
-		if metaLocked {
-			suite.kg.metaLock.Unlock(enabled.GetId())
-		}
-	}()
-
-	configResultCh := make(chan error, 1)
-	go func() {
-		_, err := suite.kg.UpdateKeyspaceConfig(enabled.GetName(), []*Mutation{{
-			Op:    OpPut,
-			Key:   TSOKeyspaceGroupIDKey,
-			Value: "1",
-		}})
-		configResultCh <- err
-	}()
-
-	// A group-moving config update must acquire the membership write lock before
-	// waiting for metaLock.
-	re.Eventually(func() bool {
-		locked := suite.kgm.membershipMutationLock.TryLock()
-		if locked {
-			suite.kgm.membershipMutationLock.Unlock()
-		}
-		return !locked
-	}, 5*time.Second, 10*time.Millisecond)
-
-	removalResultCh := make(chan error, 1)
-	go func() {
-		_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
-			suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{enabled.GetId()}, nil)
-		removalResultCh <- err
-	}()
-
-	// Removal is blocked by the membership lock and therefore cannot hold the
-	// manager lock while waiting for the same keyspace metadata lock.
-	managerLocked := suite.kgm.TryLock()
-	re.True(managerLocked)
-	if managerLocked {
-		suite.kgm.Unlock()
-	}
-
-	suite.kg.metaLock.Unlock(enabled.GetId())
-	metaLocked = false
-	select {
-	case err := <-configResultCh:
-		re.NoError(err)
-	case <-time.After(5 * time.Second):
-		re.FailNow("timed out waiting for the keyspace group config move")
-	}
-	select {
-	case err := <-removalResultCh:
-		re.NoError(err)
-	case <-time.After(5 * time.Second):
-		re.FailNow("timed out waiting for keyspace removal")
-	}
-
-	defaultGroup, err := suite.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
-	re.NoError(err)
-	re.NotContains(defaultGroup.Keyspaces, enabled.GetId())
-	targetGroup, err := suite.kgm.GetKeyspaceGroupByID(1)
-	re.NoError(err)
-	re.Contains(targetGroup.Keyspaces, enabled.GetId())
-	meta, err := suite.kg.LoadKeyspaceByID(enabled.GetId())
-	re.NoError(err)
-	re.Equal("1", meta.GetConfig()[TSOKeyspaceGroupIDKey])
-}
-
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupStopsAfterCancellation() {
 	re := suite.Require()
 	keyspaceIDs := suite.createArchivedKeyspaces(maxKeyspaceRemovalBatchSize*2 + 1)
@@ -1448,11 +1329,11 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDoubleDe
 	duplicateMembers := make([]uint32, 0, len(requestedIDs)+1)
 	duplicateMembers = append(duplicateMembers, requestedIDs[0])
 	duplicateMembers = append(duplicateMembers, requestedIDs...)
-	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+	seedKeyspaceGroups(re, suite.kgm, []*endpoint.KeyspaceGroup{{
 		ID:        1,
 		UserKind:  endpoint.Basic.String(),
 		Keyspaces: duplicateMembers,
-	}}))
+	}})
 
 	group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
 		suite.ctx, 1, suite.kg, requestedIDs, nil)
@@ -1481,8 +1362,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 			UserKind: endpoint.Standard.String(),
 		},
 	}
-	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
-	re.NoError(err)
+	seedKeyspaceGroups(re, suite.kgm, keyspaceGroups)
 	// list all keyspace groups
 	kgs, err := suite.kgm.GetKeyspaceGroups(uint32(0), 0)
 	re.NoError(err)
@@ -1559,171 +1439,6 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceAssignment() {
 	}
 }
 
-func (suite *keyspaceGroupTestSuite) TestUpdateKeyspace() {
-	re := suite.Require()
-
-	keyspaceGroups := []*endpoint.KeyspaceGroup{
-		{
-			ID:       uint32(1),
-			UserKind: endpoint.Basic.String(),
-		},
-		{
-			ID:       uint32(2),
-			UserKind: endpoint.Standard.String(),
-		},
-		{
-			ID:       uint32(3),
-			UserKind: endpoint.Enterprise.String(),
-		},
-	}
-	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
-	re.NoError(err)
-	// list all keyspace groups
-	_, err = suite.kgm.GetKeyspaceGroups(uint32(0), 0)
-	re.NoError(err)
-	re.Equal(2, suite.kgm.groups[endpoint.Basic].Len())
-	re.Equal(1, suite.kgm.groups[endpoint.Standard].Len())
-	re.Equal(1, suite.kgm.groups[endpoint.Enterprise].Len())
-
-	_, err = suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
-		Name: "test",
-		Config: map[string]string{
-			UserKindKey: endpoint.Standard.String(),
-		},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	kg2, err := suite.kgm.GetKeyspaceGroupByID(2)
-	re.NoError(err)
-	re.Len(kg2.Keyspaces, 1)
-	kg3, err := suite.kgm.GetKeyspaceGroupByID(3)
-	re.NoError(err)
-	re.Empty(kg3.Keyspaces)
-
-	_, err = suite.kg.UpdateKeyspaceConfig("test", []*Mutation{
-		{
-			Op:    OpPut,
-			Key:   UserKindKey,
-			Value: endpoint.Enterprise.String(),
-		},
-		{
-			Op:    OpPut,
-			Key:   TSOKeyspaceGroupIDKey,
-			Value: "2",
-		},
-	})
-	re.Error(err)
-	kg2, err = suite.kgm.GetKeyspaceGroupByID(2)
-	re.NoError(err)
-	re.Len(kg2.Keyspaces, 1)
-	kg3, err = suite.kgm.GetKeyspaceGroupByID(3)
-	re.NoError(err)
-	re.Empty(kg3.Keyspaces)
-	_, err = suite.kg.UpdateKeyspaceConfig("test", []*Mutation{
-		{
-			Op:    OpPut,
-			Key:   UserKindKey,
-			Value: endpoint.Enterprise.String(),
-		},
-		{
-			Op:    OpPut,
-			Key:   TSOKeyspaceGroupIDKey,
-			Value: "3",
-		},
-	})
-	re.NoError(err)
-	kg2, err = suite.kgm.GetKeyspaceGroupByID(2)
-	re.NoError(err)
-	re.Empty(kg2.Keyspaces)
-	kg3, err = suite.kgm.GetKeyspaceGroupByID(3)
-	re.NoError(err)
-	re.Len(kg3.Keyspaces, 1)
-}
-
-func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackOnSaveError() {
-	re := suite.Require()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	errorStore := &errorKeyspaceGroupStorage{StorageEndpoint: store}
-	kgm := NewKeyspaceGroupManager(ctx, errorStore, nil)
-	re.NoError(kgm.Bootstrap(ctx))
-
-	keyspaceID := uint32(111)
-	keyspaceGroups := []*endpoint.KeyspaceGroup{
-		{
-			ID:        uint32(1),
-			UserKind:  endpoint.Standard.String(),
-			Keyspaces: []uint32{keyspaceID},
-		},
-		{
-			ID:        uint32(2),
-			UserKind:  endpoint.Standard.String(),
-			Keyspaces: []uint32{222},
-		},
-	}
-	re.NoError(kgm.CreateKeyspaceGroups(keyspaceGroups))
-
-	errorStore.failOnSaveID = 2
-	err := kgm.UpdateKeyspaceGroup("1", "2", endpoint.Standard, endpoint.Standard, keyspaceID)
-	re.ErrorIs(err, errSaveKeyspaceGroup)
-
-	oldKG := kgm.groups[endpoint.Standard].Get(1)
-	newKG := kgm.groups[endpoint.Standard].Get(2)
-	re.NotNil(oldKG)
-	re.NotNil(newKG)
-	re.Equal([]uint32{keyspaceID}, oldKG.Keyspaces)
-	re.Equal([]uint32{222}, newKG.Keyspaces)
-
-	storedOld, err := kgm.GetKeyspaceGroupByID(1)
-	re.NoError(err)
-	re.Equal([]uint32{keyspaceID}, storedOld.Keyspaces)
-	storedNew, err := kgm.GetKeyspaceGroupByID(2)
-	re.NoError(err)
-	re.Equal([]uint32{222}, storedNew.Keyspaces)
-}
-
-// TestUpdateKeyspaceGroupSaveErrorPreservesSortedCache verifies that a failed
-// storage transaction does not mutate the cached keyspace group.
-func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupSaveErrorPreservesSortedCache() {
-	re := suite.Require()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	errorStore := &errorKeyspaceGroupStorage{StorageEndpoint: store}
-	kgm := NewKeyspaceGroupManager(ctx, errorStore, nil)
-	re.NoError(kgm.Bootstrap(ctx))
-
-	keyspaceID := uint32(222)
-	keyspaceGroups := []*endpoint.KeyspaceGroup{
-		{
-			ID:        uint32(1),
-			UserKind:  endpoint.Standard.String(),
-			Keyspaces: []uint32{100, keyspaceID, 300},
-		},
-		{
-			ID:        uint32(2),
-			UserKind:  endpoint.Standard.String(),
-			Keyspaces: []uint32{10, 500},
-		},
-	}
-	re.NoError(kgm.CreateKeyspaceGroups(keyspaceGroups))
-
-	errorStore.failOnSaveID = 2
-	err := kgm.UpdateKeyspaceGroup("1", "2", endpoint.Standard, endpoint.Standard, keyspaceID)
-	re.ErrorIs(err, errSaveKeyspaceGroup)
-
-	oldKG := kgm.groups[endpoint.Standard].Get(1)
-	re.NotNil(oldKG)
-	re.Equal([]uint32{100, keyspaceID, 300}, oldKG.Keyspaces)
-
-	newKG := kgm.groups[endpoint.Standard].Get(2)
-	re.NotNil(newKG)
-	re.Equal([]uint32{10, 500}, newKG.Keyspaces)
-}
-
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re := suite.Require()
 
@@ -1740,11 +1455,10 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 			Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount),
 		},
 	}
-	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
-	re.NoError(err)
+	seedKeyspaceGroups(re, suite.kgm, keyspaceGroups)
 	// split the bootstrap keyspace
 	bootstrapKeyspaceID := GetBootstrapKeyspaceID()
-	err = suite.kgm.SplitKeyspaceGroupByID(0, 4, []uint32{bootstrapKeyspaceID})
+	err := suite.kgm.SplitKeyspaceGroupByID(0, 4, []uint32{bootstrapKeyspaceID})
 	re.ErrorIs(err, newModifyProtectedKeyspaceError())
 	// split the keyspace group 1 to 4
 	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{444})
@@ -1834,10 +1548,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplitRange() {
 			Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount),
 		},
 	}
-	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
-	re.NoError(err)
+	seedKeyspaceGroups(re, suite.kgm, keyspaceGroups)
 	// split the keyspace group 2 to 4 with keyspace range [222, 555]
-	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, nil, 222, 555)
+	err := suite.kgm.SplitKeyspaceGroupByID(2, 4, nil, 222, 555)
 	re.NoError(err)
 	kg2, err := suite.kgm.GetKeyspaceGroupByID(2)
 	re.NoError(err)
@@ -1886,10 +1599,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 			Keyspaces: []uint32{444, 555},
 		},
 	}
-	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
-	re.NoError(err)
+	seedKeyspaceGroups(re, suite.kgm, keyspaceGroups)
 	// split the keyspace group 1 to 2
-	err = suite.kgm.SplitKeyspaceGroupByID(1, 2, []uint32{333})
+	err := suite.kgm.SplitKeyspaceGroupByID(1, 2, []uint32{333})
 	re.NoError(err)
 	// finish the split of the keyspace group 2
 	err = suite.kgm.FinishSplitKeyspaceByID(2)
