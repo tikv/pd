@@ -16,6 +16,7 @@ package requestutil
 
 import (
 	"context"
+	"time"
 )
 
 // The key type is unexported to prevent collisions
@@ -24,8 +25,12 @@ type key int
 const (
 	// requestInfoKey is the context key for the request info.
 	requestInfoKey key = iota
-	// endTimeKey is the context key for the end time.
+	// endTimeKey stores the request end time as Unix seconds (int64), retained
+	// for compatibility with callers that calculate duration from timestamps.
 	endTimeKey
+	// requestDurationKey stores elapsed time (time.Duration) with subsecond
+	// precision. Metrics prefer it over subtracting whole-second timestamps.
+	requestDurationKey
 )
 
 // WithRequestInfo returns a copy of parent in which the request info value is set
@@ -48,4 +53,15 @@ func WithEndTime(parent context.Context, endTime int64) context.Context {
 func EndTimeFrom(ctx context.Context) (int64, bool) {
 	info, ok := ctx.Value(endTimeKey).(int64)
 	return info, ok
+}
+
+// WithRequestDuration returns a copy of parent with the elapsed request duration.
+func WithRequestDuration(parent context.Context, duration time.Duration) context.Context {
+	return context.WithValue(parent, requestDurationKey, duration)
+}
+
+// RequestDurationFrom returns the elapsed request duration from ctx.
+func RequestDurationFrom(ctx context.Context) (time.Duration, bool) {
+	duration, ok := ctx.Value(requestDurationKey).(time.Duration)
+	return duration, ok
 }
