@@ -1668,8 +1668,7 @@ func (kgm *KeyspaceGroupManager) keyspaceGroupMetricsSyncer() {
 	}
 }
 
-// deletedGroupCleaner is used to clean the deleted keyspace groups related data.
-// For example, the TSO keys of the merged keyspace groups remain in the storage.
+// deletedGroupCleaner clears local state for deleted keyspace groups.
 func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
@@ -1706,17 +1705,7 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 					zap.Uint32("keyspace-group-id", groupID))
 				continue
 			}
-			log.Info("delete the keyspace group tso key",
-				zap.Uint32("keyspace-group-id", groupID))
-			// Clean up the remaining TSO keys.
-
-			err := kgm.storage.DeleteTimestamp(kgm.ctx, groupID)
-			if err != nil {
-				log.Warn("failed to delete the keyspace group tso key",
-					zap.Uint32("keyspace-group-id", groupID),
-					zap.Error(err))
-				continue
-			}
+			// A merge target can still need the persisted window after the source allocator closes.
 			kgm.cleanKeyspaceGroup(groupID)
 			lastDeletedGroupID = groupID
 			lastDeletedGroupNum += 1
