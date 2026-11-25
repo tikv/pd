@@ -616,6 +616,21 @@ error = '''
 keyspace already exists
 '''
 
+["PD:keyspace:ErrKeyspaceGCConfigInvalid"]
+error = '''
+invalid gc_management_type %q: expected unified or keyspace_level
+'''
+
+["PD:keyspace:ErrKeyspaceGCModeImmutable"]
+error = '''
+cannot change effective gc mode from %s to %s
+'''
+
+["PD:keyspace:ErrKeyspaceGCModeMismatch"]
+error = '''
+gc management type %q is incompatible with kernel %s
+'''
+
 ["PD:keyspace:ErrKeyspaceGroupExists"]
 error = '''
 keyspace group already exists
@@ -664,6 +679,11 @@ primary of keyspace group does not exist
 ["PD:keyspace:ErrKeyspaceGroupWithEmptyKeyspace"]
 error = '''
 keyspace group with empty keyspace
+'''
+
+["PD:keyspace:ErrKeyspaceLegacyGCConfigUnsupported"]
+error = '''
+safe_point_version is no longer supported in write requests
 '''
 
 ["PD:keyspace:ErrKeyspaceNotFound"]
