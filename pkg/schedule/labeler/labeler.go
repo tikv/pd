@@ -274,8 +274,8 @@ func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
 // SetLabelRuleLocked inserts or updates a LabelRule. The enclosing Unlock
 // publishes derived index updates.
 // It updates the in-memory states and storage at the same time.
-// Callers must have already validated/adjusted the rule (checkAndAdjust or
-// NewLabelRuleFromJSON), because this method does not re-validate.
+// Callers must pass a validated, adjusted rule because this method does not
+// re-validate it.
 // It should be used in watcher.
 func (l *RegionLabeler) SetLabelRuleLocked(rule *LabelRule) error {
 	if err := l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {

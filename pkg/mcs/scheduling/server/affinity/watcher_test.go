@@ -118,13 +118,23 @@ func TestAffinityWatcherLifecycle(t *testing.T) {
 	})
 }
 
-// TestOnlyProcessAffinityGroupLabelRules verifies that only label rules with "affinity_group/" prefix are processed.
-// Even if the watcher receives events for other prefixes (e.g., "affinity_group_v2/"), the business logic should filter them out.
+// TestOnlyProcessAffinityGroupLabelRules verifies that the watcher loads and
+// watches only rules with the "affinity_group/" prefix.
 func TestOnlyProcessAffinityGroupLabelRules(t *testing.T) {
 	re := require.New(t)
 	ctx, client, clean := prepare(t)
 	defer clean()
 
+	// An expired ordinary rule shares the prefix up to the slash. It must not
+	// reach the affinity parser during the initial load.
+	re.NoError(putLabelRule(ctx, client, &labeler.LabelRule{
+		ID: "affinity_group_extra",
+		Labels: []labeler.RegionLabel{{
+			Key: "schedule", Value: "deny", TTL: "1h", StartAt: time.Now().Add(-2 * time.Hour).Format(time.UnixDate),
+		}},
+		RuleType: labeler.KeyRange,
+		Data:     labeler.MakeKeyRanges("01", "02"),
+	}))
 	affinityManager, watcher, err := setupAffinityManager(ctx, client)
 	re.NoError(err)
 	defer watcher.Close()
@@ -136,9 +146,7 @@ func TestOnlyProcessAffinityGroupLabelRules(t *testing.T) {
 		return affinityManager.IsGroupExist(testGroup.ID)
 	})
 
-	// Write a label rule with non-standard prefix "affinity_group_v2/"
-	// Watcher will receive this event (matches etcd prefix /pd/0/region_label/affinity_group*),
-	// but business logic should filter it out (ID doesn't start with "affinity_group/")
+	// This ordinary rule also falls outside the watch prefix.
 	nonStandardRule := &labeler.LabelRule{
 		ID:       "affinity_group_v2/" + testGroup.ID,
 		Labels:   []labeler.RegionLabel{{Key: "affinity_group", Value: testGroup.ID}},
@@ -146,11 +154,7 @@ func TestOnlyProcessAffinityGroupLabelRules(t *testing.T) {
 		Data:     labeler.MakeKeyRanges("7480000000000000ff0000000000000000f8", "7480000000000000ff1000000000000000f8"),
 	}
 
-	labelKey := keypath.RegionLabelKeyPath(nonStandardRule.ID)
-	labelValue, err := json.Marshal(nonStandardRule)
-	re.NoError(err)
-	_, err = client.Put(ctx, labelKey, string(labelValue))
-	re.NoError(err)
+	re.NoError(putLabelRule(ctx, client, nonStandardRule))
 
 	testutil.Eventually(re, func() bool {
 		groupState := affinityManager.GetAffinityGroupState(testGroup.ID)

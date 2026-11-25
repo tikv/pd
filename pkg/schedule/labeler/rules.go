@@ -99,16 +99,33 @@ func (rule *LabelRule) GetKeyRanges() []*KeyRangeRule {
 	return rs
 }
 
-// NewLabelRuleFromJSON creates a label rule from the JSON data.
+// NewLabelRuleFromJSON validates and adjusts a label rule from JSON.
+// It rejects rules whose labels have all expired.
 func NewLabelRuleFromJSON(data []byte) (*LabelRule, error) {
-	lr := &LabelRule{}
-	if err := json.Unmarshal(data, lr); err != nil {
+	lr, err := NewLabelRuleFromJSONWithoutCheck(data)
+	if err != nil {
 		return nil, err
 	}
 	if err := lr.checkAndAdjust(); err != nil {
 		return nil, err
 	}
 	return lr, nil
+}
+
+// LoadLabelRuleFromJSON validates a stored label rule and removes expired labels.
+// It returns a nil rule and no error when all labels in a valid rule have expired.
+func LoadLabelRuleFromJSON(data []byte) (*LabelRule, error) {
+	rule, err := NewLabelRuleFromJSONWithoutCheck(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := rule.adjust(); err != nil {
+		return nil, err
+	}
+	if len(rule.Labels) == 0 {
+		return nil, nil
+	}
+	return rule, nil
 }
 
 // NewLabelRuleFromJSONWithoutCheck creates a label rule from the JSON data. It will not call checkAndAdjust.
@@ -203,6 +220,17 @@ func (rule *LabelRule) checkAndRemoveExpireLabels(now time.Time) bool {
 }
 
 func (rule *LabelRule) checkAndAdjust() error {
+	if err := rule.adjust(); err != nil {
+		return err
+	}
+	if len(rule.Labels) == 0 {
+		return errs.ErrRegionRuleContent.FastGenByArgs("region label with expired ttl")
+	}
+	return nil
+}
+
+// adjust validates the rule before removing expired labels.
+func (rule *LabelRule) adjust() error {
 	if rule.ID == "" {
 		return errs.ErrRegionRuleContent.FastGenByArgs("empty rule id")
 	}
@@ -221,19 +249,18 @@ func (rule *LabelRule) checkAndAdjust() error {
 			return errs.ErrRegionRuleContent.FastGenByArgs(err)
 		}
 	}
-	rule.checkAndRemoveExpireLabels(time.Now())
-	if len(rule.Labels) == 0 {
-		return errs.ErrRegionRuleContent.FastGenByArgs("region label with expired ttl")
-	}
-
 	// TODO: change it to switch statement once we support more types.
-	if rule.RuleType == KeyRange {
-		var err error
-		rule.Data, err = initKeyRangeRulesFromLabelRuleData(rule.Data)
+	if rule.RuleType != KeyRange {
+		log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
+		return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %s", rule.RuleType))
+	}
+	ranges, err := initKeyRangeRulesFromLabelRuleData(rule.Data)
+	if err != nil {
 		return err
 	}
-	log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
-	return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %s", rule.RuleType))
+	rule.Data = ranges
+	rule.checkAndRemoveExpireLabels(time.Now())
+	return nil
 }
 
 func (rule *LabelRule) expireBefore(t time.Time) bool {

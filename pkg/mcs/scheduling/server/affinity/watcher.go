@@ -118,7 +118,7 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 }
 
 // initializeAffinityLabelWatcher initializes the watcher for affinity label rule changes.
-// It watches the region_label path but only processes rules with affinity group prefix.
+// It watches the affinity_group/ subtree under the region label path.
 func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
@@ -143,7 +143,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		ctx, w.wg,
 		w.etcdClient,
 		"scheduling-affinity-label-watcher",
-		strings.TrimSuffix(keypath.RegionLabelKeyPath(affinity.LabelRuleIDPrefix), "/"), // Filter: only process affinity group label rules
+		keypath.RegionLabelKeyPath(affinity.LabelRuleIDPrefix),
 		func([]*clientv3.Event) error {
 			w.affinityManager.SetLabelRuleBatchInProgress(true)
 			return nil
