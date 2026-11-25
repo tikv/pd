@@ -41,7 +41,10 @@ import (
 // even when few keyspaces remain active. This mechanism reclaims IDs from
 // deleted keyspaces.
 //
-// Current workflow
+// Reclamation workflow
+//
+// This file provides the bitmap storage and cache. Reclamation and Create
+// integration will be added in subsequent changes.
 //
 // After a keyspace enters TOMBSTONE, an external caller may select it from
 // a cached view of PD metadata and request reclamation. PD rechecks eligibility,
@@ -92,15 +95,15 @@ type freeIDBitmapStore interface {
 // boundaries. This primitive has no service lifecycle or keyspace metadata
 // dependencies.
 type freeIDBitmap struct {
-	mu          sync.Mutex
-	store       freeIDBitmapStore
-	prefix      string
-	bucketBytes int
-	initialized bool
-	buckets     map[uint32]kv.KeyValuePair // Includes loaded, absent buckets.
-	freeBuckets []uint32                   // Sorted, nonempty buckets only.
-	invalid     map[uint32]struct{}
-	nextLoad    uint32 // Loaded prefix end; invalid entries override this coverage.
+	mu               sync.Mutex
+	store            freeIDBitmapStore
+	prefix           string
+	bucketBytes      int
+	initialized      bool
+	buckets          map[uint32]kv.KeyValuePair // Empty entries are needed only outside nextLoad.
+	candidateBuckets []uint32                   // Sorted buckets with at least one candidate.
+	invalid          map[uint32]struct{}
+	nextLoad         uint32 // Loaded prefix end; invalid entries override this coverage.
 }
 
 // newFreeIDBitmap creates an empty cache. prefix is the caller-provided etcd
@@ -198,11 +201,7 @@ func (b *freeIDBitmap) loadNextPage(ctx context.Context, pageBuckets uint32) err
 	if start == end {
 		return nil
 	}
-	if err := b.loadRangeLocked(ctx, start, end); err != nil {
-		return err
-	}
-	b.nextLoad = end
-	return nil
+	return b.loadRangeLocked(ctx, start, end)
 }
 
 func (b *freeIDBitmap) loadRangeLocked(ctx context.Context, start, end uint32) error {
@@ -227,6 +226,11 @@ func (b *freeIDBitmap) loadRangeLocked(ctx context.Context, start, end uint32) e
 			return errors.New("invalid free ID bitmap encoding or revision")
 		}
 		loaded[bucket] = value
+	}
+	// Extend contiguous coverage only after the entire range is validated.
+	// Publication can then omit empty entries inside the loaded prefix.
+	if start == b.nextLoad {
+		b.nextLoad = end
 	}
 	for bucket := start; bucket < end; bucket++ {
 		value := loaded[bucket]
@@ -255,32 +259,22 @@ func (b *freeIDBitmap) candidates() *freeIDCandidates {
 // checks its Region. The preceding ID must be known non-free: selecting from
 // the middle of a consecutive free run could split off its earlier IDs and
 // leave them ineligible for reuse. Unknown predecessors are skipped as well.
+// The index limits each lookup to the resumed bucket and, if its candidates
+// were already visited, the next candidate bucket.
 func (c *freeIDCandidates) Next() (uint32, bool) {
 	b := c.bitmap
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	idsPerBucket := uint32(b.bucketBytes * 8)
 	resumeBucket := c.nextID / idsPerBucket
-	index, _ := slices.BinarySearch(b.freeBuckets, resumeBucket)
-	for _, bucket := range b.freeBuckets[index:] {
+	index, _ := slices.BinarySearch(b.candidateBuckets, resumeBucket)
+	for _, bucket := range b.candidateBuckets[index:] {
 		firstBit := uint32(0)
 		if bucket == resumeBucket {
 			firstBit = c.nextID % idsPerBucket
 		}
-		bitmap := b.buckets[bucket].Value
-		for bit := firstBit; bit < idsPerBucket; bit++ {
-			byteIndex := bit / 8
-			bitMask := byte(1 << (bit % 8))
-			if bitmap[byteIndex]&bitMask == 0 {
-				continue
-			}
+		if bit, found := b.nextCandidateBitLocked(bucket, firstBit); found {
 			id := bucket*idsPerBucket + bit
-			if id > 0 {
-				previousFree, known := b.isFreeLocked(id - 1)
-				if !known || previousFree {
-					continue
-				}
-			}
 			c.nextID = id + 1
 			return id, true
 		}
@@ -378,7 +372,11 @@ func (b *freeIDBitmap) loadBucketLocked(ctx context.Context, bucket uint32) (kv.
 	if err := b.loadRangeLocked(ctx, bucket, bucket+1); err != nil {
 		return kv.KeyValuePair{}, err
 	}
-	return b.buckets[bucket], nil
+	cached := b.buckets[bucket]
+	if cached.Key == "" {
+		cached.Key = b.bucketKey(bucket)
+	}
+	return cached, nil
 }
 
 // updatedBucketValue changes one bucket-relative bit in a copy of the bitmap.
@@ -406,21 +404,56 @@ func (b *freeIDBitmap) updatedBucketValue(value string, bitOffset uint32, free b
 // invalidateBucketLocked removes the cached value and its allocation candidates.
 // The invalid marker overrides loaded-prefix coverage until the bucket is reread.
 func (b *freeIDBitmap) invalidateBucketLocked(bucket uint32) {
-	b.publishLocked(bucket, "", 0)
 	delete(b.buckets, bucket)
 	b.invalid[bucket] = struct{}{}
+	b.refreshCandidateBucketLocked(bucket)
+	b.refreshCandidateBucketLocked(bucket + 1)
 }
 
 func (b *freeIDBitmap) publishLocked(bucket uint32, value string, revision int64) {
-	index, present := slices.BinarySearch(b.freeBuckets, bucket)
-	if value == "" && present {
-		b.freeBuckets = slices.Delete(b.freeBuckets, index, index+1)
-	} else if value != "" && !present {
-		b.freeBuckets = slices.Insert(b.freeBuckets, index, bucket)
-	}
 	if value == "" {
 		revision = 0
 	}
-	b.buckets[bucket] = kv.KeyValuePair{Key: b.bucketKey(bucket), Value: value, ModRevision: revision}
+	if value == "" && bucket < b.nextLoad {
+		delete(b.buckets, bucket)
+	} else {
+		b.buckets[bucket] = kv.KeyValuePair{Key: b.bucketKey(bucket), Value: value, ModRevision: revision}
+	}
 	delete(b.invalid, bucket)
+	// A change can affect this bucket's run starts and the next bucket's first bit.
+	b.refreshCandidateBucketLocked(bucket)
+	b.refreshCandidateBucketLocked(bucket + 1)
+}
+
+// refreshCandidateBucketLocked excludes buckets with no eligible run starts,
+// including fully free buckets continuing a run from their predecessor. This
+// keeps Next from scanning a long free run after its first ID is skipped.
+func (b *freeIDBitmap) refreshCandidateBucketLocked(bucket uint32) {
+	_, candidate := b.nextCandidateBitLocked(bucket, 0)
+	index, present := slices.BinarySearch(b.candidateBuckets, bucket)
+	if candidate && !present {
+		b.candidateBuckets = slices.Insert(b.candidateBuckets, index, bucket)
+	} else if !candidate && present {
+		b.candidateBuckets = slices.Delete(b.candidateBuckets, index, index+1)
+	}
+}
+
+// nextCandidateBitLocked finds a free bit with a known non-free predecessor.
+// Scanning is bounded by one bucket; candidateBuckets skips ineligible buckets.
+func (b *freeIDBitmap) nextCandidateBitLocked(bucket, firstBit uint32) (uint32, bool) {
+	bitmap := b.buckets[bucket].Value
+	for bit := firstBit; bit < uint32(len(bitmap)*8); bit++ {
+		if bitmap[bit/8]&(1<<(bit%8)) == 0 {
+			continue
+		}
+		id := bucket*uint32(b.bucketBytes*8) + bit
+		if id > 0 {
+			free, known := b.isFreeLocked(id - 1)
+			if free || !known {
+				continue
+			}
+		}
+		return bit, true
+	}
+	return 0, false
 }

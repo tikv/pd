@@ -147,6 +147,7 @@ func TestFreeIDBitmap(t *testing.T) {
 		require.Equal(t, reads+1, store.reads)
 		require.Equal(t, []kv.RawTxnOp{{Key: b.bucketKey(0), EndKey: b.bucketKey(64), Limit: 64, OpType: kv.RawTxnOpGetRange}}, store.lastRead)
 		require.Equal(t, uint32(64), b.nextLoad)
+		require.Empty(t, b.buckets, "loaded empty buckets need no cache entries")
 		require.NoError(t, b.loadNextPage(ctx, 64))
 		require.NoError(t, b.update(ctx, 512, true, noMetadata))
 		require.Equal(t, reads+2, store.reads, "each page needs one read; cached writes need none")
@@ -176,22 +177,65 @@ func TestFreeIDBitmap(t *testing.T) {
 			require.Equal(t, end, b.nextLoad)
 			require.Equal(t, []kv.RawTxnOp{{Key: b.bucketKey(start), EndKey: b.bucketKey(end), Limit: int(end - start), OpType: kv.RawTxnOpGetRange}}, store.lastRead)
 		}
+		require.Len(t, b.buckets, 2, "only the two nonempty buckets remain after full loading")
 		reads = store.reads
 		require.NoError(t, b.loadNextPage(ctx, 64))
 		require.Equal(t, reads, store.reads, "fully loaded index needs no further reads")
+	})
+
+	t.Run("empty buckets outside the loaded prefix remain known", func(t *testing.T) {
+		b, store := newBitmap(t)
+		const bucket = uint32(200)
+		cached, err := b.loadBucketLocked(ctx, bucket)
+		require.NoError(t, err)
+		require.Equal(t, b.bucketKey(bucket), cached.Key)
+		require.Contains(t, b.buckets, bucket)
+		free, known := b.isFreeLocked(bucket * 512)
+		require.False(t, free)
+		require.True(t, known)
+		_, known = b.isFreeLocked((bucket - 1) * 512)
+		require.False(t, known)
+
+		// Learning that an empty predecessor exists enables the next bucket.
+		require.NoError(t, b.update(ctx, (bucket+1)*512, true, noMetadata))
+		require.Equal(t, []uint32{bucket + 1}, b.candidateBuckets)
+		for b.nextLoad <= bucket {
+			require.NoError(t, b.loadNextPage(ctx, 64))
+		}
+		require.NotContains(t, b.buckets, bucket)
+		require.Equal(t, []uint32{bucket + 1}, b.candidateBuckets)
+		reads := store.reads
+		cached, err = b.loadBucketLocked(ctx, bucket)
+		require.NoError(t, err)
+		require.Equal(t, b.bucketKey(bucket), cached.Key)
+		require.Equal(t, reads, store.reads)
+
+		// Invalidating implicit empty coverage blocks the boundary until reload.
+		b.invalidateBucketLocked(bucket)
+		require.Empty(t, b.candidateBuckets)
+		cached, err = b.loadBucketLocked(ctx, bucket)
+		require.NoError(t, err)
+		require.Equal(t, b.bucketKey(bucket), cached.Key)
+		require.Zero(t, cached.ModRevision)
+		require.NotContains(t, b.buckets, bucket)
+		require.Equal(t, []uint32{bucket + 1}, b.candidateBuckets)
+		require.NoError(t, b.update(ctx, bucket*512, true, noMetadata))
 	})
 
 	t.Run("unknown predecessor blocks a consecutive free run", func(t *testing.T) {
 		b, _ := newBitmap(t)
 		require.NoError(t, b.update(ctx, 512, true, noMetadata))
 		require.NoError(t, b.update(ctx, 513, true, noMetadata))
+		require.Empty(t, b.candidateBuckets)
 		_, ok := b.candidates().Next()
 		require.False(t, ok)
 		require.NoError(t, b.update(ctx, 511, true, noMetadata))
+		require.Equal(t, []uint32{0}, b.candidateBuckets)
 		id, ok := b.candidates().Next()
 		require.True(t, ok)
 		require.Equal(t, uint32(511), id)
 		require.NoError(t, b.update(ctx, 511, false, noMetadata))
+		require.Equal(t, []uint32{1}, b.candidateBuckets)
 		id, ok = b.candidates().Next()
 		require.True(t, ok)
 		require.Equal(t, uint32(512), id)
