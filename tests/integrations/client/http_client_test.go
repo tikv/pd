@@ -1004,43 +1004,37 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 
 func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	re := suite.Require()
-	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
-
-	// Use the correct bootstrap keyspace name based on build type
-	var keyspaceName string
+	ctx := suite.ctx
+	name := keyspace.GetBootstrapKeyspaceName()
+	mode, opposite := keyspace.UnifiedGC, keyspace.KeyspaceLevelGC
 	if kerneltype.IsNextGen() {
-		keyspaceName = constant.SystemKeyspaceName
-	} else {
-		keyspaceName = constant.DefaultKeyspaceName
+		mode, opposite = opposite, mode
 	}
-	expectGCManagementType := "test-type"
-
-	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
-		Config: pd.KeyspaceGCManagementType{
-			GCManagementType: expectGCManagementType,
-		},
-	}
-	err := client.UpdateKeyspaceGCManagementType(ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	// The typed helper and generic patch both accept idempotent mode updates.
+	err := suite.client.UpdateKeyspaceGCManagementType(ctx, name, &pd.KeyspaceGCManagementTypeConfig{Config: pd.KeyspaceGCManagementType{GCManagementType: mode}})
 	re.NoError(err)
-
-	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(ctx, keyspaceName)
+	meta, err := suite.client.UpdateKeyspaceConfig(ctx, name, &pd.UpdateKeyspaceConfigParams{Config: map[string]*string{keyspace.GCManagementType: &mode}})
 	re.NoError(err)
-	val, ok := keyspaceMetaRes.Config[keyspace.GCManagementType]
-
-	// Check it can get expect key and value in keyspace meta config.
-	re.True(ok)
-	re.Equal(expectGCManagementType, val)
-
-	// Check it doesn't support update config to keyspace.KeyspaceLevelGC now.
-	keyspaceSafePointVersionConfig = pd.KeyspaceGCManagementTypeConfig{
-		Config: pd.KeyspaceGCManagementType{
-			GCManagementType: keyspace.KeyspaceLevelGC,
-		},
+	re.Equal(mode, meta.Config[keyspace.GCManagementType])
+	err = suite.client.UpdateKeyspaceGCManagementType(ctx, name, &pd.KeyspaceGCManagementTypeConfig{})
+	re.EqualError(err, "gc_management_type must not be empty")
+	for _, value := range []string{opposite, "test-type"} {
+		err = suite.client.UpdateKeyspaceGCManagementType(ctx, name, &pd.KeyspaceGCManagementTypeConfig{Config: pd.KeyspaceGCManagementType{GCManagementType: value}})
+		re.ErrorContains(err, "400 Bad Request")
 	}
-	err = client.UpdateKeyspaceGCManagementType(suite.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
-	re.Error(err)
+	legacy, empty := "v2", ""
+	for _, patch := range []map[string]*string{
+		{"safe_point_version": &legacy},
+		{"safe_point_version": nil},
+		{keyspace.GCManagementType: &opposite},
+		{keyspace.GCManagementType: &empty},
+	} {
+		_, err = suite.client.UpdateKeyspaceConfig(ctx, name, &pd.UpdateKeyspaceConfigParams{Config: patch})
+		re.ErrorContains(err, "400 Bad Request")
+	}
+	loaded, err := suite.client.GetKeyspaceMetaByName(ctx, name)
+	re.NoError(err)
+	re.Equal(mode, loaded.Config[keyspace.GCManagementType])
 }
 
 func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {

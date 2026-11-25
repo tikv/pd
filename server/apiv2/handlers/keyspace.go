@@ -63,7 +63,8 @@ type CreateKeyspaceParams struct {
 //	@Param		body	body	CreateKeyspaceParams	true	"Create keyspace parameters"
 //	@Produce	json
 //	@Success	200	{object}	KeyspaceMeta
-//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	400	{string}	string	"The input is invalid or violates the keyspace GC policy."
+//	@Failure	409	{string}	string	"The creation conflicts with another metadata update."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/keyspaces [post]
 func CreateKeyspace(c *gin.Context) {
@@ -86,7 +87,7 @@ func CreateKeyspace(c *gin.Context) {
 	}
 	meta, err := manager.CreateKeyspace(req)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		c.AbortWithStatusJSON(keyspaceConfigErrorStatus(err), err.Error())
 		return
 	}
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
@@ -106,9 +107,10 @@ type CreateKeyspaceByIDParams struct {
 //	@Param		body	body	CreateKeyspaceByIDParams	true	"Create keyspace parameters"
 //	@Produce	json
 //	@Success	200	{object}	KeyspaceMeta
-//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	400	{string}	string	"The input is invalid or violates the keyspace GC policy."
+//	@Failure	409	{string}	string	"The creation conflicts with another metadata update."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
-//	@Router		/keyspaces [post]
+//	@Router		/keyspaces/id [post]
 func CreateKeyspaceByID(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
@@ -130,7 +132,7 @@ func CreateKeyspaceByID(c *gin.Context) {
 	}
 	meta, err := manager.CreateKeyspaceByID(req)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		c.AbortWithStatusJSON(keyspaceConfigErrorStatus(err), err.Error())
 		return
 	}
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
@@ -326,7 +328,7 @@ type UpdateConfigParams struct {
 //	@Param		body	body	UpdateConfigParams	true	"Update keyspace parameters"
 //	@Produce	json
 //	@Success	200	{object}	KeyspaceMeta
-//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	400	{string}	string	"The input is invalid or violates the keyspace GC policy."
 //	@Failure	409	{string}	string	"The update conflicts or preconditions are not met."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //
@@ -346,40 +348,32 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	mutations := getMutations(configParams.Config)
-
-	// Check if the update is supported.
-	for _, mutation := range mutations {
-		if mutation.Key == keyspace.GCManagementType && mutation.Value == keyspace.KeyspaceLevelGC {
-			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("keyspace level GC")
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
-		if mutation.Key == keyspace.RegionBoundType {
-			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("region bound type")
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-
-	meta, err := manager.UpdateKeyspaceConfigWithPreconditions(name, mutations, configParams.Preconditions)
-	if err != nil {
-		if goerrors.Is(err, errs.ErrKeyspaceConfigPreconditionFailed) {
-			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
-			return
-		}
-		if goerrors.Is(err, errs.ErrEtcdTxnConflict) {
-			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
-			return
-		}
-		if goerrors.Is(err, errs.ErrUnknownMetaServiceGroup) || goerrors.Is(err, errs.ErrMetaServiceGroupDisabled) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-			return
-		}
+	if _, present := configParams.Config[keyspace.RegionBoundType]; present {
+		err = errs.ErrUnsupportedOperationInKeyspace.FastGen("region bound type")
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	meta, err := manager.UpdateKeyspaceConfigWithPreconditions(name, getMutations(configParams.Config), configParams.Preconditions)
+	if err != nil {
+		c.AbortWithStatusJSON(keyspaceConfigErrorStatus(err), err.Error())
+		return
+	}
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
+}
+
+// keyspaceConfigErrorStatus keeps creation and config-update policy responses consistent.
+func keyspaceConfigErrorStatus(err error) int {
+	switch {
+	case goerrors.Is(err, errs.ErrKeyspaceConfigPreconditionFailed), goerrors.Is(err, errs.ErrEtcdTxnConflict):
+		return http.StatusConflict
+	case goerrors.Is(err, errs.ErrKeyspaceGCConfigInvalid), goerrors.Is(err, errs.ErrKeyspaceGCModeMismatch),
+		goerrors.Is(err, errs.ErrKeyspaceGCModeImmutable), goerrors.Is(err, errs.ErrKeyspaceLegacyGCConfigUnsupported),
+		goerrors.Is(err, errs.ErrUnknownMetaServiceGroup), goerrors.Is(err, errs.ErrMetaServiceGroupDisabled):
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 // getMutations converts a given JSON merge patch to a series of keyspace config mutations.
