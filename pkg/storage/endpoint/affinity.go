@@ -59,12 +59,7 @@ func (se *StorageEndpoint) LoadAffinityGroup(groupID string) (string, error) {
 
 // LoadAffinityGroupInTxn loads the raw group value and guards its revision on etcd.
 func (*StorageEndpoint) LoadAffinityGroupInTxn(txn kv.Txn, groupID string) (string, int64, error) {
-	key := keypath.AffinityGroupPath(groupID)
-	if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
-		return revisionTxn.LoadWithRevision(key)
-	}
-	value, err := txn.Load(key)
-	return value, 0, err
+	return kv.LoadWithRevision(txn, keypath.AffinityGroupPath(groupID))
 }
 
 // LoadAllAffinityGroups loads all affinity group configurations from storage.

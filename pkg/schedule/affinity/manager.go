@@ -73,12 +73,12 @@ type Manager struct {
 	// as in the scheduling service. When it is nil, the Manager writes its own storage.
 	targetWriter TargetWriter
 	// targetWriteMutex protects the queue, backoff, and per-group cooldown for background first-win requests.
-	targetWriteMutex               syncutil.Mutex
-	pendingTargets                 map[string]observedTarget
-	pendingTargetIDs               []string
-	targetWriteInFlight            bool
-	targetWriteRetryAt             time.Time
-	targetEndpointUnsupportedUntil time.Time
+	targetWriteMutex          syncutil.Mutex
+	pendingTargets            map[string]observedTarget
+	pendingTargetIDs          []string
+	targetWriteInFlight       bool
+	targetWriteRetryAt        time.Time
+	targetEndpointUnsupported bool
 
 	// labelRuleVer is increased while holding RWMutex whenever a group's label rule may change.
 	// A lookup reads it before the region labeler and saves its result only if it is unchanged,
@@ -191,16 +191,11 @@ func (m *Manager) initGroupLocked(group *Group) {
 
 func (m *Manager) setGroupLocked(group *Group) {
 	groupInfo := &runtimeGroupInfo{
-		ID:                  group.ID,
-		CreateTimestamp:     group.CreateTimestamp,
-		LeaderStoreID:       group.LeaderStoreID,
-		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
-		AffinityVer:         1,
-		AffinityRegionCount: 0,
-		Regions:             make(map[uint64]regionCache),
-		LabelRule:           nil,
-		RangeCount:          0,
+		Group:       *group,
+		AffinityVer: 1,
+		Regions:     make(map[uint64]regionCache),
 	}
+	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
 	m.setTargetAvailabilityLocked(groupInfo)
 	m.groups[group.ID] = groupInfo
 }

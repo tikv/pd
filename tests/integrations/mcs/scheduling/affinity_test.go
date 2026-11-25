@@ -55,7 +55,10 @@ func TestAffinityFirstWinPersistence(t *testing.T) {
 		}
 		manager := cluster.GetAffinityManager()
 		peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3}}
-		for i, id := range []string{"g", "h"} {
+		for i, group := range []struct {
+			id, start, end string
+		}{{"g", "b", "c"}, {"h", "d", "e"}} {
+			id := group.id
 			if i == 1 {
 				// Learn the other etcd endpoints before stopping the tracked PD leader.
 				testutil.Eventually(re, func() bool { return len(primary.GetClient().Endpoints()) > 1 })
@@ -74,17 +77,12 @@ func TestAffinityFirstWinPersistence(t *testing.T) {
 			}
 			pdManager, err := leader.GetServer().GetAffinityManager()
 			re.NoError(err)
-			keyRange := testutil.TxnKeyspaceRange([]byte("b"), []byte("c"))
-			if i == 1 {
-				keyRange = testutil.TxnKeyspaceRange([]byte("d"), []byte("e"))
-			}
 			// Avoid bootstrap keyspace boundaries, which require a TiKV split.
-			re.NoError(pdManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: id,
-				KeyRanges: []keyutil.KeyRange{keyRange},
-			}}))
+			keyRange := testutil.TxnKeyspaceRange([]byte(group.start), []byte(group.end))
+			re.NoError(pdManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{keyRange}}}))
 			testutil.Eventually(re, func() bool {
-				g := manager.GetAffinityGroupState(id)
-				return g != nil && g.RangeCount == 1 && cluster.GetStore(3) != nil
+				state := manager.GetAffinityGroupState(id)
+				return state != nil && state.RangeCount == 1 && cluster.GetStore(3) != nil
 			})
 			tests.MustPutRegionInfo(re, pd, core.NewRegionInfo(&metapb.Region{
 				Id: uint64(100 + i), StartKey: keyRange.StartKey, EndKey: keyRange.EndKey, Peers: peers,

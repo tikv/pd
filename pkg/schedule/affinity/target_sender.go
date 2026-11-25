@@ -41,7 +41,8 @@ type observedTarget struct {
 func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64, persistOnly bool) {
 	m.targetWriteMutex.Lock()
 	now := time.Now()
-	if now.Before(m.targetEndpointUnsupportedUntil) {
+	retrying := now.Before(m.targetWriteRetryAt)
+	if retrying && m.targetEndpointUnsupported {
 		m.targetWriteMutex.Unlock()
 		if !persistOnly {
 			m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
@@ -49,7 +50,7 @@ func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGr
 		return
 	}
 	id := target.Expected.ID
-	if m.ctx.Err() != nil || now.Before(m.targetWriteRetryAt) ||
+	if m.ctx.Err() != nil || retrying ||
 		(groupInfoPtr != nil && now.Before(groupInfoPtr.targetSendAfter)) {
 		m.targetWriteMutex.Unlock()
 		return
@@ -110,7 +111,7 @@ func (m *Manager) drainObservedTargets() {
 
 		m.targetWriteMutex.Lock()
 		finish := time.Now()
-		m.targetEndpointUnsupportedUntil = time.Time{}
+		m.targetEndpointUnsupported = unsupported
 		if err == nil {
 			// PD can skip individual targets in a successful response.
 			for _, obs := range batch {
@@ -140,7 +141,6 @@ func (m *Manager) drainObservedTargets() {
 
 		m.targetWriteRetryAt = finish.Add(time.Second)
 		if unsupported {
-			m.targetEndpointUnsupportedUntil = m.targetWriteRetryAt
 			for _, id := range m.pendingTargetIDs {
 				batch = append(batch, m.pendingTargets[id])
 			}

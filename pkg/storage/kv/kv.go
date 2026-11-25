@@ -139,6 +139,16 @@ type RevisionTxn interface {
 	LoadWithRevision(key string) (string, int64, error)
 }
 
+// LoadWithRevision loads a value and its modification revision when supported by txn.
+// Transactions without revision support return revision zero.
+func LoadWithRevision(txn Txn, key string) (string, int64, error) {
+	if revisionTxn, ok := txn.(RevisionTxn); ok {
+		return revisionTxn.LoadWithRevision(key)
+	}
+	value, err := txn.Load(key)
+	return value, 0, err
+}
+
 // ConditionalTxnRunner runs a transaction with additional etcd comparisons.
 // The comparisons and the transaction operations are committed atomically.
 type ConditionalTxnRunner interface {

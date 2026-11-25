@@ -62,9 +62,10 @@ func (m *Manager) SetTargetWriter(w TargetWriter) {
 }
 
 // UpdateAffinityGroupTargets validates the whole request, then commits each
-// target in its own conditional transaction. Earlier commits survive an error.
-// Each target releases metaMutex before the next one starts.
-func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, error) {
+// target in its own conditional transaction. Cancellation of ctx or the Manager
+// context stops further work. The returned IDs include targets confirmed before
+// cancellation or another error.
+func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
 	if len(targets) == 0 {
 		return nil, errs.ErrEmptyRequest.FastGenByArgs("no targets provided")
 	}
@@ -89,12 +90,24 @@ func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, e
 		target.VoterStoreIDs = sortedStoreIDs(target.VoterStoreIDs)
 		adjusted = append(adjusted, target)
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(m.ctx, cancel)
+	defer stop()
+
 	written := make([]string, 0, len(adjusted))
 	for _, target := range adjusted {
+		// The Manager's AfterFunc runs asynchronously.
+		if m.ctx.Err() != nil {
+			cancel()
+		}
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
 		if err := m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs); err != nil {
 			continue
 		}
-		ok, err := m.updateGroupTarget(target)
+		ok, err := m.updateGroupTarget(ctx, target)
 		if err != nil {
 			return written, err
 		}
@@ -105,12 +118,21 @@ func (m *Manager) UpdateAffinityGroupTargets(targets []GroupTarget) ([]string, e
 	return written, nil
 }
 
-func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
+func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := m.ctx.Err(); err != nil {
+		return false, err
+	}
 	var stored *Group
 	written := false
-	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
 		value, revision, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
 		if err != nil || value == "" {
 			return err
@@ -159,7 +181,7 @@ func (m *Manager) updateGroupTarget(target GroupTarget) (bool, error) {
 func (t *GroupTarget) result() *Group {
 	group := t.Expected
 	group.LeaderStoreID = t.LeaderStoreID
-	group.VoterStoreIDs = slices.Clone(t.VoterStoreIDs)
+	group.VoterStoreIDs = t.VoterStoreIDs
 	return &group
 }
 

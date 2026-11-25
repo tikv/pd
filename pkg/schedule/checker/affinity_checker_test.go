@@ -320,11 +320,7 @@ func TestAffinityCheckerPersistsUnpersistedTarget(t *testing.T) {
 		cluster.AddLeaderRegionWithRange(100, string(keyRange.StartKey), string(keyRange.EndKey), 1, 2, 3)
 		region := cluster.GetRegion(100)
 		manager := cluster.GetAffinityManager()
-		checker := newTestAffinityChecker(t.Context(), cluster, opt)
-		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-			GroupID:   "g",
-			KeyRanges: []keyutil.KeyRange{keyRange},
-		}}))
+		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{keyRange}}}))
 		created := manager.GetAffinityGroupState("g")
 		var requests []affinity.GroupTarget
 		manager.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []affinity.GroupTarget) ([]string, error) {
@@ -341,8 +337,8 @@ func TestAffinityCheckerPersistsUnpersistedTarget(t *testing.T) {
 		re.True(local.AffinitySchedulingAllowed)
 		re.Len(requests, 1)
 
-		time.Sleep(time.Second)
-		re.Empty(checker.Check(region))
+		synctest.Sleep(time.Second)
+		re.Empty(newTestAffinityChecker(t.Context(), cluster, opt).Check(region))
 		synctest.Wait()
 		want := affinity.GroupTarget{Expected: created.Group, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
 		re.Equal([]affinity.GroupTarget{want, want}, requests)

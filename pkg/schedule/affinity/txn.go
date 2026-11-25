@@ -383,8 +383,7 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
-	voterStoreIDs = slices.Clone(voterStoreIDs)
-	slices.Sort(voterStoreIDs)
+	voterStoreIDs = sortedStoreIDs(voterStoreIDs)
 	if observed != nil {
 		// A recreated group can reuse the observed version.
 		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer || group.rangeConflict {
@@ -434,7 +433,7 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 
 	// Step 2: Save the Group in storage.
 	group.LeaderStoreID = leaderStoreID
-	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
+	group.VoterStoreIDs = voterStoreIDs
 	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
 	}); err != nil {

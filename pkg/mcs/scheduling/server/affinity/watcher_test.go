@@ -415,8 +415,7 @@ func TestAffinityGroupWatcherReloadsAfterCompaction(t *testing.T) {
 
 func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 	re := require.New(t)
-	ctx, client, clean := prepare(t)
-	defer clean()
+	ctx, client, _ := prepare(t)
 	const checkInterval = "github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval"
 	re.NoError(failpoint.Enable(checkInterval, "return(true)"))
 	defer func() { re.NoError(failpoint.Disable(checkInterval)) }()
@@ -432,36 +431,33 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 		re.NoError(err)
 		return manager
 	}
-	pd := newManager(endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil))
-	manager := newManager(endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil))
 	const reloadID, adminID = "reload-target", "admin-target"
-	re.NoError(pd.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: reloadID}, {GroupID: adminID}}))
 	read := func(id string) *mvccpb.KeyValue {
 		resp, err := client.Get(ctx, keypath.AffinityGroupPath(id))
 		re.NoError(err)
 		re.Len(resp.Kvs, 1)
 		return resp.Kvs[0]
 	}
-	initial := make(map[string]*mvccpb.KeyValue)
-	expected := make(map[string]affinity.GroupTarget)
+	initial := make(map[string]*mvccpb.KeyValue, 2)
+	expected := make(map[string]affinity.GroupTarget, 2)
 	for _, id := range []string{reloadID, adminID} {
-		_, err := pd.UpdateAffinityGroupPeers(id, 2, []uint64{1, 2})
-		re.NoError(err)
+		group := makeTestGroup(id, 2, []uint64{1, 2})
+		re.NoError(putGroup(ctx, client, group))
 		initial[id] = read(id)
 		expected[id] = affinity.GroupTarget{
-			Expected: pd.GetAffinityGroupState(id).Group, ExpectedModRevision: initial[id].ModRevision,
+			Expected: *group, ExpectedModRevision: initial[id].ModRevision,
 			LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2},
 		}
 	}
 
+	pd := newManager(endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil))
+	manager := newManager(endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil))
 	var upgraded atomic.Bool
 	sent := make(chan affinity.GroupTarget, 2)
 	allowAdminRetry := make(chan struct{})
-	type writeResult struct {
-		written []string
-		err     error
-	}
-	adminResult := make(chan writeResult, 1)
+	adminDone := make(chan struct{})
+	var adminWritten []string
+	var adminErr error
 	manager.SetTargetWriter(targetWriterFunc(func(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
 		if !upgraded.Load() {
 			return nil, affinity.ErrTargetWriterUnsupported
@@ -472,17 +468,17 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		if target.Expected.ID != adminID {
-			return pd.UpdateAffinityGroupTargets(targets)
+		if target.Expected.ID == adminID {
+			select {
+			case <-allowAdminRetry:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			adminWritten, adminErr = pd.UpdateAffinityGroupTargets(ctx, targets)
+			close(adminDone)
+			return adminWritten, adminErr
 		}
-		select {
-		case <-allowAdminRetry:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		written, err := pd.UpdateAffinityGroupTargets(targets)
-		adminResult <- writeResult{written: written, err: err}
-		return written, err
+		return pd.UpdateAffinityGroupTargets(ctx, targets)
 	}))
 	startWatcher := func() *Watcher {
 		watcher, err := NewWatcher(ctx, client, manager)
@@ -490,7 +486,7 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 		return watcher
 	}
 	watcher := startWatcher()
-	defer watcher.Close()
+	defer func() { watcher.Close() }()
 	state := manager.GetAffinityGroupState
 	testutil.Eventually(re, func() bool { return state(reloadID).AffinitySchedulingAllowed })
 	store2 := stores.GetStore(2)
@@ -513,7 +509,6 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 	_, err = client.Compact(ctx, marker.Header.Revision)
 	re.NoError(err)
 	watcher = startWatcher()
-	defer watcher.Close()
 	local := state(reloadID)
 	re.True(local.HasUnpersistedTarget())
 	re.Equal(uint64(1), local.LeaderStoreID)
@@ -546,9 +541,9 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 	})
 	close(allowAdminRetry)
 	select {
-	case result := <-adminResult:
-		re.NoError(result.err)
-		re.Empty(result.written, "the in-flight retry must not overwrite the admin target")
+	case <-adminDone:
+		re.NoError(adminErr)
+		re.Empty(adminWritten, "the in-flight retry must not overwrite the admin target")
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for in-flight retry")
 	}

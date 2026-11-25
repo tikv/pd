@@ -177,16 +177,7 @@ var _ KeyspaceGroupStorage = (*StorageEndpoint)(nil)
 
 // LoadKeyspaceGroup loads the keyspace group by ID.
 func (*StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
-	key := keypath.KeyspaceGroupIDPath(id)
-	var (
-		value string
-		err   error
-	)
-	if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
-		value, _, err = revisionTxn.LoadWithRevision(key)
-	} else {
-		value, err = txn.Load(key)
-	}
+	value, _, err := kv.LoadWithRevision(txn, keypath.KeyspaceGroupIDPath(id))
 	if err != nil || value == "" {
 		return nil, err
 	}

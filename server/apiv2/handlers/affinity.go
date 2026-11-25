@@ -397,6 +397,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 // UpdateAffinityGroupTargets writes leader and voter targets for several affinity groups.
 // A target is written only if the stored group matches the expected contents and any supplied modification revision.
 // The scheduling service uses it to store the targets it decides.
+// Targets commit independently. Canceling the request stops further work and preserves commits already made.
 //
 //	@Tags		affinity-groups
 //	@Summary	Write leader and voter targets for affinity groups whose stored groups are unchanged.
@@ -420,7 +421,7 @@ func UpdateAffinityGroupTargets(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	written, err := manager.UpdateAffinityGroupTargets(req.Targets)
+	written, err := manager.UpdateAffinityGroupTargets(c.Request.Context(), req.Targets)
 	if handleAffinityError(c, err) {
 		return
 	}
