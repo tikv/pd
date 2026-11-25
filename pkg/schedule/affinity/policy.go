@@ -116,7 +116,8 @@ func calcGroupAvailability(
 	return worstCondition.groupAvailability()
 }
 
-// ObserveAvailableRegion observes available Region and collects information to update the Peer distribution within the Group.
+// ObserveAvailableRegion uses a healthy region's peer distribution to update an
+// affinity target if the observed group instance, version, and revision are still current.
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// In the future, we may want to use a more sophisticated strategy rather than first-win.

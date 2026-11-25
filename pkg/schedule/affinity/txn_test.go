@@ -368,6 +368,43 @@ func TestTargetCASAndLostReplyWithEtcd(t *testing.T) {
 	test.Equal(stable, state("g"))
 }
 
+func TestUpdateAffinityGroupTargetsSkipsRangeConflict(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	test := newTargetTestWithStorage(t, t.Context(), storage.NewStorageWithEtcdBackend(client), "g", "h")
+	readGroupRevision := func() int64 {
+		resp, err := client.Get(t.Context(), keypath.AffinityGroupPath("g"))
+		test.NoError(err)
+		test.Len(resp.Kvs, 1)
+		return resp.Kvs[0].ModRevision
+	}
+
+	_, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2})
+	test.NoError(err)
+	test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: testKeyRanges("a", "d")}}, nil))
+	revision := readGroupRevision()
+	changed, unchanged := test.target("g", 2, 1, 2), test.target("g", 1, 1, 2)
+	changed.ExpectedModRevision, unchanged.ExpectedModRevision = revision, revision
+
+	rule := MakeLabelRule(GroupKeyRanges{GroupID: "h", KeyRanges: testKeyRanges("b", "c")})
+	test.NoError(test.regionLabeler.SetLabelRule(rule))
+	test.NoError(test.SyncKeyRangesFromEtcd(rule))
+	test.ReconcileRangeConflicts()
+	test.True(test.GetAffinityGroupState("g").rangeConflict)
+	test.Equal(revision, readGroupRevision(), "only the label rule changed")
+	test.write([]string{}, changed)
+	test.write([]string{"g"}, unchanged)
+	test.Equal(revision, readGroupRevision(), "neither skipping nor confirming writes a new value")
+	test.Equal(unchanged.result(), test.stored("g"))
+
+	test.NoError(test.regionLabeler.DeleteLabelRule(rule.ID))
+	test.SyncKeyRangesDeleteFromEtcd(rule.ID)
+	test.ReconcileRangeConflicts()
+	test.False(test.GetAffinityGroupState("g").rangeConflict)
+	test.write([]string{"g"}, changed)
+	test.Equal(changed.result(), test.stored("g"))
+}
+
 // Persist pairs directly to model legacy data that would fail write validation.
 func saveTestAffinityGroups(t *testing.T, store storage.Storage, groups []GroupKeyRanges) {
 	t.Helper()

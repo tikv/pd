@@ -35,89 +35,172 @@ type observedTarget struct {
 	persistOnly  bool
 }
 
+// matches checks the observation against the current group under Manager.RWMutex.
+func (obs *observedTarget) matches(group *runtimeGroupInfo) bool {
+	// A recreated group can reuse the same creation timestamp and affinity version.
+	// A same-peers write can advance the revision without changing the affinity version.
+	return group == obs.groupInfoPtr && group.AffinityVer == obs.affinityVer &&
+		group.modRevision == obs.target.ExpectedModRevision && !group.rangeConflict
+}
+
+func (obs *observedTarget) sameCandidate(other observedTarget) bool {
+	return obs.groupInfoPtr == other.groupInfoPtr && obs.affinityVer == other.affinityVer &&
+		obs.target.ExpectedModRevision == other.target.ExpectedModRevision &&
+		obs.target.LeaderStoreID == other.target.LeaderStoreID &&
+		slices.Equal(obs.target.VoterStoreIDs, other.target.VoterStoreIDs)
+}
+
 // sendObservedTarget queues the latest observation per group for a single writer.
+// Repeats of the last sent target cannot displace a different queued candidate.
 // A 404 pauses HTTP attempts but lets groups use observations locally.
 // Caller holds metaMutex.
-func (m *Manager) sendObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64, persistOnly bool) {
+func (m *Manager) sendObservedTarget(obs observedTarget) {
+	id := obs.target.Expected.ID
+	m.RLock()
+	current := obs.matches(m.groups[id])
+	m.RUnlock()
+	if !current {
+		return
+	}
 	m.targetWriteMutex.Lock()
 	now := time.Now()
 	retrying := now.Before(m.targetWriteRetryAt)
 	if retrying && m.targetEndpointUnsupported {
 		m.targetWriteMutex.Unlock()
-		if !persistOnly {
-			m.applyLocalObservedTarget(target, groupInfoPtr, affinityVer)
+		if !obs.persistOnly {
+			m.applyLocalObservedTarget(&obs)
 		}
 		return
 	}
-	id := target.Expected.ID
-	if m.ctx.Err() != nil || retrying ||
-		(groupInfoPtr != nil && now.Before(groupInfoPtr.targetSendAfter)) {
+	if m.ctx.Err() != nil || retrying {
 		m.targetWriteMutex.Unlock()
 		return
 	}
-	if _, queued := m.pendingTargets[id]; !queued {
+	if sending, ok := m.sendingTargets[id]; ok && obs.sameCandidate(sending) {
+		m.targetWriteMutex.Unlock()
+		return
+	}
+	queued, hasQueued := m.pendingTargets[id]
+	if lastSent := obs.groupInfoPtr.lastSentTarget; lastSent != nil && obs.sameCandidate(*lastSent) {
+		if now.Before(obs.groupInfoPtr.targetSendAfter) {
+			m.targetWriteMutex.Unlock()
+			return
+		}
+		if hasQueued && !obs.sameCandidate(queued) {
+			m.RLock()
+			keepQueued := queued.matches(m.groups[id])
+			m.RUnlock()
+			if keepQueued {
+				m.targetWriteMutex.Unlock()
+				return
+			}
+		}
+	}
+	if !hasQueued {
 		m.pendingTargetIDs = append(m.pendingTargetIDs, id)
 	}
 	if m.pendingTargets == nil {
 		m.pendingTargets = make(map[string]observedTarget)
 	}
-	m.pendingTargets[id] = observedTarget{target, groupInfoPtr, affinityVer, persistOnly}
-	if !m.targetWriteInFlight {
-		m.targetWriteInFlight = true
+	m.pendingTargets[id] = obs
+	if !m.targetDrainRunning {
+		m.targetDrainRunning = true
 		go m.drainObservedTargets()
+	} else if m.targetDrainWake != nil {
+		close(m.targetDrainWake)
+		m.targetDrainWake = nil
 	}
 	m.targetWriteMutex.Unlock()
+}
+
+// popObservedTargets moves current, ready observations into the sending batch and
+// returns the earliest cooldown deadline of any deferred observations it encounters.
+// Caller holds targetWriteMutex.
+func (m *Manager) popObservedTargets(now time.Time) ([]observedTarget, time.Time) {
+	batch := make([]observedTarget, 0, min(maxTargetBatchSize, len(m.pendingTargetIDs)))
+	var retryAt time.Time
+	m.RLock()
+	defer m.RUnlock()
+	for remaining := len(m.pendingTargetIDs); remaining > 0 && len(batch) < maxTargetBatchSize; remaining-- {
+		id := m.pendingTargetIDs[0]
+		m.pendingTargetIDs[0] = ""
+		m.pendingTargetIDs = m.pendingTargetIDs[1:]
+		obs := m.pendingTargets[id]
+		if !obs.matches(m.groups[id]) {
+			delete(m.pendingTargets, id)
+			continue
+		}
+		if sendAfter := obs.groupInfoPtr.targetSendAfter; now.Before(sendAfter) {
+			m.pendingTargetIDs = append(m.pendingTargetIDs, id)
+			if retryAt.IsZero() || sendAfter.Before(retryAt) {
+				retryAt = sendAfter
+			}
+			continue
+		}
+		batch = append(batch, obs)
+		delete(m.pendingTargets, id)
+	}
+	if len(m.pendingTargetIDs) == 0 {
+		m.pendingTargetIDs = nil
+	}
+	return batch, retryAt
 }
 
 func (m *Manager) drainObservedTargets() {
 	defer logutil.LogPanic()
 	for {
 		m.targetWriteMutex.Lock()
+		m.targetDrainWake = nil
 		now := time.Now()
 		if m.ctx.Err() != nil || now.Before(m.targetWriteRetryAt) {
 			clear(m.pendingTargets)
 			m.pendingTargetIDs = nil
-			m.targetWriteInFlight = false
+			m.targetDrainRunning = false
 			m.targetWriteMutex.Unlock()
 			return
 		}
-		batch := make([]observedTarget, 0, min(maxTargetBatchSize, len(m.pendingTargetIDs)))
-		for len(batch) < maxTargetBatchSize && len(m.pendingTargetIDs) > 0 {
-			id := m.pendingTargetIDs[0]
-			m.pendingTargetIDs[0] = ""
-			m.pendingTargetIDs = m.pendingTargetIDs[1:]
-			obs := m.pendingTargets[id]
-			if obs.groupInfoPtr == nil || !now.Before(obs.groupInfoPtr.targetSendAfter) {
-				batch = append(batch, obs)
-			}
-			delete(m.pendingTargets, id)
-		}
-		if len(m.pendingTargetIDs) == 0 {
-			m.pendingTargetIDs = nil
-		}
+		batch, retryAt := m.popObservedTargets(now)
 		if len(batch) == 0 {
-			m.targetWriteInFlight = false
+			if retryAt.IsZero() {
+				m.targetDrainRunning = false
+				m.targetWriteMutex.Unlock()
+				return
+			}
+			wake := make(chan struct{})
+			m.targetDrainWake = wake
 			m.targetWriteMutex.Unlock()
-			return
+			timer := time.NewTimer(time.Until(retryAt))
+			select {
+			case <-m.ctx.Done():
+			case <-wake:
+			case <-timer.C:
+			}
+			timer.Stop()
+			continue
 		}
-		m.targetWriteMutex.Unlock()
-
+		if m.sendingTargets == nil {
+			m.sendingTargets = make(map[string]observedTarget, maxTargetBatchSize)
+		}
 		targets := make([]GroupTarget, len(batch))
 		for i, obs := range batch {
 			targets[i] = obs.target
+			m.sendingTargets[obs.target.Expected.ID] = obs
+			obs.groupInfoPtr.lastSentTarget = &obs
 		}
+		m.targetWriteMutex.Unlock()
+
 		written, err := m.targetWriter.WriteGroupTargets(m.ctx, targets)
 		unsupported := errors.Is(err, ErrTargetWriterUnsupported)
 
 		m.targetWriteMutex.Lock()
+		clear(m.sendingTargets)
 		finish := time.Now()
 		m.targetEndpointUnsupported = unsupported
 		if err == nil {
-			// PD can skip individual targets in a successful response.
+			// PD can skip individual targets in a successful response. Keep any
+			// different candidate already queued for after the cooldown.
 			for _, obs := range batch {
-				if obs.groupInfoPtr != nil {
-					obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
-				}
+				obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
 			}
 			shouldReport := m.ctx.Err() == nil
 			m.targetWriteMutex.Unlock()
@@ -147,14 +230,14 @@ func (m *Manager) drainObservedTargets() {
 		}
 		clear(m.pendingTargets)
 		m.pendingTargetIDs = nil
-		m.targetWriteInFlight = false
+		m.targetDrainRunning = false
 		m.targetWriteMutex.Unlock()
 
 		if unsupported {
 			m.metaMutex.Lock()
 			for _, obs := range batch {
 				if !obs.persistOnly {
-					m.applyLocalObservedTarget(obs.target, obs.groupInfoPtr, obs.affinityVer)
+					m.applyLocalObservedTarget(&obs)
 				}
 			}
 			m.metaMutex.Unlock()
@@ -168,20 +251,15 @@ func (m *Manager) drainObservedTargets() {
 
 // applyLocalObservedTarget applies a healthy observation without a write when it
 // matches the current or stored target, or PD does not implement the target
-// endpoint. Caller holds metaMutex.
-func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *runtimeGroupInfo, affinityVer uint64) {
-	voterStoreIDs := sortedStoreIDs(target.VoterStoreIDs)
-
+// endpoint. It updates the observation's version if it changes local state so
+// the caller can still queue the target for persistence. Caller holds metaMutex.
+func (m *Manager) applyLocalObservedTarget(obs *observedTarget) {
+	target := &obs.target
 	m.Lock()
 	defer m.Unlock()
 
-	groupInfo, ok := m.groups[target.Expected.ID]
-	// A recreated group can have the same creation timestamp and affinity version.
-	if !ok || groupInfo != groupInfoPtr || groupInfo.AffinityVer != affinityVer {
-		return
-	}
-	// A same-peers write can advance the revision without changing the affinity version.
-	if groupInfo.modRevision != target.ExpectedModRevision {
+	groupInfo := m.groups[target.Expected.ID]
+	if !obs.matches(groupInfo) {
 		return
 	}
 	stored := groupInfo.storedGroup()
@@ -191,19 +269,20 @@ func (m *Manager) applyLocalObservedTarget(target GroupTarget, groupInfoPtr *run
 	if groupInfo.IsAffinitySchedulingAllowed() {
 		return
 	}
-	if !groupInfo.IsRegularSchedulingAllowed() && !slices.Equal(voterStoreIDs, groupInfo.VoterStoreIDs) {
+	if !groupInfo.IsRegularSchedulingAllowed() && !slices.Equal(target.VoterStoreIDs, groupInfo.VoterStoreIDs) {
 		return
 	}
 	// Store conditions can change during the request without affecting an unset group.
-	if calcGroupAvailability(m.unavailableStores, target.LeaderStoreID, voterStoreIDs) != groupAvailable {
+	if calcGroupAvailability(m.unavailableStores, target.LeaderStoreID, target.VoterStoreIDs) != groupAvailable {
 		return
 	}
 	groupInfo.LeaderStoreID = target.LeaderStoreID
-	groupInfo.VoterStoreIDs = voterStoreIDs
+	groupInfo.VoterStoreIDs = slices.Clone(target.VoterStoreIDs)
 	groupInfo.persistedGroup = nil
 	if !sameStoredGroup(&stored, &groupInfo.Group) {
 		groupInfo.persistedGroup = &stored
 	}
 	groupInfo.SetAvailability(groupAvailable)
 	m.resetCountLocked(groupInfo)
+	obs.affinityVer = groupInfo.AffinityVer
 }

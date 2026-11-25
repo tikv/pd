@@ -62,9 +62,10 @@ func (m *Manager) SetTargetWriter(w TargetWriter) {
 }
 
 // UpdateAffinityGroupTargets validates the whole request, then commits each
-// target in its own conditional transaction. Cancellation of ctx or the Manager
-// context stops further work. The returned IDs include targets confirmed before
-// cancellation or another error.
+// target in its own conditional transaction. Groups currently in range conflict
+// cannot save a changed target, but an already stored result is still confirmed.
+// Cancellation of ctx or the Manager context stops further work. The returned
+// IDs include targets confirmed before cancellation or another error.
 func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
 	if len(targets) == 0 {
 		return nil, errs.ErrEmptyRequest.FastGenByArgs("no targets provided")
@@ -146,6 +147,13 @@ func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bo
 		case sameStoredGroup(group, result):
 			written = true
 		case revisionMatches && sameStoredGroup(group, &target.Expected):
+			m.RLock()
+			current := m.groups[group.ID]
+			conflict := current != nil && current.rangeConflict
+			m.RUnlock()
+			if conflict {
+				return nil
+			}
 			if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
 				return err
 			}

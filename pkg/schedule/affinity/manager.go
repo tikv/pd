@@ -72,11 +72,13 @@ type Manager struct {
 	// targetWriter writes the targets this Manager decides when it does not own the storage,
 	// as in the scheduling service. When it is nil, the Manager writes its own storage.
 	targetWriter TargetWriter
-	// targetWriteMutex protects the queue, backoff, and per-group cooldown for background first-win requests.
+	// targetWriteMutex protects the queue, backoff, and per-group state for background first-win requests.
 	targetWriteMutex          syncutil.Mutex
 	pendingTargets            map[string]observedTarget
 	pendingTargetIDs          []string
-	targetWriteInFlight       bool
+	sendingTargets            map[string]observedTarget
+	targetDrainRunning        bool
+	targetDrainWake           chan struct{}
 	targetWriteRetryAt        time.Time
 	targetEndpointUnsupported bool
 
@@ -286,7 +288,7 @@ func (m *Manager) ExpireAffinityGroup(groupID string) {
 }
 
 // ExpireAffinityGroupIf changes the Group availability to groupExpired only when
-// the group still matches the expected runtime instance, version, and target.
+// the group still matches the expected runtime instance, version, revision, and target.
 func (m *Manager) ExpireAffinityGroupIf(expected *GroupState) (*GroupState, bool) {
 	if expected == nil {
 		return nil, false
@@ -298,6 +300,7 @@ func (m *Manager) ExpireAffinityGroupIf(expected *GroupState) (*GroupState, bool
 		(expected.groupInfoPtr != nil && groupInfo != expected.groupInfoPtr) ||
 		groupInfo.CreateTimestamp != expected.CreateTimestamp ||
 		groupInfo.AffinityVer != expected.affinityVer ||
+		groupInfo.modRevision != expected.modRevision ||
 		groupInfo.LeaderStoreID != expected.LeaderStoreID ||
 		!slices.Equal(groupInfo.VoterStoreIDs, expected.VoterStoreIDs) {
 		return nil, false

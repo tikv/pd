@@ -357,8 +357,9 @@ func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64,
 
 // updateAffinityGroupPeersWithState updates the leader and voter stores of an affinity group
 // and resets target availability as described by UpdateAffinityGroupPeers.
-// A nil observed state indicates an admin update. Otherwise the runtime group and version must match,
-// its ranges must not conflict, and voter stores can change only when regular scheduling is allowed.
+// A nil observed state indicates an admin update. An observation must match the runtime
+// group instance, affinity version, and watched revision. Its ranges must not conflict,
+// and voter stores can change only when regular scheduling is allowed.
 func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *GroupState, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
@@ -386,7 +387,8 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 	voterStoreIDs = sortedStoreIDs(voterStoreIDs)
 	if observed != nil {
 		// A recreated group can reuse the observed version.
-		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer || group.rangeConflict {
+		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer ||
+			group.modRevision != observed.modRevision || group.rangeConflict {
 			return group, nil
 		}
 		// Changing only the leader is allowed while regular scheduling is disabled.
@@ -398,34 +400,36 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 			return group, nil
 		}
 		if m.targetWriter != nil {
+			observation := observedTarget{
+				target: GroupTarget{
+					ExpectedModRevision: observed.modRevision,
+					LeaderStoreID:       leaderStoreID,
+					VoterStoreIDs:       voterStoreIDs,
+				},
+				groupInfoPtr: observed.groupInfoPtr,
+				affinityVer:  observed.affinityVer,
+				persistOnly:  group.AffinitySchedulingAllowed && group.targetUnpersisted,
+			}
 			m.RLock()
 			current := m.groups[groupID]
-			if current.AffinityVer != observed.affinityVer {
+			if !observation.matches(current) {
 				m.RUnlock()
 				return m.GetAffinityGroupState(groupID), nil
 			}
 			conditionsKnown := m.storeConditionsKnown
-			observedModRevision := current.modRevision
-			expected := current.storedGroup()
-			expected.VoterStoreIDs = slices.Clone(expected.VoterStoreIDs)
+			observation.target.Expected = current.storedGroup()
+			observation.target.Expected.VoterStoreIDs = slices.Clone(observation.target.Expected.VoterStoreIDs)
 			m.RUnlock()
 			if !conditionsKnown && !group.targetUnpersisted && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
 				return group, nil
 			}
-			target := GroupTarget{
-				Expected:            expected,
-				ExpectedModRevision: observedModRevision,
-				LeaderStoreID:       leaderStoreID,
-				VoterStoreIDs:       voterStoreIDs,
-			}
-			persistOnly := group.AffinitySchedulingAllowed && group.targetUnpersisted
-			result := target.result()
-			matchesStored := sameStoredGroup(&target.Expected, result)
+			result := observation.target.result()
+			matchesStored := sameStoredGroup(&observation.target.Expected, result)
 			if !group.AffinitySchedulingAllowed && (matchesStored || sameStoredGroup(&group.Group, result)) {
-				m.applyLocalObservedTarget(target, observed.groupInfoPtr, observed.affinityVer)
+				m.applyLocalObservedTarget(&observation)
 			}
 			if !matchesStored {
-				m.sendObservedTarget(target, observed.groupInfoPtr, observed.affinityVer, persistOnly)
+				m.sendObservedTarget(observation)
 			}
 			return m.GetAffinityGroupState(groupID), nil
 		}

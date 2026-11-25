@@ -67,7 +67,7 @@ func TestAskBatchSplitRejectsInvalidRequestBeforeAllocation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
 			client := &splitScatterPDClient{next: 1000, allocErr: errors.New("unexpected split ID allocation")}
-			cluster.SwitchPDLeader(client)
+			cluster.SwitchPDLeader(client, "http://pd-leader")
 			region := newAffinitySplitTestRegion()
 			cluster.PutRegion(region)
 			meta := region.GetMeta()
@@ -113,7 +113,7 @@ func TestAskBatchSplitLegacyAllocation(t *testing.T) {
 		t.Run(strconv.FormatUint(uint64(count), 10), func(t *testing.T) {
 			svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
 			client := &splitScatterPDClient{next: 1000, nonBatch: true}
-			cluster.SwitchPDLeader(client)
+			cluster.SwitchPDLeader(client, "http://pd-leader")
 			region := newAffinitySplitTestRegion()
 			cluster.PutRegion(region)
 			resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{
@@ -442,7 +442,7 @@ func TestAskBatchSplitAllocationHeaderError(t *testing.T) {
 		t.Run(strconv.Itoa(call), func(t *testing.T) {
 			svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
 			client := &splitScatterPDClient{next: 1000, nonBatch: true, headerErr: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "id exhausted"}, headerErrAt: call}
-			cluster.SwitchPDLeader(client)
+			cluster.SwitchPDLeader(client, "http://pd-leader")
 			region := newAffinitySplitTestRegion()
 			cluster.PutRegion(region)
 			resp, err := svc.AskBatchSplit(t.Context(), &schedulingpb.AskBatchSplitRequest{Region: region.GetMeta(), SplitCount: 10})
@@ -469,7 +469,7 @@ func TestAskBatchSplitAllocationCancellation(t *testing.T) {
 					<-ctx.Done()
 				}
 			}}
-			cluster.SwitchPDLeader(client)
+			cluster.SwitchPDLeader(client, "http://pd-leader")
 			region := newAffinitySplitTestRegion()
 			cluster.PutRegion(region)
 			resp, err := svc.AskBatchSplit(ctx, &schedulingpb.AskBatchSplitRequest{Region: region.GetMeta(), SplitCount: 10})
@@ -498,7 +498,7 @@ func TestAllocIDRefreshesMembershipOnRPCError(t *testing.T) {
 					<-ctx.Done()
 				}
 			}
-			cluster.SwitchPDLeader(client)
+			cluster.SwitchPDLeader(client, "http://pd-leader")
 			_, _, err := cluster.AllocID(1)
 			require.ErrorIs(t, err, test.err)
 			require.NoError(t, cluster.ctx.Err(), "the parent context must remain active")
@@ -522,7 +522,7 @@ func TestAskBatchSplitConstructionCancellation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			svc, cluster, _ := newTestSchedulingServiceForSplit(t, false)
 			client := &splitScatterPDClient{next: 1000, nonBatch: test.nonBatch}
-			cluster.SwitchPDLeader(client)
+			cluster.SwitchPDLeader(client, "http://pd-leader")
 			region := newAffinitySplitTestRegion()
 			cluster.PutRegion(region)
 			pendingBefore := splitScatterPendingMetricValue(t)

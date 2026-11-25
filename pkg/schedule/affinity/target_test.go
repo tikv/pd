@@ -313,6 +313,7 @@ func TestFirstWinStoreConditions(t *testing.T) {
 		test.Equal(deadline, test.groups["loaded"].degradedExpiredAt)
 		time.Sleep(time.Second)
 		test.SyncGroupFromEtcdWithRevision(loaded, 3)
+		degraded.modRevision = 3
 		test.Equal(degraded, state(loaded.ID))
 		test.Equal(deadline, test.groups["loaded"].degradedExpiredAt)
 	})
@@ -408,7 +409,9 @@ func TestFirstWinSkippedGroupDoesNotBlockPatrol(t *testing.T) {
 			for _, id := range skipped[1:] {
 				test.ObserveAvailableRegion(region, test.GetAffinityGroupState(id))
 			}
-			test.observe("b", 1, 2)
+			if patrol == 0 {
+				test.observe("b", 1, 2)
+			}
 			test.observe("b", 2, 3)
 			test.observe("c", 3, 4)
 			test.observe(first, 1, 2) // Queue a repeat of the in-flight request.
@@ -470,8 +473,12 @@ func TestFirstWinLateReply(t *testing.T) {
 				})
 				test.observe("g", 1, 3)
 				switch name {
-				case "new revision", "store down":
-					test.Equal(before, updated, "a revision-only update or a store outage for an unset target leaves the group unchanged")
+				case "new revision":
+					test.Greater(updated.modRevision, before.modRevision)
+					test.Equal(before.affinityVer, updated.affinityVer)
+					test.Equal(before.Group, updated.Group)
+				case "store down":
+					test.Equal(before, updated, "a store outage for an unset target leaves the group unchanged")
 				case "recreated in the same second":
 					test.NotSame(before.groupInfoPtr, updated.groupInfoPtr)
 					test.Equal(before.Group, updated.Group)
@@ -481,6 +488,116 @@ func TestFirstWinLateReply(t *testing.T) {
 				test.observe("g", 3, 4)
 				test.True(state("g").HasUnpersistedTarget())
 				test.Len(test.calls, 1, "a fresh observation applies during the 404 cooldown")
+			})
+		})
+	}
+}
+
+func TestObserveAvailableRegionRejectsStaleRevision(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		test := newTargetTest(t, "g")
+		before, err := test.UpdateAffinityGroupPeers("g", 2, []uint64{1, 2})
+		test.NoError(err)
+		test.applyStoreConditions(map[uint64]storeCondition{2: storeDown})
+		test.SyncGroupFromEtcdWithRevision(&before.Group, 1)
+		observed := test.GetAffinityGroupState("g")
+		// Deliver the watch event for an admin PUT that kept the same peers.
+		test.SyncGroupFromEtcdWithRevision(&before.Group, 2)
+		current := test.GetAffinityGroupState("g")
+		test.Equal(observed.affinityVer, current.affinityVer)
+		test.Equal(observed.Group, current.Group)
+		test.Equal(int64(2), current.modRevision)
+		test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
+			return nil, ErrTargetWriterUnsupported
+		})
+
+		region := targetRegion(1, 3)
+		test.ObserveAvailableRegion(region, observed)
+		synctest.Wait()
+		test.Empty(test.calls)
+		test.Equal(current, test.GetAffinityGroupState("g"))
+
+		test.observe("g", 1, 3)
+		test.Len(test.calls, 1)
+		test.Equal(current.modRevision, test.calls[0].ExpectedModRevision)
+		test.True(test.GetAffinityGroupState("g").HasUnpersistedTarget())
+	})
+}
+
+func TestFirstWinRetriesDifferentQueuedTargetAfterCooldown(t *testing.T) {
+	for _, scenario := range []string{"duplicate only", "different peers", "stale revision", "slow other group", "observed during cooldown"} {
+		t.Run(scenario, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				pd := newTargetTest(t, "g", "h")
+				pd.applyStoreConditions(map[uint64]storeCondition{1: storeDown})
+				test := newTargetTestWithStorage(t, t.Context(), pd.store)
+				release := make(chan struct{})
+				defer close(release)
+				var lastSendAt time.Time
+				test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+					lastSendAt = time.Now()
+					if len(test.calls) == 1 || (scenario == "slow other group" && targets[0].Expected.ID == "h") {
+						<-release
+					}
+					return pd.UpdateAffinityGroupTargets(ctx, targets)
+				})
+				first, second := test.target("g", 1, 1, 2), test.target("g", 2, 2, 3)
+				other := test.target("h", 3, 3, 4)
+				test.observe("g", 1, 2)
+				if scenario != "duplicate only" && scenario != "observed during cooldown" {
+					test.observe("g", 2, 3)
+				}
+				if scenario == "slow other group" {
+					test.observe("h", 3, 4)
+				}
+				test.observe("g", 1, 2)
+				test.Equal([]GroupTarget{first}, test.calls)
+				release <- struct{}{}
+				synctest.Wait()
+				test.Zero(pd.stored("g").LeaderStoreID)
+
+				if scenario == "slow other group" {
+					test.Equal([]GroupTarget{first, other}, test.calls)
+					time.Sleep(1100 * time.Millisecond)
+					test.observe("g", 1, 2)
+					test.Zero(pd.stored("h").LeaderStoreID, "h is still in flight after g's cooldown")
+					release <- struct{}{}
+					synctest.Wait()
+					test.Equal([]GroupTarget{first, other, second}, test.calls)
+					test.Equal(other.result(), pd.stored("h"))
+					test.Equal(second.result(), pd.stored("g"))
+					return
+				}
+				if scenario == "observed during cooldown" {
+					readyAt := time.Now().Add(time.Second)
+					time.Sleep(100 * time.Millisecond)
+					test.observe("g", 2, 3)
+					test.observe("g", 1, 2)
+					time.Sleep(time.Until(readyAt))
+					synctest.Wait()
+					test.Equal([]GroupTarget{first, second}, test.calls)
+					test.Equal(readyAt, lastSendAt, "g sends the queued target when its cooldown ends")
+					test.Equal(second.result(), pd.stored("g"))
+					return
+				}
+
+				// A different group can wake the sender during g's cooldown.
+				time.Sleep(time.Second - time.Millisecond)
+				test.observe("h", 3, 4)
+				test.Equal([]GroupTarget{first, other}, test.calls)
+				test.Equal(other.result(), pd.stored("h"))
+				if scenario == "stale revision" {
+					test.SyncGroupFromEtcdWithRevision(&second.Expected, 1)
+				}
+				time.Sleep(time.Millisecond)
+				synctest.Wait()
+				if scenario == "different peers" {
+					test.Equal([]GroupTarget{first, other, second}, test.calls)
+					test.Equal(second.result(), pd.stored("g"))
+				} else {
+					test.Equal([]GroupTarget{first, other}, test.calls)
+					test.Zero(pd.stored("g").LeaderStoreID)
+				}
 			})
 		})
 	}
