@@ -1428,20 +1428,21 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 	return nil, err
 }
 
-func (m *GCStateManager) setGlobalGCBarrierImpl(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GlobalGCBarrier, error) {
+func (m *GCStateManager) setGlobalGCBarrierImpl(ctx context.Context, barrierID string, requestedTS uint64, ttl time.Duration, suppliedTime time.Time) (*endpoint.GlobalGCBarrier, error) {
 	var newBarrier *endpoint.GlobalGCBarrier
 	var rejection error
+	admissionTime := suppliedTime
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		barriers, err := m.gcMetaStorage.LoadAllGlobalGCBarriers()
 		if err != nil {
 			return err
 		}
-		if now.IsZero() {
-			now = time.Now()
+		if admissionTime.IsZero() {
+			admissionTime = time.Now()
 		}
 		var minimum *endpoint.GlobalGCBarrier
 		for _, barrier := range barriers {
-			if !barrier.IsExpired(now) && (minimum == nil || barrier.BarrierTS < minimum.BarrierTS) {
+			if !barrier.IsExpired(admissionTime) && (minimum == nil || barrier.BarrierTS < minimum.BarrierTS) {
 				minimum = barrier
 			}
 		}
@@ -1457,19 +1458,20 @@ func (m *GCStateManager) setGlobalGCBarrierImpl(ctx context.Context, barrierID s
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if barrierTS == 0 {
-			barrierTS = floor
-		} else if barrierTS < floor {
+		selectedTS := requestedTS
+		if requestedTS == 0 {
+			selectedTS = floor
+		} else if requestedTS < floor {
 			// Validate the read-only transaction's revision before reporting this threshold.
-			rejection = errs.ErrGlobalGCBarrierTSUnsafe.GenWithStackByArgs(barrierTS, floor)
+			rejection = errs.ErrGlobalGCBarrierTSUnsafe.GenWithStackByArgs(requestedTS, floor)
 			return nil
 		}
 		var expiresAt *time.Time
 		if ttl < time.Duration(math.MaxInt64) {
-			expiration := now.Add(ttl)
+			expiration := admissionTime.Add(ttl)
 			expiresAt = &expiration
 		}
-		newBarrier = endpoint.NewGlobalGCBarrier(barrierID, barrierTS, expiresAt)
+		newBarrier = endpoint.NewGlobalGCBarrier(barrierID, selectedTS, expiresAt)
 		return wb.SetGlobalGCBarrier(newBarrier)
 	})
 	if err != nil {
@@ -1480,7 +1482,7 @@ func (m *GCStateManager) setGlobalGCBarrierImpl(ctx context.Context, barrierID s
 	}
 	log.Info("global GC barrier set", zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", newBarrier.BarrierTS),
 		zap.Duration("ttl", ttl), zap.Stringer("new-gc-barrier", newBarrier))
-	m.barrierMetrics.updateMetrics(barrierMetricScope{global: true}, &endpoint.GCBarrier{BarrierID: newBarrier.BarrierID, BarrierTS: newBarrier.BarrierTS, ExpirationTime: newBarrier.ExpirationTime.Time}, now)
+	m.barrierMetrics.updateMetrics(barrierMetricScope{global: true}, &endpoint.GCBarrier{BarrierID: newBarrier.BarrierID, BarrierTS: newBarrier.BarrierTS, ExpirationTime: newBarrier.ExpirationTime.Time}, admissionTime)
 	return newBarrier, nil
 }
 
