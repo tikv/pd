@@ -106,6 +106,9 @@ func (c *Controller) GetSchedulerHandlers() map[string]http.Handler {
 	}
 	handlers := make(map[string]http.Handler, len(c.schedulers))
 	for name, scheduler := range c.schedulers {
+		if scheduler.removalDone != nil {
+			continue
+		}
 		handlers[name] = scheduler.Scheduler
 	}
 	return handlers
@@ -451,9 +454,8 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 	defer c.wg.Done()
 	defer close(s.done)
 	// TODO(#11562): In MCS, let only the watcher write scheduler config.
-	// Serialize reload with instance teardown, and make CleanConfig release
-	// only the instance's runtime state without modifying watched config.
-	defer s.CleanConfig(c.cluster)
+	// CleanConfig should release runtime state without modifying watched config.
+	defer s.cleanOnExit()
 
 	ticker := time.NewTicker(s.GetInterval())
 	defer ticker.Stop()
@@ -545,8 +547,9 @@ type ScheduleController struct {
 	nextInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc
-	done               chan struct{} // Closed by runScheduler after CleanConfig returns.
-	removalDone        chan struct{} // Guarded by the owning Controller's lock; closed after unregistration.
+	done               chan struct{}  // Closed by runScheduler after CleanConfig returns.
+	removalDone        chan struct{}  // Guarded by the owning Controller's lock; closed after unregistration.
+	lifecycleMu        syncutil.Mutex // Serializes reload with exit cleanup.
 	delayAt            atomic.Int64
 	delayUntil         atomic.Int64
 	diagnosticRecorder *DiagnosticRecorder
@@ -575,6 +578,23 @@ func (s *ScheduleController) Ctx() context.Context {
 // Stop cancels the ScheduleController without waiting for its loop to exit.
 func (s *ScheduleController) Stop() {
 	s.cancel()
+}
+
+// ReloadConfig applies config only if the scheduler has not started shutting down.
+func (s *ScheduleController) ReloadConfig() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.ctx.Err() != nil {
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return s.Scheduler.ReloadConfig()
+}
+
+func (s *ScheduleController) cleanOnExit() {
+	s.Stop()
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.Scheduler.CleanConfig(s.cluster)
 }
 
 // Schedule tries to create some operators.
