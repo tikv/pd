@@ -134,7 +134,15 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	if numNodes <= 0 {
 		numNodes = 1
 	}
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, numNodes, &etcdClusterOpt)
+	_, client, closeEtcd := etcdutil.NewTestEtcdCluster(t, numNodes, &etcdClusterOpt)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		// The caller only takes ownership after setup succeeds.
+		if clean == nil {
+			cancel()
+			closeEtcd()
+		}
+	}()
 	kvBase := kv.NewEtcdKVBase(client)
 
 	// Simulate a member which id.Allocator may need to check.
@@ -148,7 +156,6 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		Member: "member1",
 		Step:   keyspace.AllocStep,
 	})
-	ctx, cancel := context.WithCancel(context.Background())
 	kgm := keyspace.NewKeyspaceGroupManager(ctx, s, client)
 	var mgm *keyspace.MetaServiceGroupManager
 	if len(opt.metaServiceGroups) > 0 {
@@ -240,10 +247,9 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager, mgm, gcClient, cutoff)
 	t.Cleanup(gcStateManager.CloseBarrierMetrics)
 	stopGCStateManager := gcStateManager.OnNodeBecomesLeader()
-	originalClean := clean
 	clean = func() {
 		stopGCStateManager()
-		originalClean()
+		closeEtcd()
 	}
 
 	return s, s.GetGCStateProvider(), gcStateManager, clean, cancel

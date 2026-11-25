@@ -231,18 +231,27 @@ func TestStarterGCMigrationConcurrentTakeover(t *testing.T) {
 		go func() { done <- manager.ensureMigratedTxnSafePoint(ctx, generation, id) }()
 		return done
 	}
+	wait := func(request string, done <-chan error) {
+		t.Helper()
+		select {
+		case err := <-done:
+			require.NoErrorf(t, err, "%s failed", request)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %s", request)
+		}
+	}
 	first := start(ctx, 1)
 	gcWarmupWait(t, reached)
 	// A competing first use can commit and advance T while this one holds a stale snapshot.
-	require.NoError(t, <-start(ctx, 1))
-	require.NoError(t, <-start(ctx, 2))
+	wait("competing migration for keyspace 1", start(ctx, 1))
+	wait("migration for keyspace 2", start(ctx, 2))
 	_, err := manager.AdvanceTxnSafePoint(1, 350, time.Now())
 	require.NoError(t, err)
 	_, _, err = manager.AdvanceGCSafePoint(1, 240)
 	require.NoError(t, err)
 	_, advancedRevision := readStarterSafePoint(t, manager, 1)
 	release()
-	require.NoError(t, <-first)
+	wait("paused migration for keyspace 1", first)
 	txn, rev := readStarterSafePoint(t, manager, 1)
 	require.EqualValues(t, 350, txn)
 	require.Equal(t, advancedRevision, rev)
