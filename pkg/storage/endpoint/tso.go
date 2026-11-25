@@ -17,8 +17,6 @@ package endpoint
 import (
 	"context"
 	"math"
-	"path"
-	"regexp"
 	"strings"
 	"time"
 
@@ -169,15 +167,6 @@ func decodeTSOWindow(key, value string) (uint64, error) {
 	return nanos, nil
 }
 
-// Legacy allocators built their window keys with path.Join. A DC location can
-// therefore occupy multiple directory components beneath lta/.
-const localTSOWindowSuffix = `([^/]+/)+timestamp`
-
-var (
-	localTSOWindow = regexp.MustCompile(`^` + localTSOWindowSuffix + `$`)
-	groupTSOWindow = regexp.MustCompile(`^[0-9]{5}/(gta/timestamp|lta/` + localTSOWindowSuffix + `)$`)
-)
-
 // LoadGlobalGCBarrierTSFloor returns the greater of the persisted TSO window
 // bound (including retired groups and legacy per-DC allocators) and the unified
 // txn safe point, which can outlive the group that issued its timestamp.
@@ -185,15 +174,14 @@ func (p GCStateProvider) LoadGlobalGCBarrierTSFloor(ctx context.Context) (uint64
 	defaultKey, retiredKey := keypath.TimestampPath(constant.DefaultKeyspaceGroupID), keypath.RetiredTSOWindowPath()
 	unifiedKey := keypath.TxnSafePointPath(constant.NullKeyspaceID)
 	localPrefix, groupPrefix := keypath.LegacyLocalTSOPrefix(), keypath.TSOMicroservicePrefix()
-	// Read the safe point and windows at the same etcd revision. Group IDs are
-	// formatted as five decimal digits, so the group range skips registries,
-	// elections and the default group, whose windows live under /pd.
+	groupStart, groupEnd := keypath.TSOGroupWindowRange()
+	// Read the safe point and windows at the same etcd revision.
 	ops := []kv.RawTxnOp{
 		{OpType: kv.RawTxnOpGet, Key: unifiedKey},
 		{OpType: kv.RawTxnOpGet, Key: defaultKey},
 		{OpType: kv.RawTxnOpGet, Key: retiredKey},
 		{OpType: kv.RawTxnOpGetRange, Key: localPrefix, EndKey: "\x00"},
-		{OpType: kv.RawTxnOpGetRange, Key: groupPrefix + "00001/", EndKey: groupPrefix + ":"},
+		{OpType: kv.RawTxnOpGetRange, Key: groupStart, EndKey: groupEnd},
 	}
 	txn, err := p.storage.createRawTxnWithContext(ctx)
 	if err != nil {
@@ -217,9 +205,9 @@ func (p GCStateProvider) LoadGlobalGCBarrierTSFloor(ctx context.Context) (uint64
 	for _, item := range result.Responses[1:] {
 		for _, pair := range item.KeyValuePairs {
 			isWindow := pair.Key == defaultKey || pair.Key == retiredKey ||
-				localTSOWindow.MatchString(strings.TrimPrefix(pair.Key, localPrefix)) ||
-				groupTSOWindow.MatchString(strings.TrimPrefix(pair.Key, groupPrefix))
-			if !isWindow || path.Clean(pair.Key) != pair.Key {
+				keypath.IsLocalTSOWindowPath(strings.TrimPrefix(pair.Key, localPrefix)) ||
+				keypath.IsTSOGroupWindowPath(strings.TrimPrefix(pair.Key, groupPrefix))
+			if !isWindow {
 				continue
 			}
 			nanos, err := decodeTSOWindow(pair.Key, pair.Value)
