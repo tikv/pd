@@ -346,6 +346,15 @@ func (m *GCStateManager) lockForTxnSafePoint(ctx context.Context, id uint32, loc
 	return nil
 }
 
+// Unified GC state always lives in PD etcd. Followers can serve its legacy reads.
+func (m *GCStateManager) rLockForTxnSafePoint(ctx context.Context, id uint32) error {
+	if id == constant.NullKeyspaceID {
+		m.mu.RLock()
+		return nil
+	}
+	return m.lockForTxnSafePoint(ctx, id, m.mu.RLocker())
+}
+
 // CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
 func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 	keyspaceID, _, err := m.redirectKeyspace(keyspaceID, false)
@@ -984,7 +993,7 @@ func (m *GCStateManager) getGCStateImplSlow(ctx context.Context, keyspaceID uint
 	if generation := m.activeGeneration.Load(); excludeGCBarriers && generation != nil {
 		return m.loadGCState(ctx, generation, keyspaceID)
 	}
-	if err := m.lockForTxnSafePoint(ctx, keyspaceID, m.mu.RLocker()); err != nil {
+	if err := m.rLockForTxnSafePoint(ctx, keyspaceID); err != nil {
 		return GCState{}, err
 	}
 	defer m.mu.RUnlock()
@@ -1087,7 +1096,7 @@ func (m *GCStateManager) GetGCStateWithGlobalGCBarriers(keyspaceID uint32, exclu
 		return GCState{}, nil, err
 	}
 
-	if err := m.lockForTxnSafePoint(context.Background(), keyspaceID, m.mu.RLocker()); err != nil {
+	if err := m.rLockForTxnSafePoint(context.Background(), keyspaceID); err != nil {
 		return GCState{}, nil, err
 	}
 	defer m.mu.RUnlock()
