@@ -15,10 +15,12 @@
 package affinity
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -152,24 +154,22 @@ func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
 			transactions++
 			return test.store.RunInTxn(txnCtx, apply)
 		})
-		started, done := make(chan struct{}), make(chan struct{})
+		done := make(chan struct{})
 		var written []string
 		var err error
 		test.metaMutex.Lock()
 		go func() {
 			defer close(done)
-			close(started)
 			written, err = test.UpdateAffinityGroupTargets(ctx, targets)
 		}()
-		<-started
-		// Give the update time to reach the mutex before canceling the request.
-		time.Sleep(20 * time.Millisecond)
+		waiting := waitForTargetMetaMutex(done)
 		cancel()
 		test.metaMutex.Unlock()
 		<-done
+		test.True(waiting, "the update must reach metaMutex before cancellation")
+		test.Zero(transactions)
 		test.ErrorIs(err, context.Canceled)
 		test.Empty(written)
-		test.Zero(transactions)
 	})
 
 	synctest.Test(t, func(t *testing.T) {
@@ -214,6 +214,34 @@ func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
 		test.observe("second", 1, 2)
 		test.Equal(targets[1:], test.calls, "a stopped Manager sends no further requests")
 	})
+}
+
+func waitForTargetMetaMutex(done <-chan struct{}) bool {
+	// GetStore runs during validation, before the loop checks cancellation.
+	// Observe the blocked update while the test still owns metaMutex.
+	stack := make([]byte, 64<<10)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case <-done:
+			return false
+		default:
+		}
+		n := runtime.Stack(stack, true)
+		if n == len(stack) {
+			stack = make([]byte, 2*len(stack))
+			continue
+		}
+		for goroutine := range bytes.SplitSeq(stack[:n], []byte("\n\n")) {
+			header, frames, _ := bytes.Cut(goroutine, []byte("\n"))
+			if bytes.Contains(header, []byte("[sync.Mutex.Lock]")) &&
+				bytes.Contains(frames, []byte("/affinity.(*Manager).updateGroupTarget(")) {
+				return true
+			}
+		}
+		runtime.Gosched()
+	}
+	return false
 }
 
 func TestSyncRecreatedAffinityGroup(t *testing.T) {

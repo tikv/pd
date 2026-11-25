@@ -119,9 +119,6 @@ func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []Grou
 }
 
 func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bool, error) {
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	if err := ctx.Err(); err != nil {
