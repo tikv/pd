@@ -984,7 +984,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 	// Check the merged TSO from the default keyspace group is greater than the TSO from the keyspace group`firstID`.
 	var mergedTS pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
-		mergedTS, err = suite.requestTSO(re, 2222, constant.DefaultKeyspaceGroupID)
+		mergedTS, err = suite.requestTSO(re, 3333, constant.DefaultKeyspaceGroupID)
 		if err != nil {
 			re.ErrorIs(err, errs.ErrKeyspaceGroupIsMerging)
 		}
