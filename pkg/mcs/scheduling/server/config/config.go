@@ -200,6 +200,8 @@ type PersistConfig struct {
 	schedule       atomic.Value
 	replication    atomic.Value
 	storeConfig    atomic.Value
+	// pdRawKeyType tracks the legacy keyspace fallback, not the merge policy.
+	pdRawKeyType atomic.Bool
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
 	// Store as `chan struct{}`.
 	schedulersUpdatingNotifier atomic.Value
@@ -396,6 +398,14 @@ func (o *PersistConfig) IsUseJointConsensus() bool {
 // GetKeyType returns the key type.
 func (*PersistConfig) GetKeyType() constant.KeyType {
 	return constant.StringToKeyType("table")
+}
+
+// GetKeyspaceFallbackKeyType returns the watched PD mode for legacy keyspaces.
+func (o *PersistConfig) GetKeyspaceFallbackKeyType() constant.KeyType {
+	if o.pdRawKeyType.Load() {
+		return constant.Raw
+	}
+	return constant.Txn
 }
 
 // IsCrossTableMergeEnabled returns if the cross table merge is enabled.

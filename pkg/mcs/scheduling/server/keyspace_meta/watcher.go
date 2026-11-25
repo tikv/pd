@@ -117,7 +117,7 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 				zap.Uint32("keyspace-id", meta.GetId()),
 				zap.String("name", meta.GetName()),
 				zap.Stringer("state", meta.GetState()))
-			rw.keyspaceCache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+			rw.keyspaceCache.SaveMeta(meta)
 		}
 		bound := keyspace.MakeRegionBound(keyspaceID)
 		suspectKeyRanges.Append(bound.RawLeftBound, bound.RawRightBound)

@@ -71,6 +71,15 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 
 // LoadRange loads a range of keys [key, endKey) from etcd.
 func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
+	resp, err := kv.getRangeResponse(key, endKey, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys, values = rangeKeyValues(resp)
+	return keys, values, nil
+}
+
+func (kv *etcdKVBase) getRangeResponse(key, endKey string, limit int) (*clientv3.GetResponse, error) {
 	var OpOption []clientv3.OpOption
 	// If endKey is "\x00", it means to scan with prefix.
 	// If the key is empty and endKey is "\x00", it means to scan all keys.
@@ -81,17 +90,17 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []s
 	}
 
 	OpOption = append(OpOption, clientv3.WithLimit(int64(limit)))
-	resp, err := etcdutil.EtcdKVGet(kv.client, key, OpOption...)
-	if err != nil {
-		return nil, nil, err
-	}
+	return etcdutil.EtcdKVGet(kv.client, key, OpOption...)
+}
+
+func rangeKeyValues(resp *clientv3.GetResponse) (keys, values []string) {
 	keys = make([]string, 0, len(resp.Kvs))
 	values = make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
 		keys = append(keys, string(item.Key))
 		values = append(values, string(item.Value))
 	}
-	return keys, values, nil
+	return keys, values
 }
 
 // Save puts a key-value pair to etcd.
@@ -219,6 +228,8 @@ type etcdTxn struct {
 	operations []clientv3.Op
 }
 
+var _ rangeRevisionTxn = (*etcdTxn)(nil)
+
 // RunInTxn runs user provided function f in a transaction.
 func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
 	return kv.RunInTxnWithConditions(ctx, nil, f)
@@ -314,6 +325,21 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 		txn.conditions = append(txn.conditions, condition)
 	}
 	return keys, values, err
+}
+
+// LoadRangeWithRevision guards each returned key by its mod revision, keeping
+// the values out of the commit request.
+func (txn *etcdTxn) LoadRangeWithRevision(key, endKey string, limit int) (keys, values []string, err error) {
+	resp, err := txn.kv.getRangeResponse(key, endKey, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys, values = rangeKeyValues(resp)
+	for i, item := range resp.Kvs {
+		condition := clientv3.Compare(clientv3.ModRevision(keys[i]), "=", item.ModRevision)
+		txn.conditions = append(txn.conditions, condition)
+	}
+	return keys, values, nil
 }
 
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.

@@ -50,6 +50,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
@@ -224,14 +225,9 @@ func (c *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return c.persistConfig
 }
 
-// GetKeyspaceIDInRange returns the keyspace IDs in the specified range.
-func (c *Cluster) GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID uint32, limit int) ([]uint32, error) {
-	return c.keyspaceCache.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID, limit)
-}
-
-// KeyspaceExist checks if a keyspace exists by ID.
-func (c *Cluster) KeyspaceExist(id uint32) bool {
-	return c.keyspaceCache.KeyspaceExist(id)
+// GetKeyspaceBoundaryIDs returns the raw and txn boundary IDs in the given ranges.
+func (c *Cluster) GetKeyspaceBoundaryIDs(raw, txn *sche.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	return c.keyspaceCache.GetKeyspaceBoundaryIDs(raw, txn, limit, c.persistConfig.GetKeyspaceFallbackKeyType())
 }
 
 // GetRuleManager returns the rule manager.

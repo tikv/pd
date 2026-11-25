@@ -18,17 +18,22 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
+	"github.com/tikv/pd/pkg/schedule/checker"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -166,4 +171,62 @@ func (suite *metaTestSuite) TestKeyspaceMetaWatch() {
 		}
 		return false
 	})
+
+	// Write metadata only, with no compatibility labels to mask the boundary
+	// lookup. The watches must handle both explicit modes and legacy metadata.
+	const rawID, txnID, legacyID = 7001, 7003, 7005
+	store := suite.pdLeaderServer.GetServer().GetStorage()
+	re.NoError(store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		for id, mode := range map[uint32]string{rawID: "raw", txnID: "txn", legacyID: ""} {
+			m := &keyspacepb.KeyspaceMeta{
+				Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id}, Name: fmt.Sprintf("metadata-%d", id),
+				State: keyspacepb.KeyspaceState_ENABLED,
+			}
+			if mode != "" {
+				m.Config = map[string]string{keyspace.RegionBoundType: mode}
+			}
+			if err := store.SaveKeyspaceMeta(txn, m); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	cluster := se.GetCluster()
+	opts := suite.pdLeaderServer.GetPersistOptions()
+	original := opts.GetPDServerConfig()
+	suite.T().Cleanup(func() {
+		opts.SetPDServerConfig(original)
+		persistConfig(re, suite.pdLeaderServer)
+	})
+	setKeyType := func(mode coreconstant.KeyType) {
+		cfg := original.Clone()
+		cfg.KeyType = mode.String()
+		opts.SetPDServerConfig(cfg)
+		persistConfig(re, suite.pdLeaderServer)
+	}
+	start, end := keyspace.MakeRegionBound(rawID-1), keyspace.MakeRegionBound(legacyID+2)
+	raw, txn, legacy := keyspace.MakeRegionBound(rawID), keyspace.MakeRegionBound(txnID), keyspace.MakeRegionBound(legacyID)
+	checkKeys := func(wantRaw, wantTxn [][]byte) {
+		testutil.Eventually(re, func() bool {
+			rawKeys, rawErr := keyspace.GetKeyspaceSplitKeys(start.RawLeftBound, end.RawLeftBound, cluster)
+			txnKeys, txnErr := keyspace.GetKeyspaceSplitKeys(start.TxnLeftBound, end.TxnLeftBound, cluster)
+			return rawErr == nil && txnErr == nil && slices.EqualFunc(rawKeys, wantRaw, bytes.Equal) && slices.EqualFunc(txnKeys, wantTxn, bytes.Equal)
+		})
+	}
+	setKeyType(coreconstant.Raw)
+	checkKeys([][]byte{raw.RawLeftBound, raw.RawRightBound, legacy.RawLeftBound, legacy.RawRightBound},
+		[][]byte{txn.TxnLeftBound, txn.TxnRightBound})
+	left := core.NewRegionInfo(&metapb.Region{Id: 1, StartKey: keyspace.MakeRegionBound(legacyID - 1).RawLeftBound, EndKey: legacy.RawLeftBound}, nil)
+	right := core.NewRegionInfo(&metapb.Region{Id: 2, StartKey: legacy.RawLeftBound, EndKey: end.RawLeftBound}, nil)
+	re.False(checker.AllowMerge(cluster, left, right), "raw metadata must protect a merge in MCS")
+	re.Equal(coreconstant.Table, cluster.GetSharedConfig().GetKeyType(), "MCS merge policy must not change")
+
+	// No keyspace metadata changes while the legacy boundary moves to txn.
+	setKeyType(coreconstant.Txn)
+	checkKeys([][]byte{raw.RawLeftBound, raw.RawRightBound},
+		[][]byte{txn.TxnLeftBound, txn.TxnRightBound, legacy.TxnLeftBound, legacy.TxnRightBound})
+	re.True(checker.AllowMerge(cluster, left, right), "txn fallback must not protect a phantom raw boundary")
+	m, err := suite.pdLeaderServer.GetKeyspaceManager().LoadKeyspaceByID(legacyID)
+	re.NoError(err)
+	re.NotContains(m.GetConfig(), keyspace.RegionBoundType)
 }

@@ -16,7 +16,6 @@ package keyspace
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	goerrors "errors"
 	"maps"
@@ -131,10 +130,13 @@ type Manager struct {
 	// updated, or removed through this Manager keep the cache in sync directly and
 	// do not depend on this watermark.
 	keyspaceIDVerifiedUpTo uint32
-	// uncertainKeyspaceIDs only supplies conservative split/merge boundaries, not
+	// uncertainBoundaries only supplies conservative split/merge boundaries, not
 	// metadata. Guarded by cacheEpochMu and retained until the epoch ends:
 	// a fresh storage read cannot rule out a timed-out transaction committing later.
-	uncertainKeyspaceIDs map[uint32]struct{}
+	uncertainBoundaries boundaryIndex
+	// uncertainRemovals protect merges without synthesizing split keys. Like
+	// uncertainBoundaries, they are scheduling-only and scoped to one epoch.
+	uncertainRemovals boundaryIndex
 }
 
 // SetGCBarrierInvalidator installs the GC observation lifecycle callback.
@@ -343,14 +345,15 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
-		request.Config[RegionBoundType] = boundType.String()
 	}
+	if request.Config == nil {
+		request.Config = make(map[string]string)
+	}
+	// Persist the same PD-selected mode used to split the keyspace below.
+	request.Config[RegionBoundType] = boundType.String()
 
 	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
 	if kerneltype.IsNextGen() {
-		if request.Config == nil {
-			request.Config = make(map[string]string)
-		}
 		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
 			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
@@ -403,7 +406,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			return nil
 		})
 		if callbackSucceeded && commitResultIsAmbiguous(err2) {
-			manager.markKeyspacesUncertain(epoch, []uint32{newID})
+			manager.markKeyspacesUncertain(epoch, boundaryFromMeta(keyspace))
 		}
 		if err2 != nil {
 			log.Warn("[create-keyspace] failed to remove pre-created keyspace after split failed",
@@ -509,13 +512,14 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
-		request.Config[RegionBoundType] = boundType.String()
 	}
+	if request.Config == nil {
+		request.Config = make(map[string]string)
+	}
+	// Persist the same PD-selected mode used to split the keyspace below.
+	request.Config[RegionBoundType] = boundType.String()
 	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
 	if kerneltype.IsNextGen() {
-		if request.Config == nil {
-			request.Config = make(map[string]string)
-		}
 		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
 			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
@@ -563,7 +567,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 			return nil
 		})
 		if callbackSucceeded && commitResultIsAmbiguous(err2) {
-			manager.markKeyspacesUncertain(epoch, []uint32{id})
+			manager.markKeyspacesUncertain(epoch, boundaryFromMeta(keyspace))
 		}
 		if err2 != nil {
 			log.Warn("[keyspace] failed to remove pre-created keyspace after split failed",
@@ -643,7 +647,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		return nil
 	})
 	if callbackSucceeded && commitResultIsAmbiguous(err) {
-		manager.markKeyspacesUncertain(epoch, []uint32{keyspace.GetId()})
+		manager.markKeyspacesUncertain(epoch, boundaryFromMeta(keyspace))
 	}
 	if err == nil {
 		failpoint.InjectCall("saveNewKeyspaceBeforeCacheWrite")
@@ -805,14 +809,11 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBound
 
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
 func (manager *Manager) CheckKeyspaceRegionBound(meta *keyspacepb.KeyspaceMeta) bool {
-	config := meta.GetConfig()
-	val, ok := config[RegionBoundType]
-	// if config does not contain region bound type, we use the default one from manager.
-	if !ok {
-		val = manager.getRegionBoundType().String()
+	bound := configuredRegionBound(meta.GetConfig())
+	if bound == legacyRegionBound {
+		bound = manager.getRegionBoundType()
 	}
-	typ := keyTypeStringToRegionBoundType(val)
-	return manager.hasKeyspaceRegionBound(meta.GetId(), typ)
+	return manager.hasKeyspaceRegionBound(meta.GetId(), bound)
 }
 
 func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType regionBoundType) bool {
@@ -1120,7 +1121,8 @@ func (manager *Manager) updateKeyspaceConfigTxn(
 	epoch := manager.currentCacheEpoch()
 	err := manager.runTxnWithMetaGroupLock(txnFunc)
 	if callbackSucceeded && commitResultIsAmbiguous(err) {
-		manager.markKeyspacesUncertain(epoch, []uint32{lockedID})
+		manager.markKeyspacesUncertain(epoch,
+			keyspaceBoundary{lockedID, configuredRegionBound(oldConfig)}, boundaryFromMeta(meta))
 	}
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
@@ -1203,7 +1205,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		return nil
 	})
 	if callbackSucceeded && commitResultIsAmbiguous(err) {
-		manager.markKeyspacesUncertain(epoch, []uint32{lockedID})
+		manager.markKeyspacesUncertain(epoch, boundaryFromMeta(meta))
 	}
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
@@ -1230,11 +1232,11 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
 func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
-	groupID, err := manager.removeKeyspaceMetadata(txn, id)
+	meta, _, err := manager.removeKeyspaceMetadata(txn, id, false, nil)
 	if err != nil {
 		return err
 	}
-	if manager.mgm != nil && groupID != "" {
+	if groupID := meta.GetConfig()[MetaServiceGroupIDKey]; manager.mgm != nil && groupID != "" {
 		if err := manager.mgm.decrementAssignmentTxn(txn, groupID, 1); err != nil {
 			return err
 		}
@@ -1256,94 +1258,102 @@ func (manager *Manager) decrementMetaServiceGroupAssignmentsTxn(txn kv.Txn, assi
 	return nil
 }
 
-func (manager *Manager) removeKeyspaceMetadata(txn kv.Txn, id uint32) (string, error) {
-	groupID, _, _, err := manager.removeKeyspaceMetadataIfEligible(txn, id, false, nil)
-	return groupID, err
-}
-
-// tryRemoveKeyspaceMetadata removes id only when it is currently archived or
-// tombstoned and canRemove accepts its meta-service group. Missing, protected,
-// and non-removable keyspaces are skipped to preserve the bulk-removal API
-// semantics. deferred reports that an eligible keyspace should be retried in
-// the next transaction.
-func (manager *Manager) tryRemoveKeyspaceMetadata(
-	txn kv.Txn,
-	id uint32,
-	canRemove func(metaServiceGroupID string) bool,
-) (metaServiceGroupID string, removed, deferred bool, err error) {
-	return manager.removeKeyspaceMetadataIfEligible(txn, id, true, canRemove)
-}
-
-func (manager *Manager) removeKeyspaceMetadataIfEligible(
+// removeKeyspaceMetadata returns the removed metadata so an ambiguous commit
+// can retain the original boundary mode even if the ID is no longer cached.
+// Bulk removal skips missing, protected and non-removable keyspaces, and
+// defers eligible entries that do not fit in the current transaction.
+func (manager *Manager) removeKeyspaceMetadata(
 	txn kv.Txn,
 	id uint32,
 	skipNonRemovable bool,
 	canRemove func(metaServiceGroupID string) bool,
-) (metaServiceGroupID string, removed, deferred bool, err error) {
+) (removed *keyspacepb.KeyspaceMeta, deferred bool, err error) {
 	manager.metaLock.Lock(id)
 	defer manager.metaLock.Unlock(id)
 	if isProtectedKeyspaceID(id) {
 		if skipNonRemovable {
-			return "", false, false, nil
+			return nil, false, nil
 		}
-		return "", false, false, newModifyProtectedKeyspaceError()
+		return nil, false, newModifyProtectedKeyspaceError()
 	}
 	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
 	if err != nil {
-		return "", false, false, err
+		return nil, false, err
 	}
 	if meta == nil {
 		if skipNonRemovable {
-			return "", false, false, nil
+			return nil, false, nil
 		}
-		return "", false, false, errs.ErrKeyspaceNotFound
+		return nil, false, errs.ErrKeyspaceNotFound
 	}
 	state := meta.GetState()
 	if skipNonRemovable {
 		if state != keyspacepb.KeyspaceState_ARCHIVED && state != keyspacepb.KeyspaceState_TOMBSTONE {
-			return "", false, false, nil
+			return nil, false, nil
 		}
 	} else if state == keyspacepb.KeyspaceState_ENABLED || state == keyspacepb.KeyspaceState_DISABLED {
-		return "", false, false, errors.Errorf("cannot remove keyspace in state %s", state.String())
+		return nil, false, errors.Errorf("cannot remove keyspace in state %s", state.String())
 	}
-	metaServiceGroupID = meta.GetConfig()[MetaServiceGroupIDKey]
-	if canRemove != nil && !canRemove(metaServiceGroupID) {
-		return metaServiceGroupID, false, true, nil
+	if canRemove != nil && !canRemove(meta.GetConfig()[MetaServiceGroupIDKey]) {
+		return nil, true, nil
 	}
 	err = manager.store.RemoveKeyspace(txn, id, meta.GetName())
 	if err != nil {
-		return "", false, false, err
+		return nil, false, err
 	}
-	return metaServiceGroupID, true, false, nil
+	return meta, false, nil
 }
 
-// evictKeyspacesFromCache removes ids from the keyspace metadata cache. The
-// call sites in tso_keyspace_group.go call this both on confirmed success and
-// on a genuinely ambiguous commit result (the client gave up waiting before
-// learning the outcome) - but not on a definite failure, where the removal is
-// known not to have committed and the cache must be left alone (see
-// TestGCBarrierRemovalInvalidationAfterCommit). In the ambiguous case, a
-// retry cannot always rediscover an already-removed keyspace to evict it
-// again, since group membership may already be gone by the time the retry
-// runs even though the original call reported an error - so eviction has to
-// happen pessimistically there too, meaning some evictions here turn out to
-// be wrong (the removal didn't actually commit after all). That is something
-// GetKeyspaceIDInRange's keyspaceIDVerifiedUpTo watermark cannot tolerate on
-// its own, since it trusts cache absence below the watermark without a
-// storage check. Roll the watermark back to cover any evicted ID below it,
-// under the same lock backfillKeyspaceIDRange uses, so the next query that
-// reaches that far re-verifies against storage instead of trusting a
-// possibly-wrong eviction.
+// evictKeyspacesFromCache drops entries whose absence must be reverified.
 func (manager *Manager) evictKeyspacesFromCache(ids []uint32) {
 	manager.keyspaceIDRangeMu.Lock()
 	defer manager.keyspaceIDRangeMu.Unlock()
+	manager.evictKeyspacesLocked(ids)
+}
+
+func (manager *Manager) evictKeyspacesLocked(ids []uint32) {
 	for _, id := range ids {
 		if id < manager.keyspaceIDVerifiedUpTo {
 			manager.keyspaceIDVerifiedUpTo = id
 		}
-		manager.keyspaceNameLookup.Delete(id)
-		manager.keyspaceStateLookup.Delete(id)
+		manager.clearLegacyLookups(id)
 		manager.cache.DeleteKeyspace(id)
+	}
+}
+
+func (manager *Manager) clearLegacyLookups(id uint32) {
+	manager.keyspaceNameLookup.Delete(id)
+	manager.keyspaceStateLookup.Delete(id)
+}
+
+// publishKeyspaceRemoval removes confirmed deletions without rewinding the
+// watermark when the cache has not changed since the transaction started.
+func (manager *Manager) publishKeyspaceRemoval(epoch, generation uint64, ids []uint32) {
+	if len(ids) == 0 {
+		return
+	}
+	manager.cacheEpochMu.RLock()
+	if !manager.cacheActive || manager.cacheEpoch != epoch {
+		manager.cacheEpochMu.RUnlock()
+		return
+	}
+	if manager.cache.deleteBatchIfGenerationUnchanged(ids, generation) {
+		for _, id := range ids {
+			manager.clearLegacyLookups(id)
+		}
+		manager.cacheEpochMu.RUnlock()
+		return
+	}
+	manager.cacheEpochMu.RUnlock()
+
+	// An intervening cache write may be a recreation of the same ID. Keep
+	// eviction and watermark rollback together so scheduling rechecks storage.
+	manager.keyspaceIDRangeMu.Lock()
+	defer manager.keyspaceIDRangeMu.Unlock()
+	manager.cacheEpochMu.RLock()
+	defer manager.cacheEpochMu.RUnlock()
+	if manager.cacheActive && manager.cacheEpoch == epoch {
+		manager.evictKeyspacesLocked(ids)
 	}
 }
 
@@ -1391,7 +1401,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		return nil
 	})
 	if callbackSucceeded && commitResultIsAmbiguous(err) {
-		manager.markKeyspacesUncertain(epoch, []uint32{id})
+		manager.markKeyspacesUncertain(epoch, boundaryFromMeta(meta))
 	}
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
@@ -1473,6 +1483,10 @@ func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.Keys
 // LoadRangeKeyspace load up to limit keyspaces starting from keyspace with startID.
 // It will not load the NullKeyspace meta data.
 func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
+	return manager.readKeyspaceRange(startID, limit, false)
+}
+
+func (manager *Manager) readKeyspaceRange(startID uint32, limit int, compareRevision bool) ([]*keyspacepb.KeyspaceMeta, error) {
 	// Load Start should fall within acceptable ID range.
 	if startID > constant.MaxValidKeyspaceID {
 		return nil, errors.Errorf("startID of the scan %d exceeds spaceID Max %d", startID, constant.MaxValidKeyspaceID)
@@ -1482,6 +1496,9 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 		err       error
 	)
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		if compareRevision {
+			txn = kv.WithRangeRevision(txn)
+		}
 		keyspaces, err = manager.store.LoadRangeKeyspace(txn, startID, limit)
 		return err
 	})
@@ -1502,8 +1519,51 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 // in descending order, for conservative split/merge decisions. An error means the
 // metadata is incomplete, not that no keyspace exists.
 func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
+	var ids []uint32
+	err := manager.withKeyspaceRangeCache(func() error {
+		var err error
+		ids, err = manager.cache.GetKeyspaceIDInRange(start, end, limit)
+		if err != nil {
+			return err
+		}
+		r := core.KeyspaceIDRange{Start: start, End: end}
+		for mode := range manager.uncertainBoundaries {
+			ids = manager.uncertainBoundaries.appendIDs(ids, &r, limit, regionBoundType(mode))
+			ids = manager.uncertainRemovals.appendIDs(ids, &r, limit, regionBoundType(mode))
+		}
+		ids = limitBoundaryIDs(ids, limit)
+		return nil
+	})
+	return ids, err
+}
+
+// GetKeyspaceBoundaryIDs looks up both modes with a single snapshot of the
+// metadata and current PD key type.
+func (manager *Manager) GetKeyspaceBoundaryIDs(raw, txn *core.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	return manager.lookupKeyspaceBoundaries(raw, txn, limit, false)
+}
+
+// GetKeyspaceMergeBoundaryIDs includes retained boundaries for uncertain deletions.
+func (manager *Manager) GetKeyspaceMergeBoundaryIDs(raw, txn *core.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	return manager.lookupKeyspaceBoundaries(raw, txn, limit, true)
+}
+
+func (manager *Manager) lookupKeyspaceBoundaries(raw, txn *core.KeyspaceIDRange, limit int, forMerge bool) (rawIDs, txnIDs []uint32, err error) {
+	err = manager.withKeyspaceRangeCache(func() error {
+		fallback := manager.getRegionBoundType()
+		if forMerge {
+			rawIDs, txnIDs, err = manager.cache.getBoundaryIDs(raw, txn, limit, fallback, &manager.uncertainBoundaries, &manager.uncertainRemovals)
+		} else {
+			rawIDs, txnIDs, err = manager.cache.getBoundaryIDs(raw, txn, limit, fallback, &manager.uncertainBoundaries)
+		}
+		return err
+	})
+	return rawIDs, txnIDs, err
+}
+
+func (manager *Manager) withKeyspaceRangeCache(lookup func() error) error {
 	if manager == nil {
-		return nil, errors.New("keyspace manager is unavailable")
+		return errors.New("keyspace manager is unavailable")
 	}
 	manager.keyspaceIDRangeMu.Lock()
 	defer manager.keyspaceIDRangeMu.Unlock()
@@ -1511,36 +1571,33 @@ func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]ui
 	active := manager.cacheActive
 	manager.cacheEpochMu.RUnlock()
 	if !active {
-		return nil, errors.New("keyspace cache is not active on this node")
+		return errors.New("keyspace cache is not active on this node")
 	}
 	// Keep eviction/ClearCache serialized through the lookup too: otherwise an
 	// eviction after a successful backfill could expose an incomplete cache.
 	if err := manager.backfillKeyspaceIDRange(); err != nil {
-		return nil, err
+		return err
 	}
 	manager.cacheEpochMu.RLock()
 	defer manager.cacheEpochMu.RUnlock()
-	ids, err := manager.cache.GetKeyspaceIDInRange(start, end, limit)
-	if err != nil || len(manager.uncertainKeyspaceIDs) == 0 {
-		return ids, err
-	}
-	// The largest limit cached IDs suffice: adding uncertain IDs can only
-	// displace cached IDs, never promote a cached ID beyond that prefix.
-	for id := range manager.uncertainKeyspaceIDs {
-		if id >= start && id <= end {
-			ids = append(ids, id)
-		}
-	}
-	slices.SortFunc(ids, func(a, b uint32) int { return cmp.Compare(b, a) })
-	ids = slices.Compact(ids)
-	if limit > 0 && len(ids) > limit {
-		ids = ids[:limit]
-	}
-	return ids, nil
+	return lookup()
 }
 
-func (manager *Manager) markKeyspacesUncertain(epoch uint64, ids []uint32) {
-	if len(ids) == 0 {
+type keyspaceBoundary struct {
+	id   uint32
+	mode regionBoundType
+}
+
+func boundaryFromMeta(meta *keyspacepb.KeyspaceMeta) keyspaceBoundary {
+	return keyspaceBoundary{meta.GetId(), configuredRegionBound(meta.GetConfig())}
+}
+
+func (manager *Manager) markKeyspacesUncertain(epoch uint64, boundaries ...keyspaceBoundary) {
+	manager.retainBoundaries(epoch, &manager.uncertainBoundaries, boundaries)
+}
+
+func (manager *Manager) retainBoundaries(epoch uint64, index *boundaryIndex, boundaries []keyspaceBoundary) {
+	if len(boundaries) == 0 {
 		return
 	}
 	// Do not take keyspaceIDRangeMu here: callers may hold metadata/group
@@ -1550,11 +1607,8 @@ func (manager *Manager) markKeyspacesUncertain(epoch uint64, ids []uint32) {
 	if !manager.cacheActive || manager.cacheEpoch != epoch {
 		return
 	}
-	if manager.uncertainKeyspaceIDs == nil {
-		manager.uncertainKeyspaceIDs = make(map[uint32]struct{}, len(ids))
-	}
-	for _, id := range ids {
-		manager.uncertainKeyspaceIDs[id] = struct{}{}
+	for _, boundary := range boundaries {
+		index.add(boundary.id, boundary.mode)
 	}
 }
 
@@ -1602,14 +1656,16 @@ func (manager *Manager) backfillKeyspaceIDRange() error {
 	generation := manager.cache.Generation()
 	var buffered []keyspaceItem
 	for {
-		keyspaces, err := manager.LoadRangeKeyspace(startID, etcdutil.MaxEtcdTxnOps)
+		// Compare revisions so the commit request is bounded by the number of
+		// keys, not by the combined size of their metadata values.
+		keyspaces, err := manager.readKeyspaceRange(startID, etcdutil.MaxEtcdTxnOps, true)
 		if err != nil {
 			log.Warn("[keyspace] failed to backfill keyspace ID range cache",
 				zap.Uint32("start-id", startID), errs.ZapError(err))
 			return errors.Annotate(err, "failed to backfill keyspace metadata")
 		}
 		for _, meta := range keyspaces {
-			buffered = append(buffered, keyspaceItem{keyspaceID: meta.GetId(), name: meta.GetName(), state: meta.GetState()})
+			buffered = append(buffered, newKeyspaceItem(meta))
 		}
 		if len(keyspaces) < etcdutil.MaxEtcdTxnOps {
 			// Storage has nothing left beyond this page.
@@ -1646,7 +1702,7 @@ func (manager *Manager) publishKeyspaceMeta(epoch uint64, meta *keyspacepb.Keysp
 	manager.cacheEpochMu.RLock()
 	defer manager.cacheEpochMu.RUnlock()
 	if manager.cacheActive && manager.cacheEpoch == epoch {
-		manager.cache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+		manager.cache.SaveMeta(meta)
 	}
 }
 
@@ -1672,7 +1728,8 @@ func (manager *Manager) setCacheLeader(active bool) {
 	manager.cacheActive = active
 	manager.cache.clearAll()
 	manager.keyspaceIDVerifiedUpTo = 0
-	manager.uncertainKeyspaceIDs = nil
+	manager.uncertainBoundaries = boundaryIndex{}
+	manager.uncertainRemovals = boundaryIndex{}
 }
 
 // ClearCache empties the metadata cache and resets its watermark within the
@@ -1776,44 +1833,6 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	return loadedName, nil
 }
 
-// UpdateKeyspaceMetaToCache updates keyspace cache from keyspace metadata.
-func (manager *Manager) UpdateKeyspaceMetaToCache(meta *keyspacepb.KeyspaceMeta) {
-	if meta == nil {
-		return
-	}
-	manager.publishKeyspaceMeta(manager.currentCacheEpoch(), meta)
-}
-
-// DeleteKeyspaceMetaFromCache removes a keyspace from cache by ID.
-func (manager *Manager) DeleteKeyspaceMetaFromCache(id uint32) {
-	manager.cache.DeleteKeyspace(id)
-}
-
-// ScanAllKeyspace loads all keyspaces from storage and applies the given function to each keyspace.
-func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool) {
-	iterator := manager.IterateKeyspaces()
-	for {
-		meta, ok, err := iterator.Next()
-		if err != nil {
-			log.Warn("[keyspace] failed to scan keyspaces", errs.ZapError(err))
-			return
-		}
-		if !ok {
-			return
-		}
-		// Deliberately does not warm the cache here: fn already receives the
-		// scanned (keyspaceID, name, state) directly, and ScanAllKeyspace's
-		// only caller (collectStorageSize's periodic metering loop) only
-		// ever uses those values, never a subsequent cache read - so there
-		// is nothing here that would benefit from the write, only an
-		// unconditional cache.Save racing concurrent, authoritative writers
-		// like UpdateKeyspaceStateByID for no reason.
-		if !fn(meta.GetId(), meta.GetName(), meta.GetState()) {
-			return
-		}
-	}
-}
-
 // GetKeyspaceStateByID gets the keyspace state by ID, which will try to get it from the cache first.
 // If not found, it will try to get it from the storage.
 func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceState, error) {
@@ -1839,14 +1858,49 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 // GetEnabledKeyspaceNameByID gets the enabled keyspace name by ID. If the state is not enabled, it will return an error.
 // This method is useful for getting the keyspace name while checking whether the keyspace is enabled.
 func (manager *Manager) GetEnabledKeyspaceNameByID(id uint32) (string, error) {
-	state, err := manager.GetKeyspaceStateByID(id)
+	item := keyspaceItem{state: keyspacepb.KeyspaceState_DISABLED}
+	var cached bool
+	if id != constant.NullKeyspaceID {
+		item, cached = manager.cache.getKeyspaceByID(id)
+		if !cached {
+			var err error
+			item, err = manager.loadKeyspaceItemByID(id)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+	if item.state != keyspacepb.KeyspaceState_ENABLED {
+		return "", errors.Errorf("keyspace %d is not enabled, current state is %s", id, item.state.String())
+	}
+	if !cached && item.name == "" {
+		return "", errors.Errorf("got an empty keyspace name by id %d", id)
+	}
+	return item.name, nil
+}
+
+// loadKeyspaceItemByID reads the state and name together on a cache miss.
+// Cache valid metadata even if the keyspace is disabled. The result may
+// answer this call even if publication is no longer safe.
+func (manager *Manager) loadKeyspaceItemByID(id uint32) (keyspaceItem, error) {
+	manager.cacheEpochMu.RLock()
+	epoch, active := manager.cacheEpoch, manager.cacheActive
+	generation := manager.cache.Generation()
+	manager.cacheEpochMu.RUnlock()
+
+	meta, err := manager.LoadKeyspaceByID(id)
 	if err != nil {
-		return "", err
+		return keyspaceItem{}, err
 	}
-	if state != keyspacepb.KeyspaceState_ENABLED {
-		return "", errors.Errorf("keyspace %d is not enabled, current state is %s", id, state.String())
+	item := newKeyspaceItem(meta)
+	if active && item.name != "" {
+		manager.cacheEpochMu.RLock()
+		defer manager.cacheEpochMu.RUnlock()
+		if manager.cacheActive && manager.cacheEpoch == epoch {
+			manager.cache.SaveBatchIfGenerationUnchanged([]keyspaceItem{item}, generation)
+		}
 	}
-	return manager.GetKeyspaceNameByID(id)
+	return item, nil
 }
 
 // IterateKeyspaces returns an iterator that yields all keyspaces starting from startID.

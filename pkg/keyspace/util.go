@@ -34,6 +34,7 @@ import (
 	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -379,6 +380,11 @@ const (
 	rawRegionBound regionBoundType = iota
 	// txnRegionBound represents the txn keyspace, which is used for KV operations with transaction.
 	txnRegionBound
+	// legacyRegionBound uses the current PD key type at lookup, not ingestion.
+	legacyRegionBound
+	// unknownRegionBound is an uncertainty marker with no known mode.
+	unknownRegionBound
+	regionBoundTypeCount
 )
 
 // String returns the string representation of the regionBoundType.
@@ -414,6 +420,13 @@ func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
 	return txnRegionBound
 }
 
+func configuredRegionBound(config map[string]string) regionBoundType {
+	if val, ok := config[RegionBoundType]; ok {
+		return keyTypeStringToRegionBoundType(val)
+	}
+	return legacyRegionBound
+}
+
 // ExtractKeyspaceID extracts the keyspace ID and region bound type (raw or
 // txn) from a region key. ok is false when key is not a memcomparable-encoded
 // keyspace key, in which case id and bound are left at their zero value.
@@ -443,23 +456,13 @@ func ExtractKeyspaceID(key []byte) (id uint32, bound regionBoundType, ok bool) {
 	}
 }
 
-// Checker is an interface to check keyspace existence.
-type Checker interface {
-	// GetKeyspaceIDInRange returns the keyspace IDs in the range [start, end].
-	// IDs are descending. An error means the result is unknown, not empty.
-	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error)
-}
-
-// RegionSpansMultipleKeyspaces reports whether a live keyspace in the cluster's
-// keyType has a boundary strictly inside [startKey, endKey). Empty endpoints
+// RegionSpansMultipleKeyspaces reports whether keyspace metadata indicates a
+// boundary strictly inside [startKey, endKey). Empty endpoints
 // represent negative and positive infinity, respectively, not keyspace IDs.
 // An error means the boundaries could not be verified; callers must not allow
 // a merge in that case.
-func RegionSpansMultipleKeyspaces(startKey, endKey []byte, keyType coreconstant.KeyType, checker Checker) (bool, error) {
-	if checker == nil {
-		return false, errors.New("keyspace checker is unavailable")
-	}
-	keys, err := findKeyspaceBoundaryKeys(startKey, endKey, keyTypeToRegionBoundType(keyType), checker)
+func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker core.KeyspaceBoundaryChecker) (bool, error) {
+	keys, err := collectKeyspaceSplitKeys(startKey, endKey, checker, true)
 	return len(keys) > 0, err
 }
 
@@ -468,18 +471,12 @@ const scanLimit = 10
 // resolveKeyspaceID finds the ID whose left bound is at or immediately before
 // a nonempty key inside boundType's keyspace block. IDs only bound the metadata
 // lookup; the caller must still compare actual boundaries with the region keys.
-func resolveKeyspaceID(key []byte, boundType regionBoundType) uint32 {
-	if ksID, kt, extractOK := ExtractKeyspaceID(key); extractOK {
-		if kt == boundType {
-			return ksID
-		}
+func resolveKeyspaceID(key []byte, prefix byte) uint32 {
+	if mode, id, ok := codec.DecodeKeyspaceKey(key); ok && mode == prefix {
+		return id
 	}
 	// A partial prefix need not decode as a full keyspace key. Resolve it by
 	// byte order too, so a bounded metadata scan cannot skip matching IDs.
-	prefix := codec.TxnKeyspaceModePrefix
-	if boundType == rawRegionBound {
-		prefix = codec.RawKeyspaceModePrefix
-	}
 	next := sort.Search(int(constant.MaxValidKeyspaceID)+1, func(id int) bool {
 		left := codec.EncodeKeyspaceBoundary(prefix, uint32(id))
 		return bytes.Compare(left[:], key) > 0
@@ -488,70 +485,99 @@ func resolveKeyspaceID(key []byte, boundType regionBoundType) uint32 {
 }
 
 // GetKeyspaceSplitKeys returns the keys at which the region [startKey, endKey)
-// must be split so that no region spans more than one keyspace. keyType is the
-// cluster-wide keyspace API mode (raw or txn); only that mode's keyspace
-// boundaries are considered. It returns nil when no split is needed.
-func GetKeyspaceSplitKeys(startKey, endKey []byte, keyType coreconstant.KeyType, checker Checker) ([][]byte, error) {
+// must be split according to each keyspace's boundary mode. It returns nil
+// when no split is needed.
+func GetKeyspaceSplitKeys(startKey, endKey []byte, checker core.KeyspaceBoundaryChecker) ([][]byte, error) {
+	return collectKeyspaceSplitKeys(startKey, endKey, checker, false)
+}
+
+func collectKeyspaceSplitKeys(startKey, endKey []byte, checker core.KeyspaceBoundaryChecker, forMerge bool) ([][]byte, error) {
 	if checker == nil {
 		return nil, errors.New("keyspace checker is unavailable")
 	}
-	return findKeyspaceBoundaryKeys(startKey, endKey, keyTypeToRegionBoundType(keyType), checker)
-}
-
-func findKeyspaceBoundaryKeys(startKey, endKey []byte, boundType regionBoundType, checker Checker) ([][]byte, error) {
 	if len(endKey) > 0 && bytes.Compare(startKey, endKey) >= 0 {
 		return nil, nil
 	}
-	blockLeft, _ := boundType.bounds(MakeRegionBound(constant.StartKeyspaceID))
-	_, blockRight := boundType.bounds(MakeRegionBound(constant.MaxValidKeyspaceID))
-	if (len(endKey) > 0 && bytes.Compare(endKey, blockLeft) <= 0) || bytes.Compare(startKey, blockRight) >= 0 {
+	raw := boundaryIDRange(startKey, endKey, rawRegionBound)
+	txn := boundaryIDRange(startKey, endKey, txnRegionBound)
+	if raw == nil && txn == nil {
 		return nil, nil
+	}
+	// Use one snapshot: looking up the blocks separately could miss a boundary
+	// if a keyspace (or the legacy fallback) changed modes between lookups.
+	lookup := checker.GetKeyspaceBoundaryIDs
+	if forMerge {
+		if c, ok := checker.(interface {
+			GetKeyspaceMergeBoundaryIDs(raw, txn *core.KeyspaceIDRange, limit int) ([]uint32, []uint32, error)
+		}); ok {
+			lookup = c.GetKeyspaceMergeBoundaryIDs
+		}
+	}
+	rawIDs, txnIDs, err := lookup(raw, txn, scanLimit)
+	if err != nil {
+		return nil, err
+	}
+	var splitKeys [][]byte
+	for mode, ids := range [2][]uint32{rawIDs, txnIDs} {
+		for _, id := range ids {
+			lo, hi := regionBoundType(mode).bounds(MakeRegionBound(id))
+			if keyutil.Between(startKey, endKey, lo) {
+				splitKeys = append(splitKeys, lo)
+			}
+			if keyutil.Between(startKey, endKey, hi) {
+				splitKeys = append(splitKeys, hi)
+			}
+		}
+	}
+	slices.SortFunc(splitKeys, bytes.Compare)
+	return slices.CompactFunc(splitKeys, bytes.Equal), nil
+}
+
+func boundaryIDRange(startKey, endKey []byte, boundType regionBoundType) *core.KeyspaceIDRange {
+	prefix := codec.TxnKeyspaceModePrefix
+	if boundType == rawRegionBound {
+		prefix = codec.RawKeyspaceModePrefix
+	}
+	blockLeft := codec.EncodeKeyspaceBoundary(prefix, constant.StartKeyspaceID)
+	blockRight := codec.EncodeKeyspaceBoundary(prefix, constant.MaxValidKeyspaceID+1)
+	if (len(endKey) > 0 && bytes.Compare(endKey, blockLeft[:]) <= 0) || bytes.Compare(startKey, blockRight[:]) >= 0 {
+		return nil
 	}
 	// Clip the metadata lookup to this mode's block without replacing infinite
 	// or foreign endpoints by real keys. In particular, ID 0 and MaxValidKeyspaceID
 	// remain valid IDs, never sentinels for negative or positive infinity.
 	startID := constant.StartKeyspaceID
-	if bytes.Compare(startKey, blockLeft) > 0 {
-		startID = resolveKeyspaceID(startKey, boundType)
+	if bytes.Compare(startKey, blockLeft[:]) >= 0 {
+		startID = resolveKeyspaceID(startKey, prefix)
+		// Most patrols visit regions already confined to one keyspace. Check
+		// the end before looking up metadata, including an end at right.
+		right := codec.EncodeKeyspaceBoundary(prefix, startID+1)
+		if len(endKey) > 0 && bytes.Compare(endKey, right[:]) <= 0 {
+			return nil
+		}
 	}
 	endID := constant.MaxValidKeyspaceID
-	if len(endKey) > 0 && bytes.Compare(endKey, blockRight) < 0 {
-		endID = resolveKeyspaceID(endKey, boundType)
-	}
-	left, right := boundType.bounds(MakeRegionBound(startID))
-	// Most patrols visit regions already confined to one keyspace. Check their
-	// actual bounds before any metadata lookup, including an end at right.
-	if bytes.Compare(startKey, left) >= 0 && len(endKey) > 0 && bytes.Compare(endKey, right) <= 0 {
-		return nil, nil
-	}
-
-	// Even point/adjacent-ID queries must propagate storage errors. A bool-only
-	// existence lookup cannot distinguish an absent keyspace from unknown metadata.
-	ids, err := checker.GetKeyspaceIDInRange(startID, endID, scanLimit)
-	if err != nil {
-		return nil, err
-	}
-	var splitKeys [][]byte
-	for _, id := range ids {
-		lo, hi := boundType.bounds(MakeRegionBound(id))
-		if keyutil.Between(startKey, endKey, lo) {
-			splitKeys = append(splitKeys, lo)
-		}
-		if keyutil.Between(startKey, endKey, hi) {
-			splitKeys = append(splitKeys, hi)
+	if len(endKey) > 0 && bytes.Compare(endKey, blockRight[:]) < 0 {
+		endID = resolveKeyspaceID(endKey, prefix)
+		// An end at a left bound never lies strictly across either boundary
+		// of that ID. Exclude it before checking uncertainty or applying the limit.
+		endLeft := codec.EncodeKeyspaceBoundary(prefix, endID)
+		if bytes.Equal(endKey, endLeft[:]) {
+			endID-- // endKey > blockLeft, so endID is not zero here.
 		}
 	}
-	if len(splitKeys) == 0 {
-		return nil, nil
-	}
-	slices.SortFunc(splitKeys, bytes.Compare)
-	return slices.CompactFunc(splitKeys, bytes.Equal), nil
+	return &core.KeyspaceIDRange{Start: startID, End: endID}
 }
 
 type keyspaceItem struct {
 	keyspaceID uint32
 	name       string
 	state      keyspacepb.KeyspaceState
+	bound      regionBoundType
+}
+
+func newKeyspaceItem(meta *keyspacepb.KeyspaceMeta) keyspaceItem {
+	return keyspaceItem{keyspaceID: meta.GetId(), name: meta.GetName(), state: meta.GetState(), bound: configuredRegionBound(meta.GetConfig())}
 }
 
 // Less compares two keyspaceItem.
@@ -562,7 +588,8 @@ func (s *keyspaceItem) Less(than keyspaceItem) bool {
 // Cache is a cache for keyspace information, which is used to quickly determine keyspace existence and get keyspace name by ID.
 type Cache struct {
 	syncutil.RWMutex
-	tree *btree.BTreeG[keyspaceItem]
+	tree       *btree.BTreeG[keyspaceItem]
+	boundaries boundaryIndex
 	// generation counts every mutation (Save, DeleteKeyspace, clearAll) made
 	// to this Cache. It lets a caller that buffered a batch of entries from a
 	// slow storage scan (see SaveBatchIfGenerationUnchanged) detect whether
@@ -589,21 +616,54 @@ func (s *Cache) getKeyspaceByID(keyspaceID uint32) (keyspaceItem, bool) {
 	return item, found
 }
 
-// Save saves the keyspace information to the cache. It will replace the old information if the keyspace ID already exists.
-func (s *Cache) Save(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) {
+// SaveMeta saves or replaces the cached information for the given keyspace.
+func (s *Cache) SaveMeta(meta *keyspacepb.KeyspaceMeta) {
 	s.Lock()
 	defer s.Unlock()
-	item := keyspaceItem{keyspaceID: keyspaceID, name: name, state: state}
-	s.tree.ReplaceOrInsert(item)
+	s.save(newKeyspaceItem(meta))
 	s.generation++
+}
+
+func (s *Cache) save(item keyspaceItem) {
+	old, replaced := s.tree.ReplaceOrInsert(item)
+	oldLive := replaced && old.state != keyspacepb.KeyspaceState_TOMBSTONE
+	newLive := item.state != keyspacepb.KeyspaceState_TOMBSTONE
+	if oldLive && newLive && old.bound == item.bound {
+		return
+	}
+	if oldLive {
+		s.boundaries[old.bound].Delete(old.keyspaceID)
+	}
+	if newLive {
+		s.boundaries.add(item.keyspaceID, item.bound)
+	}
 }
 
 // DeleteKeyspace deletes a keyspace by ID.
 func (s *Cache) DeleteKeyspace(keyspaceID uint32) {
 	s.Lock()
 	defer s.Unlock()
-	s.tree.Delete(keyspaceItem{keyspaceID: keyspaceID})
+	s.deleteKeyspaceLocked(keyspaceID)
 	s.generation++
+}
+
+func (s *Cache) deleteKeyspaceLocked(keyspaceID uint32) {
+	if old, deleted := s.tree.Delete(keyspaceItem{keyspaceID: keyspaceID}); deleted && old.state != keyspacepb.KeyspaceState_TOMBSTONE {
+		s.boundaries[old.bound].Delete(keyspaceID)
+	}
+}
+
+func (s *Cache) deleteBatchIfGenerationUnchanged(ids []uint32, generation uint64) bool {
+	s.Lock()
+	defer s.Unlock()
+	if s.generation != generation {
+		return false
+	}
+	for _, id := range ids {
+		s.deleteKeyspaceLocked(id)
+	}
+	s.generation++
+	return true
 }
 
 // Generation returns the current value of the mutation counter described on
@@ -633,7 +693,7 @@ func (s *Cache) SaveBatchIfGenerationUnchanged(items []keyspaceItem, expectedGen
 		return false
 	}
 	for _, item := range items {
-		s.tree.ReplaceOrInsert(item)
+		s.save(item)
 	}
 	s.generation++
 	return true
@@ -648,6 +708,7 @@ func (s *Cache) clearAll() {
 	s.tree = btree.NewG(2, func(i, j keyspaceItem) bool {
 		return i.Less(j)
 	})
+	s.boundaries = boundaryIndex{}
 	s.generation++
 }
 
@@ -688,6 +749,85 @@ func (s *Cache) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, er
 		return limit <= 0 || len(ret) < limit
 	})
 	return ret, nil
+}
+
+// boundaryIndex keeps live or conservatively retained IDs ordered by mode.
+// Legacy IDs are kept separate so a fallback change needs no reindexing.
+// The owner provides synchronization.
+type boundaryIndex [regionBoundTypeCount]*btree.BTreeG[uint32]
+
+func (idx *boundaryIndex) add(id uint32, mode regionBoundType) {
+	if idx[mode] == nil {
+		idx[mode] = btree.NewOrderedG[uint32](2)
+	}
+	idx[mode].ReplaceOrInsert(id)
+}
+
+func (idx *boundaryIndex) appendIDs(ids []uint32, r *core.KeyspaceIDRange, limit int, mode regionBoundType) []uint32 {
+	if idx[mode] != nil && r != nil {
+		remaining := limit
+		idx[mode].DescendLessOrEqual(r.End, func(id uint32) bool {
+			if id < r.Start {
+				return false
+			}
+			ids = append(ids, id)
+			remaining--
+			return limit <= 0 || remaining > 0
+		})
+	}
+	return ids
+}
+
+func (idx *boundaryIndex) appendModeIDs(ids []uint32, r *core.KeyspaceIDRange, limit int, mode, fallback regionBoundType) []uint32 {
+	ids = idx.appendIDs(ids, r, limit, mode)
+	if mode == fallback {
+		ids = idx.appendIDs(ids, r, limit, legacyRegionBound)
+	}
+	return ids
+}
+
+func (idx *boundaryIndex) hasUnknownMode(r *core.KeyspaceIDRange) bool {
+	tree := idx[unknownRegionBound]
+	if r == nil || tree == nil {
+		return false
+	}
+	var found bool
+	tree.DescendLessOrEqual(r.End, func(id uint32) bool {
+		found = id >= r.Start
+		return false
+	})
+	return found
+}
+
+func limitBoundaryIDs(ids []uint32, limit int) []uint32 {
+	slices.Sort(ids)
+	slices.Reverse(ids)
+	ids = slices.Compact(ids)
+	if limit > 0 && len(ids) > limit {
+		return ids[:limit]
+	}
+	return ids
+}
+
+// GetKeyspaceBoundaryIDs looks up both modes atomically within the cache,
+// resolving legacy metadata against the supplied PD key type.
+func (s *Cache) GetKeyspaceBoundaryIDs(raw, txn *core.KeyspaceIDRange, limit int, pdKeyType coreconstant.KeyType) (rawIDs, txnIDs []uint32, err error) {
+	return s.getBoundaryIDs(raw, txn, limit, keyTypeToRegionBoundType(pdKeyType))
+}
+
+func (s *Cache) getBoundaryIDs(raw, txn *core.KeyspaceIDRange, limit int, fallback regionBoundType, uncertain ...*boundaryIndex) (rawIDs, txnIDs []uint32, err error) {
+	s.RLock()
+	defer s.RUnlock()
+	rawIDs = s.boundaries.appendModeIDs(nil, raw, limit, rawRegionBound, fallback)
+	txnIDs = s.boundaries.appendModeIDs(nil, txn, limit, txnRegionBound, fallback)
+	for _, index := range uncertain {
+		if index.hasUnknownMode(raw) || index.hasUnknownMode(txn) {
+			return nil, nil, errors.New("keyspace boundary mode is unknown")
+		}
+		rawIDs = index.appendModeIDs(rawIDs, raw, limit, rawRegionBound, fallback)
+		txnIDs = index.appendModeIDs(txnIDs, txn, limit, txnRegionBound, fallback)
+	}
+	return limitBoundaryIDs(rawIDs, limit), limitBoundaryIDs(txnIDs, limit), nil
 }
 
 // NewKeyspaceMeta creates a KeyspaceMeta from the given marshaled protobuf data.

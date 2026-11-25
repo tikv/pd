@@ -23,6 +23,7 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -71,11 +72,11 @@ type metadataErrorSchedulerCluster struct {
 	metadataErr error
 }
 
-func (c *metadataErrorSchedulerCluster) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
+func (c *metadataErrorSchedulerCluster) GetKeyspaceBoundaryIDs(raw, txn *sche.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
 	if c.metadataErr != nil {
-		return nil, c.metadataErr
+		return nil, nil, c.metadataErr
 	}
-	return c.Cluster.GetKeyspaceIDInRange(start, end, limit)
+	return c.Cluster.GetKeyspaceBoundaryIDs(raw, txn, limit)
 }
 
 func TestRandomMergeRejectsUnknownKeyspaceMetadata(t *testing.T) {

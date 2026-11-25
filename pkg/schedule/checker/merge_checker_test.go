@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -608,33 +609,23 @@ type mockKeyspaceManagerForMerge struct {
 	existing map[uint32]bool
 }
 
-func (m *mockKeyspaceManagerForMerge) KeyspaceExist(id uint32) bool {
-	if m.existing == nil {
-		return false
-	}
-	exist, ok := m.existing[id]
-	return ok && exist
-}
-
-func (m *mockKeyspaceManagerForMerge) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
-	if start > end {
-		return nil, nil
-	}
-	if m.existing == nil {
-		return nil, nil
+func (m *mockKeyspaceManagerForMerge) getKeyspaceIDs(r *sche.KeyspaceIDRange, limit int) []uint32 {
+	if r == nil || m.existing == nil {
+		return nil
 	}
 	ret := make([]uint32, 0, limit)
 
 	for id, exists := range m.existing {
-		if exists && id >= start && id <= end {
+		if exists && id >= r.Start && id <= r.End {
 			ret = append(ret, id)
-			if limit > 0 && len(ret) >= limit {
-				break
-			}
 		}
 	}
 	slices.Sort(ret)
-	return ret, nil
+	slices.Reverse(ret)
+	if limit > 0 && len(ret) > limit {
+		ret = ret[:limit]
+	}
+	return ret
 }
 
 type mockClusterWithKeyspaceManager struct {
@@ -642,12 +633,11 @@ type mockClusterWithKeyspaceManager struct {
 	manager *mockKeyspaceManagerForMerge
 }
 
-func (c *mockClusterWithKeyspaceManager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
-	return c.manager.GetKeyspaceIDInRange(start, end, limit)
-}
-
-func (c *mockClusterWithKeyspaceManager) KeyspaceExist(id uint32) bool {
-	return c.manager.KeyspaceExist(id)
+func (c *mockClusterWithKeyspaceManager) GetKeyspaceBoundaryIDs(raw, txn *sche.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	if c.GetKeyType() == coreconstant.Raw {
+		return c.manager.getKeyspaceIDs(raw, limit), nil, nil
+	}
+	return nil, c.manager.getKeyspaceIDs(txn, limit), nil
 }
 
 func TestNotMergeAfterSplit(t *testing.T) {
@@ -686,7 +676,7 @@ func testNoMerge(re *require.Assertions, cluster *mockClusterWithKeyspaceManager
 	cfg := cluster.GetPDServerConfig().Clone()
 	cfg.KeyType = keyType.String()
 	cluster.SetPDServerConfig(cfg)
-	keys, err := keyspace.GetKeyspaceSplitKeys(startKey, endKey, keyType, cluster)
+	keys, err := keyspace.GetKeyspaceSplitKeys(startKey, endKey, cluster)
 	re.NoError(err)
 	re.NotEmpty(keys)
 	keys = append(keys, endKey)

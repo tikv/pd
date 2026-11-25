@@ -74,7 +74,7 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if len(keys) == 0 {
 		desc = "keyspace-split-region"
 		var err error
-		keys, err = keyspace.GetKeyspaceSplitKeys(start, end, c.cluster.GetSharedConfig().GetKeyType(), c.cluster)
+		keys, err = keyspace.GetKeyspaceSplitKeys(start, end, c.cluster)
 		if err != nil {
 			log.Debug("skip keyspace split while metadata is unavailable", errs.ZapError(err))
 			return nil

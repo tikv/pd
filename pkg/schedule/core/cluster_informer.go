@@ -26,6 +26,17 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 )
 
+// KeyspaceIDRange is an inclusive range of keyspace IDs.
+type KeyspaceIDRange struct{ Start, End uint32 }
+
+// KeyspaceBoundaryChecker looks up metadata for the raw and txn blocks together.
+type KeyspaceBoundaryChecker interface {
+	// GetKeyspaceBoundaryIDs returns up to limit descending boundary IDs per
+	// mode from one lookup. A nil range skips that mode. An error means
+	// metadata could not be verified; merges must be rejected.
+	GetKeyspaceBoundaryIDs(raw, txn *KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error)
+}
+
 // ClusterInformer provides the necessary information of a cluster.
 type ClusterInformer interface {
 	SchedulerCluster
@@ -58,6 +69,7 @@ type CheckerCluster interface {
 type SharedCluster interface {
 	BasicCluster
 	statistics.RegionStatInformer
+	KeyspaceBoundaryChecker
 
 	GetBasicCluster() *core.BasicCluster
 	GetSharedConfig() sc.SharedConfigProvider
@@ -68,12 +80,6 @@ type SharedCluster interface {
 	AllocID(uint32) (uint64, uint32, error)
 	IsSchedulingHalted() bool
 	GetPrepareRegionCount() (int, error)
-	// GetKeyspaceIDInRange returns the keyspace IDs in [start, end].
-	// An error means metadata could not be verified; merges must be rejected.
-	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error)
-
-	// KeyspaceExist returns whether the keyspace ID exists.
-	KeyspaceExist(id uint32) bool
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces

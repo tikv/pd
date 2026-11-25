@@ -240,7 +240,7 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 
 	// Check if merging these regions would span multiple keyspaces
 	// This ensures one region corresponds to one keyspace
-	spans, err := keyspace.RegionSpansMultipleKeyspaces(start, end, cluster.GetSharedConfig().GetKeyType(), cluster)
+	spans, err := keyspace.RegionSpansMultipleKeyspaces(start, end, cluster)
 	if err != nil || spans {
 		return false
 	}

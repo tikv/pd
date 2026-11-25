@@ -134,6 +134,27 @@ type RevisionTxn interface {
 	LoadWithRevision(key string) (string, error)
 }
 
+type rangeRevisionTxn interface {
+	Txn
+	LoadRangeWithRevision(key, endKey string, limit int) (keys, values []string, err error)
+}
+
+type revisionRangeReads struct{ rangeRevisionTxn }
+
+// LoadRange guards the returned keys by their mod revisions.
+func (txn revisionRangeReads) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
+	return txn.LoadRangeWithRevision(key, endKey, limit)
+}
+
+// WithRangeRevision returns a Txn view whose range reads compare mod revisions
+// instead of values when supported by the backend.
+func WithRangeRevision(txn Txn) Txn {
+	if revisionTxn, ok := txn.(rangeRevisionTxn); ok {
+		return revisionRangeReads{revisionTxn}
+	}
+	return txn
+}
+
 // ConditionalTxnRunner runs a transaction with additional etcd comparisons.
 // The comparisons and the transaction operations are committed atomically.
 type ConditionalTxnRunner interface {

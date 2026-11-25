@@ -36,7 +36,6 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -60,6 +59,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
@@ -503,7 +503,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 	go c.startProgressGC()
-	go c.runStorageSizeCollector(s.GetMeteringWriter(), s.GetKeyspaceManager())
+	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
 
 	c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesLeader()
 
@@ -1117,14 +1117,14 @@ func (c *RaftCluster) GetKeyspaceManager() *keyspace.Manager {
 	return c.keyspaceManager
 }
 
-// GetKeyspaceIDInRange returns the keyspace info by the keyspace ID.
-func (c *RaftCluster) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
-	return c.keyspaceManager.GetKeyspaceIDInRange(start, end, limit)
+// GetKeyspaceBoundaryIDs returns the raw and txn boundary IDs in the given ranges.
+func (c *RaftCluster) GetKeyspaceBoundaryIDs(raw, txn *sche.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	return c.keyspaceManager.GetKeyspaceBoundaryIDs(raw, txn, limit)
 }
 
-// KeyspaceExist returns whether the keyspace exists by the keyspace ID.
-func (c *RaftCluster) KeyspaceExist(id uint32) bool {
-	return c.keyspaceManager.KeyspaceExist(id)
+// GetKeyspaceMergeBoundaryIDs includes uncertain removals in merge checks.
+func (c *RaftCluster) GetKeyspaceMergeBoundaryIDs(raw, txn *sche.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	return c.keyspaceManager.GetKeyspaceMergeBoundaryIDs(raw, txn, limit)
 }
 
 // GetRegionLabeler returns the region labeler.
@@ -3052,6 +3052,7 @@ func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
 // runStorageSizeCollector runs the storage size collector for the metering.
 func (c *RaftCluster) runStorageSizeCollector(
 	writer *metering.Writer,
+	regionLabeler *labeler.RegionLabeler,
 	keyspaceManager *keyspace.Manager,
 ) {
 	defer logutil.LogPanic()
@@ -3074,28 +3075,40 @@ func (c *RaftCluster) runStorageSizeCollector(
 			log.Info("storage size collector has been stopped")
 			return
 		case <-ticker.C:
-			storageSizeInfoList := c.collectStorageSize(keyspaceManager)
+			storageSizeInfoList := c.collectStorageSize(regionLabeler, keyspaceManager)
 			// Collect the storage size info list of all keyspaces.
 			collector.Collect(storageSizeInfoList)
 		}
 	}
 }
 
-func (c *RaftCluster) collectStorageSize(keyspaceManager *keyspace.Manager) []*storageSizeInfo {
-	regionBoundsMap := make(map[string]*keyspace.RegionBound)
-	keyspaceManager.ScanAllKeyspace(func(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) bool {
-		// Only meter keyspaces currently in active use, matching the
-		// pre-cache-backed behavior of skipping a keyspace once it is no
-		// longer ENABLED (e.g. ARCHIVED or TOMBSTONE), which can otherwise
-		// linger in the cache until it is fully deleted.
-		if state != keyspacepb.KeyspaceState_ENABLED {
-			return true
+func (c *RaftCluster) collectStorageSize(
+	regionLabeler *labeler.RegionLabeler,
+	keyspaceManager *keyspace.Manager,
+) []*storageSizeInfo {
+	start := time.Now()
+	// Keep metadata reads outside the labeler's read lock.
+	var keyspaceIDs []uint32
+	regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
+		if id, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule); ok {
+			keyspaceIDs = append(keyspaceIDs, id)
 		}
-		regionBoundsMap[name] = keyspace.MakeRegionBound(keyspaceID)
 		return true
 	})
+	regionBoundsMap := make(map[string]*keyspace.RegionBound, len(keyspaceIDs))
+	for _, id := range keyspaceIDs {
+		name, err := keyspaceManager.GetEnabledKeyspaceNameByID(id)
+		if err != nil {
+			// TODO: improve the observability of this error.
+			continue
+		}
+		regionBoundsMap[name] = keyspace.MakeRegionBound(id)
+	}
+	log.Info("iterated the region bounds of all keyspaces",
+		zap.Duration("cost", time.Since(start)),
+		zap.Int("count", len(regionBoundsMap)))
 
-	start := time.Now()
+	start = time.Now()
 	storageSizeInfoList := make([]*storageSizeInfo, 0, len(regionBoundsMap))
 	// Observe the region stats of each keyspace.
 	for keyspaceName, regionBounds := range regionBoundsMap {

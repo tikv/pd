@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
-	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -296,7 +295,7 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 	}
 
 	for _, tc := range spanTestCases {
-		spans, err := keyspace.RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, coreconstant.Txn, manager)
+		spans, err := keyspace.RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, manager)
 		re.NoError(err)
 		re.Equal(tc.shouldSpan, spans, "test case: %s", tc.name)
 	}
@@ -310,7 +309,7 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 
 	startKey := keyspace.MakeRegionBound(1).TxnLeftBound
 	endKey := keyspace.MakeRegionBound(3).TxnRightBound
-	splitKeys, err := keyspace.GetKeyspaceSplitKeys(startKey, endKey, coreconstant.Txn, manager)
+	splitKeys, err := keyspace.GetKeyspaceSplitKeys(startKey, endKey, manager)
 	re.NoError(err)
 	re.NotNil(splitKeys)
 	re.GreaterOrEqual(len(splitKeys), 1, "Should generate at least one split key")

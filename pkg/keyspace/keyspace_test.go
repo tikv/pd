@@ -206,6 +206,25 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	// Create a keyspace with empty name must return error.
 	_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{Name: ""})
 	re.Error(err)
+
+	// With no TSO group manager, creation still owns the persisted mode.
+	manager.kgm = nil
+	opts := mockconfig.NewTestOptions()
+	pdConfig := opts.GetPDServerConfig().Clone()
+	pdConfig.KeyType = "raw"
+	opts.SetPDServerConfig(pdConfig)
+	manager.cluster = mockcluster.NewCluster(suite.ctx, opts)
+	for i, config := range []map[string]string{nil, {RegionBoundType: "txn"}} {
+		created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+			Name: fmt.Sprintf("standalone-%d", i), Config: config,
+		})
+		re.NoError(err)
+		re.Equal("raw", created.GetConfig()[RegionBoundType])
+		loaded, err := manager.LoadKeyspaceByID(created.GetId())
+		re.NoError(err)
+		re.Equal("raw", loaded.GetConfig()[RegionBoundType])
+		re.NotContains(loaded.GetConfig(), TSOKeyspaceGroupIDKey)
+	}
 }
 
 // getCreateKeyspaceStepCounts gathers metrics and returns the observation count per step
@@ -378,6 +397,21 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceByID() {
 	id := uint32(100)
 	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: ""})
 	re.Error(err)
+
+	// The explicit-ID path also persists the PD-selected mode without a TSO group.
+	manager.kgm = nil
+	for i, config := range []map[string]string{nil, {RegionBoundType: "raw"}} {
+		id := uint32(20 + i)
+		created, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+			ID: &id, Name: fmt.Sprintf("standalone-%d", i), Config: config,
+		})
+		re.NoError(err)
+		re.Equal("txn", created.GetConfig()[RegionBoundType])
+		loaded, err := manager.LoadKeyspaceByID(id)
+		re.NoError(err)
+		re.Equal("txn", loaded.GetConfig()[RegionBoundType])
+		re.NotContains(loaded.GetConfig(), TSOKeyspaceGroupIDKey)
+	}
 }
 
 // TestCreateKeyspaceNoIDLeak tests that repeated failed creation attempts
@@ -661,6 +695,52 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		re.NoError(err)
 		re.Equal(bootstrapKeyspaceName, name)
 	}
+
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{Name: "cold-enabled-name"})
+	re.NoError(err)
+	id := created.GetId()
+	manager.ClearCache()
+	var reads int
+	var afterRead func()
+	const readFP = "github.com/tikv/pd/pkg/keyspace/loadKeyspaceByIDAfterRead"
+	re.NoError(failpoint.EnableCall(readFP, func() {
+		reads++
+		if afterRead != nil {
+			afterRead()
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(readFP)) }()
+
+	for range 2 {
+		name, err := manager.GetEnabledKeyspaceNameByID(id)
+		re.NoError(err)
+		re.Equal(created.GetName(), name)
+	}
+	re.Equal(1, reads, "one read on a cold enabled lookup, then a cache hit")
+
+	manager.ClearCache()
+	// Publish a real state change after the cold read but before it can cache its result.
+	afterRead = func() {
+		_, err := manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+	}
+	name, err := manager.GetEnabledKeyspaceNameByID(id)
+	re.NoError(err)
+	re.Equal(created.GetName(), name, "the in-flight call returns what it read")
+	re.Equal(2, reads)
+	afterRead = nil
+	name, err = manager.GetEnabledKeyspaceNameByID(id)
+	re.ErrorContains(err, "not enabled, current state is DISABLED")
+	re.Empty(name)
+	re.Equal(2, reads, "the read must not replace the concurrent update in cache")
+
+	manager.ClearCache()
+	for range 2 {
+		name, err := manager.GetEnabledKeyspaceNameByID(id)
+		re.ErrorContains(err, "not enabled, current state is DISABLED")
+		re.Empty(name)
+	}
+	re.Equal(3, reads, "valid disabled metadata is also cached")
 }
 
 func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
@@ -2379,6 +2459,38 @@ func TestUpdateKeyspaceStateDoesNotUpdateCacheBeforeCommit(t *testing.T) {
 	item, ok := manager.cache.getKeyspaceByID(id)
 	re.True(ok)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, item.state)
+
+	// A config write that may have committed can move the boundary. Protect
+	// both persisted modes, even after backfill has seen only the new value.
+	uncertainStore := &ambiguousCommitKeyspaceGroupStorage{StorageEndpoint: store}
+	uncertainStore.failNextRun.Store(true)
+	manager.store = uncertainStore
+	_, err = manager.UpdateKeyspaceConfig("cache-commit", []*Mutation{{Op: OpPut, Key: RegionBoundType, Value: "raw"}})
+	re.ErrorIs(err, context.DeadlineExceeded)
+	manager.ClearCache()
+	before, bound, after := MakeRegionBound(id-1), MakeRegionBound(id), MakeRegionBound(id+2)
+	keys, err := GetKeyspaceSplitKeys(before.RawLeftBound, after.RawLeftBound, manager)
+	re.NoError(err)
+	re.Equal([][]byte{bound.RawLeftBound, bound.RawRightBound}, keys)
+	keys, err = GetKeyspaceSplitKeys(before.TxnLeftBound, after.TxnLeftBound, manager)
+	re.NoError(err)
+	re.Equal([][]byte{bound.TxnLeftBound, bound.TxnRightBound}, keys)
+
+	// A truly unknown marker is an error in either mode only if a possible
+	// boundary lies strictly inside the region, and never yields a split key.
+	manager.markKeyspacesUncertain(manager.currentCacheEpoch(), keyspaceBoundary{id + 2, unknownRegionBound})
+	for _, mode := range []regionBoundType{rawRegionBound, txnRegionBound} {
+		start, _ := mode.bounds(before)
+		end, extended := mode.bounds(after)
+		spans, err := RegionSpansMultipleKeyspaces(start, end, manager)
+		re.NoError(err, "the unknown ID is exactly at the endpoint")
+		re.True(spans)
+		_, err = RegionSpansMultipleKeyspaces(start, extended, manager)
+		re.ErrorContains(err, "boundary mode is unknown")
+		keys, err := GetKeyspaceSplitKeys(start, extended, manager)
+		re.ErrorContains(err, "boundary mode is unknown")
+		re.Empty(keys)
+	}
 }
 
 // TestAssignGroupAndSaveKeyspace verifies that keyspace creation tolerates a

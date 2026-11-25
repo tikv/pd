@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -490,35 +491,59 @@ func (m *mockKeyspaceChecker) KeyspaceExist(id uint32) bool {
 	return m.existingKeyspaces[id]
 }
 
-func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, error) {
-	if start > end {
-		return nil, nil
+func (m *mockKeyspaceChecker) GetKeyspaceBoundaryIDs(raw, txn *core.KeyspaceIDRange, limit int, keyType coreconstant.KeyType) (rawIDs, txnIDs []uint32, err error) {
+	if keyType == coreconstant.Raw {
+		return m.getIDs(raw, limit), nil, nil
+	}
+	return nil, m.getIDs(txn, limit), nil
+}
+
+func (m *mockKeyspaceChecker) getIDs(r *core.KeyspaceIDRange, limit int) []uint32 {
+	if r == nil {
+		return nil
 	}
 	if m.allExist {
-		return []uint32{start}, nil
+		return []uint32{r.Start}
 	}
 	ret := make([]uint32, 0)
 	for id, exists := range m.existingKeyspaces {
-		if exists && id >= start && id <= end {
+		if exists && id >= r.Start && id <= r.End {
 			ret = append(ret, id)
 			if limit > 0 && len(ret) >= limit {
 				break
 			}
 		}
 	}
-	return ret, nil
+	return ret
 }
 
-func mustSpanKeyspaces(t *testing.T, start, end []byte, keyType coreconstant.KeyType, checker Checker) bool {
+type testBoundaryChecker interface {
+	GetKeyspaceBoundaryIDs(raw, txn *core.KeyspaceIDRange, limit int, keyType coreconstant.KeyType) (rawIDs, txnIDs []uint32, err error)
+}
+
+type checkerWithFallback struct {
+	testBoundaryChecker
+	keyType coreconstant.KeyType
+}
+
+func (c checkerWithFallback) GetKeyspaceBoundaryIDs(raw, txn *core.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	return c.testBoundaryChecker.GetKeyspaceBoundaryIDs(raw, txn, limit, c.keyType)
+}
+
+func saveBoundaryTestMeta(cache *Cache, id uint32, name string, state keyspacepb.KeyspaceState, config map[string]string) {
+	cache.SaveMeta(&keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id}, Name: name, State: state, Config: config})
+}
+
+func mustSpanKeyspaces(t *testing.T, start, end []byte, keyType coreconstant.KeyType, checker testBoundaryChecker) bool {
 	t.Helper()
-	spans, err := RegionSpansMultipleKeyspaces(start, end, keyType, checker)
+	spans, err := RegionSpansMultipleKeyspaces(start, end, checkerWithFallback{checker, keyType})
 	require.NoError(t, err)
 	return spans
 }
 
-func mustKeyspaceSplitKeys(t *testing.T, start, end []byte, keyType coreconstant.KeyType, checker Checker) [][]byte {
+func mustKeyspaceSplitKeys(t *testing.T, start, end []byte, keyType coreconstant.KeyType, checker testBoundaryChecker) [][]byte {
 	t.Helper()
-	keys, err := GetKeyspaceSplitKeys(start, end, keyType, checker)
+	keys, err := GetKeyspaceSplitKeys(start, end, checkerWithFallback{checker, keyType})
 	require.NoError(t, err)
 	return keys
 }
@@ -527,8 +552,8 @@ type unavailableKeyspaceChecker struct {
 	err error
 }
 
-func (c *unavailableKeyspaceChecker) GetKeyspaceIDInRange(uint32, uint32, int) ([]uint32, error) {
-	return nil, c.err
+func (c *unavailableKeyspaceChecker) GetKeyspaceBoundaryIDs(*core.KeyspaceIDRange, *core.KeyspaceIDRange, int) (rawIDs, txnIDs []uint32, err error) {
+	return nil, nil, c.err
 }
 
 func TestKeyspaceBoundaryChecksPropagateLookupErrors(t *testing.T) {
@@ -539,16 +564,16 @@ func TestKeyspaceBoundaryChecksPropagateLookupErrors(t *testing.T) {
 		{nil, deeperTxnKey(0, 'a')},
 		{deeperTxnKey(constant.MaxValidKeyspaceID, 'a'), nil},
 	} {
-		spans, err := RegionSpansMultipleKeyspaces(bounds[0], bounds[1], coreconstant.Txn, checker)
+		spans, err := RegionSpansMultipleKeyspaces(bounds[0], bounds[1], checker)
 		require.ErrorIs(t, err, checker.err)
 		require.False(t, spans)
-		keys, err := GetKeyspaceSplitKeys(bounds[0], bounds[1], coreconstant.Txn, checker)
+		keys, err := GetKeyspaceSplitKeys(bounds[0], bounds[1], checker)
 		require.ErrorIs(t, err, checker.err)
 		require.Empty(t, keys)
 	}
 	// No lookup is necessary to prove a region already lies within one keyspace.
 	bound := MakeRegionBound(100)
-	spans, err := RegionSpansMultipleKeyspaces(bound.TxnLeftBound, bound.TxnRightBound, coreconstant.Txn, checker)
+	spans, err := RegionSpansMultipleKeyspaces(bound.TxnLeftBound, bound.TxnRightBound, checker)
 	require.NoError(t, err)
 	require.False(t, spans)
 }
@@ -731,16 +756,21 @@ func TestRegionSpansMultipleKeyspacesWithMissingEndpoints(t *testing.T) {
 func TestKeyspaceBoundaryChecksMatchMetadata(t *testing.T) {
 	cache := NewCache()
 	ids := []uint32{0, 1, 101, constant.MaxValidKeyspaceID}
+	modes := []regionBoundType{rawRegionBound, txnRegionBound, legacyRegionBound, legacyRegionBound}
 	endpoints := [][]byte{nil, codec.EncodeBytes([]byte("a")), codec.EncodeBytes([]byte("c")), codec.EncodeBytes([]byte("t")), codec.EncodeBytes([]byte("z"))}
-	for _, id := range ids {
-		cache.Save(id, "test", keyspacepb.KeyspaceState_ENABLED)
+	for i, id := range ids {
+		var config map[string]string
+		if modes[i] != legacyRegionBound {
+			config = map[string]string{RegionBoundType: modes[i].String()}
+		}
+		saveBoundaryTestMeta(cache, id, "test", keyspacepb.KeyspaceState_ENABLED, config)
 		bound := MakeRegionBound(id)
 		endpoints = append(endpoints, bound.RawLeftBound, bound.RawRightBound, bound.TxnLeftBound, bound.TxnRightBound)
 		for _, prefix := range []byte{codec.RawKeyspaceModePrefix, codec.TxnKeyspaceModePrefix} {
 			endpoints = append(endpoints, codec.EncodeBytes(append(codec.MakeKeyspacePrefix(prefix, id), 'k')))
 		}
 	}
-	cache.Save(102, "tombstone", keyspacepb.KeyspaceState_TOMBSTONE)
+	saveBoundaryTestMeta(cache, 102, "tombstone", keyspacepb.KeyspaceState_TOMBSTONE, nil)
 	for _, start := range endpoints {
 		for _, end := range endpoints {
 			if len(end) > 0 && bytes.Compare(start, end) >= 0 {
@@ -748,8 +778,12 @@ func TestKeyspaceBoundaryChecksMatchMetadata(t *testing.T) {
 			}
 			for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn, coreconstant.Table} {
 				var expected [][]byte
-				for _, id := range ids {
-					left, right := keyTypeToRegionBoundType(keyType).bounds(MakeRegionBound(id))
+				for i, id := range ids {
+					mode := modes[i]
+					if mode == legacyRegionBound {
+						mode = keyTypeToRegionBoundType(keyType)
+					}
+					left, right := mode.bounds(MakeRegionBound(id))
 					for _, boundary := range [][]byte{left, right} {
 						if bytes.Compare(start, boundary) < 0 && (len(end) == 0 || bytes.Compare(boundary, end) < 0) {
 							expected = append(expected, boundary)
@@ -769,17 +803,24 @@ func TestKeyspaceBoundaryChecksMatchMetadata(t *testing.T) {
 
 func TestKeyspaceSplitPartialPrefixes(t *testing.T) {
 	cache := NewCache()
-	cache.Save(1<<16, "inside", keyspacepb.KeyspaceState_ENABLED)
+	saveBoundaryTestMeta(cache, 1<<16, "inside", keyspacepb.KeyspaceState_ENABLED, nil)
 	// More than scanLimit live IDs above the region must not hide the ID inside
 	// it when an endpoint contains only a partial keyspace prefix.
 	for i := range scanLimit + 1 {
-		cache.Save(3<<16+uint32(i), "outside", keyspacepb.KeyspaceState_ENABLED)
+		saveBoundaryTestMeta(cache, 3<<16+uint32(i), "outside", keyspacepb.KeyspaceState_ENABLED, nil)
 	}
 	for _, keyType := range []coreconstant.KeyType{coreconstant.Raw, coreconstant.Txn} {
 		t.Run(keyType.String(), func(t *testing.T) {
 			prefix := codec.RawKeyspaceModePrefix
+			wrongMode := coreconstant.Txn
 			if keyType == coreconstant.Txn {
 				prefix = codec.TxnKeyspaceModePrefix
+				wrongMode = coreconstant.Raw
+			}
+			for i := range scanLimit + 1 {
+				// Higher IDs in the other mode must not count toward the limit.
+				saveBoundaryTestMeta(cache, 1<<16+1+uint32(i), "wrong-mode", keyspacepb.KeyspaceState_ENABLED,
+					map[string]string{RegionBoundType: wrongMode.String()})
 			}
 			start := codec.EncodeBytes([]byte{prefix, 1})
 			end := codec.EncodeBytes([]byte{prefix, 2})
@@ -954,17 +995,17 @@ type narrowRangeChecker struct {
 	existing map[uint32]bool
 }
 
-func (c *narrowRangeChecker) GetKeyspaceIDInRange(start, end uint32, _ int) ([]uint32, error) {
-	if end-start > 1 {
+func (c *narrowRangeChecker) GetKeyspaceBoundaryIDs(raw, txn *core.KeyspaceIDRange, _ int, _ coreconstant.KeyType) (rawIDs, txnIDs []uint32, err error) {
+	if raw != nil || txn == nil || txn.End-txn.Start > 1 {
 		panic("unexpected broad keyspace ID lookup")
 	}
 	var ids []uint32
 	for id, exists := range c.existing {
-		if exists && id >= start && id <= end {
+		if exists && id >= txn.Start && id <= txn.End {
 			ids = append(ids, id)
 		}
 	}
-	return ids, nil
+	return nil, ids, nil
 }
 
 func TestGetKeyspaceSplitKeysForeignModeKeys(t *testing.T) {
@@ -983,7 +1024,7 @@ func TestGetKeyspaceSplitKeysForeignModeKeys(t *testing.T) {
 		startKey          []byte
 		endKey            []byte
 		keyType           coreconstant.KeyType
-		checker           Checker
+		checker           testBoundaryChecker
 		expectedSplitKeys [][]byte
 	}{
 		{
@@ -1152,10 +1193,10 @@ func TestKeyspaceExists(t *testing.T) {
 	re := require.New(t)
 	cache := NewCache()
 
-	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_ENABLED)
-	cache.Save(101, "ks-101", keyspacepb.KeyspaceState_ARCHIVED)
-	cache.Save(102, "ks-102", keyspacepb.KeyspaceState_DISABLED)
-	cache.Save(103, "ks-103", keyspacepb.KeyspaceState_TOMBSTONE)
+	saveBoundaryTestMeta(cache, 100, "ks-100", keyspacepb.KeyspaceState_ENABLED, nil)
+	saveBoundaryTestMeta(cache, 101, "ks-101", keyspacepb.KeyspaceState_ARCHIVED, nil)
+	saveBoundaryTestMeta(cache, 102, "ks-102", keyspacepb.KeyspaceState_DISABLED, nil)
+	saveBoundaryTestMeta(cache, 103, "ks-103", keyspacepb.KeyspaceState_TOMBSTONE, nil)
 
 	re.True(cache.KeyspaceExist(100))
 	re.True(cache.KeyspaceExist(101))
@@ -1167,10 +1208,10 @@ func TestGetKeyspaceIDInRange(t *testing.T) {
 	re := require.New(t)
 	cache := NewCache()
 
-	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_ENABLED)
-	cache.Save(101, "ks-101", keyspacepb.KeyspaceState_ARCHIVED)
-	cache.Save(102, "ks-102", keyspacepb.KeyspaceState_DISABLED)
-	cache.Save(103, "ks-103", keyspacepb.KeyspaceState_TOMBSTONE)
+	saveBoundaryTestMeta(cache, 100, "ks-100", keyspacepb.KeyspaceState_ENABLED, nil)
+	saveBoundaryTestMeta(cache, 101, "ks-101", keyspacepb.KeyspaceState_ARCHIVED, nil)
+	saveBoundaryTestMeta(cache, 102, "ks-102", keyspacepb.KeyspaceState_DISABLED, nil)
+	saveBoundaryTestMeta(cache, 103, "ks-103", keyspacepb.KeyspaceState_TOMBSTONE, nil)
 
 	item, ok := cache.getKeyspaceByID(101)
 	re.True(ok)
