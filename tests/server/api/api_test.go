@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	mconfig "github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
@@ -1309,7 +1310,19 @@ func (suite *forwardTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/enableAddServerNameHeader", `return`))
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, serverName string) {
+		// Leave Type empty so no cloud metering writer starts while exercising config GET endpoints.
+		conf.Metering = mconfig.MeteringConfig{
+			Region: "cn-beijing",
+			Bucket: "metering",
+			TOS: &mconfig.MeteringTOSConfig{
+				AssumeRoleARN:   "trn:iam::1:role/" + serverName,
+				AccessKey:       "test-ak-" + serverName,
+				SecretAccessKey: "test-sk-" + serverName,
+				SessionToken:    "test-token-" + serverName,
+			},
+		}
+	})
 	suite.env.PDCount = 3
 	suite.env.RunFunc(func(cluster *tests.TestCluster) {
 		suite.leader = cluster.GetLeaderServer().GetServer()
@@ -1402,8 +1415,30 @@ func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
 	re.NotEqual(suite.leader.GetConfig().Name, followerCfg.Name)
 	re.Equal(suite.follower.GetConfig().PeerUrls, followerCfg.PeerUrls)
 	re.NotEqual(suite.leader.GetConfig().PeerUrls, followerCfg.PeerUrls)
-	// Test sync config
+	assertRedactedTOS := func(name string, got, live *mconfig.MeteringTOSConfig) {
+		const redactedValue = "***REDACTED***"
+		re.NotNil(got)
+		re.Equal("trn:iam::1:role/"+name, got.AssumeRoleARN)
+		re.Equal(redactedValue, got.AccessKey)
+		re.Equal(redactedValue, got.SecretAccessKey)
+		re.Equal(redactedValue, got.SessionToken)
+		re.NotNil(live)
+		re.Equal("test-ak-"+name, live.AccessKey)
+		re.Equal("test-sk-"+name, live.SecretAccessKey)
+		re.Equal("test-token-"+name, live.SessionToken)
+	}
+	assertRedactedTOS(followerName, followerCfg.Metering.TOS, suite.follower.GetConfig().Metering.TOS)
+
+	// Test leader config GET redaction
 	leaderURL := suite.leader.GetAddr() + "/pd/api/v1/config"
+	leaderName := suite.leader.GetConfig().Name
+	var leaderCfg config.Config
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, leaderURL, &leaderCfg,
+		testutil.StatusOK(re))
+	re.NoError(err)
+	assertRedactedTOS(leaderName, leaderCfg.Metering.TOS, suite.leader.GetConfig().Metering.TOS)
+
+	// Test sync config
 	reqData, err := json.Marshal(map[string]any{
 		"max-replicas": 4,
 	})

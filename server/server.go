@@ -266,7 +266,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	// 3. Disable microservice and disable keyspace group. (both serverless scenario and non-serverless scenario)
 	// We should separate the keyspace group from the microservice later.
 	isKeyspaceGroupEnabled := len(services) != 0
-	log.Info("PD config", zap.Bool("enable-keyspace-group", isKeyspaceGroupEnabled), zap.Reflect("config", cfg))
+	log.Info("PD config", zap.Bool("enable-keyspace-group", isKeyspaceGroupEnabled), zap.Reflect("config", RedactedConfig(cfg)))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
@@ -1216,6 +1216,17 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	cfg.RateLimitConfig = *s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
 	cfg.GRPCRateLimitConfig = *s.serviceMiddlewarePersistOptions.GetGRPCRateLimitConfig().Clone()
 	return cfg
+}
+
+// RedactedConfig returns a shallow copy of cfg with Volcengine TOS metering
+// credentials masked for logging and external inspection.
+func RedactedConfig(cfg *config.Config) *config.Config {
+	if cfg == nil {
+		return nil
+	}
+	cloned := cfg.Clone()
+	cloned.Metering = metering.RedactedConfig(cloned.Metering)
+	return cloned
 }
 
 // GetConfig gets the config information.

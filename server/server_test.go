@@ -15,15 +15,21 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
+	mconfig "github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -469,4 +475,68 @@ func (s *testFollowerRegionStorage) RunInTxn(ctx context.Context, f func(txn kv.
 		return s.runInTxnErr
 	}
 	return s.Storage.RunInTxn(ctx, f)
+}
+
+func TestCreateServerLogsRedactedTOSConfig(t *testing.T) {
+	re := require.New(t)
+	const (
+		role          = "trn:iam::1:role/metering"
+		tosAK         = "test-tos-ak"
+		tosSK         = "test-tos-sk"
+		tosToken      = "test-tos-token"
+		redactedValue = "***REDACTED***"
+	)
+
+	re.Nil(RedactedConfig(nil))
+
+	cfg := config.NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	// Invalid URL makes CreateServer fail right after logging "PD config" without starting etcd.
+	cfg.Logger = zap.NewNop()
+	cfg.LogProps = &log.ZapProperties{}
+	cfg.ClientUrls = "://invalid"
+	cfg.Metering = mconfig.MeteringConfig{
+		Region: "cn-beijing",
+		Bucket: "metering",
+		TOS: &mconfig.MeteringTOSConfig{
+			AssumeRoleARN:   role,
+			AccessKey:       tosAK,
+			SecretAccessKey: tosSK,
+			SessionToken:    tosToken,
+		},
+	}
+
+	var buf bytes.Buffer
+	logger := zap.New(zapcore.NewCore(
+		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
+		zapcore.AddSync(&buf),
+		zapcore.InfoLevel,
+	))
+	restore := log.ReplaceGlobals(logger, nil)
+	t.Cleanup(restore)
+
+	_, err := CreateServer(t.Context(), cfg, nil)
+	re.Error(err)
+	re.NoError(logger.Sync())
+
+	logged := buf.String()
+	re.NotContains(logged, tosAK)
+	re.NotContains(logged, tosSK)
+	re.NotContains(logged, tosToken)
+
+	var entry struct {
+		Msg    string        `json:"msg"`
+		Config config.Config `json:"config"`
+	}
+	re.NoError(json.Unmarshal(buf.Bytes(), &entry))
+	re.Equal("PD config", entry.Msg)
+	re.NotNil(entry.Config.Metering.TOS)
+	re.Equal(role, entry.Config.Metering.TOS.AssumeRoleARN)
+	re.Equal(redactedValue, entry.Config.Metering.TOS.AccessKey)
+	re.Equal(redactedValue, entry.Config.Metering.TOS.SecretAccessKey)
+	re.Equal(redactedValue, entry.Config.Metering.TOS.SessionToken)
+
+	re.Equal(tosAK, cfg.Metering.TOS.AccessKey)
+	re.Equal(tosSK, cfg.Metering.TOS.SecretAccessKey)
+	re.Equal(tosToken, cfg.Metering.TOS.SessionToken)
 }
