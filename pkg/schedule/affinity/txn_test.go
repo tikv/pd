@@ -356,7 +356,7 @@ func TestTargetCASAndLostReplyWithEtcd(t *testing.T) {
 	})
 	written, err := test.UpdateAffinityGroupTargets(ctx, []GroupTarget{first, stale})
 	test.ErrorIs(err, errs.ErrEtcdTxnConflict, "another Manager wrote between the read and commit")
-	test.Equal([]string{"h"}, written)
+	test.Equal([]string{"h"}, written.WrittenGroupIDs)
 	test.Equal(first.result(), test.stored("h"), "earlier commits survive a later error")
 	test.Equal(before+1, state("h").affinityVer)
 	test.Equal(uint64(2), test.stored("g").LeaderStoreID)

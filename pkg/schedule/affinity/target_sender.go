@@ -109,7 +109,7 @@ func (m *Manager) sendObservedTarget(obs observedTarget) {
 		}
 		return
 	}
-	if !current || m.ctx.Err() != nil || retrying {
+	if !current || m.ctx.Err() != nil || retrying || group.lastSentPolicyMismatch {
 		return
 	}
 
@@ -247,7 +247,7 @@ func (m *Manager) drainObservedTargets() {
 		m.targetWriteMutex.Unlock()
 		m.metaMutex.Unlock()
 
-		written, err := m.targetWriter.WriteGroupTargets(m.ctx, targets)
+		resp, err := m.targetWriter.WriteGroupTargets(m.ctx, targets)
 		unsupported := errors.Is(err, ErrTargetWriterUnsupported)
 		notReady := errors.Is(err, ErrTargetWriterNotReady)
 
@@ -260,24 +260,34 @@ func (m *Manager) drainObservedTargets() {
 			// remaining candidates queued for after the cooldown.
 			m.Lock()
 			for _, obs := range batch {
-				if _, ok := m.sendingTargets[obs.target.Expected.ID]; !ok {
+				id := obs.target.Expected.ID
+				if _, ok := m.sendingTargets[id]; !ok {
 					continue // the group reconciled while the request was in flight
 				}
 				obs.groupInfoPtr.lastSentTarget = &obs
-				obs.groupInfoPtr.lastSentWritten = slices.Contains(written, obs.target.Expected.ID)
-				obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
+				obs.groupInfoPtr.lastSentWritten = slices.Contains(resp.WrittenGroupIDs, id)
+				obs.groupInfoPtr.lastSentPolicyMismatch = slices.Contains(resp.PolicyMismatchGroupIDs, id)
+				if obs.groupInfoPtr.lastSentPolicyMismatch {
+					if queued := m.pendingTargets[id]; len(queued) > 0 && queued[0].matches(obs.groupInfoPtr) {
+						m.pendingTargets[id] = nil
+					}
+				} else {
+					obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
+				}
 			}
 			m.Unlock()
 			clear(m.sendingTargets)
 			shouldReport := m.ctx.Err() == nil
 			m.targetWriteMutex.Unlock()
 			var firstSkippedID string
-			if len(written) < len(targets) {
+			skipped := 0
+			if len(resp.WrittenGroupIDs) < len(targets) {
 				for _, obs := range batch {
 					id := obs.target.Expected.ID
-					if slices.Contains(written, id) {
+					if slices.Contains(resp.WrittenGroupIDs, id) || slices.Contains(resp.PolicyMismatchGroupIDs, id) {
 						continue
 					}
+					skipped++
 					if firstSkippedID == "" {
 						firstSkippedID = id
 					}
@@ -293,8 +303,7 @@ func (m *Manager) drainObservedTargets() {
 				}
 			}
 			m.metaMutex.Unlock()
-			if shouldReport && firstSkippedID != "" {
-				skipped := len(targets) - len(written)
+			if shouldReport && skipped > 0 {
 				targetWriteFailureCounter.Add(float64(skipped))
 				log.Warn("skipped affinity group target writes",
 					zap.Int("skipped-count", skipped),

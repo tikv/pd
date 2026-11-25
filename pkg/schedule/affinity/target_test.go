@@ -27,9 +27,13 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -49,7 +53,7 @@ type targetTest struct {
 	store   storage.Storage
 	callsMu sync.Mutex
 	calls   []GroupTarget
-	reply   func(context.Context, []GroupTarget) ([]string, error)
+	reply   func(context.Context, []GroupTarget) (GroupTargetsResponse, error)
 }
 
 func newTargetTest(t *testing.T, ids ...string) *targetTest {
@@ -91,15 +95,15 @@ func (test *targetTest) stored(id string) *Group {
 func (test *targetTest) write(want []string, targets ...GroupTarget) {
 	written, err := test.UpdateAffinityGroupTargets(test.ctx, targets)
 	test.NoError(err)
-	test.Equal(want, written)
+	test.Equal(want, written.WrittenGroupIDs)
 }
 
-func (test *targetTest) useWriter(reply func(context.Context, []GroupTarget) ([]string, error)) {
+func (test *targetTest) useWriter(reply func(context.Context, []GroupTarget) (GroupTargetsResponse, error)) {
 	test.reply = reply
 	test.SetTargetWriter(test)
 }
 
-func (test *targetTest) WriteGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
+func (test *targetTest) WriteGroupTargets(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 	test.callsMu.Lock()
 	test.calls = append(test.calls, targets...)
 	test.callsMu.Unlock()
@@ -113,6 +117,166 @@ func (test *targetTest) observe(id string, voters ...uint64) {
 
 func targetRegion(voters ...uint64) *core.RegionInfo {
 	return generateRegionForTest(10, voters, targetTestRange)
+}
+
+func TestTargetPolicyCAS(t *testing.T) {
+	test := newTargetTest(t, "g")
+	target := test.target("g", 1, 1, 2, 3)
+	_, err := test.UpdateAffinityGroupPolicy("g", BalancePolicyFixed)
+	test.NoError(err)
+	test.write([]string{}, target)
+	test.Zero(test.stored("g").LeaderStoreID)
+	test.Equal(BalancePolicyFixed, test.GetAffinityGroupState("g").BalancePolicy)
+}
+
+func TestEmptyTargetRevisionMismatchIsNotPolicyMismatch(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		recreated bool
+		policy    BalancePolicy
+	}{
+		{name: "same group and policy"},
+		{name: "recreated with the same policy", recreated: true},
+		{name: "recreated with a different policy", recreated: true, policy: BalancePolicyAuto},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			test := newTargetTest(t, "g")
+			target := test.target("g", 1, 1, 2)
+			target.ExpectedModRevision = 1
+			stored := test.stored("g")
+			if scenario.recreated {
+				stored.CreateTimestamp++
+			}
+			stored.BalancePolicy = scenario.policy
+			test.NoError(test.store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+				return test.store.SaveAffinityGroup(txn, "g", stored)
+			}))
+			test.storage = &revisionedTargetStorage{AffinityStorage: test.store, revision: 2}
+
+			reply, err := test.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{target})
+			test.NoError(err)
+			test.Empty(reply.WrittenGroupIDs)
+			test.Empty(reply.PolicyMismatchGroupIDs)
+			test.Equal(stored, test.stored("g"))
+		})
+	}
+}
+
+func TestClassicFirstWinKeepsCommittedPolicy(t *testing.T) {
+	for _, hasTarget := range []bool{false, true} {
+		t.Run(fmt.Sprintf("has-target-%t", hasTarget), func(t *testing.T) {
+			test := newTargetTest(t, "g")
+			test.applyStoreConditions(nil)
+			if hasTarget {
+				_, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+				test.NoError(err)
+			}
+			wrapped := &lostReplyStorage{AffinityStorage: test.store, lose: true}
+			test.storage = wrapped
+			_, err := test.UpdateAffinityGroupPolicy("g", BalancePolicyFixed)
+			test.Error(err)
+			wrapped.lose = false
+			test.Empty(test.GetAffinityGroupState("g").BalancePolicy)
+			committed := *test.stored("g")
+			test.Equal(BalancePolicyFixed, committed.BalancePolicy)
+			test.ExpireAffinityGroup("g")
+			test.ObserveAvailableRegion(targetRegion(2, 1, 3), test.GetAffinityGroupState("g"))
+			test.Equal(committed, *test.stored("g"))
+			test.Equal(committed, test.GetAffinityGroupState("g").Group)
+			test.ObserveAvailableRegion(targetRegion(2, 1, 3), test.GetAffinityGroupState("g"))
+			state := test.GetAffinityGroupState("g")
+			test.Equal(BalancePolicyFixed, state.BalancePolicy)
+			test.Equal(uint64(2), state.LeaderStoreID)
+			test.Equal(state.Group, *test.stored("g"))
+		})
+	}
+}
+
+func TestClassicFirstWinBeforeStoreScan(t *testing.T) {
+	test := newTargetTest(t, "g")
+	test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{targetTestRange}}}, nil))
+	test.False(test.storeConditionsKnown)
+	region := targetRegion(1, 2, 3)
+	before, isAffinity := test.GetAndCacheRegionAffinityGroupState(region)
+	test.NotNil(before)
+	test.False(isAffinity)
+
+	test.ObserveAvailableRegion(region, before)
+	state, isAffinity := test.GetAndCacheRegionAffinityGroupState(region)
+	test.True(isAffinity)
+	test.Greater(state.affinityVer, before.affinityVer)
+	test.True(state.AffinitySchedulingAllowed)
+	test.Equal(uint64(1), state.LeaderStoreID)
+	test.Equal(state.Group, *test.stored("g"))
+}
+
+func TestClassicFirstWinReplayPreservesExpirationWithEvictedLeader(t *testing.T) {
+	test := newTargetTest(t, "g")
+	test.checkGroupsAvailability()
+	test.True(test.storeConditionsKnown)
+	_, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+	test.NoError(err)
+	test.ExpireAffinityGroup("g")
+	expired := test.GetAffinityGroupState("g")
+	test.Equal(groupExpired, getGroupForTest(test.Assertions, test.Manager, "g").GetAvailability())
+
+	transactions := 0
+	test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+		transactions++
+		err := test.store.RunInTxn(ctx, apply)
+		test.applyStoreConditions(map[uint64]storeCondition{1: storeLeaderEvicted})
+		return err
+	})
+
+	test.ObserveAvailableRegion(targetRegion(1, 2, 3), expired)
+	test.Equal(1, transactions)
+	test.Equal(groupExpired, getGroupForTest(test.Assertions, test.Manager, "g").GetAvailability())
+	test.Equal(expired, test.GetAffinityGroupState("g"))
+}
+
+func TestMCSFirstWinKeepsFixedTarget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		test := newTargetTest(t, "g")
+		test.applyStoreConditions(nil)
+		_, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2})
+		test.NoError(err)
+		test.DegradeAffinityGroup("g")
+		observed := test.GetAffinityGroupState("g")
+		_, err = test.UpdateAffinityGroupPolicy("g", BalancePolicyFixed)
+		test.NoError(err)
+		test.reply = func(_ context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
+			return GroupTargetsResponse{WrittenGroupIDs: []string{targets[0].Expected.ID}}, nil
+		}
+		test.SetTargetWriter(test)
+		test.ObserveAvailableRegion(targetRegion(2, 1), observed)
+		synctest.Wait()
+		test.Empty(test.calls)
+		test.Equal(uint64(1), test.GetAffinityGroupState("g").LeaderStoreID)
+	})
+}
+
+func TestLocalTargetPreservesPolicyUpdate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		test := newTargetTest(t, "g")
+		test.applyStoreConditions(map[uint64]storeCondition{})
+		test.reply = func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
+			return GroupTargetsResponse{}, ErrTargetWriterUnsupported
+		}
+		test.SetTargetWriter(test)
+		test.observe("g", 1, 2, 3)
+		before := test.GetAffinityGroupState("g")
+		test.True(before.HasUnpersistedTarget())
+		stored := before.groupInfoPtr.storedGroup()
+		stored.BalancePolicy = BalancePolicyFixed
+		test.SyncGroupFromEtcd(&stored)
+		after := test.GetAffinityGroupState("g")
+		test.Equal(before.groupInfoPtr, after.groupInfoPtr)
+		test.Equal(before.affinityVer, after.affinityVer)
+		test.Equal(before.LeaderStoreID, after.LeaderStoreID)
+		test.True(after.HasUnpersistedTarget())
+		test.Equal(BalancePolicyFixed, after.BalancePolicy)
+		test.Equal(BalancePolicyFixed, after.groupInfoPtr.storedGroup().BalancePolicy)
+	})
 }
 
 func TestUpdateAffinityGroupTargetsValidation(t *testing.T) {
@@ -192,6 +356,60 @@ func TestUpdateAffinityGroupTargetsReplayWithDeletedStore(t *testing.T) {
 	test.Equal(healthy.result(), test.stored("h"))
 }
 
+func TestAdminTargetUsesStoreConditionsAtCommit(t *testing.T) {
+	test := newTargetTest(t, "g")
+	test.checkGroupsAvailability()
+	test.True(test.storeConditionsKnown)
+	test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+		err := test.store.RunInTxn(ctx, apply)
+		test.applyStoreConditions(map[uint64]storeCondition{2: storeRemoving})
+		return err
+	})
+
+	state, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+	test.NoError(err)
+	test.Equal(groupExpired, test.groups["g"].GetAvailability())
+	test.False(state.AffinitySchedulingAllowed)
+	test.applyStoreConditions(map[uint64]storeCondition{2: storeRemoving})
+	test.False(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+}
+
+func TestAdminTargetReplacesLocalFallback(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		test := newTargetTest(t, "g")
+		test.checkGroupsAvailability()
+		_, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+		test.NoError(err)
+		test.DegradeAffinityGroup("g")
+		test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
+			return GroupTargetsResponse{}, ErrTargetWriterUnsupported
+		})
+		test.observe("g", 2, 1, 3)
+		test.True(test.GetAffinityGroupState("g").HasUnpersistedTarget())
+
+		state, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+		test.NoError(err)
+		test.Equal(uint64(1), state.LeaderStoreID)
+		test.False(state.HasUnpersistedTarget())
+		test.Equal(test.stored("g"), &state.Group)
+	})
+}
+
+func TestAdminTargetReturnsRecreatedGroup(t *testing.T) {
+	test := newTargetTest(t, "g")
+	old := test.GetAffinityGroupState("g")
+	recreated := *test.stored("g")
+	recreated.CreateTimestamp++
+	test.NoError(test.store.SaveAffinityGroup(test.store, "g", &recreated))
+
+	state, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+	test.NoError(err)
+	test.NotSame(old.groupInfoPtr, state.groupInfoPtr)
+	test.Equal(recreated.CreateTimestamp, state.CreateTimestamp)
+	test.Equal(test.stored("g"), &state.Group)
+	test.Equal(test.GetAffinityGroupState("g"), state)
+}
+
 func TestFirstGroupRejectsRemovingStoreBeforeScan(t *testing.T) {
 	test := newTargetTest(t)
 	stores := test.storeSetInformer.(*core.StoresInfo)
@@ -243,7 +461,7 @@ func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
 		written, err := test.UpdateAffinityGroupTargets(ctx, targets)
 		test.Zero(transactions)
 		test.ErrorIs(err, context.Canceled)
-		test.Empty(written)
+		test.Empty(written.WrittenGroupIDs)
 	})
 
 	synctest.Test(t, func(t *testing.T) {
@@ -262,7 +480,7 @@ func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
 		})
 		written, err := test.UpdateAffinityGroupTargets(ctx, targets)
 		test.ErrorIs(err, context.Canceled)
-		test.Equal([]string{"first"}, written)
+		test.Equal([]string{"first"}, written.WrittenGroupIDs)
 		test.Equal(1, transactions)
 		test.Equal(targets[0].result(), test.stored("first"))
 		test.Zero(test.stored("second").LeaderStoreID)
@@ -273,7 +491,7 @@ func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
 			return txnCtx.Err()
 		})
 		var writerErr error
-		test.useWriter(func(writerCtx context.Context, targets []GroupTarget) ([]string, error) {
+		test.useWriter(func(writerCtx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 			requestCtx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			written, err = test.UpdateAffinityGroupTargets(requestCtx, targets)
@@ -283,7 +501,7 @@ func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
 		test.observe("second", 1, 2)
 		test.ErrorIs(err, context.Canceled, "the Manager cancels the in-flight transaction")
 		test.ErrorIs(writerErr, context.Canceled)
-		test.Empty(written)
+		test.Empty(written.WrittenGroupIDs)
 		synctest.Sleep(time.Second)
 		test.observe("second", 1, 2)
 		test.Equal(targets[1:], test.calls, "a stopped Manager sends no further requests")
@@ -320,6 +538,55 @@ func TestSyncRecreatedAffinityGroup(t *testing.T) {
 			test.Equal(recreated, state.Group)
 			test.Zero(state.RegionCount)
 			test.Equal(1, state.RangeCount)
+		})
+	}
+}
+
+func TestRecreatedGroupKeepsRangeConflict(t *testing.T) {
+	for _, source := range []string{"watcher", "policy"} {
+		t.Run(source, func(t *testing.T) {
+			test := newTargetTest(t, "g", "h")
+			test.write([]string{"g"}, test.target("g", 1, 1, 2, 3))
+			test.checkGroupsAvailability()
+			test.True(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+			for _, id := range []string{"g", "h"} {
+				data, err := json.Marshal(MakeLabelRule(GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{targetTestRange}}))
+				test.NoError(err)
+				rule, err := labeler.NewLabelRuleFromJSON(data)
+				test.NoError(err)
+				test.NoError(test.SyncKeyRangesFromEtcd(rule))
+			}
+			test.ReconcileRangeConflicts()
+			before := test.GetAffinityGroupState("g")
+			test.True(before.rangeConflict)
+			recreated := before.Group
+			recreated.CreateTimestamp++
+			if source == "watcher" {
+				test.SyncGroupFromEtcdWithRevision(&recreated, 2)
+			} else {
+				test.NoError(test.store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+					return test.store.SaveAffinityGroup(txn, "g", &recreated)
+				}))
+				state, err := test.UpdateAffinityGroupPolicy("g", BalancePolicyFixed)
+				test.NoError(err)
+				recreated.BalancePolicy = BalancePolicyFixed
+				test.Equal(recreated, state.Group)
+				test.True(state.rangeConflict)
+			}
+			after := test.GetAffinityGroupState("g")
+			test.NotSame(before.groupInfoPtr, after.groupInfoPtr)
+			test.Equal(recreated, after.Group)
+			test.True(after.rangeConflict)
+			test.Equal(1, after.RangeCount)
+			test.True(after.RegularSchedulingAllowed)
+			test.False(after.AffinitySchedulingAllowed)
+
+			test.SyncKeyRangesDeleteFromEtcd(GetLabelRuleID("h"))
+			test.ReconcileRangeConflicts()
+			restored := test.GetAffinityGroupState("g")
+			test.False(restored.rangeConflict)
+			test.False(restored.RegularSchedulingAllowed)
+			test.True(restored.AffinitySchedulingAllowed)
 		})
 	}
 }
@@ -382,14 +649,14 @@ func TestFirstWinSingleFlightAndGlobalBackoff(t *testing.T) {
 				failures := testutil.ToFloat64(targetWriteFailureCounter)
 				release := make(chan struct{})
 				defer close(release)
-				test.useWriter(func(_ context.Context, targets []GroupTarget) ([]string, error) {
+				test.useWriter(func(_ context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 					if len(test.calls) <= 3 {
 						<-release
 					}
 					if len(targets) == 2 {
-						return nil, replyErr
+						return GroupTargetsResponse{}, replyErr
 					}
-					return []string{targets[0].Expected.ID}, nil
+					return GroupTargetsResponse{WrittenGroupIDs: []string{targets[0].Expected.ID}}, nil
 				})
 				g, h := test.target("g", 1, 1, 2), test.target("h", 1, 1, 2)
 				i, j := test.target("i", 1, 1, 2), test.target("j", 1, 1, 2)
@@ -435,13 +702,13 @@ func TestFirstWinSkippedGroupDoesNotBlockPatrol(t *testing.T) {
 		release := make(chan struct{})
 		defer close(release)
 		var written []string
-		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 			test.LessOrEqual(len(targets), 128)
 			if targets[0].Expected.ID == first {
 				<-release
 			}
 			ids, err := pd.UpdateAffinityGroupTargets(ctx, targets)
-			written = append(written, ids...)
+			written = append(written, ids.WrittenGroupIDs...)
 			return ids, err
 		})
 
@@ -510,7 +777,7 @@ func TestFirstWinLateReply(t *testing.T) {
 				state := test.GetAffinityGroupState
 				before := state("g")
 				var updated *GroupState
-				test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
+				test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
 					switch name {
 					case "new revision":
 						test.SyncGroupFromEtcdWithRevision(&group, 2)
@@ -523,7 +790,7 @@ func TestFirstWinLateReply(t *testing.T) {
 						test.applyStoreConditions(map[uint64]storeCondition{1: storeDown})
 					}
 					updated = state("g")
-					return nil, ErrTargetWriterUnsupported
+					return GroupTargetsResponse{}, ErrTargetWriterUnsupported
 				})
 				test.observe("g", 1, 3)
 				switch name {
@@ -561,8 +828,8 @@ func TestObserveAvailableRegionRejectsStaleRevision(t *testing.T) {
 		test.Equal(observed.affinityVer, current.affinityVer)
 		test.Equal(observed.Group, current.Group)
 		test.Equal(int64(2), current.modRevision)
-		test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
-			return nil, ErrTargetWriterUnsupported
+		test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
+			return GroupTargetsResponse{}, ErrTargetWriterUnsupported
 		})
 
 		region := targetRegion(1, 3)
@@ -586,7 +853,7 @@ func TestFirstWinQueuedRelearnPrecedesLocalRecovery(t *testing.T) {
 		test.checkGroupsAvailability()
 		release := make(chan struct{})
 		defer close(release)
-		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 			if targets[0].Expected.ID == "h" {
 				<-release
 			}
@@ -627,8 +894,8 @@ func TestFirstWinRecoversStoredTargetAfterWriteAttempt(t *testing.T) {
 				test.write([]string{"g"}, test.target("g", 1, 1, 2))
 				test.checkGroupsAvailability()
 				test.ExpireAffinityGroup("g")
-				test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
-					return scenario.written, scenario.replyErr
+				test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
+					return GroupTargetsResponse{WrittenGroupIDs: scenario.written}, scenario.replyErr
 				})
 
 				test.observe(scenario.attemptID, 2, 3)
@@ -669,11 +936,11 @@ func TestFirstWinRetainsStoredTargetInPatrolOrder(t *testing.T) {
 				test.ExpireAffinityGroup("g")
 				release := make(chan struct{})
 				defer close(release)
-				test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
+				test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
 					if len(test.calls) == 1 {
 						<-release
 					}
-					return nil, scenario.replyErr
+					return GroupTargetsResponse{}, scenario.replyErr
 				})
 
 				first, second := test.target("g", 2, 2, 3), test.target("g", 3, 3, 4)
@@ -765,11 +1032,11 @@ func TestFirstWinConfirmationWaitsForReconciliation(t *testing.T) {
 				test.SyncGroupFromEtcdWithRevision(stored, 1)
 				test.checkGroupsAvailability()
 				test.ExpireAffinityGroup("g")
-				test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
+				test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
 					if len(test.calls) == 1 {
-						return []string{"g"}, nil
+						return GroupTargetsResponse{WrittenGroupIDs: []string{"g"}}, nil
 					}
-					return nil, nil
+					return GroupTargetsResponse{}, nil
 				})
 				test.observe("g", 2, 3)
 				synctest.Sleep(time.Second + time.Millisecond)
@@ -819,11 +1086,11 @@ func TestFirstWinDoesNotRestoreTargetWithPurgedVoter(t *testing.T) {
 				test.Equal(groupExpired, test.groups["g"].GetAvailability())
 				test.Equal(storeRemoved, test.unavailableStores[2])
 				if mode == "reassert stored target" || mode == "skipped persistence" {
-					test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
+					test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
 						if len(test.calls) == 1 {
-							return nil, ErrTargetWriterUnsupported
+							return GroupTargetsResponse{}, ErrTargetWriterUnsupported
 						}
-						return nil, nil
+						return GroupTargetsResponse{}, nil
 					})
 					test.observe("g", 3, 4)
 					test.True(test.GetAffinityGroupState("g").HasUnpersistedTarget())
@@ -861,7 +1128,7 @@ func TestFirstWinSkipsNewlyUnavailableQueuedTarget(t *testing.T) {
 		test.checkGroupsAvailability()
 		release := make(chan struct{})
 		defer close(release)
-		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 			if targets[0].Expected.ID == "h" {
 				<-release
 			}
@@ -894,7 +1161,7 @@ func TestFirstWinRetriesDifferentQueuedTargetAfterCooldown(t *testing.T) {
 				release := make(chan struct{})
 				defer close(release)
 				var lastSendAt time.Time
-				test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+				test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 					lastSendAt = time.Now()
 					if len(test.calls) == 1 || (scenario == "slow other group" && targets[0].Expected.ID == "h") {
 						<-release
@@ -977,9 +1244,9 @@ type targetAttempt struct {
 	targets []GroupTarget
 }
 
-func (test *targetTest) recordTargetAttempts(reply func(context.Context, []GroupTarget) ([]string, error)) <-chan targetAttempt {
+func (test *targetTest) recordTargetAttempts(reply func(context.Context, []GroupTarget) (GroupTargetsResponse, error)) <-chan targetAttempt {
 	attempts := make(chan targetAttempt, maxPendingTargetsPerGroup+2)
-	test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+	test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 		at := time.Now()
 		written, err := reply(ctx, targets)
 		attempts <- targetAttempt{at: at, targets: targets}
@@ -1061,7 +1328,7 @@ func TestFirstWinPendingTargetLimit(t *testing.T) {
 		// Establish store conditions before queuing targets so the first periodic
 		// scan does not change the group's affinity version while the queue drains.
 		test.checkGroupsAvailability()
-		attempts := test.recordTargetAttempts(func(context.Context, []GroupTarget) ([]string, error) { return nil, nil })
+		attempts := test.recordTargetAttempts(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) { return GroupTargetsResponse{}, nil })
 		start := time.Now()
 		test.observe("g", 1, 2)
 		test.expectTargetAttempt(attempts, start, test.target("g", 1, 1, 2))
@@ -1090,13 +1357,13 @@ func TestFirstWinReconcilesLocalTarget(t *testing.T) {
 		test.checkGroupsAvailability()
 		failures := testutil.ToFloat64(targetWriteFailureCounter)
 		state := test.GetAffinityGroupState
-		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 			if len(test.calls) == 1 {
 				test.ObserveAvailableRegion(targetRegion(2, 3), state("h"))
 				test.ObserveAvailableRegion(targetRegion(3, 4), state("h"))
 			}
 			if len(test.calls) <= 2 {
-				return nil, fmt.Errorf("404 Not Found: %w", ErrTargetWriterUnsupported)
+				return GroupTargetsResponse{}, fmt.Errorf("404 Not Found: %w", ErrTargetWriterUnsupported)
 			}
 			return pd.UpdateAffinityGroupTargets(ctx, targets)
 		})
@@ -1150,9 +1417,9 @@ func TestFirstWinReplacesRejectedLocalTarget(t *testing.T) {
 		pd := newTargetTest(t, "g")
 		test := newTargetTestWithStorage(t, t.Context(), pd.store)
 		test.checkGroupsAvailability()
-		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 			if len(test.calls) == 1 {
-				return nil, ErrTargetWriterUnsupported
+				return GroupTargetsResponse{}, ErrTargetWriterUnsupported
 			}
 			return pd.UpdateAffinityGroupTargets(ctx, targets)
 		})
@@ -1187,10 +1454,10 @@ func TestFirstWinReplacesRejectedReactivatedTarget(t *testing.T) {
 		test.checkGroupsAvailability()
 		state := func() *GroupState { return test.GetAffinityGroupState("g") }
 		var reactivated *GroupState
-		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 			switch len(test.calls) {
 			case 1:
-				return nil, ErrTargetWriterUnsupported
+				return GroupTargetsResponse{}, ErrTargetWriterUnsupported
 			case 2:
 				reactivated = state()
 			}
@@ -1236,4 +1503,277 @@ func (store targetTxnStorage) RunInTxn(ctx context.Context, apply func(kv.Txn) e
 
 func (test *targetTest) interceptTxns(run func(context.Context, func(kv.Txn) error) error) {
 	test.storage = targetTxnStorage{test.store, run}
+}
+
+// Memory transactions do not track revisions, so supply the revision at each
+// storage update to exercise the same checks as an etcd transaction.
+type revisionedTargetStorage struct {
+	endpoint.AffinityStorage
+	revision int64
+}
+
+func (store *revisionedTargetStorage) LoadAffinityGroupInTxn(txn kv.Txn, id string) (string, int64, error) {
+	value, _, err := store.AffinityStorage.LoadAffinityGroupInTxn(txn, id)
+	return value, store.revision, err
+}
+
+func TestPolicyPinAdoptsStoredTargetOverUnpersistedReplacement(t *testing.T) {
+	for _, watchFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("watch-first-%t", watchFirst), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				pd := newTargetTest(t, "g")
+				_, err := pd.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2})
+				pd.NoError(err)
+				store := &revisionedTargetStorage{AffinityStorage: pd.store, revision: 1}
+				pd.storage = store
+				test := newTargetTestWithStorage(t, t.Context(), pd.store)
+				test.checkGroupsAvailability()
+				test.SyncGroupFromEtcdWithRevision(pd.stored("g"), 1)
+				var reply GroupTargetsResponse
+				test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
+					if len(test.calls) == 1 {
+						return GroupTargetsResponse{}, ErrTargetWriterUnsupported
+					}
+					resp, err := pd.UpdateAffinityGroupTargets(ctx, targets)
+					reply = resp
+					if watchFirst {
+						test.SyncGroupFromEtcdWithRevision(pd.stored("g"), 2)
+					}
+					return resp, err
+				})
+
+				test.ExpireAffinityGroup("g")
+				test.observe("g", 2, 3)
+				local := test.GetAffinityGroupState("g")
+				test.True(local.HasUnpersistedTarget())
+				test.Equal(uint64(2), local.LeaderStoreID)
+				test.Equal([]uint64{2, 3}, local.VoterStoreIDs)
+
+				time.Sleep(time.Second)
+				_, err = pd.UpdateAffinityGroupPolicy("g", BalancePolicyFixed)
+				pd.NoError(err)
+				store.revision++
+				pinned := pd.stored("g")
+				test.observe("g", 2, 3)
+				test.Len(test.calls, 2)
+				test.Empty(reply.WrittenGroupIDs)
+				test.Empty(reply.PolicyMismatchGroupIDs)
+				reconciled := test.GetAffinityGroupState("g")
+				test.False(reconciled.HasUnpersistedTarget())
+				test.Greater(reconciled.affinityVer, local.affinityVer)
+				test.Equal(pinned.LeaderStoreID, reconciled.LeaderStoreID)
+				test.Equal(pinned.VoterStoreIDs, reconciled.VoterStoreIDs)
+				if !watchFirst {
+					test.Empty(reconciled.BalancePolicy)
+					test.SyncGroupFromEtcdWithRevision(pinned, 2)
+				}
+				test.Equal(*pinned, test.GetAffinityGroupState("g").Group)
+
+				time.Sleep(time.Second)
+				test.observe("g", 2, 3)
+				test.Len(test.calls, 2)
+				test.Equal(pinned, pd.stored("g"))
+				test.Equal(*pinned, test.GetAffinityGroupState("g").Group)
+			})
+		})
+	}
+}
+
+func TestPolicyMismatchKeepsPendingGroupIndexed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pd := newTargetTest(t, "g", "blocker", "skipped")
+		store := &revisionedTargetStorage{AffinityStorage: pd.store, revision: 1}
+		pd.storage = store
+		pd.applyStoreConditions(map[uint64]storeCondition{4: storeDown})
+		test := newTargetTestWithStorage(t, t.Context(), pd.store)
+		test.checkGroupsAvailability()
+		for _, id := range []string{"g", "blocker", "skipped"} {
+			test.SyncGroupFromEtcdWithRevision(pd.stored(id), 1)
+		}
+
+		release := make(chan struct{})
+		defer close(release)
+		var batches [][]GroupTarget
+		var replies []GroupTargetsResponse
+		var writeErrors []error
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
+			batches = append(batches, targets)
+			if len(batches) <= 2 {
+				<-release
+			}
+			reply, err := pd.UpdateAffinityGroupTargets(ctx, targets)
+			replies = append(replies, reply)
+			writeErrors = append(writeErrors, err)
+			return reply, err
+		})
+
+		test.observe("blocker", 1, 2)
+		test.observe("g", 1, 2)
+		test.observe("skipped", 4, 3)
+		release <- struct{}{}
+		synctest.Wait()
+		test.Len(batches, 2)
+		test.Len(batches[1], 2)
+		test.Equal("g", batches[1][0].Expected.ID)
+		test.observe("g", 2, 3)
+
+		_, err := pd.UpdateAffinityGroupPolicy("g", BalancePolicyFixed)
+		test.NoError(err)
+		store.revision++
+		stored := pd.stored("g")
+		// The ordinary skip in this batch gives the watch and new observations
+		// a chance to run after the mismatch is handled and before the next pop.
+		logCore, _ := observer.New(zapcore.WarnLevel)
+		restore := log.ReplaceGlobals(zap.New(logCore, zap.Hooks(func(entry zapcore.Entry) error {
+			if entry.Message == "skipped affinity group target writes" {
+				test.SyncGroupFromEtcdWithRevision(stored, 2)
+				state := test.GetAffinityGroupState("g")
+				test.ObserveAvailableRegion(targetRegion(3, 2), state)
+				test.ObserveAvailableRegion(targetRegion(2, 1), state)
+			}
+			return nil
+		})), nil)
+		defer restore()
+		release <- struct{}{}
+		synctest.Wait()
+
+		test.Len(writeErrors, 3)
+		test.NoError(writeErrors[2])
+		test.Equal([]string{"g"}, replies[1].PolicyMismatchGroupIDs)
+		test.Len(batches[2], 1)
+		test.Equal(int64(2), batches[2][0].ExpectedModRevision)
+		test.Equal([]string{"g"}, replies[2].WrittenGroupIDs)
+		test.Equal(uint64(3), pd.stored("g").LeaderStoreID)
+	})
+}
+
+func TestPolicyUpdateOnEmptyTargetPreservesAndRevalidatesLocalTarget(t *testing.T) {
+	for _, scenario := range []struct {
+		name       string
+		oldPolicy  BalancePolicy
+		newPolicy  BalancePolicy
+		watchFirst bool
+		reject     bool
+		coalesce   bool
+	}{
+		{name: "unset to fixed, reply first", newPolicy: BalancePolicyFixed},
+		{name: "unset to fixed, watch first", newPolicy: BalancePolicyFixed, watchFirst: true},
+		{name: "unset to auto", newPolicy: BalancePolicyAuto},
+		{name: "auto to fixed", oldPolicy: BalancePolicyAuto, newPolicy: BalancePolicyFixed},
+		{name: "fixed to auto", oldPolicy: BalancePolicyFixed, newPolicy: BalancePolicyAuto},
+		{name: "rejected on revalidation", newPolicy: BalancePolicyFixed, reject: true},
+		{name: "coalesced policy updates", oldPolicy: BalancePolicyAuto, newPolicy: BalancePolicyFixed, coalesce: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				pd := newTargetTest(t, "g")
+				if scenario.oldPolicy != "" {
+					_, err := pd.UpdateAffinityGroupPolicy("g", scenario.oldPolicy)
+					pd.NoError(err)
+				}
+				store := &revisionedTargetStorage{AffinityStorage: pd.store, revision: 1}
+				pd.storage = store
+				test := newTargetTestWithStorage(t, t.Context(), pd.store)
+				test.checkGroupsAvailability()
+				test.SyncGroupFromEtcdWithRevision(pd.stored("g"), 1)
+				var replies []GroupTargetsResponse
+				var stateAfterWatch *GroupState
+				test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
+					if len(test.calls) == 1 {
+						return GroupTargetsResponse{}, ErrTargetWriterUnsupported
+					}
+					if len(test.calls) == 3 {
+						stateAfterWatch = test.GetAffinityGroupState("g")
+					}
+					resp, err := pd.UpdateAffinityGroupTargets(ctx, targets)
+					replies = append(replies, resp)
+					if scenario.watchFirst && len(test.calls) == 2 {
+						test.SyncGroupFromEtcdWithRevision(pd.stored("g"), 2)
+					}
+					return resp, err
+				})
+
+				test.observe("g", 1, 2)
+				local := test.GetAffinityGroupState("g")
+				test.True(local.HasUnpersistedTarget())
+				test.Equal(uint64(1), local.LeaderStoreID)
+				test.Equal([]uint64{1, 2}, local.VoterStoreIDs)
+
+				time.Sleep(time.Second)
+				_, err := pd.UpdateAffinityGroupPolicy("g", scenario.newPolicy)
+				pd.NoError(err)
+				store.revision++
+				failures := testutil.ToFloat64(targetWriteFailureCounter)
+				test.observe("g", 1, 2)
+				test.NotEmpty(replies)
+				test.Empty(replies[0].WrittenGroupIDs)
+				test.Equal([]string{"g"}, replies[0].PolicyMismatchGroupIDs)
+				if !scenario.watchFirst {
+					test.Len(replies, 1)
+					test.Equal(local, test.GetAffinityGroupState("g"))
+					test.observe("g", 1, 2)
+					test.observe("g", 2, 3)
+					test.Len(test.calls, 2)
+					test.Equal(local, test.GetAffinityGroupState("g"))
+				}
+				test.Equal(failures, testutil.ToFloat64(targetWriteFailureCounter))
+
+				if scenario.reject {
+					pd.applyStoreConditions(map[uint64]storeCondition{1: storeBusy})
+				}
+				if scenario.coalesce {
+					// Deliver only the final empty target, with the original policy.
+					_, err = pd.UpdateAffinityGroupPolicy("g", scenario.oldPolicy)
+					pd.NoError(err)
+					store.revision++
+					stored := pd.stored("g")
+					test.SyncGroupFromEtcdWithRevision(stored, store.revision)
+					synctest.Wait()
+					test.Len(test.calls, 2)
+					reconciled := test.GetAffinityGroupState("g")
+					test.False(reconciled.HasUnpersistedTarget())
+					test.Equal(*stored, reconciled.Group)
+					test.Greater(reconciled.affinityVer, local.affinityVer)
+					test.Equal(failures, testutil.ToFloat64(targetWriteFailureCounter))
+					return
+				}
+				if !scenario.watchFirst {
+					test.SyncGroupFromEtcdWithRevision(pd.stored("g"), 2)
+					synctest.Wait()
+				}
+				want := local.Group
+				want.BalancePolicy = scenario.newPolicy
+				test.Len(test.calls, 3)
+				test.Len(replies, 2)
+				test.True(stateAfterWatch.HasUnpersistedTarget())
+				test.Equal(want, stateAfterWatch.Group)
+				test.Equal(int64(2), test.calls[2].ExpectedModRevision)
+				test.Equal(scenario.newPolicy, test.calls[2].Expected.BalancePolicy)
+				test.Empty(replies[1].PolicyMismatchGroupIDs)
+				if scenario.reject {
+					test.Empty(replies[1].WrittenGroupIDs)
+					reverted := test.GetAffinityGroupState("g")
+					test.False(reverted.HasUnpersistedTarget())
+					test.Zero(reverted.LeaderStoreID)
+					test.Equal(*pd.stored("g"), reverted.Group)
+					test.Equal(scenario.newPolicy, reverted.BalancePolicy)
+
+					time.Sleep(time.Second)
+					test.observe("g", 2, 3)
+					test.Len(replies, 3)
+					test.Equal([]string{"g"}, replies[2].WrittenGroupIDs)
+					test.Equal(uint64(2), pd.stored("g").LeaderStoreID)
+					test.Equal([]uint64{2, 3}, pd.stored("g").VoterStoreIDs)
+					return
+				}
+				test.Equal(failures, testutil.ToFloat64(targetWriteFailureCounter))
+				test.Equal([]string{"g"}, replies[1].WrittenGroupIDs)
+				test.Equal(want, *pd.stored("g"))
+				test.SyncGroupFromEtcdWithRevision(pd.stored("g"), 3)
+				confirmed := test.GetAffinityGroupState("g")
+				test.False(confirmed.HasUnpersistedTarget())
+				test.Equal(want, confirmed.Group)
+			})
+		})
+	}
 }

@@ -72,9 +72,9 @@ func TestTargetWriterFailures(t *testing.T) {
 			if tc.name == "canceled" {
 				cancel()
 			}
-			written, err := writer.WriteGroupTargets(ctx, []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}})
+			resp, err := writer.WriteGroupTargets(ctx, []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}})
 			re.ErrorContains(err, tc.wantError)
-			re.Empty(written)
+			re.Equal(affinity.GroupTargetsResponse{}, resp)
 			re.Equal(1, failures)
 			re.Equal(tc.name == "no leader", errors.Is(err, affinity.ErrTargetWriterNotReady))
 			re.Equal(tc.status == http.StatusNotFound, errors.Is(err, affinity.ErrTargetWriterUnsupported))
