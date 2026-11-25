@@ -82,6 +82,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) allocID() uint32 {
 }
 
 func TestTSOKeyspaceGroupManagerSuite(t *testing.T) {
+	const cleaner = "github.com/tikv/pd/pkg/tso/fastDeletedGroupCleaner"
+	require.NoError(t, failpoint.Enable(cleaner, "return(true)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(cleaner)) })
 	suite.Run(t, &tsoKeyspaceGroupManagerTestSuite{})
 }
 
@@ -959,6 +962,14 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 	// Set the TSO of the keyspace group `firstID` to a large value.
 	err = suite.tsoCluster.GetPrimaryServer(2222, firstID).ResetTS(tsoutil.GenerateTS(&ts), false, true, firstID)
 	re.NoError(err)
+	readKeyspaceTS := func() pdpb.Timestamp {
+		client := utils.SetupClientWithKeyspaceID(suite.ctx, re, 2222, []string{suite.pdLeaderServer.GetAddr()})
+		defer client.Close()
+		physical, logical, err := client.GetTS(suite.ctx)
+		re.NoError(err)
+		return pdpb.Timestamp{Physical: physical, Logical: logical}
+	}
+	before := readKeyspaceTS()
 	// Merge the keyspace group `firstID` and `secondID` to the default keyspace group.
 	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, constant.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
 		MergeList: []uint32{firstID, secondID},
@@ -973,12 +984,14 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 	// Check the merged TSO from the default keyspace group is greater than the TSO from the keyspace group`firstID`.
 	var mergedTS pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
-		mergedTS, err = suite.requestTSO(re, 3333, constant.DefaultKeyspaceGroupID)
+		mergedTS, err = suite.requestTSO(re, 2222, constant.DefaultKeyspaceGroupID)
 		if err != nil {
 			re.ErrorIs(err, errs.ErrKeyspaceGroupIsMerging)
 		}
 		return err == nil && tsoutil.CompareTimestamp(&mergedTS, &pdpb.Timestamp{}) > 0
 	}, testutil.WithTickInterval(5*time.Second), testutil.WithWaitFor(time.Minute))
+	after := readKeyspaceTS()
+	re.Positive(tsoutil.CompareTimestamp(&after, &before), "before merge: %v, after merge: %v", &before, &after)
 	re.Positive(tsoutil.CompareTimestamp(&mergedTS, &ts))
 }
 
