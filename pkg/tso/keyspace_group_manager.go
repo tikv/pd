@@ -201,10 +201,9 @@ func (s *state) getDeletedGroupNum() int {
 	return len(s.deletedGroups)
 }
 
-// cleanKeyspaceGroup cleans the given keyspace group from the state.
-// NOTICE: currently the only legal way to delete a keyspace group is
-// to merge it into another one. This function is used to clean up the
-// remaining info after the merge has been finished.
+// cleanKeyspaceGroup removes local tracking state for a deleted keyspace group
+// once its allocator has been closed on this node. A merge target may still be
+// reading the group's persisted TSO window in storage.
 func (s *state) cleanKeyspaceGroup(groupID uint32) {
 	s.Lock()
 	defer s.Unlock()
