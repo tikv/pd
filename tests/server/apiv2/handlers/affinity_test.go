@@ -1000,6 +1000,61 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
 	})
 }
 
+// TestAffinityStatusQueryValidation verifies opt-in diagnostics and capability reporting.
+func (suite *affinityHandlerTestSuite) TestAffinityStatusQueryValidation() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		baseURL := getAffinityGroupURL(serverAddr)
+
+		for _, query := range []string{"?include_status=true", "?ids=&include_status=true", "?ids=group-1&include_status=invalid"} {
+			err := testutil.CheckGetJSON(tests.TestDialClient, baseURL+query, nil, testutil.Status(re, http.StatusBadRequest))
+			re.NoError(err)
+		}
+		ids := make([]string, 101)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("ids=g%d", i)
+		}
+		query := "?" + strings.Join(ids, "&") + "&include_status=true"
+		err := testutil.CheckGetJSON(tests.TestDialClient, baseURL+query, nil, testutil.Status(re, http.StatusBadRequest))
+		re.NoError(err)
+
+		var result handlers.AffinityGroupsResponse
+		keyRange := handlers.AffinityKeyRange{StartKey: []byte{0x01}, EndKey: []byte{0x10}}
+		createReq := handlers.CreateAffinityGroupsRequest{AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+			"empty-group": {Ranges: []handlers.AffinityKeyRange{keyRange}},
+		}}
+		mustCreateAffinityGroups(re, serverAddr, &createReq)
+		mustBatchModifyAffinityGroups(re, serverAddr, &handlers.BatchModifyAffinityGroupsRequest{
+			Remove: []handlers.GroupRangesModification{{ID: "empty-group", Ranges: []handlers.AffinityKeyRange{keyRange}}},
+		})
+		err = testutil.ReadGetJSON(re, tests.TestDialClient, baseURL+"?ids=empty-group&include_status=true", &result)
+		re.NoError(err)
+		diagnostics := result.AffinityGroups["empty-group"].Diagnostics
+		re.NotNil(diagnostics)
+		re.NotNil(diagnostics.ActualLeaderStoreIDs)
+		re.Empty(diagnostics.ActualLeaderStoreIDs)
+		re.NotNil(diagnostics.ActualVoterStoreIDs)
+		re.Empty(diagnostics.ActualVoterStoreIDs)
+		re.NotNil(diagnostics.ApproximateSizeMiB)
+		re.Zero(*diagnostics.ApproximateSizeMiB)
+		re.Nil(diagnostics.PendingMoveMiB)
+		re.NotEmpty(diagnostics.BlockedReasons)
+		re.Equal("no_key_ranges", diagnostics.BlockedReasons[0].Code)
+
+		result = handlers.AffinityGroupsResponse{}
+		err = testutil.ReadGetJSON(re, tests.TestDialClient, baseURL+"?ids=missing&include_status=true", &result)
+		re.NoError(err)
+		re.Equal(1, result.StatusVersion)
+		re.Empty(result.AffinityGroups)
+
+		result = handlers.AffinityGroupsResponse{}
+		err = testutil.ReadGetJSON(re, tests.TestDialClient, baseURL+"?ids=missing", &result)
+		re.NoError(err)
+		re.Zero(result.StatusVersion)
+	})
+}
+
 // TestAffinityListWithInvalidIDs verifies invalid ID values are rejected.
 func (suite *affinityHandlerTestSuite) TestAffinityListWithInvalidIDs() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
@@ -1441,6 +1496,43 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDQueriesMCS() {
 			re.NoError(err)
 			re.NoError(resp.Body.Close())
 			re.Equal(http.StatusNotFound, resp.StatusCode, url)
+		}
+	})
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityStatusForwardedMCS() {
+	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"forwarded-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+			},
+		})
+		urls := []string{
+			cluster.GetSchedulingPrimaryServer().GetAddr() + "/scheduling/api/v1/affinity-groups",
+			getAffinityGroupURL(serverAddr),
+		}
+		for _, url := range urls {
+			var result handlers.AffinityGroupsResponse
+			testutil.Eventually(re, func() bool {
+				result = handlers.AffinityGroupsResponse{}
+				err := testutil.ReadGetJSON(re, tests.TestDialClient, url+"?ids=forwarded-group&include_status=true", &result)
+				if err != nil || result.StatusVersion != 1 {
+					return false
+				}
+				state := result.AffinityGroups["forwarded-group"]
+				return state != nil && state.Diagnostics != nil && state.Diagnostics.ObservedAt != ""
+			})
+			state := result.AffinityGroups["forwarded-group"]
+			re.NotNil(state.Diagnostics, url)
+			re.NotEmpty(state.Diagnostics.ObservedAt, url)
+
+			result = handlers.AffinityGroupsResponse{}
+			err := testutil.ReadGetJSON(re, tests.TestDialClient, url+"?ids=missing&include_status=true", &result)
+			re.NoError(err)
+			re.Equal(1, result.StatusVersion, url)
+			re.Empty(result.AffinityGroups, url)
 		}
 	})
 }

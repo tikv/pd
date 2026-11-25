@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	affinitydiagnostics "github.com/tikv/pd/pkg/schedule/affinity/diagnostics"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -89,6 +90,7 @@ type server struct {
 
 // AffinityGroupsResponse defines the response payload for listing affinity groups.
 type AffinityGroupsResponse struct {
+	StatusVersion  int                             `json:"status_version,omitempty"`
 	AffinityGroups map[string]*affinity.GroupState `json:"affinity_groups"`
 }
 
@@ -1702,6 +1704,7 @@ func getBasicCluster(c *gin.Context, svr *scheserver.Server) (*pdcore.BasicClust
 // @Tags     affinity-groups
 // @Summary  List all affinity groups.
 // @Param    ids  query  []string  false  "Optional affinity group IDs. Repeat as ids=a&ids=b."
+// @Param    include_status  query  bool  false  "Include runtime diagnostics. Requires explicit IDs when true."
 // @Produce  json
 // @Success  200  {object}  AffinityGroupsResponse
 // @Failure  400  {string}  string  "The input is invalid."
@@ -1714,10 +1717,46 @@ func getAllAffinityGroups(c *gin.Context) {
 	}
 
 	rawIDs := c.QueryArray("ids")
-	var (
-		groupStates map[string]*affinity.GroupState
-		err         error
-	)
+	includeStatus := false
+	var err error
+	if raw, exists := c.GetQuery("include_status"); exists {
+		includeStatus, err = strconv.ParseBool(raw)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "invalid include_status value")
+			return
+		}
+	}
+	if includeStatus {
+		ids, parseErr := affinity.ParseGroupIDs(rawIDs)
+		if parseErr != nil || len(ids) == 0 {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "include_status=true requires non-empty valid ids")
+			return
+		}
+		if len(ids) > 100 || len(c.Request.URL.RawQuery) > 4096 {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "diagnostic query exceeds 100 ids or 4096 bytes")
+			return
+		}
+		h := c.MustGet(handlerKey).(*handler.Handler)
+		cluster := h.GetCluster()
+		if cluster == nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+			return
+		}
+		operators, operatorErr := h.GetOperatorController()
+		if operatorErr != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, operatorErr.Error())
+			return
+		}
+		groupStates, collectErr := affinitydiagnostics.CollectGroupStates(c.Request.Context(), manager, cluster, operators, ids)
+		if collectErr != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, collectErr.Error())
+			return
+		}
+		c.IndentedJSON(http.StatusOK, AffinityGroupsResponse{StatusVersion: 1, AffinityGroups: groupStates})
+		return
+	}
+
+	var groupStates map[string]*affinity.GroupState
 	if len(rawIDs) == 0 {
 		groupStates = affinity.CollectAllGroupStates(manager)
 	} else {
@@ -1727,11 +1766,7 @@ func getAllAffinityGroups(c *gin.Context) {
 			return
 		}
 	}
-
-	resp := AffinityGroupsResponse{
-		AffinityGroups: groupStates,
-	}
-	c.IndentedJSON(http.StatusOK, resp)
+	c.IndentedJSON(http.StatusOK, AffinityGroupsResponse{AffinityGroups: groupStates})
 }
 
 // @Tags     affinity-groups

@@ -21,9 +21,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	affinitydiagnostics "github.com/tikv/pd/pkg/schedule/affinity/diagnostics"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -78,8 +81,9 @@ type CreateAffinityGroupsRequest struct {
 	AffinityGroups map[string]CreateAffinityGroupInput `json:"affinity_groups"`
 }
 
-// AffinityGroupsResponse defines the success response for the POST request.
+// AffinityGroupsResponse defines the success response for affinity group queries.
 type AffinityGroupsResponse struct {
+	StatusVersion  int                             `json:"status_version,omitempty"`
 	AffinityGroups map[string]*affinity.GroupState `json:"affinity_groups"`
 }
 
@@ -455,7 +459,8 @@ func DeleteAffinityGroup(c *gin.Context) {
 //
 //	@Tags		affinity-groups
 //	@Summary	List all affinity groups.
-//	@Param		ids	query	[]string	false	"Optional affinity group IDs. Repeat as ids=a&ids=b."
+//	@Param		ids				query	[]string	false	"Optional affinity group IDs. Repeat as ids=a&ids=b."
+//	@Param		include_status	query	bool		false	"Include runtime diagnostics. Requires explicit IDs when true."
 //	@Produce	json
 //	@Success	200	{object}	AffinityGroupsResponse
 //	@Failure	400	{string}	string	"The input is invalid."
@@ -470,9 +475,47 @@ func GetAllAffinityGroups(c *gin.Context) {
 	}
 
 	rawIDs := c.QueryArray("ids")
-	var (
-		groupStates map[string]*affinity.GroupState
-	)
+	includeStatus := false
+	if raw, ok := c.GetQuery("include_status"); ok {
+		includeStatus, err = strconv.ParseBool(raw)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "invalid include_status value")
+			return
+		}
+	}
+	statusVersion := 0
+	if includeStatus {
+		ids, parseErr := parseDiagnosticGroupIDs(rawIDs, len(c.Request.URL.RawQuery))
+		if parseErr != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, parseErr.Error())
+			return
+		}
+		h := svr.GetHandler()
+		if h == nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, "PD server is not bootstrapped")
+			return
+		}
+		cluster, clusterErr := h.GetRaftCluster()
+		if clusterErr != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, clusterErr.Error())
+			return
+		}
+		operators, operatorErr := h.GetOperatorController()
+		if operatorErr != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, operatorErr.Error())
+			return
+		}
+		groupStates, collectErr := affinitydiagnostics.CollectGroupStates(c.Request.Context(), manager, cluster, operators, ids)
+		if collectErr != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, collectErr.Error())
+			return
+		}
+		statusVersion = 1
+		c.IndentedJSON(http.StatusOK, AffinityGroupsResponse{StatusVersion: statusVersion, AffinityGroups: groupStates})
+		return
+	}
+
+	var groupStates map[string]*affinity.GroupState
 	if len(rawIDs) == 0 {
 		groupStates = affinity.CollectAllGroupStates(manager)
 	} else {
@@ -482,11 +525,18 @@ func GetAllAffinityGroups(c *gin.Context) {
 			return
 		}
 	}
+	c.IndentedJSON(http.StatusOK, AffinityGroupsResponse{AffinityGroups: groupStates})
+}
 
-	response := AffinityGroupsResponse{
-		AffinityGroups: groupStates,
+func parseDiagnosticGroupIDs(rawIDs []string, rawQueryLength int) ([]string, error) {
+	ids, err := affinity.ParseGroupIDs(rawIDs)
+	if err != nil || len(ids) == 0 {
+		return nil, errors.New("include_status=true requires non-empty valid ids")
 	}
-	c.IndentedJSON(http.StatusOK, response)
+	if len(ids) > 100 || rawQueryLength > 4096 {
+		return nil, errors.New("diagnostic query exceeds 100 ids or 4096 bytes")
+	}
+	return ids, nil
 }
 
 // GetAffinityGroup gets a specific affinity group by group id, with optional range details.

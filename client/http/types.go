@@ -761,13 +761,42 @@ type AffinityGroup struct {
 	VoterStoreIDs   []uint64 `json:"voter_store_ids,omitempty"`
 }
 
+// AffinityGroupOperatorCount aggregates running operators by kind.
+type AffinityGroupOperatorCount struct {
+	Kind  string `json:"kind"`
+	Count uint64 `json:"count"`
+}
+
+// AffinityGroupBlockedReason describes a condition that prevents convergence.
+type AffinityGroupBlockedReason struct {
+	Code string `json:"code"`
+	Text string `json:"text"`
+}
+
+// AffinityGroupDiagnostics is a point-in-time diagnostic sample for an affinity group.
+// Pointer fields distinguish an unknown value from a known zero. Slice fields
+// are nil when coverage is incomplete and non-nil when the value is known.
+type AffinityGroupDiagnostics struct {
+	EffectivePolicy      *string                      `json:"effective_policy"`
+	ObservedAt           string                       `json:"observed_at"`
+	ActualLeaderStoreIDs []uint64                     `json:"actual_leader_store_ids"`
+	ActualVoterStoreIDs  [][]uint64                   `json:"actual_voter_store_ids"`
+	ApproximateSizeMiB   *uint64                      `json:"approximate_size_mib"`
+	PendingMoveMiB       *uint64                      `json:"pending_move_mib"`
+	LeaderSpread         *uint64                      `json:"leader_spread"`
+	VoterSpread          *uint64                      `json:"voter_spread"`
+	RunningOperators     []AffinityGroupOperatorCount `json:"running_operators"`
+	BlockedReasons       []AffinityGroupBlockedReason `json:"blocked_reasons"`
+}
+
 // AffinityGroupState defines the runtime state of an affinity group.
 type AffinityGroupState struct {
 	AffinityGroup
-	Phase               string `json:"phase"`
-	RangeCount          int    `json:"range_count"`
-	RegionCount         int    `json:"region_count"`
-	AffinityRegionCount int    `json:"affinity_region_count"`
+	Phase               string                    `json:"phase"`
+	RangeCount          int                       `json:"range_count"`
+	RegionCount         int                       `json:"region_count"`
+	AffinityRegionCount int                       `json:"affinity_region_count"`
+	Diagnostics         *AffinityGroupDiagnostics `json:"diagnostics,omitempty"`
 }
 
 // IsPending indicates that the Group is still determining the StoreIDs.
@@ -788,6 +817,7 @@ func (s *AffinityGroupState) IsStable() bool {
 
 // AffinityGroupsResponse defines the success response for affinity group operations.
 type AffinityGroupsResponse struct {
+	StatusVersion  int                            `json:"status_version,omitempty"`
 	AffinityGroups map[string]*AffinityGroupState `json:"affinity_groups"`
 }
 
