@@ -95,7 +95,7 @@ func (h *serviceMiddlewareHandler) SetServiceMiddlewareConfig(w http.ResponseWri
 			}
 			continue
 		}
-		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.ServiceMiddlewareConfig{}), k)
+		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeFor[config.ServiceMiddlewareConfig](), k)
 		if key == "" {
 			h.rd.Text(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return

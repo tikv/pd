@@ -42,7 +42,7 @@ const (
 	splitHotWriteBuckets    = "split-hot-write-region"
 	splitProgressiveRank    = 5
 	minHotScheduleInterval  = time.Second
-	maxHotScheduleInterval  = 20 * time.Second
+	maxHotScheduleInterval  = 10 * time.Second
 	defaultPendingWeight    = 1.0
 	defaultPendingAmpFactor = 2.0
 	defaultStddevThreshold  = 0.1
@@ -92,7 +92,7 @@ func newBaseHotScheduler(
 		regionPendings: make(map[uint64]*pendingInfluence),
 		stHistoryLoads: statistics.NewStoreHistoryLoads(sampleDuration, sampleInterval),
 	}
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+	for ty := range resourceTypeLen {
 		ret.types = append(ret.types, ty)
 		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
 	}
@@ -227,13 +227,13 @@ type hotScheduler struct {
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
-	base := newBaseHotScheduler(opController, conf.getHistorySampleDuration(),
-		conf.getHistorySampleInterval(), conf)
+	duration, interval := conf.getHistorySampleConfig()
+	base := newBaseHotScheduler(opController, duration, interval, conf)
 	ret := &hotScheduler{
 		baseHotScheduler: base,
 		conf:             conf,
 	}
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+	for ty := range resourceTypeLen {
 		ret.searchRevertRegions[ty] = false
 	}
 	return ret
@@ -258,7 +258,7 @@ func (s *hotScheduler) ReloadConfig() error {
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
-	if err := newCfg.validateLocked(); err != nil {
+	if err := newCfg.adjustLegacyConfig(); err != nil {
 		return err
 	}
 	s.conf.MinHotByteRate = newCfg.MinHotByteRate
@@ -301,8 +301,8 @@ func (*hotScheduler) GetMinInterval() time.Duration {
 }
 
 // GetNextInterval implements the Scheduler interface.
-func (s *hotScheduler) GetNextInterval(time.Duration) time.Duration {
-	return intervalGrow(s.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
+func (*hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(interval, maxHotScheduleInterval, exponentialGrowth)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
@@ -324,7 +324,8 @@ func (s *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*opera
 func (s *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) (ops []*operator.Operator) {
 	s.Lock()
 	defer s.Unlock()
-	s.updateHistoryLoadConfig(s.conf.getHistorySampleDuration(), s.conf.getHistorySampleInterval())
+	duration, interval := s.conf.getHistorySampleConfig()
+	s.updateHistoryLoadConfig(duration, interval)
 	s.prepareForBalance(typ, cluster)
 	// isForbidRWType can not be move earlier to support to use api and metrics.
 	switch typ {

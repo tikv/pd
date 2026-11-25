@@ -60,6 +60,15 @@ func (*checkBucketsTask) taskType() flowItemTaskKind {
 }
 
 func (t *checkBucketsTask) runTask(cache *HotBucketCache) {
+	// Only compute hot statistics when every bucket has all load counters.
+	bucketCount := len(t.Buckets.GetKeys()) - 1
+	stats := t.Buckets.GetStats()
+	if bucketCount <= 0 ||
+		len(stats.GetReadBytes()) < bucketCount || len(stats.GetReadKeys()) < bucketCount ||
+		len(stats.GetReadQps()) < bucketCount || len(stats.GetWriteBytes()) < bucketCount ||
+		len(stats.GetWriteKeys()) < bucketCount || len(stats.GetWriteQps()) < bucketCount {
+		return
+	}
 	newItems, overlaps := cache.checkBucketsFlow(t.Buckets)
 	cache.putItem(newItems, overlaps)
 }

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -45,6 +47,8 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
@@ -68,6 +72,24 @@ type ambiguousCommitKeyspaceGroupStorage struct {
 	*endpoint.StorageEndpoint
 	failNextRun     atomic.Bool
 	failNextRefresh atomic.Bool
+}
+
+type observingKeyspaceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	results chan error
+}
+
+func (s *observingKeyspaceGroupStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
+	return s.RunInTxnWithConditions(ctx, nil, f)
+}
+
+func (s *observingKeyspaceGroupStorage) RunInTxnWithConditions(ctx context.Context, conditions []clientv3.Cmp, f func(kv.Txn) error) error {
+	err := s.StorageEndpoint.RunInTxnWithConditions(ctx, conditions, f)
+	select {
+	case s.results <- err:
+	default:
+	}
+	return err
 }
 
 func (s *countingKeyspaceGroupStorage) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*endpoint.KeyspaceGroup, error) {
@@ -594,6 +616,147 @@ func (suite *keyspaceGroupTestSuite) createArchivedKeyspaces(count int) []uint32
 		keyspaceIDs = append(keyspaceIDs, meta.GetId())
 	}
 	return keyspaceIDs
+}
+
+func TestBootstrapKeyspaceGroupIsFencedByLeadershipTerm(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := storage.NewCoreStorage(storage.NewStorageWithEtcdBackend(client), nil)
+	manager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer manager.Close()
+	leadership := election.NewLeadership(client, "/test/keyspace-bootstrap-leader", "bootstrap test", "bootstrap test")
+	re.NoError(leadership.Campaign(60, "same-leader"))
+	defer leadership.Reset()
+	oldTerm, ok := leadership.CaptureTerm()
+	re.True(ok)
+	leadership.Reset()
+	re.NoError(leadership.Campaign(60, "same-leader"))
+	term, ok := leadership.CaptureTerm()
+	re.True(ok)
+	re.Equal(oldTerm.LeaderValue(), term.LeaderValue())
+	re.NotEqual(oldTerm.LeaseID(), term.LeaseID())
+	re.ErrorIs(manager.BootstrapWithLeadership(ctx, oldTerm), errs.ErrEtcdTxnConflict)
+	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	re.NoError(err)
+	re.Empty(groups)
+	re.NoError(manager.BootstrapWithLeadership(ctx, term))
+	re.NoError(manager.BootstrapWithLeadership(ctx, term))
+	group, err := manager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.Equal([]uint32{GetBootstrapKeyspaceID()}, group.Keyspaces)
+}
+
+func TestBootstrapKeyspaceGroupWorkerIsFencedByLeadershipTerm(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%t", existing), func(t *testing.T) {
+			re := require.New(t)
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer clean()
+			store := &observingKeyspaceGroupStorage{
+				StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil),
+				results:         make(chan error, 10),
+			}
+			manager := NewKeyspaceGroupManager(t.Context(), store, client)
+			defer manager.Close()
+			leadership := election.NewLeadership(client, "/test/keyspace-worker-leader", "worker test", "worker test")
+			re.NoError(leadership.Campaign(60, "same-leader"))
+			defer leadership.Reset()
+			term, ok := leadership.CaptureTerm()
+			re.True(ok)
+			if existing {
+				re.NoError(manager.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+					ID: constant.DefaultKeyspaceGroupID, UserKind: endpoint.Basic.String(), Keyspaces: []uint32{GetBootstrapKeyspaceID()},
+				}}))
+			}
+			re.NoError(manager.BootstrapWithLeadership(t.Context(), term))
+			for len(store.results) > 0 {
+				<-store.results
+			}
+			// Replace the lease at the actual worker's commit boundary without
+			// canceling its context. Only a commit-time term fence can reject it.
+			const hook = "github.com/tikv/pd/pkg/storage/kv/beforeTxnCommit"
+			var replaced sync.Once
+			re.NoError(failpoint.EnableCall(hook, func(ops []clientv3.Op) {
+				for _, op := range ops {
+					if op.IsPut() && string(op.KeyBytes()) == keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID) {
+						replaced.Do(func() {
+							leadership.Reset()
+							re.NoError(leadership.Campaign(60, "same-leader"))
+						})
+					}
+				}
+			}))
+			defer func() { re.NoError(failpoint.Disable(hook)) }()
+			manager.nodesBalancer.Put("http://tso-1")
+			select {
+			case err := <-store.results:
+				re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+			case <-time.After(10 * time.Second):
+				t.Fatal("keyspace group allocation did not attempt a transaction")
+			}
+			groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+			re.NoError(err)
+			re.Len(groups, 1)
+			re.Empty(groups[0].Members)
+			currentTerm, ok := leadership.CaptureTerm()
+			re.True(ok)
+			re.NotEqual(term.LeaseID(), currentTerm.LeaseID())
+			re.NoError(manager.BootstrapWithLeadership(t.Context(), currentTerm))
+			testutil.Eventually(re, func() bool {
+				groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+				re.NoError(err)
+				return len(groups) == 1 && len(groups[0].Members) == 1
+			})
+		})
+	}
+}
+
+func TestKeyspaceGroupAutoSplitIsFencedByLeadershipTerm(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client)
+	manager := NewKeyspaceGroupManager(t.Context(), store, nil)
+	defer manager.Close()
+	leadership := election.NewLeadership(client, "/test/keyspace-split-leader", "split test", "split test")
+	re.NoError(leadership.Campaign(60, "same-leader"))
+	defer leadership.Reset()
+	term, ok := leadership.CaptureTerm()
+	re.True(ok)
+	group := &endpoint.KeyspaceGroup{
+		ID: constant.DefaultKeyspaceGroupID, UserKind: endpoint.Basic.String(),
+		Keyspaces: buildSequentialKeyspaces(0, defaultKeyspaceCountSplitThreshold+1),
+		Members:   testKeyspaceGroupMembers(),
+	}
+	re.NoError(manager.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{group}))
+	re.NoError(manager.BootstrapWithLeadership(t.Context(), term))
+	const hook = "github.com/tikv/pd/pkg/storage/kv/beforeTxnCommit"
+	var replaced sync.Once
+	re.NoError(failpoint.EnableCall(hook, func(ops []clientv3.Op) {
+		for _, op := range ops {
+			if op.IsPut() && string(op.KeyBytes()) == keypath.KeyspaceGroupIDPath(1) {
+				replaced.Do(func() {
+					leadership.Reset()
+					re.NoError(leadership.Campaign(60, "same-leader"))
+				})
+			}
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
+	manager.doPatrolKeyspaceGroupSizeForAutoSplit(t.Context(), term.Comparisons()...)
+	currentTerm, ok := leadership.CaptureTerm()
+	re.True(ok)
+	re.NotEqual(term.LeaseID(), currentTerm.LeaseID(), "auto-split did not reach its commit boundary")
+	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	re.NoError(err)
+	re.Equal([]*endpoint.KeyspaceGroup{group}, groups)
+	manager.doPatrolKeyspaceGroupSizeForAutoSplit(t.Context(), currentTerm.Comparisons()...)
+	groups, err = store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	re.NoError(err)
+	re.Len(groups, 2)
+	re.True(groups[1].IsSplitTarget())
 }
 
 func TestRemoveKeyspacesFromGroupIsFencedByLeadershipTerm(t *testing.T) {

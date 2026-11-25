@@ -184,7 +184,7 @@ func NewSetConfigCommand() *cobra.Command {
 func NewSetLabelPropertyCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "label-property <type> <key> <value>",
-		Short: "set a label property config item",
+		Short: "set a label property config item, which is deprecated and not supported by the scheduling microservice; use placement rules or evict-leader-scheduler instead",
 		Run:   setLabelPropertyConfigCommandFunc,
 	}
 	return sc
@@ -460,7 +460,7 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 1 {
 		postJSON(cmd, replicationModePrefix, map[string]any{"replication-mode": args[0]})
 	} else if len(args) == 3 {
-		t := reflectutil.FindFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
+		t := reflectutil.FindFieldByJSONTag(reflect.TypeFor[config.ReplicationModeConfig](), []string{args[0], args[1]})
 		if t != nil && t.Kind() == reflect.Int {
 			// convert to number for numeric fields.
 			arg2, err := strconv.ParseInt(args[2], 10, 64)

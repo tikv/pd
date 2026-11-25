@@ -58,6 +58,30 @@ func TestKeyspaceGroupTestsuite(t *testing.T) {
 	suite.Run(t, new(keyspaceGroupTestSuite))
 }
 
+func TestKeyspaceGroupTearDownAfterPartialSetup(t *testing.T) {
+	for _, hasPDCluster := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pd-cluster-%t", hasPDCluster), func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			s := &keyspaceGroupTestSuite{ctx: ctx, cancel: cancel}
+			s.SetT(t)
+			if hasPDCluster {
+				s.cluster = &pdTests.TestCluster{}
+			}
+			for _, name := range []string{
+				"github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes",
+				"github.com/tikv/pd/server/delayStartServerLoop",
+			} {
+				re.NoError(failpoint.Enable(name, `return(true)`))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(name)) })
+			}
+			re.NotPanics(s.TearDownTest)
+			re.ErrorIs(ctx.Err(), context.Canceled)
+		})
+	}
+}
+
 func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupShowsKeyspacesByDefault() {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
@@ -91,6 +115,8 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupShowsKeyspacesByDefaul
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster = nil
+	suite.tsoCluster = nil
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 
@@ -106,11 +132,11 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
+	suite.cluster = tc
 	re.NoError(tc.RunInitialServers())
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	suite.cluster = tc
 	suite.pdAddr = tc.GetConfig().GetClientURL()
 
 	suite.tsoCluster, err = pdTests.NewTestTSOCluster(suite.ctx, 2, suite.pdAddr)
@@ -123,9 +149,13 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	re := suite.Require()
-	suite.cancel()
-	suite.tsoCluster.Destroy()
-	suite.cluster.Destroy()
+	defer suite.cancel()
+	if suite.tsoCluster != nil {
+		suite.tsoCluster.Destroy()
+	}
+	if suite.cluster != nil {
+		suite.cluster.Destroy()
+	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
@@ -270,6 +300,19 @@ func (suite *keyspaceGroupTestSuite) TestSetNodeAndPriorityKeyspaceGroup() {
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	// Wait for automatic replica repair after setting a single node so its
+	// membership write cannot conflict with the following validation reads.
+	testutil.Eventually(re, func() bool {
+		output, err := tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "keyspace-group", defaultKeyspaceGroupID)
+		if err != nil {
+			return false
+		}
+		var keyspaceGroup endpoint.KeyspaceGroup
+		if err := json.Unmarshal(output, &keyspaceGroup); err != nil {
+			return false
+		}
+		return len(keyspaceGroup.Members) == mcs.DefaultKeyspaceGroupReplicaCount
+	})
 	args = []string{"-u", suite.pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, "", ""}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)

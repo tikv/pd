@@ -20,6 +20,7 @@ import (
 	"errors"
 	"net/url"
 	"runtime/trace"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -832,8 +833,8 @@ func (c *Cli) processRequestsInner(
 		}
 	}
 	defer func() {
-		for i := len(spans) - 1; i >= 0; i-- {
-			spans[i].Finish()
+		for _, span := range slices.Backward(spans) {
+			span.Finish()
 		}
 		traceRegion.End()
 	}()

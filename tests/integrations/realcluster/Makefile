@@ -23,7 +23,7 @@ static: install-tools
 	@ echo "golangci-lint ..."
 	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
 	@ echo "modernize ..."
-	@ go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.18.1 -test ./...
+	@ go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@v0.52.0 -test ./...
 
 tidy:
 	@ go mod tidy

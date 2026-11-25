@@ -22,8 +22,10 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -50,6 +52,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -384,11 +388,9 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 	var wg sync.WaitGroup
 	for j := range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			scatterOnce(re, tc, scatterer, fmt.Sprintf("group-%v", j))
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -580,28 +582,31 @@ func TestScattersGroup(t *testing.T) {
 }
 
 func TestSelectedStoreGC(t *testing.T) {
-	re := require.New(t)
-	originalGCInterval := gcInterval
-	originalGCTTL := gcTTL
-	gcInterval = time.Second
-	gcTTL = time.Second * 3
-	defer func() {
-		gcInterval = originalGCInterval
-		gcTTL = originalGCTTL
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		originalGCInterval := gcInterval
+		originalGCTTL := gcTTL
+		gcInterval = time.Second
+		gcTTL = time.Second * 3
+		defer func() {
+			gcInterval = originalGCInterval
+			gcTTL = originalGCTTL
+		}()
 
-	ctx := t.Context()
-	stores := newSelectedStores(ctx)
-	stores.Put(1, "testgroup")
-	_, ok := stores.GetGroupDistribution("testgroup")
-	re.True(ok)
-	_, ok = stores.GetGroupDistribution("testgroup")
-	re.True(ok)
-	time.Sleep(gcTTL)
-	_, ok = stores.GetGroupDistribution("testgroup")
-	re.False(ok)
-	_, ok = stores.GetGroupDistribution("testgroup")
-	re.False(ok)
+		ctx := t.Context()
+		stores := newSelectedStores(ctx)
+		stores.Put(1, "testgroup")
+		_, ok := stores.GetGroupDistribution("testgroup")
+		re.True(ok)
+		_, ok = stores.GetGroupDistribution("testgroup")
+		re.True(ok)
+		// A TTL entry expires strictly after its deadline.
+		synctest.Sleep(gcTTL + time.Nanosecond)
+		_, ok = stores.GetGroupDistribution("testgroup")
+		re.False(ok)
+		_, ok = stores.GetGroupDistribution("testgroup")
+		re.False(ok)
+	})
 }
 
 func TestRegionHasLearner(t *testing.T) {
@@ -2083,9 +2088,7 @@ func TestScatterConcurrentPlacementViews(t *testing.T) {
 	results := make(chan error, len(regions))
 	var workers sync.WaitGroup
 	for worker := range 8 {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			for i := worker; i < len(regions); i += 8 {
 				region := regions[i]
 				original := region.Clone()
@@ -2117,7 +2120,7 @@ func TestScatterConcurrentPlacementViews(t *testing.T) {
 				}
 				results <- nil
 			}
-		}()
+		})
 	}
 	workers.Wait()
 	close(results)

@@ -29,6 +29,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+const testLeaseInSeconds = 2
+
 func TestRegister(t *testing.T) {
 	re := require.New(t)
 	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
@@ -52,17 +54,11 @@ func TestRegister(t *testing.T) {
 	re.NoError(err)
 	re.Empty(resp.Kvs)
 
-	// Test the case that ctx is canceled.
-	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
-	err = sr.Register()
-	re.NoError(err)
-	sr.cancel()
-	re.Empty(getKeyAfterLeaseExpired(ctx, re, client, sr.key))
-
 	// Test the case that keepalive is failed when the etcd is restarted.
-	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
+	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", testLeaseInSeconds)
 	err = sr.Register()
 	re.NoError(err)
+	defer sr.cancel()
 	fname := testutil.InitTempFileLogger(t, "info")
 	for i := range 3 {
 		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(ctx, re, client, sr.key))
@@ -83,12 +79,77 @@ func TestRegister(t *testing.T) {
 		re.NoError(err)
 		<-etcd.Server.ReadyNotify()
 		testutil.Eventually(re, func() bool {
-			return getKeyAfterLeaseExpired(ctx, re, client, sr.key) == "127.0.0.1:2"
+			resp, err := client.Get(ctx, sr.key)
+			return err == nil && len(resp.Kvs) == 1 && string(resp.Kvs[0].Value) == "127.0.0.1:2"
 		})
+		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(ctx, re, client, sr.key))
 	}
 	// Close the last restarted etcd instance
 	etcd.Server.HardStop()
 	etcd.Close()
+}
+
+func TestRevokeLeaseAfterRequestEnds(t *testing.T) {
+	for _, contextErr := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(contextErr.Error(), func(t *testing.T) {
+			re := require.New(t)
+			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+			defer clean()
+
+			ctx := t.Context()
+			sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance", 60)
+			defer sr.cancel()
+			lease, err := client.Grant(ctx, 60)
+			re.NoError(err)
+			// A registration write can commit before its caller observes a timeout.
+			_, err = client.Put(ctx, sr.key, sr.value, clientv3.WithLease(lease.ID))
+			re.NoError(err)
+			resp, err := client.Get(ctx, sr.key)
+			re.NoError(err)
+			re.Len(resp.Kvs, 1)
+
+			var requestCtx context.Context
+			var cancel context.CancelFunc
+			if contextErr == context.Canceled {
+				requestCtx, cancel = context.WithCancel(ctx)
+				cancel()
+			} else {
+				requestCtx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+			}
+			defer cancel()
+			re.ErrorIs(requestCtx.Err(), contextErr)
+			sr.revokeLease(requestCtx, lease.ID)
+
+			resp, err = client.Get(ctx, sr.key)
+			re.NoError(err)
+			re.Empty(resp.Kvs)
+			ttl, err := client.TimeToLive(ctx, lease.ID)
+			re.NoError(err)
+			re.Equal(int64(-1), ttl.TTL)
+		})
+	}
+}
+
+func TestRegisterLeaseExpiresWithoutDeregister(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx := t.Context()
+	sr := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance", testLeaseInSeconds)
+	defer sr.cancel()
+	re.NoError(sr.Register())
+	resp, err := client.Get(ctx, sr.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+
+	// Simulate a crash: stop keepalive without actively deregistering the key.
+	sr.cancel()
+	sr.wg.Wait()
+	testutil.Eventually(re, func() bool {
+		resp, err := client.Get(ctx, sr.key)
+		return err == nil && len(resp.Kvs) == 0
+	})
 }
 
 func TestRegisterConflict(t *testing.T) {
@@ -347,9 +408,66 @@ func TestRegisterRetriesAfterPromotionFollowingTTLObservation(t *testing.T) {
 	re.NoError(replacement.Deregister())
 }
 
+func TestGetKeyAfterLeaseExpiredWhenLeaseReplaced(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx := t.Context()
+	original := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "original", testLeaseInSeconds)
+	re.NoError(original.Register())
+	defer original.cancel()
+	replacement := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "replacement", testLeaseInSeconds)
+	defer replacement.cancel()
+	// Replace the registration between reading its lease ID and querying its TTL.
+	kv := &leaseSwitchingKV{KV: client.KV, afterGet: func() error {
+		if err := original.Deregister(); err != nil {
+			return err
+		}
+		if _, err := client.Revoke(ctx, original.leaseID); err != nil {
+			return err
+		}
+		return replacement.Register()
+	}}
+	observedClient := &clientv3.Client{KV: kv, Lease: client.Lease}
+	re.Equal("replacement", getKeyAfterLeaseExpired(ctx, re, observedClient, original.key))
+}
+
+type leaseSwitchingKV struct {
+	clientv3.KV
+	afterGet func() error
+}
+
+func (kv *leaseSwitchingKV) Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+	resp, err := kv.KV.Get(ctx, key, opts...)
+	if err == nil && kv.afterGet != nil {
+		afterGet := kv.afterGet
+		kv.afterGet = nil
+		err = afterGet()
+	}
+	return resp, err
+}
+
 func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
-	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
-	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
+	leaseCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	var lease *clientv3.LeaseTimeToLiveResponse
+	for {
+		resp, err := client.Get(leaseCtx, key)
+		re.NoError(err)
+		re.Len(resp.Kvs, 1)
+		re.NotZero(resp.Kvs[0].Lease)
+		lease, err = client.TimeToLive(leaseCtx, clientv3.LeaseID(resp.Kvs[0].Lease))
+		re.NoError(err)
+		if lease.GrantedTTL > 0 {
+			break
+		}
+		// The registration may have moved to a new lease between the two reads.
+		time.Sleep(100 * time.Millisecond)
+	}
+	// Leader promotion can extend the remaining TTL beyond the granted TTL.
+	// Allow for TTL rounding and etcd's expired-lease cleanup interval.
+	time.Sleep(time.Duration(max(lease.TTL, lease.GrantedTTL)+1)*time.Second + 500*time.Millisecond)
 	resp, err := client.Get(ctx, key)
 	re.NoError(err)
 	if len(resp.Kvs) == 0 {

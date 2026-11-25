@@ -90,6 +90,106 @@ func TestStoreStatistics(t *testing.T) {
 	re.Len(stats.LabelCounter["zone:unknown"], 2)
 }
 
+func TestObserveHotStatClearsStaleLoads(t *testing.T) {
+	metrics := []string{
+		"store_write_rate_bytes", "store_read_rate_bytes",
+		"store_write_rate_keys", "store_read_rate_keys",
+		"store_write_query_rate", "store_read_query_rate",
+		"store_read_cpu_usage", "store_cpu_usage",
+		"store_disk_read_rate", "store_disk_write_rate",
+		"store_regions_write_rate_bytes", "store_regions_write_rate_keys",
+		"store_write_rate_bytes_instant", "store_read_rate_bytes_instant",
+		"store_write_rate_keys_instant", "store_read_rate_keys_instant",
+		"store_write_query_rate_instant", "store_read_query_rate_instant",
+		"store_read_cpu_usage_instant",
+		"store_regions_write_rate_bytes_instant", "store_regions_write_rate_keys_instant",
+	}
+	for _, tc := range []struct {
+		name        string
+		downTime    time.Duration
+		removeStats bool
+		filterStats bool
+	}{
+		{name: "disconnected", downTime: time.Minute},
+		{name: "unhealthy", downTime: time.Hour, filterStats: true},
+		{name: "missing statistics", removeStats: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1"},
+				core.SetLastHeartbeatTS(time.Now()))
+			otherStore := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "mock://tikv-2"},
+				core.SetLastHeartbeatTS(time.Now()))
+			t.Cleanup(func() {
+				ResetStoreStatistics("1")
+				ResetStoreStatistics("2")
+			})
+			stats := NewStoresStats()
+			heartbeat := &pdpb.StoreStats{
+				Interval:     &pdpb.TimeInterval{EndTimestamp: utils.StoreHeartBeatReportInterval},
+				BytesRead:    utils.StoreHeartBeatReportInterval,
+				BytesWritten: utils.StoreHeartBeatReportInterval,
+				KeysRead:     utils.StoreHeartBeatReportInterval,
+				KeysWritten:  utils.StoreHeartBeatReportInterval,
+				QueryStats: &pdpb.QueryStats{
+					Get: utils.StoreHeartBeatReportInterval,
+					Put: utils.StoreHeartBeatReportInterval,
+				},
+				CpuUsages:    []*pdpb.RecordPair{{Key: "unified-read-pool-0", Value: 1}},
+				ReadIoRates:  []*pdpb.RecordPair{{Value: 1}},
+				WriteIoRates: []*pdpb.RecordPair{{Value: 1}},
+			}
+			for _, s := range []*core.StoreInfo{store, otherStore} {
+				stats.Observe(s.GetID(), heartbeat)
+				stats.ObserveRegionsStats([]uint64{s.GetID()}, []float64{1}, []float64{1})
+				ObserveHotStat(s, stats)
+			}
+			checkMetrics := func(s *core.StoreInfo, id string, expected float64) {
+				for _, metric := range metrics {
+					re.Equal(expected, promtestutil.ToFloat64(
+						storeStatusGauge.WithLabelValues(s.GetAddress(), id, metric)), metric)
+				}
+			}
+			checkMetrics(store, "1", 1)
+			checkMetrics(otherStore, "2", 1)
+
+			store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-tc.downTime)))
+			if tc.removeStats {
+				stats.RemoveRollingStoreStats(store.GetID())
+			}
+			if tc.filterStats {
+				cluster := core.NewBasicCluster()
+				cluster.PutStore(store)
+				cluster.PutStore(otherStore)
+				stats.FilterUnhealthyStore(cluster)
+			}
+			ObserveHotStat(store, stats)
+			ObserveHotStat(otherStore, stats)
+			checkMetrics(store, "1", 0)
+			checkMetrics(otherStore, "2", 1)
+			if tc.removeStats || tc.filterStats {
+				re.Nil(stats.GetRollingStoreStats(store.GetID()))
+			} else {
+				re.Equal(1.0, stats.GetRollingStoreStats(store.GetID()).GetLoad(utils.StoreReadBytes))
+			}
+
+			// A fresh heartbeat must make the metrics visible again.
+			store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
+			stats.Observe(store.GetID(), heartbeat)
+			stats.ObserveRegionsStats([]uint64{store.GetID()}, []float64{1}, []float64{1})
+			ObserveHotStat(store, stats)
+			checkMetrics(store, "1", 1)
+
+			// Removed stores must not have their metrics recreated.
+			ResetStoreStatistics("1")
+			ObserveHotStat(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)), stats)
+			for _, metric := range metrics {
+				re.False(storeStatusGauge.DeleteLabelValues(store.GetAddress(), "1", metric), metric)
+			}
+		})
+	}
+}
+
 func TestResetStoreStatisticsClearsPlacementStatusGauge(t *testing.T) {
 	re := require.New(t)
 	defer placementStatusGauge.Reset()

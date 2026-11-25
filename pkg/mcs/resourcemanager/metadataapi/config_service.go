@@ -190,8 +190,7 @@ func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
 	// Keep the legacy encoding/json behavior for all existing ResourceGroup
 	// fields. In particular, it matches JSON field names case-insensitively.
 	if err := json.Unmarshal(data, &legacyGroup); err != nil {
-		var keyspaceIDErr *resourceGroupKeyspaceIDError
-		if errors.As(err, &keyspaceIDErr) {
+		if keyspaceIDErr, ok := errors.AsType[*resourceGroupKeyspaceIDError](err); ok {
 			return keyspaceIDErr
 		}
 		// The updated ResourceGroup contains a protobuf oneof, so clients may
@@ -420,7 +419,7 @@ func (s *ConfigService) SetControllerConfig(c *gin.Context) {
 	}
 	resolvedConf := make(map[string]any, len(conf))
 	for k, v := range conf {
-		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(rmserver.ControllerConfig{}), k)
+		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeFor[rmserver.ControllerConfig](), k)
 		if key == "" {
 			c.String(http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return

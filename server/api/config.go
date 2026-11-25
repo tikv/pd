@@ -26,7 +26,6 @@ import (
 
 	"github.com/unrolled/render"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -169,7 +168,7 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	for k, v := range conf {
 		key := k
 		if !strings.Contains(k, ".") {
-			key = reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.Config{}), k)
+			key = reflectutil.FindJSONFullTagByChildTag(reflect.TypeFor[config.Config](), k)
 		}
 		if key == "" {
 			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
@@ -472,11 +471,9 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.svr.PatchScheduleConfig(data); err != nil {
-		var errCode errcode.ErrorCode
 		taggedErr := apiutil.TagJSONError(err)
 		if jsonErr, ok := errors.Cause(taggedErr).(apiutil.JSONError); ok {
-			errCode = errcode.NewInvalidInputErr(jsonErr.Err)
-			apiutil.ErrorResp(h.rd, w, errCode)
+			apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(jsonErr.Err))
 			return
 		}
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -608,13 +605,13 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	}
 	version, ok := input["cluster-version"]
 	if !ok {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set cluster-version")))
+		apiutil.ErrorResp(h.rd, w, errs.NewInvalidInputErr(errors.New("not set cluster-version")))
 		return
 	}
 
 	err := h.svr.SetClusterVersion(version)
 	if err != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInternalErr(err))
+		apiutil.ErrorResp(h.rd, w, errs.NewInternalErr(err))
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, "The cluster version is updated.")
@@ -728,7 +725,7 @@ func unmarshalRemoteConfig(data []byte) (*config.Config, error) {
 }
 
 func (h *confHandler) updateControllerConfig(key string, value any) error {
-	k := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(rm.ControllerConfig{}), key)
+	k := reflectutil.FindJSONFullTagByChildTag(reflect.TypeFor[rm.ControllerConfig](), key)
 	if k == "" {
 		return errors.Errorf("controller config item %s not found", key)
 	}

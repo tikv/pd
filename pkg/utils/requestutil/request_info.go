@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 // RequestInfo holds service information from http.Request
@@ -36,12 +37,28 @@ type RequestInfo struct {
 	Port           string
 	URLParam       string
 	BodyParam      string
+	PathParam      string
 	StartTimeStamp int64
 }
 
+// String implements fmt.Stringer. URLParam, BodyParam, and PathParam may carry user data
+// (e.g. region keys in label rules), so they are redacted according to the
+// `security.redact-info-log` setting. Empty fields are preserved.
 func (info *RequestInfo) String() string {
-	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, CallerID:%s, IP:%s, Port:%s, StartTime:%s, URLParam:%s, BodyParam:%s}",
-		info.ServiceLabel, info.Method, info.CallerID, info.IP, info.Port, time.Unix(info.StartTimeStamp, 0), info.URLParam, info.BodyParam)
+	urlParam, bodyParam := info.URLParam, info.BodyParam
+	if urlParam != "" {
+		urlParam = logutil.RedactString(urlParam)
+	}
+	if bodyParam != "" {
+		bodyParam = logutil.RedactString(bodyParam)
+	}
+	pathParam := ""
+	if info.PathParam != "" {
+		pathParam = ", PathParam:" + logutil.RedactString(info.PathParam)
+	}
+	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, CallerID:%s, IP:%s, Port:%s, StartTime:%s, URLParam:%s, BodyParam:%s%s}",
+		info.ServiceLabel, info.Method, info.CallerID, info.IP, info.Port, time.Unix(info.StartTimeStamp, 0),
+		urlParam, bodyParam, pathParam)
 	return s
 }
 

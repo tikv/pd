@@ -18,9 +18,9 @@ import (
 	"context"
 	"math"
 	"strconv"
-	"time"
 
 	"github.com/gogo/protobuf/proto"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -172,6 +173,16 @@ func (se *StorageEndpoint) LoadRegion(regionID uint64, region *metapb.Region) (o
 
 // LoadRegions loads all regions from storage to RegionsInfo.
 func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+	return se.LoadRegionsWithConditions(ctx, f)
+}
+
+// LoadRegionsWithConditions fences overlap deletion to the initializing term.
+// A fenced load starts from the beginning so a failed previous term cannot skip
+// records that its callback removed from the cache before deletion failed.
+func (se *StorageEndpoint) LoadRegionsWithConditions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo, conditions ...clientv3.Cmp) error {
+	if len(conditions) > 0 {
+		se.nextRegionID = 0
+	}
 	endKey := keypath.RegionPath(math.MaxUint64)
 
 	// Since the region key may be very long, using a larger rangeLimit will cause
@@ -179,10 +190,7 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 	// a variable rangeLimit to work around.
 	rangeLimit := MaxKVRangeLimit
 	for {
-		failpoint.Inject("slowLoadRegion", func() {
-			rangeLimit = 1
-			time.Sleep(time.Second)
-		})
+		failpoint.InjectCall("slowLoadRegion", ctx, &rangeLimit)
 		startKey := keypath.RegionPath(se.nextRegionID)
 		_, res, err := se.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
@@ -209,7 +217,8 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 			se.nextRegionID = region.GetId() + 1
 			overlaps := f(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
 			for _, item := range overlaps {
-				if err := se.DeleteRegion(item.GetMeta()); err != nil {
+				failpoint.InjectCall("beforeRegionOverlapDelete", item.GetID())
+				if err := se.deleteRegionWithConditions(ctx, item.GetID(), conditions); err != nil {
 					return err
 				}
 			}
@@ -219,6 +228,16 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 			return nil
 		}
 	}
+}
+
+func (se *StorageEndpoint) deleteRegionWithConditions(ctx context.Context, regionID uint64, conditions []clientv3.Cmp) error {
+	key := keypath.RegionPath(regionID)
+	if len(conditions) == 0 {
+		return se.Remove(key)
+	}
+	return se.RunInTxnWithConditions(ctx, conditions, func(txn kv.Txn) error {
+		return txn.Remove(key)
+	})
 }
 
 // SaveRegion saves one region to storage.

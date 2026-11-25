@@ -30,6 +30,7 @@ type prepareChecker struct {
 	start              time.Time
 	totalRegionCountFn func() (int, error)
 	prepared           bool
+	storesPrepared     bool
 }
 
 func newPrepareChecker(totalRegionCountFn func() (int, error)) *prepareChecker {
@@ -55,26 +56,59 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	if err != nil {
 		return false
 	}
-	// The number of active regions should be more than total region of all stores * core.CollectFactor
-	if float64(totalRegionCount)*core.CollectFactor > float64(notLoadedFromRegionsCnt) {
+	// Store preparation retains its 90% latch while scheduling waits for full collection.
+	if !checker.storesPrepared && float64(totalRegionCount)*core.CollectFactor <= float64(notLoadedFromRegionsCnt) {
+		checker.storesPrepared = areStoreRegionsCollected(c, core.CollectFactor)
+	}
+	// Wait for all regions so incomplete leader counts do not trigger premature balancing.
+	if notLoadedFromRegionsCnt < totalRegionCount {
 		return false
 	}
+	if !areStoreRegionsCollected(c, 1) {
+		return false
+	}
+	// Synced metadata can be complete while some leaders are still unknown.
+	if !c.IsRegionLeaderPrepared() {
+		return false
+	}
+	// Wait for the background refresher to publish the collected Region and
+	// leader counts. Size and flow updates can continue during preparation.
 	for _, store := range c.GetStores() {
-		if !store.IsPreparing() && !store.IsServing() {
+		if store.IsRemoved() {
 			continue
 		}
-		storeID := store.GetID()
-		// It is used to avoid sudden scheduling when scheduling service is just started.
-		if float64(store.GetStoreStats().GetRegionCount())*core.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
-			return false
-		}
-		if !c.IsStorePrepared(storeID) {
+		leaders, regions, _, _, _, _, _ := c.GetStoreStats(store.GetID())
+		if store.GetLeaderCount() != leaders || store.GetRegionCount() != regions {
 			return false
 		}
 	}
 	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionCount))
 	checker.prepared = true
 	return true
+}
+
+func areStoreRegionsCollected(c *core.BasicCluster, factor float64) bool {
+	for _, store := range c.GetStores() {
+		if !store.IsPreparing() && !store.IsServing() {
+			continue
+		}
+		storeID := store.GetID()
+		collected := c.GetNotFromStorageRegionsCntByStore(storeID)
+		if float64(collected) < float64(store.GetStoreStats().GetRegionCount())*factor || float64(collected) < float64(c.GetStoreRegionCount(storeID))*factor {
+			return false
+		}
+	}
+	return true
+}
+
+// AreStoresPrepared reports whether the original collection thresholds have been met.
+func (checker *prepareChecker) AreStoresPrepared() bool {
+	if checker == nil {
+		return false
+	}
+	checker.RLock()
+	defer checker.RUnlock()
+	return checker.prepared || checker.storesPrepared
 }
 
 // IsPrepared returns whether the coordinator is prepared.

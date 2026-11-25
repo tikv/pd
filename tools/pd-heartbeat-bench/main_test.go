@@ -18,6 +18,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -90,26 +91,28 @@ func TestStoreHeartbeatFailuresAreRecorded(t *testing.T) {
 }
 
 func TestStoreHeartbeatReporterFlushesBeforeDone(t *testing.T) {
-	stores := newStores(1)
-	stores.stat[1].Store(&pdpb.StoreStats{StoreId: 1})
+	synctest.Test(t, func(t *testing.T) {
+		stores := newStores(1)
+		stores.stat[1].Store(&pdpb.StoreStats{StoreId: 1})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	heartbeatWorkers := &sync.WaitGroup{}
-	heartbeatWorkers.Add(1)
-	reporterDone := make(chan struct{})
-	go func() {
-		defer close(reporterDone)
-		stores.reportStoreHeartbeatFailures(ctx, heartbeatWorkers)
-	}()
-	cancel()
-	stores.heartbeat(context.Background(), &storeHeartbeatClient{err: errors.New("transport failure")}, 1)
-	heartbeatWorkers.Done()
-	select {
-	case <-reporterDone:
-	case <-time.After(time.Second):
-		t.Fatal("store heartbeat reporter did not stop")
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		heartbeatWorkers := &sync.WaitGroup{}
+		heartbeatWorkers.Add(1)
+		reporterDone := make(chan struct{})
+		go func() {
+			defer close(reporterDone)
+			stores.reportStoreHeartbeatFailures(ctx, heartbeatWorkers)
+		}()
+		cancel()
+		stores.heartbeat(context.Background(), &storeHeartbeatClient{err: errors.New("transport failure")}, 1)
+		heartbeatWorkers.Done()
+		select {
+		case <-reporterDone:
+		case <-time.After(time.Second):
+			t.Fatal("store heartbeat reporter did not stop")
+		}
 
-	count, _, _ := stores.takeStoreHeartbeatFailures()
-	require.Zero(t, count)
+		count, _, _ := stores.takeStoreHeartbeatFailures()
+		require.Zero(t, count)
+	})
 }

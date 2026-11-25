@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -281,48 +282,53 @@ func TestNotify(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
-	resetTime()
-	ctx := context.Background()
-	ctx1, cancel1 := context.WithDeadline(ctx, t2)
-	re := require.New(t)
-	nc := make(chan notifyMsg, 1)
-	lim1 := NewLimiter(t0, 1, 0, 10, nc)
-	lim2 := NewLimiter(t0, 1, 0, 0, nc)
-
-	r1 := runReserveMax(t, lim1, request{t0, 5, t0, true})
-	checkTokens(re, lim1, t0, 5)
-	r1.CancelAt(t1)
-	checkTokens(re, lim1, t1, 11)
-
-	r1 = lim1.Reserve(ctx, InfDuration, t1, 5)
-	r2 := lim2.Reserve(ctx1, InfDuration, t1, 5)
-	checkTokens(re, lim1, t2, 7)
-	checkTokens(re, lim2, t2, 2)
-	d, err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
-	re.Error(err)
-	re.Equal(4*time.Second, d)
-	re.Contains(err.Error(), "estimated wait time 4s, ltb state is 1.00:-4.00")
-	checkTokens(re, lim1, t3, 13)
-	checkTokens(re, lim2, t3, 3)
-	cancel1()
-
-	ctx2, cancel2 := context.WithCancel(ctx)
-	r1 = lim1.Reserve(ctx, InfDuration, t3, 5)
-	r2 = lim2.Reserve(ctx2, InfDuration, t3, 5)
-	checkTokens(re, lim1, t3, 8)
-	checkTokens(re, lim2, t3, -2)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		_, err := WaitReservations(ctx2, t3, []*Reservation{r1, r2})
-		assert.Error(t, err)
-		wg.Done()
+	saved := [...]time.Time{t0, t1, t2, t3, t4, t5, t6, t7, t8}
+	defer func() {
+		t0, t1, t2, t3, t4, t5, t6, t7, t8 = saved[0], saved[1], saved[2], saved[3], saved[4], saved[5], saved[6], saved[7], saved[8]
 	}()
-	time.Sleep(1 * time.Second)
-	cancel2()
-	wg.Wait()
-	checkTokens(re, lim1, t5, 15)
-	checkTokens(re, lim2, t5, 5)
+
+	synctest.Test(t, func(t *testing.T) {
+		resetTime()
+		ctx := context.Background()
+		ctx1, cancel1 := context.WithDeadline(ctx, t2)
+		re := require.New(t)
+		nc := make(chan notifyMsg, 1)
+		lim1 := NewLimiter(t0, 1, 0, 10, nc)
+		lim2 := NewLimiter(t0, 1, 0, 0, nc)
+
+		r1 := runReserveMax(t, lim1, request{t0, 5, t0, true})
+		checkTokens(re, lim1, t0, 5)
+		r1.CancelAt(t1)
+		checkTokens(re, lim1, t1, 11)
+
+		r1 = lim1.Reserve(ctx, InfDuration, t1, 5)
+		r2 := lim2.Reserve(ctx1, InfDuration, t1, 5)
+		checkTokens(re, lim1, t2, 7)
+		checkTokens(re, lim2, t2, 2)
+		d, err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
+		re.Error(err)
+		re.Equal(4*time.Second, d)
+		re.Contains(err.Error(), "estimated wait time 4s, ltb state is 1.00:-4.00")
+		checkTokens(re, lim1, t3, 13)
+		checkTokens(re, lim2, t3, 3)
+		cancel1()
+
+		ctx2, cancel2 := context.WithCancel(ctx)
+		r1 = lim1.Reserve(ctx, InfDuration, t3, 5)
+		r2 = lim2.Reserve(ctx2, InfDuration, t3, 5)
+		checkTokens(re, lim1, t3, 8)
+		checkTokens(re, lim2, t3, -2)
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			_, err := WaitReservations(ctx2, t3, []*Reservation{r1, r2})
+			assert.Error(t, err)
+		})
+		synctest.Sleep(1 * time.Second)
+		cancel2()
+		wg.Wait()
+		checkTokens(re, lim1, t5, 15)
+		checkTokens(re, lim2, t5, 5)
+	})
 }
 
 func TestCancelErrorOfReservation(t *testing.T) {
@@ -339,7 +345,6 @@ func TestCancelErrorOfReservation(t *testing.T) {
 }
 
 func TestQPS(t *testing.T) {
-	re := require.New(t)
 	cases := []struct {
 		concurrency int
 		reserveN    int64
@@ -350,10 +355,13 @@ func TestQPS(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("concurrency=%d,reserveN=%d,limit=%d", tc.concurrency, tc.reserveN, tc.ruPerSec), func(t *testing.T) {
-			qps, ruSec, waitTime := testQPSCase(tc.concurrency, tc.reserveN, tc.ruPerSec)
-			t.Log(fmt.Printf("QPS: %.2f, RU: %.2f, new request need wait  %s\n", qps, ruSec, waitTime))
-			re.LessOrEqual(math.Abs(float64(tc.ruPerSec)-ruSec), float64(100)*float64(tc.reserveN))
-			re.LessOrEqual(math.Abs(float64(tc.ruPerSec)/float64(tc.reserveN)-qps), float64(100))
+			synctest.Test(t, func(t *testing.T) {
+				re := require.New(t)
+				qps, ruSec, waitTime := testQPSCase(tc.concurrency, tc.reserveN, tc.ruPerSec)
+				t.Logf("QPS: %.2f, RU: %.2f, new request needs to wait %s", qps, ruSec, waitTime)
+				re.LessOrEqual(math.Abs(float64(tc.ruPerSec)-ruSec), float64(100)*float64(tc.reserveN))
+				re.LessOrEqual(math.Abs(float64(tc.ruPerSec)/float64(tc.reserveN)-qps), float64(100))
+			})
 		})
 	}
 }
@@ -399,29 +407,31 @@ func TestReconfiguredCh(t *testing.T) {
 }
 
 func TestReconfiguredChWakesMultipleWaiters(t *testing.T) {
-	nc := make(chan notifyMsg, 1)
-	lim := NewLimiter(t0, 1, 0, 0, nc)
+	synctest.Test(t, func(t *testing.T) {
+		nc := make(chan notifyMsg, 1)
+		lim := NewLimiter(t0, 1, 0, 0, nc)
 
-	const numWaiters = 5
-	ch := lim.GetReconfiguredCh()
-	wokenUp := make(chan struct{}, numWaiters)
+		const numWaiters = 5
+		ch := lim.GetReconfiguredCh()
+		wokenUp := make(chan struct{}, numWaiters)
 
-	var wg sync.WaitGroup
-	for range numWaiters {
-		wg.Go(func() {
-			select {
-			case <-ch:
-				wokenUp <- struct{}{}
-			case <-time.After(2 * time.Second):
-			}
-		})
-	}
+		var wg sync.WaitGroup
+		for range numWaiters {
+			wg.Go(func() {
+				select {
+				case <-ch:
+					wokenUp <- struct{}{}
+				case <-time.After(2 * time.Second):
+				}
+			})
+		}
 
-	// Close by reconfiguring.
-	lim.Reconfigure(t1, tokenBucketReconfigureArgs{newTokens: 10, newFillRate: 1})
-	wg.Wait()
+		// Close by reconfiguring.
+		lim.Reconfigure(t1, tokenBucketReconfigureArgs{newTokens: 10, newFillRate: 1})
+		wg.Wait()
 
-	require.Len(t, wokenUp, numWaiters)
+		require.Len(t, wokenUp, numWaiters)
+	})
 }
 
 const testCaseRunTime = 4 * time.Second
@@ -432,13 +442,11 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var wg sync.WaitGroup
-	var totalRequests int64
+	var totalRequests atomic.Int64
 	start := time.Now()
 
 	for range concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -452,26 +460,29 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 				} else {
 					panic("r not ok")
 				}
-				atomic.AddInt64(&totalRequests, 1)
+				totalRequests.Add(1)
 			}
-		}()
+		})
 	}
 	var vQPS atomic.Value
 	var wait time.Duration
 	ch := make(chan struct{})
 	go func() {
-		var windowRequests int64
+		lastSample := start
 		for {
-			elapsed := time.Since(start)
-			if elapsed >= testCaseRunTime {
+			now := time.Now()
+			if now.Sub(start) >= testCaseRunTime {
 				close(ch)
 				break
 			}
-			windowRequests = atomic.SwapInt64(&totalRequests, 0)
-			vQPS.Store(float64(windowRequests))
+			if elapsed := now.Sub(lastSample); elapsed > 0 {
+				vQPS.Store(float64(totalRequests.Swap(0)) / elapsed.Seconds())
+			}
+			lastSample = now
 			r := lim.Reserve(ctx, 30*time.Second, time.Now(), float64(reserveN))
 			wait = r.Delay()
-			time.Sleep(1 * time.Second)
+			// Settle all reservations at the boundary before sampling the next window.
+			synctest.Sleep(time.Second)
 		}
 	}()
 	<-ch

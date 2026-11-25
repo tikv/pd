@@ -17,8 +17,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"slices"
-	"time"
 
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni/v3"
@@ -31,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 )
 
 // serviceMiddlewareBuilder is used to build service middleware for HTTP api
@@ -79,38 +78,6 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	})
 
 	next(w, r)
-}
-
-func captureRequestBodyForAudit(
-	r *http.Request,
-	requestInfo *requestutil.RequestInfo,
-	labels *audit.BackendLabels,
-) bool {
-	if requestInfo.BodyParam != "" || !auditNeedsRequestBody(labels) {
-		return false
-	}
-	requestInfo.CaptureBody(r)
-	return true
-}
-
-func auditNeedsRequestBody(labels *audit.BackendLabels) bool {
-	return labels != nil && slices.Contains(labels.Labels, audit.LocalLogLabel)
-}
-
-func prepareRequestForAudit(
-	r *http.Request,
-	requestInfo requestutil.RequestInfo,
-	hasRequestInfo bool,
-	labels *audit.BackendLabels,
-) *http.Request {
-	contextNeedsUpdate := !hasRequestInfo
-	if captureRequestBodyForAudit(r, &requestInfo, labels) {
-		contextNeedsUpdate = true
-	}
-	if contextNeedsUpdate {
-		return r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
-	}
-	return r
 }
 
 type clusterMiddleware struct {
@@ -202,8 +169,14 @@ func isFollowerSyncedClusterRequest(r *http.Request) bool {
 	return v
 }
 
+type auditServer interface {
+	GetAuditBackend() []audit.Backend
+	GetServiceMiddlewarePersistOptions() *config.ServiceMiddlewarePersistOptions
+	GetServiceAuditBackendLabels(string) *audit.BackendLabels
+}
+
 type auditMiddleware struct {
-	svr *server.Server
+	svr auditServer
 }
 
 func newAuditMiddleware(s *server.Server) negroni.Handler {
@@ -226,30 +199,10 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		next(w, r)
 		return
 	}
-	r = prepareRequestForAudit(r, requestInfo, ok, labels)
-
-	beforeNextBackends := make([]audit.Backend, 0)
-	afterNextBackends := make([]audit.Backend, 0)
-	for _, backend := range s.svr.GetAuditBackend() {
-		if backend.Match(labels) {
-			if backend.ProcessBeforeHandler() {
-				beforeNextBackends = append(beforeNextBackends, backend)
-			} else {
-				afterNextBackends = append(afterNextBackends, backend)
-			}
-		}
+	if !ok {
+		r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 	}
-	for _, backend := range beforeNextBackends {
-		backend.ProcessHTTPRequest(r)
-	}
-
-	next(w, r)
-
-	endTime := time.Now().Unix()
-	r = r.WithContext(requestutil.WithEndTime(r.Context(), endTime))
-	for _, backend := range afterNextBackends {
-		backend.ProcessHTTPRequest(r)
-	}
+	audit.ProcessHTTPRequest(w, r, labels, s.svr.GetAuditBackend(), next)
 }
 
 type rateLimitMiddleware struct {

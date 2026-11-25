@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
@@ -76,10 +77,8 @@ func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {
 		schedulerConfig:    &baseSchedulerConfig{},
 		evictCandidate:     slowCandidate{},
 		lastEvictCandidate: slowCandidate{},
-		evictSlowTrendSchedulerParam: evictSlowTrendSchedulerParam{
-			RecoverySec:   defaultRecoverySec,
-			EvictedStores: make([]uint64, 0),
-		},
+		RecoverySec:        defaultRecoverySec,
+		EvictedStores:      make([]uint64, 0),
 	}
 }
 
@@ -209,12 +208,17 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 	if oldID == 0 {
 		return
 	}
-	address := "?"
-	store := cluster.GetStore(oldID)
-	if store != nil {
-		address = store.GetAddress()
+	storeIDStr := strconv.FormatUint(oldID, 10)
+	// The store's address may have changed since we reported its eviction.
+	storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeIDStr})
+	if store := cluster.GetStore(oldID); store != nil && !store.IsRemoved() {
+		address := store.GetAddress()
+		storeSlowTrendEvictedStatusGauge.WithLabelValues(address, storeIDStr).Set(0)
+		// Burial may have cleared the metrics after we read the live snapshot.
+		if current := cluster.GetStore(oldID); current == nil || current.IsRemoved() {
+			storeSlowTrendEvictedStatusGauge.DeleteLabelValues(address, storeIDStr)
+		}
 	}
-	storeSlowTrendEvictedStatusGauge.WithLabelValues(address, strconv.FormatUint(oldID, 10)).Set(0)
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{}
@@ -355,11 +359,18 @@ func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 }
 
 func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	store := cluster.GetStore(s.conf.evictedStore())
-	if store == nil {
+	storeID := s.conf.evictedStore()
+	store := cluster.GetStore(storeID)
+	if store == nil || store.IsRemoved() {
 		return nil
 	}
-	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
+	address, storeIDStr := store.GetAddress(), strconv.FormatUint(storeID, 10)
+	storeSlowTrendEvictedStatusGauge.WithLabelValues(address, storeIDStr).Set(1)
+	// Burial may have cleared the metrics after we read the live snapshot.
+	if current := cluster.GetStore(storeID); current == nil || current.IsRemoved() {
+		storeSlowTrendEvictedStatusGauge.DeleteLabelValues(address, storeIDStr)
+		return nil
+	}
 	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
@@ -381,12 +392,12 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 	var ops []*operator.Operator
 
-	if s.conf.evictedStore() != 0 {
-		store := cluster.GetStore(s.conf.evictedStore())
+	if evictedStoreID := s.conf.evictedStore(); evictedStoreID != 0 {
+		store := cluster.GetStore(evictedStoreID)
 		if store == nil || store.IsRemoved() {
 			// Previous slow store had been removed, remove the scheduler and check
 			// slow node next time.
-			log.Info("store evicted by slow trend has been removed", zap.Uint64("store-id", store.GetID()))
+			log.Info("store evicted by slow trend has been removed", zap.Uint64("store-id", evictedStoreID))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict", "stop_removed").Inc()
 		} else if checkStoreCanRecover(cluster, store) && s.conf.readyForRecovery() {
 			log.Info("store evicted by slow trend has been recovered", zap.Uint64("store-id", store.GetID()))
@@ -418,6 +429,12 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 	}
 
 	slowStore := cluster.GetStore(slowStoreID)
+	if slowStore == nil || slowStore.IsRemoved() {
+		s.conf.popCandidate(false)
+		log.Info("slow store candidate by trend has been removed", zap.Uint64("store-id", slowStoreID))
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "canceled_removed").Inc()
+		return ops, nil
+	}
 	if !candFreshCaptured && checkStoreFasterThanOthers(cluster, slowStore) {
 		s.conf.popCandidate(false)
 		log.Info("slow store candidate by trend has been cancel", zap.Uint64("store-id", slowStoreID))

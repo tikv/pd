@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +108,9 @@ pd-ut run --junitfile xxx
 // test with race flag
 pd-ut run --race
 
+// overlap waiting tests while retaining a four-CPU budget
+pd-ut run --parallel 8 --cpu-budget 4
+
 // test with coverprofile
 pd-ut run --coverprofile xxx
 go tool cover --func=xxx`
@@ -124,6 +128,7 @@ var (
 	// runtime
 	parallel         int
 	workDir          string
+	repoRoot         string
 	coverFileTempDir string
 	// arguments
 	race         bool
@@ -131,6 +136,9 @@ var (
 	coverProfile string
 	ignoreDirs   string
 	cache        bool
+	cpuBudget    int
+	packageList  string
+	durationFile string
 	// tags for tests
 	tags string = deadlockTag
 )
@@ -145,10 +153,14 @@ func run() (exitCode int) {
 
 	race = handleFlag("--race")
 	parallelStr := stripFlag("--parallel")
+	cpuBudgetSet := slices.Contains(os.Args, "--cpu-budget")
+	cpuBudgetStr := stripFlag("--cpu-budget")
 	junitFile = stripFlag("--junitfile")
 	coverProfile = stripFlag("--coverprofile")
 	ignoreDirs = stripFlag("--ignore")
 	cache = handleFlag("--cache")
+	packageList = stripFlag("--packages")
+	durationFile = stripFlag("--test-durations")
 
 	if coverProfile != "" {
 		var err error
@@ -180,10 +192,19 @@ func run() (exitCode int) {
 			parallel = maxParallelAddrBound
 		}
 	}
+	cpuBudget = 0
+	if cpuBudgetSet {
+		cpuBudget, err = strconv.Atoi(cpuBudgetStr)
+		if err != nil || cpuBudget < 1 {
+			fmt.Println("cpu budget must be a positive integer")
+			return 1
+		}
+	}
 	workDir, err = os.Getwd()
 	if err != nil {
 		fmt.Println("os.Getwd() error", err)
 	}
+	repoRoot = workDir
 
 	srv := alloc.RunHTTPServer(context.Background())
 	defer func() {
@@ -271,7 +292,11 @@ func cmdList(args ...string) bool {
 			return false
 		}
 
-		res := listTestCases(pkg, nil)
+		res, err := listTestCases(pkg, nil)
+		if err != nil {
+			log.Println("list test cases error", err)
+			return false
+		}
 
 		if len(args) == 2 {
 			res, err = filterTestCases(res, args[1])
@@ -330,6 +355,17 @@ func cmdRun(args ...string) bool {
 		fmt.Println("list packages error", err)
 		return false
 	}
+	if packageList != "" {
+		if len(args) != 0 {
+			fmt.Println("--packages cannot be combined with positional package filters")
+			return false
+		}
+		pkgs, err = selectPackages(pkgs, packageList)
+		if err != nil {
+			fmt.Println("select packages error:", err)
+			return false
+		}
+	}
 	tasks := make([]task, 0, 5000)
 	start := time.Now()
 
@@ -370,7 +406,11 @@ func cmdRun(args ...string) bool {
 			return false
 		}
 
-		tasks = listTestCases(pkg, tasks)
+		tasks, err = listTestCases(pkg, tasks)
+		if err != nil {
+			log.Println("list test cases error", err)
+			return false
+		}
 		tasks, err = filterTestCases(tasks, args[1])
 		if err != nil {
 			log.Println("filter test cases error", err)
@@ -378,8 +418,14 @@ func cmdRun(args ...string) bool {
 		}
 	}
 
-	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", parallel*2, len(tasks), time.Since(start))
+	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", cpuParallelism()*2, len(tasks), time.Since(start))
 
+	if durationFile == "" {
+		shuffle(tasks)
+	} else if err := orderTasks(tasks, durationFile); err != nil {
+		fmt.Println("load test durations error:", err)
+		return false
+	}
 	taskCh := make(chan task, 100)
 	works := make([]numa, parallel)
 	var wg sync.WaitGroup
@@ -387,8 +433,6 @@ func cmdRun(args ...string) bool {
 		wg.Add(1)
 		go works[i].worker(&wg, taskCh)
 	}
-
-	shuffle(tasks)
 
 	start = time.Now()
 	for _, task := range tasks {
@@ -452,6 +496,7 @@ func runExistingTestCases(pkgs []string) (tasks []task, err error) {
 
 	wg := &sync.WaitGroup{}
 	tasksChannel := make(chan []task, len(pkgs))
+	errorsChannel := make(chan error, len(pkgs))
 	for _, pkg := range pkgs {
 		_, ok := existPkgs[filepath.Join(modulePath, pkg)]
 		if !ok {
@@ -460,11 +505,18 @@ func runExistingTestCases(pkgs []string) (tasks []task, err error) {
 		}
 
 		wg.Add(1)
-		go listTestCasesConcurrent(wg, pkg, tasksChannel)
+		go listTestCasesConcurrent(wg, pkg, tasksChannel, errorsChannel)
 	}
 
 	wg.Wait()
 	close(tasksChannel)
+	close(errorsChannel)
+	for listErr := range errorsChannel {
+		err = errors.Join(err, listErr)
+	}
+	if err != nil {
+		return nil, err
+	}
 	for t := range tasksChannel {
 		tasks = append(tasks, t...)
 	}
@@ -524,21 +576,24 @@ func (t *task) String() string {
 	return t.pkg + "." + t.test
 }
 
-func listTestCases(pkg string, tasks []task) []task {
-	newCases := listNewTestCases(pkg)
+func listTestCases(pkg string, tasks []task) ([]task, error) {
+	newCases, err := listNewTestCases(pkg)
+	if err != nil {
+		return nil, err
+	}
 	for _, c := range newCases {
 		tasks = append(tasks, task{pkg, c})
 	}
 
-	return tasks
+	return tasks, nil
 }
 
-func listTestCasesConcurrent(wg *sync.WaitGroup, pkg string, tasksChannel chan<- []task) {
+func listTestCasesConcurrent(wg *sync.WaitGroup, pkg string, tasksChannel chan<- []task, errorsChannel chan<- error) {
 	defer wg.Done()
-	newCases := listNewTestCases(pkg)
-	var tasks []task
-	for _, c := range newCases {
-		tasks = append(tasks, task{pkg, c})
+	tasks, err := listTestCases(pkg, nil)
+	if err != nil {
+		errorsChannel <- err
+		return
 	}
 	tasksChannel <- tasks
 }
@@ -568,7 +623,11 @@ func filterTestCases(tasks []task, arg1 string) ([]task, error) {
 
 func listPackages() ([]string, error) {
 	listPath := strings.Join([]string{".", "..."}, string(filepath.Separator))
-	cmd := goCommand("list", listPath)
+	cmd := goCommand("list", "-tags", tags)
+	if race {
+		cmd.Args = append(cmd.Args, "-race")
+	}
+	cmd.Args = append(cmd.Args, listPath)
 	cmd.Dir = workDir
 	ss, err := cmdToLines(cmd)
 	if err != nil {
@@ -580,7 +639,10 @@ func listPackages() ([]string, error) {
 		if !strings.HasPrefix(s, modulePath) {
 			continue
 		}
-		pkg := s[len(modulePath)+1:]
+		pkg := "."
+		if s != modulePath {
+			pkg = s[len(modulePath)+1:]
+		}
 		if skipDIR(pkg) {
 			continue
 		}
@@ -615,10 +677,8 @@ type testResult struct {
 
 func (n *numa) runTestCase(pkg string, fn string) testResult {
 	res := testResult{
-		JUnitTestCase: JUnitTestCase{
-			ClassName: filepath.Join(modulePath, pkg),
-			Name:      fn,
-		},
+		ClassName: filepath.Join(modulePath, pkg),
+		Name:      fn,
 	}
 
 	var buf bytes.Buffer
@@ -634,8 +694,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 		start = time.Now()
 		err = runCommandWithTempDir(cmd)
 		if err != nil {
-			var exitError *exec.ExitError
-			if errors.As(err, &exitError) {
+			if _, ok := errors.AsType[*exec.ExitError](err); ok {
 				// Retry 3 times to get rid of the weird error:
 				switch err.Error() {
 				case "signal: segmentation fault (core dumped)":
@@ -659,6 +718,15 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 			Contents: buf.String(),
 		}
 		res.err = err
+	} else {
+		skipPrefix := "--- SKIP: " + fn + " ("
+		// An unindented marker identifies a skipped top-level test.
+		for line := range strings.SplitSeq(buf.String(), "\n") {
+			if strings.HasPrefix(line, skipPrefix) {
+				res.SkipMessage = &JUnitSkipMessage{Message: "skipped"}
+				break
+			}
+		}
 	}
 
 	res.d = time.Since(start)
@@ -741,7 +809,11 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
 	if strings.Contains(fn, "Suite") {
-		args = append(args, "-test.cpu", strconv.Itoa(parallel/2))
+		cpus := cpuParallelism() / 2
+		if cpuBudget > 0 {
+			cpus = max(1, cpus)
+		}
+		args = append(args, "-test.cpu", strconv.Itoa(cpus))
 	} else {
 		args = append(args, "-test.cpu", "1")
 	}
@@ -756,6 +828,15 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 	args = append(args, "-test.run", "^"+fn+"$")
 
 	return exec.Command(exe, args...)
+}
+
+// cpuParallelism keeps compilation and individual test CPU allocations stable
+// when extra test processes overlap cluster waits.
+func cpuParallelism() int {
+	if cpuBudget > 0 {
+		return min(parallel, cpuBudget)
+	}
+	return parallel
 }
 
 func skipDIR(pkg string) bool {
@@ -779,13 +860,8 @@ func generateBuildCache() error {
 	fmt.Println("generate build cache")
 	// cd cmd/pd-server && go test -tags=$(tags) -exec-=true -vet=off -toolexec=go-compile-without-link
 	cmd := goCommand("test", "-exec=true", "-vet", "off", "--tags="+tags)
-	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(workDir, "tools", "pd-ut", "go-compile-without-link.sh"))
-	cmd.Dir = filepath.Join(workDir, "cmd", "pd-server")
-	if strings.Contains(workDir, integrationsTestPath) {
-		cmd.Dir = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "cmd", "pd-server")
-		goCompileWithoutLink = fmt.Sprintf("-toolexec=%s", filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)],
-			"tools", "pd-ut", "go-compile-without-link.sh"))
-	}
+	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(repoRoot, "tools", "pd-ut", "go-compile-without-link.sh"))
+	cmd.Dir = filepath.Join(repoRoot, "cmd", "pd-server")
 	cmd.Args = append(cmd.Args, goCompileWithoutLink)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -805,22 +881,23 @@ func buildTestBinaryMulti(pkgs []string) (_ []byte, err error) {
 
 	// go test --exec=xprog --tags=$(tags) -vet=off --count=0 $(pkgs)
 	// workPath just like `/pd/tests/integrations`
-	xprogPath := filepath.Join(workDir, "bin", "xprog")
-	if strings.Contains(workDir, integrationsTestPath) {
-		xprogPath = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin", "xprog")
-	}
+	xprogPath := filepath.Join(repoRoot, "bin", "xprog")
 	packages := make([]string, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		packages = append(packages, filepath.Join(modulePath, pkg))
 	}
 
-	// We use 2 * parallel for `go build` to make it faster.
-	p := strconv.Itoa(parallel * 2)
+	// Keep compiler concurrency within the selected CPU budget.
+	p := strconv.Itoa(cpuParallelism() * 2)
 	cmd := goCommand("test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags="+tags)
 	if coverProfile != "" {
-		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
-		if strings.Contains(workDir, integrationsTestPath) {
-			coverPkg = filepath.Join("..", "..", "...")
+		root, err := filepath.Rel(workDir, repoRoot)
+		if err != nil {
+			return nil, err
+		}
+		coverPkg := filepath.Join(root, "...")
+		if root == "." {
+			coverPkg = "./..."
 		}
 		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))
 	}
@@ -875,8 +952,7 @@ func buildTestBinary(pkg string) error {
 func testBinaryExist(pkg string) (bool, error) {
 	_, err := os.Stat(testFileFullPath(pkg))
 	if err != nil {
-		var pathError *os.PathError
-		if errors.As(err, &pathError) {
+		if _, ok := errors.AsType[*os.PathError](err); ok {
 			return false, nil
 		}
 	}
@@ -884,6 +960,9 @@ func testBinaryExist(pkg string) (bool, error) {
 }
 
 func testFileName(pkg string) string {
+	if pkg == "." {
+		return filepath.Base(modulePath) + ".test.bin"
+	}
 	_, file := filepath.Split(pkg)
 	return file + ".test.bin"
 }
@@ -892,7 +971,7 @@ func testFileFullPath(pkg string) string {
 	return filepath.Join(workDir, pkg, testFileName(pkg))
 }
 
-func listNewTestCases(pkg string) []string {
+func listNewTestCases(pkg string) ([]string, error) {
 	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	// core.test -test.list Test
 	// #nosec G702 -- pd-ut intentionally executes the test binary in the selected package directory.
@@ -900,14 +979,14 @@ func listNewTestCases(pkg string) []string {
 	cmd.Dir = filepath.Join(workDir, pkg)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
-	err := cmd.Run()
-	res := strings.Split(buf.String(), "\n")
-	if err != nil && len(res) == 0 {
-		fmt.Println("err ==", err)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("list test cases in %s: %w", pkg, err)
 	}
+	res := strings.Split(buf.String(), "\n")
 	return filter(res, func(s string) bool {
 		return strings.HasPrefix(s, "Test") && s != "TestT" && s != "TestBenchDaily"
-	})
+	}), nil
 }
 
 func cmdToLines(cmd *exec.Cmd) ([]string, error) {
@@ -975,8 +1054,7 @@ func withTrace(err error) error {
 	if err == nil {
 		return err
 	}
-	var errStack *errWithStack
-	if errors.As(err, &errStack) {
+	if _, ok := errors.AsType[*errWithStack](err); ok {
 		return err
 	}
 	var stack [4096]byte

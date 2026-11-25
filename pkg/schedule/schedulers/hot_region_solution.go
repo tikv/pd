@@ -15,6 +15,8 @@
 package schedulers
 
 import (
+	"math"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -29,7 +31,7 @@ type solution struct {
 	revertRegion   *core.RegionInfo // The regions to hedge back effects. Relate revertPeerStat. dstStore -> srcStore
 	revertPeerStat *statistics.HotPeerStat
 
-	cachedPeersRate []float64
+	cachedPeersRate [utils.DimLen]float64
 
 	// progressiveRank measures the contribution for balance.
 	// The bigger the rank, the better this solution is.
@@ -47,10 +49,11 @@ type solution struct {
 // in other word, the min load of the src store and the max load of the dst store.
 // If peersRate is negative, the direction is reversed.
 func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
+	srcPred, dstPred := s.srcStore.LoadPred, s.dstStore.LoadPred
 	if s.getPeersRateFromCache(dim) >= 0 {
-		return s.srcStore.LoadPred.Min().Loads[dim], s.dstStore.LoadPred.Max().Loads[dim]
+		return math.Min(srcPred.Current.Loads[dim], srcPred.Future.Loads[dim]), math.Max(dstPred.Current.Loads[dim], dstPred.Future.Loads[dim])
 	}
-	return s.srcStore.LoadPred.Max().Loads[dim], s.dstStore.LoadPred.Min().Loads[dim]
+	return math.Max(srcPred.Current.Loads[dim], srcPred.Future.Loads[dim]), math.Min(dstPred.Current.Loads[dim], dstPred.Future.Loads[dim])
 }
 
 // getCurrentLoad returns the current load of the src store and the dst store.
@@ -60,12 +63,13 @@ func (s *solution) getCurrentLoad(dim int) (src float64, dst float64) {
 
 // getPendingLoad returns the pending load of the src store and the dst store.
 func (s *solution) getPendingLoad(dim int) (src float64, dst float64) {
-	return s.srcStore.LoadPred.Pending().Loads[dim], s.dstStore.LoadPred.Pending().Loads[dim]
+	srcPred, dstPred := s.srcStore.LoadPred, s.dstStore.LoadPred
+	return math.Abs(srcPred.Current.Loads[dim] - srcPred.Future.Loads[dim]), math.Abs(dstPred.Current.Loads[dim] - dstPred.Future.Loads[dim])
 }
 
 // calcPeersRate precomputes the peer rate and stores it in cachedPeersRate.
 func (s *solution) calcPeersRate(dims ...int) {
-	s.cachedPeersRate = make([]float64, utils.DimLen)
+	s.cachedPeersRate = [utils.DimLen]float64{}
 	for _, dim := range dims {
 		peersRate := s.mainPeerStat.GetLoad(dim)
 		if s.revertPeerStat != nil {

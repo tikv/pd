@@ -53,7 +53,7 @@ func newMockTSOServiceProvider(option *opt.Option, createStream func(ctx context
 	return &mockTSOServiceProvider{
 		option:       option,
 		createStream: createStream,
-		conCtxMgr:    cctx.NewManager[*tsoStream](),
+		conCtxMgr:    newConnectionCtxManager(),
 	}
 }
 
@@ -107,10 +107,13 @@ func (s *testTSODispatcherSuite) SetupTest() {
 	// single stable access to the inner stream, we do not allow it to create it more than once in these tests.
 	// To avoid data race on reading `stream` and `streamInner` fields.
 	created := new(atomic.Bool)
+	streamCreated := make(chan struct{})
+	var streamCreatedOnce sync.Once
 	createStream := func(ctx context.Context) *tsoStream {
 		s.streamInner = newMockTSOStreamImpl(ctx, resultModeGenerateOnSignal)
 		s.stream = newTSOStream(ctx, mockStreamURL, s.streamInner)
 		created.Store(true)
+		streamCreatedOnce.Do(func() { close(streamCreated) })
 		return s.stream
 	}
 	s.dispatcher = newTSODispatcher(context.Background(), newMockTSOServiceProvider(s.option, createStream))
@@ -134,9 +137,7 @@ func (s *testTSODispatcherSuite) SetupTest() {
 		req := s.sendReq(ctx)
 		s.reqMustNotReady(req)
 		// Wait until created
-		for !created.Load() {
-			time.Sleep(time.Millisecond)
-		}
+		<-streamCreated
 		s.streamInner.generateNext()
 		s.reqMustReady(req)
 	}
@@ -182,6 +183,37 @@ func (s *testTSODispatcherSuite) reqMustReady(req *Request) (physical int64, log
 	physical, logical, err := req.waitTimeout(time.Second)
 	s.re.NoError(err)
 	return physical, logical
+}
+
+func (s *testTSODispatcherSuite) TestEvictStreamWithBatchOnIt() {
+	conCtxMgr := s.dispatcher.provider.getConnectionCtxMgr()
+	// Serve the next batch with a stream bound to the context of its connection, so that
+	// canceling the connection fails the batch on it.
+	oldCtx, oldCancel := context.WithCancel(context.Background())
+	defer oldCancel()
+	oldInner := newMockTSOStreamImpl(oldCtx, resultModeGenerateOnSignal)
+	defer oldInner.stop()
+	s.re.True(conCtxMgr.Store(oldCtx, oldCancel, mockStreamURL, newTSOStream(oldCtx, mockStreamURL, oldInner), true))
+	req := s.sendReq(context.Background())
+	s.reqMustNotReady(req)
+
+	// Overwriting the stream evicts it, which fails the batch on it with an error that GetTS retries.
+	newCtx, newCancel := context.WithCancel(context.Background())
+	defer newCancel()
+	newInner := newMockTSOStreamImpl(newCtx, resultModeGenerateOnSignal)
+	// Keep the timestamps above those already returned by the stream created in SetupTest.
+	newInner.resGenPhysical += 10000
+	defer newInner.stop()
+	s.re.True(conCtxMgr.CleanAllAndStore(newCtx, newCancel, "new-url", newTSOStream(newCtx, "new-url", newInner)))
+	s.re.Error(oldCtx.Err())
+	_, _, err := req.waitTimeout(time.Second)
+	s.re.True(errs.ErrClientTSOStreamClosed.Equal(err), "%v", err)
+
+	// A retried request is served by the new stream.
+	req = s.sendReq(context.Background())
+	s.reqMustNotReady(req)
+	newInner.generateNext()
+	s.reqMustReady(req)
 }
 
 func TestTSODispatcherTestSuite(t *testing.T) {
@@ -230,6 +262,124 @@ func (s *testTSODispatcherSuite) TestBasic() {
 	s.streamInner.generateNext()
 	req = s.sendReq(ctx)
 	s.reqMustNotReady(req)
+}
+
+func (s *testTSODispatcherSuite) TestDispatchRequestCancellationAfterEnqueue() {
+	for _, target := range []string{"request", "client", "tso-client"} {
+		s.Run(target, func() {
+			re := require.New(s.T())
+			requestCtx, cancelRequest := context.WithCancel(context.Background())
+			defer cancelRequest()
+			clientCtx, cancelClient := context.WithCancel(context.Background())
+			defer cancelClient()
+			tsoCtx, cancelTSO := context.WithCancel(context.Background())
+			defer cancelTSO()
+			cancel := map[string]context.CancelFunc{
+				"request": cancelRequest, "client": cancelClient, "tso-client": cancelTSO,
+			}[target]
+			canceledAfterEnqueue := false
+			re.NoError(failpoint.EnableCall("github.com/tikv/pd/client/clients/tso/afterPushTSORequest", func() {
+				cancel()
+				canceledAfterEnqueue = true
+			}))
+			defer func() {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/afterPushTSORequest"))
+			}()
+
+			cli := &Cli{ctx: tsoCtx}
+			cli.dispatcher.Store(s.dispatcher)
+			req := s.getReq(requestCtx)
+			req.clientCtx = clientCtx
+			retryable, err := cli.DispatchRequest(req)
+			re.True(canceledAfterEnqueue, "cancellation must happen after the request is enqueued")
+			re.False(retryable)
+			// An enqueue must not report an error that makes innerClient finish it again.
+			re.NoError(err)
+			re.Empty(req.done, "only the dispatcher may complete the enqueued request")
+
+			s.streamInner.generateNext()
+			select {
+			case err = <-req.done:
+				re.NoError(err)
+			case <-time.After(time.Second):
+				s.T().Fatal("dispatcher did not complete the enqueued request")
+			}
+			re.Positive(req.physical)
+			re.Positive(req.logical)
+		})
+	}
+}
+
+func TestPushToClosedDispatcher(t *testing.T) {
+	for _, target := range []string{"before-enqueue", "after-enqueue"} {
+		t.Run(target, func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			td := &tsoDispatcher{ctx: ctx, cancel: cancel, tsoRequestCh: make(chan *Request, 1)}
+			t.Cleanup(td.close)
+			if target == "before-enqueue" {
+				td.close()
+			} else {
+				re.NoError(failpoint.EnableCall("github.com/tikv/pd/client/clients/tso/afterPushTSORequest", func() {
+					// Cancel without draining so push must complete the enqueued request.
+					td.cancel()
+				}))
+				t.Cleanup(func() {
+					re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/afterPushTSORequest"))
+				})
+			}
+			req := &Request{requestCtx: context.Background(), clientCtx: context.Background(), done: make(chan error, 1)}
+			td.push(req)
+			select {
+			case err := <-req.done:
+				re.ErrorIs(err, context.Canceled)
+			default:
+				t.Fatal("request sent to a closed dispatcher was not completed")
+			}
+			re.Empty(td.tsoRequestCh)
+		})
+	}
+}
+
+func TestPushCancellationWithFullQueue(t *testing.T) {
+	for _, target := range []string{"request", "client", "dispatcher"} {
+		t.Run(target, func(t *testing.T) {
+			re := require.New(t)
+			requestCtx, cancelRequest := context.WithCancel(context.Background())
+			defer cancelRequest()
+			clientCtx, cancelClient := context.WithCancel(context.Background())
+			defer cancelClient()
+			ctx, cancelDispatcher := context.WithCancel(context.Background())
+			td := &tsoDispatcher{ctx: ctx, cancel: cancelDispatcher, tsoRequestCh: make(chan *Request, 1)}
+			// No consumer can free this slot before cleanup.
+			td.tsoRequestCh <- &Request{done: make(chan error, 1)}
+			req := &Request{requestCtx: requestCtx, clientCtx: clientCtx, done: make(chan error, 1)}
+			pushed := make(chan struct{})
+			go func() {
+				td.push(req)
+				close(pushed)
+			}()
+			t.Cleanup(func() {
+				td.close()
+				<-pushed
+			})
+			cancel := map[string]context.CancelFunc{
+				"request": cancelRequest, "client": cancelClient, "dispatcher": cancelDispatcher,
+			}[target]
+			cancel()
+			select {
+			case <-pushed:
+			case <-time.After(time.Second):
+				t.Fatal("enqueue did not stop after cancellation")
+			}
+			select {
+			case err := <-req.done:
+				re.ErrorIs(err, context.Canceled)
+			default:
+				t.Fatal("canceled request was not completed")
+			}
+		})
+	}
 }
 
 func (s *testTSODispatcherSuite) TestHandleProcessRequestErrorRemoveConnOnCalleeMismatch() {

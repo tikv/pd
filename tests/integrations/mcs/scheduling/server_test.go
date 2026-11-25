@@ -37,14 +37,18 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 )
 
@@ -138,7 +142,6 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
-	time.Sleep(time.Second)
 	id1 := retryAllocID(re, cluster)
 	re.Greater(id1, id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
@@ -352,7 +355,6 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	err = leaderServer.SetMicroserviceConfig(*conf)
 	re.NoError(err)
 	tc.GetPrimaryServer().Close()
-	time.Sleep(time.Second)
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -529,6 +531,52 @@ func (suite *serverTestSuite) TestRemoveScheduler() {
 
 	// Verify the scheduler exists again in the controller.
 	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), true)
+}
+
+func (suite *serverTestSuite) TestDeleteLastStoreAfterRaftClusterRestart() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
+	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
+
+	for _, typ := range []types.CheckerSchedulerType{types.EvictLeaderScheduler, types.GrantLeaderScheduler} {
+		name := typ.String()
+		checkExist := func(exist bool) {
+			testutil.Eventually(re, func() bool {
+				return (schedulersController.GetScheduler(name) != nil) == exist
+			})
+		}
+		tests.MustAddScheduler(re, suite.backendEndpoints, name, map[string]any{"store_id": 1})
+		checkExist(true)
+
+		// A PD restart or leader change creates a new RaftCluster, whose
+		// coordinator loads the persisted scheduler as a handler only.
+		rc := suite.pdLeader.GetServer().GetRaftCluster()
+		rc.Stop()
+		re.NoError(rc.Start(suite.pdLeader.GetServer(), false))
+		testutil.Eventually(re, func() bool {
+			rc := suite.pdLeader.GetServer().GetRaftCluster()
+			if rc == nil {
+				return false
+			}
+			_, ok := rc.GetSchedulerHandlers()[name]
+			return ok
+		})
+
+		// Removing the last store removes the whole scheduler.
+		tests.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", name, 1))
+		rc = suite.pdLeader.GetServer().GetRaftCluster()
+		_, ok := rc.GetSchedulerHandlers()[name]
+		re.False(ok, name)
+		for _, cfg := range rc.GetScheduleConfig().Schedulers {
+			re.NotEqual(types.SchedulerTypeCompatibleMap[typ], cfg.Type)
+		}
+		checkExist(false)
+	}
 }
 
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
@@ -716,8 +764,10 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 		err = bucketStream.Send(bucketReq)
 		re.NoError(err)
 
-		// Wait a bit between requests to simulate real streaming
-		time.Sleep(100 * time.Millisecond)
+		testutil.Eventually(re, func() bool {
+			region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+			return region != nil && region.GetBuckets() != nil && region.GetBuckets().GetVersion() == version
+		})
 	}
 
 	// Close the stream (ReportBuckets is fire-and-forget)
@@ -892,6 +942,77 @@ func (suite *serverTestSuite) TestStoreLimit() {
 		op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpLeader,
 			operator.TransferLeader{FromStore: 1, ToStore: 2})
 		checkOperatorSuccess(re, oc, op)
+	}
+
+	// Exhaust an existing limiter, then verify that a scheduling config update
+	// refreshes it before the next admission check.
+	const exhaustedRate = 0.00006
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, exhaustedRate)
+	re.NoError(err)
+	waitSyncFinish(re, tc, storelimit.AddPeer, exhaustedRate)
+	testutil.Eventually(re, func() bool {
+		store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+		return ok && limit.Rate(storelimit.AddPeer) == exhaustedRate/60
+	})
+	store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, coreconstant.Medium))
+	re.False(store.IsAvailable(storelimit.AddPeer, coreconstant.Medium))
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 120)
+	re.NoError(err)
+	waitSyncFinish(re, tc, storelimit.AddPeer, 120)
+	testutil.Eventually(re, func() bool {
+		store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+		limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+		return ok && limit.Rate(storelimit.AddPeer) == 2.0 && store.IsAvailable(storelimit.AddPeer, coreconstant.Medium)
+	})
+}
+
+func (suite *serverTestSuite) TestStoreLimitInitialLoad() {
+	re := suite.Require()
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetAddr())
+	defer conn.Close()
+	resp, err := grpcPDClient.PutStore(suite.ctx, &pdpb.PutStoreRequest{
+		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Store: &metapb.Store{
+			Id:      2,
+			Address: "mock://tikv-2:2",
+			State:   metapb.StoreState_Up,
+			Version: "7.0.0",
+		},
+	})
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+	limits := []struct {
+		typ  storelimit.Type
+		rate float64
+	}{
+		{storelimit.AddPeer, 120},
+		{storelimit.RemovePeer, 180},
+		{storelimit.TransferLeaderIn, 240},
+	}
+	for _, limit := range limits {
+		re.NoError(suite.pdLeader.GetRaftCluster().SetStoreLimit(2, limit.typ, limit.rate))
+	}
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	// WaitForPrimaryServing sends Region heartbeats that can trigger admission
+	// and lazily refresh limiters, masking a missing initial watcher refresh.
+	testutil.Eventually(re, func() bool { return tc.GetPrimaryServer() != nil }, testutil.WithWaitFor(10*time.Second))
+	store := tc.GetPrimaryServer().GetCluster().GetStore(2)
+	re.NotNil(store)
+	limiter, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+	re.True(ok)
+	for _, limit := range limits {
+		re.Equal(limit.rate/60, limiter.Rate(limit.typ), limit.typ.String())
+	}
+
+	for _, limit := range limits {
+		rate := limit.rate + 180
+		re.NoError(suite.pdLeader.GetRaftCluster().SetStoreLimit(2, limit.typ, rate))
+		testutil.Eventually(re, func() bool { return limiter.Rate(limit.typ) == rate/60 })
 	}
 }
 
@@ -1071,8 +1192,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: fmt.Appendf(nil, "k%d", i),
-				EndKey:   fmt.Appendf(nil, "k%d", i+1),
+				StartKey: fmt.Appendf(nil, "k%03d", i),
+				EndKey:   fmt.Appendf(nil, "k%03d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1106,6 +1227,10 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	// Get the new primary server
 	primary2 := tc.GetPrimaryServer()
 	re.NotNil(primary2)
+	testutil.Eventually(re, func() bool {
+		addr, exists := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
+		return exists && addr == primary2.GetAddr()
+	})
 
 	// Get the current cluster components
 	cluster2 := primary2.GetCluster()
@@ -1117,15 +1242,15 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	re.False(prepareChecker2.IsPrepared())
 	re.False(coordinator2.ShouldRun())
 
-	// Send only a small number of region heartbeats (insufficient for prepare checker)
-	for i := uint64(1); i <= 50; i++ {
+	// Collecting 99% of regions must not prepare the new primary.
+	for i := uint64(1); i <= 99; i++ {
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 			Region: &metapb.Region{
 				Id:       i,
 				Peers:    peers,
-				StartKey: fmt.Appendf(nil, "k%d", i),
-				EndKey:   fmt.Appendf(nil, "k%d", i+1),
+				StartKey: fmt.Appendf(nil, "k%03d", i),
+				EndKey:   fmt.Appendf(nil, "k%03d", i+1),
 			},
 			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
@@ -1135,8 +1260,9 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 		re.NoError(err)
 	}
 
-	// Wait a bit to ensure the prepare checker has time to process the incoming heartbeats
-	time.Sleep(2 * time.Second)
+	testutil.Eventually(re, func() bool {
+		return cluster2.GetNotFromStorageRegionsCnt() == 99
+	})
 
 	// The prepare checker should still be checking and potentially not satisfied
 	shouldRun := coordinator2.ShouldRun()
@@ -1146,23 +1272,21 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	re.False(isPrepared)
 	re.False(shouldRun)
 
-	// Send enough regions to eventually satisfy the prepare checker
-	for i := uint64(51); i <= 100; i++ {
-		regionReq := &pdpb.RegionHeartbeatRequest{
-			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
-			Region: &metapb.Region{
-				Id:       i,
-				Peers:    peers,
-				StartKey: fmt.Appendf(nil, "k%d", i),
-				EndKey:   fmt.Appendf(nil, "k%d", i+1),
-			},
-			Leader:          leaderPeer,
-			ApproximateSize: 10 * units.MiB,
-			ApproximateKeys: 100,
-		}
-		err = stream.Send(regionReq)
-		re.NoError(err)
+	// Collect the last region to satisfy the prepare checker.
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region: &metapb.Region{
+			Id:       100,
+			Peers:    peers,
+			StartKey: []byte("k100"),
+			EndKey:   []byte("k101"),
+		},
+		Leader:          leaderPeer,
+		ApproximateSize: 10 * units.MiB,
+		ApproximateKeys: 100,
 	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
 
 	// Finally verify that once prepared, the coordinator should be ready to run
 	testutil.Eventually(re, func() bool {
@@ -1203,7 +1327,21 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	time.Sleep(2 * time.Second)
+
+	statsUpdated := make(chan struct{})
+	notifyStatsUpdated := sync.OnceFunc(func() { close(statsUpdated) })
+	const statsHook = "github.com/tikv/pd/server/cluster/afterUpdateStoreStats"
+	re.NoError(failpoint.EnableCall(statsHook, func(updated *cluster.RaftCluster) {
+		if updated == rc {
+			notifyStatsUpdated()
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(statsHook)) }()
+	select {
+	case <-statsUpdated:
+	case <-time.After(5 * time.Second):
+		suite.T().Fatal("store statistics were not updated after the region heartbeats")
+	}
 
 	// add a new store
 	resp, err := s.PutStore(
@@ -1220,9 +1358,13 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 	re.NoError(err)
 	re.Empty(resp.GetHeader().GetError())
 
-	time.Sleep(2 * time.Second)
+	testutil.Eventually(re, func() bool {
+		_, err := rc.GetProgressByID(4)
+		return err == nil
+	})
 	for i, r := range regions {
 		if i < 50 {
+			r = r.Clone()
 			r.GetMeta().Peers[2].StoreId = 4
 			r.GetMeta().RegionEpoch.ConfVer = 2
 			r.GetMeta().RegionEpoch.Version = 2
@@ -1230,7 +1372,10 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 			re.NoError(err)
 		}
 	}
-	time.Sleep(2 * time.Second)
+	testutil.Eventually(re, func() bool {
+		p, err := rc.GetProgressByID(4)
+		return err == nil && p.ProgressPercent != 0 && p.CurrentSpeed != 0 && p.LeftSecond != 0
+	})
 	p, err := rc.GetProgressByID(4)
 	re.Equal("preparing", string(p.Action))
 	re.NotEmpty(p.ProgressPercent)
@@ -1320,6 +1465,95 @@ func (suite *serverTestSuite) TestBatchSplit() {
 
 	suite.TearDownSuite()
 	suite.SetupSuite()
+}
+
+// TestAffinitySplitNotifications delivers denial and recovery through PD.
+func (suite *serverTestSuite) TestAffinitySplitNotifications() {
+	re := suite.Require()
+	defer func() {
+		suite.TearDownSuite()
+		suite.SetupSuite()
+	}()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	cluster := tc.WaitForPrimaryServing(re).GetCluster()
+	suite.pdLeader.GetPersistOptions().SetAffinityScheduleLimit(4)
+	persistConfig(re, suite.pdLeader)
+
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	header := testutil.NewRequestHeader(suite.pdLeader.GetClusterID())
+	for id := uint64(1); id <= 3; id++ {
+		resp, err := s.PutStore(suite.ctx, &pdpb.PutStoreRequest{Header: header, Store: &metapb.Store{
+			Id: id, Address: fmt.Sprintf("mock://tikv-%d:%d", id, id), Version: "7.0.0",
+			NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano(),
+		}})
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	manager := suite.pdLeader.GetRaftCluster().GetAffinityManager()
+	const groupID = "split-notifications"
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}},
+	}}))
+	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetAddr())
+	defer conn.Close()
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
+	notifications := make(chan *pdpb.RegionHeartbeatResponse, 4)
+	go func() {
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				return
+			}
+			if split := resp.GetChangeSplit(); split != nil {
+				select {
+				case notifications <- resp:
+				default:
+				}
+			}
+		}
+	}()
+	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 33, StoreId: 3}}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: header, Region: &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader: peers[0], ApproximateSize: 5 * units.MiB, ApproximateKeys: 500,
+	}
+	testutil.Eventually(re, func() bool {
+		re.NoError(stream.Send(regionReq))
+		region := cluster.GetRegion(10)
+		return region != nil && !cluster.GetAffinityManager().AllowSplit(region, pdpb.SplitReason_SIZE)
+	})
+	splitResp, err := grpcPDClient.AskBatchSplit(suite.ctx, &pdpb.AskBatchSplitRequest{
+		Header: header, Region: regionReq.GetRegion(), SplitCount: 1, Reason: pdpb.SplitReason_SIZE,
+	})
+	re.NoError(err)
+	re.Contains(splitResp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
+	// Resend unchanged metadata so recovery is exercised without a cache update.
+	expectSplit := func(enabled bool) {
+		testutil.Eventually(re, func() bool {
+			re.NoError(stream.Send(regionReq))
+			select {
+			case resp := <-notifications:
+				re.Equal(uint64(10), resp.GetRegionId())
+				re.Equal(peers[0], resp.GetTargetPeer())
+				re.Equal(enabled, resp.GetChangeSplit().GetAutoSplitEnabled())
+				return true
+			default:
+				return false
+			}
+		})
+	}
+	expectSplit(false)
+	re.NoError(manager.DeleteAffinityGroups([]string{groupID}, true))
+	expectSplit(true)
 }
 
 func (suite *serverTestSuite) TestBatchSplitCompatibility() {
@@ -1571,11 +1805,13 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 	var wg sync.WaitGroup
 	var allocatedIDs sync.Map
 	for range 100 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
-			if !as.NoError(err) || !as.Empty(resp.GetHeader().GetError()) {
+			if err != nil {
+				suite.T().Errorf("ask batch split: %v", err)
+				return
+			}
+			if !as.Empty(resp.GetHeader().GetError()) {
 				return
 			}
 			for _, id := range resp.GetIds() {
@@ -1592,7 +1828,7 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 					allocatedIDs.Store(peer, struct{}{})
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	var len int
@@ -1677,8 +1913,16 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	}
 
 	go func() {
-		// make sure the region heartbeat is sent after the SplitRegions request
-		time.Sleep(time.Second)
+		// Wait for the split operator to reach the heartbeat stream.
+		for {
+			resp, err := stream.Recv()
+			if !as.NoError(err) {
+				return
+			}
+			if resp.GetSplitRegion() != nil {
+				break
+			}
+		}
 
 		regionReq = &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
