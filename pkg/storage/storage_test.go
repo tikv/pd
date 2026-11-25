@@ -30,6 +30,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -257,6 +258,31 @@ func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 	re.Equal(n, cache.GetTotalRegionCount())
 	for _, region := range cache.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
+	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/withRangeLimit"))
+}
+
+func TestLoadRulesExceedRangeLimit(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/withRangeLimit", "return(100)"))
+	storage := NewStorageWithMemoryBackend()
+
+	n := 1000
+	re.NoError(storage.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		for i := range n {
+			if err := storage.SaveRule(txn, fmt.Sprintf("%04d", i), i); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	var keys []string
+	re.NoError(storage.LoadRules(func(k, _ string) {
+		keys = append(keys, k)
+	}))
+	re.Len(keys, n)
+	for i, k := range keys {
+		re.Equal(fmt.Sprintf("%04d", i), k)
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/withRangeLimit"))
 }
