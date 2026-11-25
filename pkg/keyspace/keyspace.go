@@ -272,14 +272,12 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err := validateName(request.Name); err != nil {
 		return nil, err
 	}
-	validatedConfig, err := prepareNewGCConfig(request.Config)
-	if err != nil {
+	if err := validateNewGCConfig(request.Config); err != nil {
 		return nil, err
 	}
-	request.Config = validatedConfig
 	// Check if keyspace with that name already exists before allocating ID.
 	// This prevents unnecessary ID allocation when the name already exists.
-	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		nameExists, _, err := manager.store.LoadKeyspaceID(txn, request.Name)
 		if err != nil {
 			return err
@@ -300,6 +298,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	tracer.SetKeyspace(newID, request.Name)
 	tracer.OnAllocateIDFinished()
 
+	request.Config = setDefaultGCManagementType(request.Config)
 	delete(request.Config, MetaServiceGroupAddressesKey)
 	delete(request.Config, MetaServiceGroupIDKey)
 	delete(request.Config, TSOKeyspaceGroupIDKey)
@@ -415,14 +414,12 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	if err := validateName(name); err != nil {
 		return nil, err
 	}
-	validatedConfig, err := prepareNewGCConfig(request.Config)
-	if err != nil {
+	if err := validateNewGCConfig(request.Config); err != nil {
 		return nil, err
 	}
-	request.Config = validatedConfig
 	// Check if keyspace with that name or ID already exists before processing.
 	// This provides early validation and better error handling.
-	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		nameExists, _, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
 			return err
@@ -442,6 +439,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	if err != nil {
 		return nil, err
 	}
+	request.Config = setDefaultGCManagementType(request.Config)
 	delete(request.Config, MetaServiceGroupAddressesKey)
 	delete(request.Config, MetaServiceGroupIDKey)
 	delete(request.Config, TSOKeyspaceGroupIDKey)

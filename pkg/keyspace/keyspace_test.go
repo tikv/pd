@@ -325,9 +325,12 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceNoIDLeak() {
 	re.Equal(uint32(1), first.GetId())
 
 	// Attempt to create the same keyspace 5 times - should all fail without allocating IDs.
+	config := map[string]string{testConfig1: "100"}
+	duplicate := &CreateKeyspaceRequest{Name: req.Name, CreateTime: now, Config: maps.Clone(config)}
 	for range 5 {
-		_, err := manager.CreateKeyspace(req)
+		_, err := manager.CreateKeyspace(duplicate)
 		re.ErrorIs(err, errs.ErrKeyspaceExists)
+		re.Equal(config, duplicate.Config)
 	}
 
 	// Next successful creation should get ID 2, not 7 (proving no ID leak).
@@ -351,23 +354,19 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceNoIDLeak() {
 
 	// Duplicate name with different ID should fail.
 	id11 := uint32(11)
+	byName := &CreateKeyspaceByIDRequest{ID: &id11, Name: "test_by_id", CreateTime: now}
 	for range 3 {
-		_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
-			ID:         &id11,
-			Name:       "test_by_id", // Duplicate name
-			CreateTime: now,
-		})
+		_, err := manager.CreateKeyspaceByID(byName)
 		re.ErrorIs(err, errs.ErrKeyspaceExists)
+		re.Nil(byName.Config)
 	}
 
 	// Duplicate ID with different name should also fail.
+	byID := &CreateKeyspaceByIDRequest{ID: &id10, Name: "test_different", CreateTime: now, Config: maps.Clone(config)}
 	for range 3 {
-		_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
-			ID:         &id10, // Duplicate ID
-			Name:       "test_different",
-			CreateTime: now,
-		})
+		_, err := manager.CreateKeyspaceByID(byID)
 		re.ErrorIs(err, errs.ErrKeyspaceExists)
+		re.Equal(config, byID.Config)
 	}
 
 	// Next successful creation should get ID 3, not 14 (proving no ID leak).

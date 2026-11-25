@@ -51,24 +51,26 @@ func isValidGCManagementType(mode string) bool {
 	return mode == UnifiedGC || mode == KeyspaceLevelGC
 }
 
-// prepareNewGCConfig validates the original input before inserting a default.
-func prepareNewGCConfig(config map[string]string) (map[string]string, error) {
+func validateNewGCConfig(config map[string]string) error {
 	if _, present := config[legacySafePointVersion]; present {
-		return nil, errs.ErrKeyspaceLegacyGCConfigUnsupported
+		return errs.ErrKeyspaceLegacyGCConfigUnsupported
 	}
 	mode, present := config[GCManagementType]
 	if present && !isValidGCManagementType(mode) {
-		return nil, errs.ErrKeyspaceGCConfigInvalid.FastGenByArgs(mode)
+		return errs.ErrKeyspaceGCConfigInvalid.FastGenByArgs(mode)
 	}
-	defaultMode := defaultGCManagementType()
-	if present && mode != defaultMode {
-		return nil, errs.ErrKeyspaceGCModeMismatch.FastGenByArgs(mode, kerneltype.KernelType)
+	if present && mode != defaultGCManagementType() {
+		return errs.ErrKeyspaceGCModeMismatch.FastGenByArgs(mode, kerneltype.KernelType)
 	}
+	return nil
+}
+
+func setDefaultGCManagementType(config map[string]string) map[string]string {
 	if config == nil {
 		config = make(map[string]string, 1)
 	}
-	config[GCManagementType] = defaultMode
-	return config, nil
+	config[GCManagementType] = defaultGCManagementType()
+	return config
 }
 
 func applyGCConfigMutations(config map[string]string, mutations []*Mutation) error {
