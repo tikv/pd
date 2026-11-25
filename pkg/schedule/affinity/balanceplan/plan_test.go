@@ -327,7 +327,6 @@ func TestGeneralShapesAreBounded(t *testing.T) {
 
 // Other tables' counts break ties without changing this table's score.
 func TestOtherTablesSpreadTies(t *testing.T) {
-
 	in := general(4, 30, 3, 3)
 	alone := Plan(in, Options{})
 	in.OtherVoters, in.OtherLeaders = make([]int, 30), make([]int, 30)
@@ -586,14 +585,12 @@ func TestPlacementCutoffs(t *testing.T) {
 					require.ElementsMatch(t, []int{0, 2}, voters)
 					if c.kind == "node boundary" {
 						f.Replace = []StoreReplacement{{Old: 2, Candidates: all[3:]}}
-
 					}
 				case "repair":
 					if c.name != "no replacements at budget" {
 						store := max(voters[0], voters[1])
 						f.Replace = []StoreReplacement{{Old: store, Candidates: []int{store + 1}}}
 					}
-
 				}
 				if c.stop == StopBudget {
 					f.Work = limit - c.reserve

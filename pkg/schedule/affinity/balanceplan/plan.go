@@ -120,8 +120,8 @@ type StoreReplacement struct {
 // Input describes one table.
 type Input struct {
 	Stores int
-	// BaseVoters and BaseLeaders count every target of this table that the
-	// plan keeps: fixed, converging, unavailable and unsupported groups.
+	// BaseVoters and BaseLeaders count targets of this table outside Groups
+	// that the plan keeps (such as fixed, converging, or unavailable groups).
 	BaseVoters, BaseLeaders []int
 	Groups                  []Group
 	// OtherVoters and OtherLeaders count the targets of all other tables.
