@@ -540,47 +540,37 @@ func TestUpdateMemberWaitsForTimeoutBeforeFallback(t *testing.T) {
 	require.GreaterOrEqual(t, elapsed, UpdateMemberTimeout)
 }
 
-func TestUpdateMemberFastResponseUsesSingleProbe(t *testing.T) {
-	var followerCalls atomic.Int32
-	follower := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
-		followerCalls.Add(1)
-		return nil, status.Error(codes.Unavailable, "unavailable")
-	})
-	leaderURL := startMemberProbeTestLeader(t)
-	cli := newMemberProbeTestDiscovery(t, []string{leaderURL, follower}, leaderURL)
-	_, err := cli.getMembers(cli.ctx, leaderURL, UpdateMemberTimeout)
-	require.NoError(t, err)
-	require.NoError(t, cli.updateMember())
-	require.Zero(t, followerCalls.Load())
-}
-
-func TestUpdateMemberHealthySlowResponseUsesSingleProbe(t *testing.T) {
-	var followerCalls atomic.Int32
-	follower := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
-		followerCalls.Add(1)
-		return nil, status.Error(codes.Unavailable, "unavailable")
-	})
-	var response atomic.Pointer[pdpb.GetMembersResponse]
-	leaderURL := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
-		timer := time.NewTimer(300 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			return response.Load(), nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	})
-	leader := &pdpb.Member{MemberId: 1, ClientUrls: []string{leaderURL}}
-	response.Store(&pdpb.GetMembersResponse{
-		Header: &pdpb.ResponseHeader{ClusterId: 42}, Members: []*pdpb.Member{leader}, Leader: leader,
-	})
-	cli := newMemberProbeTestDiscovery(t, []string{leaderURL, follower}, leaderURL)
-	_, err := cli.getMembers(cli.ctx, leaderURL, UpdateMemberTimeout)
-	require.NoError(t, err)
-	require.NoError(t, cli.updateMember())
-	cli.Close()
-	require.Zero(t, followerCalls.Load(), "a healthy slow response should not trigger an extra membership RPC")
+func TestUpdateMemberHealthyResponseUsesSingleProbe(t *testing.T) {
+	for _, delay := range []time.Duration{0, 300 * time.Millisecond} {
+		t.Run(delay.String(), func(t *testing.T) {
+			var followerCalls atomic.Int32
+			follower := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
+				followerCalls.Add(1)
+				return nil, status.Error(codes.Unavailable, "unavailable")
+			})
+			var response atomic.Pointer[pdpb.GetMembersResponse]
+			leaderURL := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+				timer := time.NewTimer(delay)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+					return response.Load(), nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			})
+			leader := &pdpb.Member{MemberId: 1, ClientUrls: []string{leaderURL}}
+			response.Store(&pdpb.GetMembersResponse{
+				Header: &pdpb.ResponseHeader{ClusterId: 42}, Members: []*pdpb.Member{leader}, Leader: leader,
+			})
+			cli := newMemberProbeTestDiscovery(t, []string{leaderURL, follower}, leaderURL)
+			_, err := cli.getMembers(cli.ctx, leaderURL, UpdateMemberTimeout)
+			require.NoError(t, err)
+			require.NoError(t, cli.updateMember())
+			cli.Close()
+			require.Zero(t, followerCalls.Load(), "a healthy response should not trigger an extra membership RPC")
+		})
+	}
 }
 
 func TestUpdateMemberStopsAfterFirstSuccessfulEndpoint(t *testing.T) {
