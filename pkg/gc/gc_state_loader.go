@@ -114,6 +114,9 @@ func (m *GCStateManager) publishStarterGroup(ctx context.Context, generation *gc
 			pair.Err = err
 			if err == nil {
 				pair, pairs = pairs[0], pairs[1:]
+				if pair.Err == nil {
+					pair.Err = validateStarterGCState(pair)
+				}
 			}
 		}
 		m.finishGCStateFlight(ctx, generation, batch, item.index, pair)
@@ -186,11 +189,13 @@ func (m *GCStateManager) loadLocalGCStateBatch(ctx context.Context, generation *
 	generation.mu.Lock()
 	defer generation.mu.Unlock()
 	var pending []*migrationItem
-	for i, id := range batch.keyspaceIDs {
+	for i := range batch.keyspaceIDs {
 		pair := endpoint.GCSafePointReadResult{Err: err}
 		if err == nil {
 			pair = values[i]
-			if pair.Err == nil && !pair.TxnSafePointEmpty && m.needsStarterCheck(id, pair.TxnSafePointRevision) {
+			var needsMigration bool
+			needsMigration, pair.Err = needsStarterMigration(pair, m.migrationCutoff)
+			if needsMigration {
 				pending = append(pending, &migrationItem{index: i, localRead: pair})
 				continue
 			}
@@ -211,8 +216,6 @@ func (m *GCStateManager) finishGCStateFlight(ctx context.Context, generation *gc
 			pair.Err = errs.ErrNotLeader
 		} else if ctx.Err() != nil {
 			pair.Err = ctx.Err()
-		} else if m.migrationCutoff > 0 && id != constant.NullKeyspaceID && pair.Err == nil {
-			pair.Err = validateStarterGCState(pair)
 		}
 		if pair.Err == nil {
 			m.gcStateCache.store(id, gcStateCacheEntry{TxnSafePoint: pair.TxnSafePoint, GCSafePoint: pair.GCSafePoint})

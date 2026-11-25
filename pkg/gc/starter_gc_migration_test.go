@@ -31,10 +31,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -155,10 +158,12 @@ func TestStarterGCMigrationSourceValues(t *testing.T) {
 		{"source missing with target zero", "0", missing, 0, "0", ""},
 		{"explicit source zero", missing, "0", 0, "0", ""},
 		{"max uint64", missing, "18446744073709551615", 0, "18446744073709551615", ""},
-		{"target ahead", "151", "150", 0, "", "exceeds frozen"},
-		{"G ahead", "100", "150", 151, "", "exceeds frozen"},
-		{"target with missing source", "1", missing, 0, "", "exceeds frozen"},
-		{"G with missing source", missing, missing, 1, "", "exceeds frozen"},
+		{"target ahead", "151", "150", 0, "151", ""},
+		{"G between source and target", "160", "150", 155, "160", ""},
+		{"G ahead of higher source", "100", "150", 151, "", "exceeds selected transaction safe point 150"},
+		{"G ahead of higher target", "160", "150", 161, "", "exceeds selected transaction safe point 160"},
+		{"target with missing source", "1", missing, 0, "1", ""},
+		{"G with missing source", missing, missing, 1, "", "exceeds selected transaction safe point 0"},
 		{"empty target", "", "100", 0, "", "empty transaction safe point"},
 		{"malformed target", "bad", "100", 0, "", "invalid syntax"},
 		{"empty source", "0", "", 0, "", "invalid transaction safe point"},
@@ -301,7 +306,16 @@ func TestStarterGCMigrationFullBatchAmbiguousCommit(t *testing.T) {
 }
 
 func TestStarterGCMigrationBatchWithChangingRoute(t *testing.T) {
-	m, dest, _, cutoff := newStarterGCAPIFixture(t, 2)
+	ctx := t.Context()
+	m, dest, _, cutoff := newStarterGCFixture(t, 2, func(dest, _ *clientv3.Client) {
+		for _, id := range []uint32{1, 2} {
+			_, err := dest.Put(ctx, keypath.TxnSafePointPath(id), "120")
+			require.NoError(t, err)
+		}
+	}, nil)
+	core, logs := observer.New(zap.ErrorLevel)
+	restore := log.ReplaceGlobals(zap.New(core), nil)
+	defer restore()
 	const hook = "github.com/tikv/pd/pkg/gc/starterGCMigrationSourceLoaded"
 	require.NoError(t, failpoint.EnableCall(hook, func(firstID uint32) {
 		if firstID == 1 {
@@ -316,11 +330,21 @@ func TestStarterGCMigrationBatchWithChangingRoute(t *testing.T) {
 	require.ErrorIs(t, result.failed[1], errs.ErrEtcdTxnConflict)
 	require.Equal(t, []uint32{2}, result.completed)
 	value, rev := readStarterSafePoint(t, m, 1)
-	require.EqualValues(t, 10, value)
+	require.EqualValues(t, 120, value)
 	require.LessOrEqual(t, rev, cutoff)
 	value, rev = readStarterSafePoint(t, m, 2)
-	require.EqualValues(t, 102, value)
+	require.EqualValues(t, 120, value)
 	require.Greater(t, rev, cutoff)
+
+	// Only keyspace 2's fallback committed. Failed batch and individual CAS
+	// attempts for keyspace 1 must not report a stale conflict.
+	conflicts := logs.FilterMessage("Starter GC migration conflict").All()
+	require.Len(t, conflicts, 1)
+	require.Equal(t, map[string]any{
+		"keyspace-id": uint32(2), "meta-service-group-id": "group1",
+		"local-txn-safe-point": uint64(120), "local-gc-safe-point": uint64(0),
+		"frozen-txn-safe-point": uint64(102), "chosen-txn-safe-point": uint64(120),
+	}, conflicts[0].ContextMap())
 }
 
 func TestStarterGCMigrationSameBackend(t *testing.T) {
@@ -585,7 +609,7 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 	require.Equal(t, [][]string{append(slices.Clone(healthyKeys), keypath.TxnSafePointPath(8), keypath.GCSafePointPath(8)), healthyKeys}, reads)
 	require.ElementsMatch(t, []uint32{3, 4, 6, 7}, result.completed)
 	require.Len(t, result.failed, 4)
-	require.ErrorContains(t, result.failed[8], "GC safe point 109 exceeds frozen transaction safe point 108")
+	require.ErrorContains(t, result.failed[8], "GC safe point 109 exceeds selected transaction safe point 108")
 	for _, id := range []uint32{1, 2, 5, 8} {
 		require.Error(t, result.failed[id])
 		_, rev := readStarterSafePoint(t, m, id)
