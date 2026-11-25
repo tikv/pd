@@ -28,7 +28,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
 
@@ -104,6 +106,42 @@ func TestMigrateNativeBRBarrier(t *testing.T) {
 			re.Equal(before, after)
 		})
 	}
+}
+
+func TestMigrateNativeBRBarrierConflictsWithV1Renewal(t *testing.T) {
+	re := require.New(t)
+	const id = keypath.NativeBRServiceSafePointID
+	const record = `{"service_id":"native_br","safe_point":100,"expired_at":%d}`
+	source := keypath.ServiceGCSafePointPath(id)
+	expires := time.Now().Add(time.Hour)
+	renewed := fmt.Sprintf(record, expires.Add(time.Hour).Unix())
+
+	var store *StorageEndpoint
+	client := newTestEtcdClientWithInterceptor(t, func(ctx context.Context, method string, req, reply any,
+		cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		txn, _ := req.(*etcdserverpb.TxnRequest)
+		for _, op := range txn.GetSuccess() {
+			if string(op.GetRequestDeleteRange().GetKey()) == source {
+				// Renew only the V1 key just before etcd evaluates the migration transaction.
+				if err := store.Save(source, renewed); err != nil {
+					return err
+				}
+				break
+			}
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	})
+	store = NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	provider := store.GetGCStateProvider()
+	re.NoError(store.Save(source, fmt.Sprintf(record, expires.Unix())))
+
+	re.ErrorIs(provider.MigrateNativeBRBarrier(t.Context(), client), errs.ErrEtcdTxnConflict)
+	value, err := store.Load(source)
+	re.NoError(err)
+	re.Equal(renewed, value)
+	global, err := provider.LoadGlobalGCBarrier(id)
+	re.NoError(err)
+	re.Nil(global)
 }
 
 func TestMigrateNativeBRBarrierLeavesScopedBarrier(t *testing.T) {
