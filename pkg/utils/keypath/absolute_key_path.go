@@ -130,10 +130,11 @@ const (
 	resourceGroupStatesPathFormat   = "resource_group/states/%s"   // "resource_group/states/{group_name}"
 	controllerConfigPath            = "resource_group/controller"  // "resource_group/controller"
 
-	timestampPathFormat = "/pd/%d/timestamp" // "/pd/{cluster_id}/timestamp"
-	msTSOPrefixFormat   = "/ms/%d/tso/"
-	tsoGroupIDWidth     = 5
-	groupWindowSuffix   = "gta/timestamp"
+	timestampPathFormat  = "/pd/%d/timestamp" // "/pd/{cluster_id}/timestamp"
+	msTSOPrefixFormat    = "/ms/%d/tso/"
+	tsoGroupPrefixFormat = msTSOPrefixFormat + "%0*d/"
+	tsoGroupIDWidth      = 5
+	groupWindowSuffix    = "gta/timestamp"
 
 	affinityGroupPathFormat = "/pd/%d/affinity_groups/%s" // "/pd/{cluster_id}/affinity_groups/{group_id}"
 
@@ -273,7 +274,7 @@ func TimestampPath(groupID uint32) string {
 	if groupID == constant.DefaultKeyspaceGroupID {
 		return fmt.Sprintf(timestampPathFormat, ClusterID())
 	}
-	return tsoGroupPrefix(groupID) + groupWindowSuffix
+	return fmt.Sprintf(tsoGroupPrefixFormat+groupWindowSuffix, ClusterID(), tsoGroupIDWidth, groupID)
 }
 
 // RetiredTSOWindowPath stores the largest window of deleted TSO groups.
@@ -291,14 +292,11 @@ func TSOMicroservicePrefix() string {
 	return fmt.Sprintf(msTSOPrefixFormat, ClusterID())
 }
 
-func tsoGroupPrefix(groupID uint32) string {
-	return fmt.Sprintf(msTSOPrefixFormat+"%0*d/", ClusterID(), tsoGroupIDWidth, groupID)
-}
-
 // TSOGroupWindowRange returns the half-open range of non-default TSO group directories.
 func TSOGroupWindowRange() (start, end string) {
+	start = fmt.Sprintf(tsoGroupPrefixFormat, ClusterID(), tsoGroupIDWidth, constant.DefaultKeyspaceGroupID+1)
 	// ':' follows '9' in byte order, before registry and election keys.
-	return tsoGroupPrefix(constant.DefaultKeyspaceGroupID + 1), TSOMicroservicePrefix() + ":"
+	return start, TSOMicroservicePrefix() + ":"
 }
 
 // IsTSOGroupWindowPath reports whether a path relative to TSOMicroservicePrefix is a non-default group's window.
