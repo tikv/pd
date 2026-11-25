@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -103,19 +104,42 @@ func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 	}
 }
 
-// prepareAffinityPeerMove requests a SCAN split before the move to roles adds a
-// peer when size or keys exceed TiKV's ordinary split thresholds. A new peer is
-// a target voter, or a learner moved off a target voter store, on a store
-// without a peer of the Region; a role swap copies no data. It only looks at
-// this Region: each child is checked after its heartbeat reports it, and an
-// unchanged epoch can move after the zero-size or split wait timeout. Attempts
-// belong to one move: other target voters start a new one, and Check removes
-// an attempt once the Region is at the target.
+// prepareAffinityPeerMove lets NextGen moves proceed because their snapshots
+// reference shared files. On Classic, a move that adds a peer waits for size
+// statistics or requests a SCAN split if the Region exceeds TiKV's split
+// thresholds. Without joint consensus, demoting a voter also adds a peer by
+// removing and recreating it. Each child is checked after its heartbeat reports
+// it. A move can proceed after the wait times out and the cooldown has passed.
+// Attempts are scoped to a Region version and target voters.
 func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState,
 	roles map[uint64]placement.PeerRoleType) (*operator.Operator, bool) {
+	if kerneltype.IsNextGen() {
+		return nil, true
+	}
+
+	c.splitMu.Lock()
+	defer c.splitMu.Unlock()
+
+	regionID := region.GetID()
+	latest := c.cluster.GetRegion(regionID)
+	if latest == nil {
+		return nil, false
+	}
+	epoch, latestEpoch := region.GetRegionEpoch(), latest.GetRegionEpoch()
+	if latestEpoch.GetVersion() != epoch.GetVersion() || latestEpoch.GetConfVer() != epoch.GetConfVer() {
+		return nil, false
+	}
+	// Heartbeats can update the size and key count without changing the epoch.
+	region = latest
+	currentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(region)
+	if currentGroup == nil || !currentGroup.AffinitySchedulingAllowed || isAffinity || !currentGroup.MatchesTarget(group) {
+		return nil, false
+	}
+
 	addsPeer := false
-	for storeID := range roles {
-		if region.GetStorePeer(storeID) == nil {
+	for storeID, role := range roles {
+		peer := region.GetStorePeer(storeID)
+		if peer == nil || (!c.conf.IsUseJointConsensus() && role == placement.Learner && !core.IsLearner(peer)) {
 			addsPeer = true
 			break
 		}
@@ -123,10 +147,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if !addsPeer {
 		return nil, true
 	}
-	c.splitMu.Lock()
-	defer c.splitMu.Unlock()
 
-	regionID := region.GetID()
 	wait := func(reason string) (*operator.Operator, bool) {
 		checkerCounter.WithLabelValues(affinityChecker, "wait-"+reason).Inc()
 		log.Debug("wait before affinity peer move", zap.Uint64("region-id", regionID),
@@ -171,25 +192,21 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 				return wait("split-attempt-limit")
 			}
 		}
-		attempt.expiresAt = now.Add(affinitySplitAttemptTTL)
 		// A split that the controller rejects or cancels before it starts, for
 		// example because the waiting queue is full, sends no request, so the
 		// wait does not start and the next patrol requests the split again.
+		var splitRunning bool
 		if split := attempt.split; split != nil {
 			// Keep a split that can still start between preparation and admission.
 			// Expire unsubmitted operators so they cannot block later patrols.
 			if split.Status() == operator.CREATED && !split.CheckExpired() {
 				return nil, false
 			}
-			finished := split.IsEnd()
+			splitRunning = !split.IsEnd()
 			if attempt.startedAt.IsZero() {
 				attempt.startedAt = split.GetStartTime()
 			}
-			if !finished {
-				c.splitAttempts[regionID] = attempt
-				return nil, false
-			}
-			if attempt.startedAt.IsZero() {
+			if !splitRunning && attempt.startedAt.IsZero() {
 				attempt.split = nil
 			}
 		}
@@ -202,6 +219,15 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		}
 		if !attempt.startedAt.IsZero() {
 			splitWait = time.Since(attempt.startedAt)
+		}
+		attempt.expiresAt = now.Add(affinitySplitAttemptTTL)
+		if splitWait >= waitTimeout {
+			// Rejected fallback moves must not extend the attempt's lifetime.
+			attempt.expiresAt = attempt.startedAt.Add(waitTimeout + affinitySplitAttemptTTL)
+		}
+		if splitRunning {
+			c.splitAttempts[regionID] = attempt
+			return nil, false
 		}
 		if splitWait < waitTimeout {
 			if sizeUnknown {
