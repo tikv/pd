@@ -37,6 +37,7 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -800,59 +801,213 @@ func TestPDLeaderPublishesIdentityLastOnStepUp(t *testing.T) {
 // on a stalled volume. With the two reversed, the reset line is already on
 // disk by the time the resign has cleared the leader.
 func TestTSOAllocatorResignsBeforeBlockingReset(t *testing.T) {
+	for _, early := range []bool{false, true} {
+		name := "PD ready"
+		if early {
+			name = "PD initialization paused"
+		}
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			cluster, err := tests.NewTestCluster(ctx, 1)
+			re.NoError(err)
+			t.Cleanup(cluster.Destroy)
+			re.NoError(cluster.RunInitialServers())
+
+			leaderName := cluster.WaitLeader()
+			re.NotEmpty(leaderName)
+			leader := cluster.GetServer(leaderName)
+			svr := leader.GetServer()
+			resumeInitialization := func() {}
+			if early {
+				wait, resume := pauseAfterTSOInitialization(t, leader.GetServerID())
+				resumeInitialization = resume
+				leader.ResetPDLeader()
+				wait()
+				re.False(svr.IsServing())
+			}
+			client := earlyTSOClient(t, leader)
+			stream := earlyTSOStream(t, client, "")
+			previous := requestEarlyTSO(t, stream, leader.GetClusterID())
+
+			oldLease := svr.GetMember().GetLeadership().GetLease()
+			re.NotNil(oldLease)
+			re.NotEqual(clientv3.NoLease, oldLease.GetID())
+
+			// Capture the log the same way TestPDLeaderResignsBeforeLoggingStepDown
+			// does, and for the same reasons.
+			fname := testutil.InitTempFileLogger(t, "info")
+			const campaignHook = "github.com/tikv/pd/server/leaderLoopCheckAgain"
+			re.NoError(failpoint.Enable(campaignHook, fmt.Sprintf(`return("%d")`, leader.GetServerID())))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(campaignHook)) })
+
+			const resetMsg = "reset the timestamp in memory"
+
+			// Hold the resign open inside Lease.Close, so that there is a window in
+			// which it has started but not finished.
+			waitClose, resumeClose := pauseLeaseClose(t, oldLease)
+			defer resumeClose()
+			// Fail the periodic TSO update while the lease is still valid: that hands
+			// the step-down to the allocator rather than to the campaign loop, which is
+			// the path under test.
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp", `return(true)`))
+			defer func() {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"))
+			}()
+
+			// The allocator's resign has started - the leader and the published lease
+			// are gone while cleanup of the captured old lease is still blocked.
+			waitClose()
+			m := svr.GetMember()
+			re.Nil(m.GetLeader())
+			re.False(m.GetLeadership().Check())
+			re.Nil(m.GetLeadership().GetLease())
+			re.True(svr.GetTSOAllocator().IsInitialize())
+			requireEarlyTSORejected(t, stream, leader.GetClusterID())
+
+			// And the reset has not logged yet: the identity cleared first. With the
+			// resign after resetTimestamp, the line is already here.
+			content, err := os.ReadFile(fname)
+			re.NoError(err)
+			re.NotContains(string(content), resetMsg)
+			// Let the withdrawn initialization finish. Recovery below must use a
+			// new lease after the allocator reset completes.
+			resumeInitialization()
+
+			// The line does arrive once the blocked close returns, which is what keeps
+			// the assertion above from passing merely because nothing was captured.
+			resumeClose()
+			testutil.Eventually(re, func() bool {
+				content, err := os.ReadFile(fname)
+				re.NoError(err)
+				return strings.Contains(string(content), resetMsg)
+			}, testutil.WithWaitFor(30*time.Second))
+			testutil.Eventually(re, func() bool { return !svr.GetTSOAllocator().IsInitialize() })
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"))
+			re.NoError(failpoint.Disable(campaignHook))
+			testutil.Eventually(re, func() bool {
+				lease := m.GetLeadership().GetLease()
+				return lease != nil && lease != oldLease && svr.IsServing()
+			})
+			next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+			re.Negative(tsoutil.CompareTimestamp(previous, next))
+		})
+	}
+}
+
+// TestPDLeaderRejectsPromotionAfterWithdrawal covers the interval before Resign
+// detaches the lease: the lease is still live, but its member identity is gone.
+func TestPDLeaderRejectsPromotionAfterWithdrawal(t *testing.T) {
 	re := require.New(t)
-	ctx := t.Context()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
+	cluster := newEarlyTSOCluster(t, 1)
+	leader := cluster.GetLeaderServer()
+	svr := leader.GetServer()
+	client := earlyTSOClient(t, leader)
+	previous := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 
-	leaderName := cluster.WaitLeader()
-	re.NotEmpty(leaderName)
-	svr := cluster.GetServer(leaderName).GetServer()
-
+	const promotionHook = "github.com/tikv/pd/server/beforePDLeaderPromoted"
+	reachedPromotion := make(chan struct{})
+	releasePromotion := make(chan struct{})
+	resumePromotion := sync.OnceFunc(func() { close(releasePromotion) })
+	t.Cleanup(resumePromotion)
+	re.NoError(failpoint.EnableCall(promotionHook, func(id uint64) {
+		if id == leader.GetServerID() {
+			close(reachedPromotion)
+			<-releasePromotion
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(promotionHook)) })
+	leader.ResetPDLeader()
+	select {
+	case <-reachedPromotion:
+	case <-time.After(30 * time.Second):
+		t.Fatal("PD initialization did not reach promotion")
+	}
 	oldLease := svr.GetMember().GetLeadership().GetLease()
 	re.NotNil(oldLease)
-	re.NotEqual(clientv3.NoLease, oldLease.GetID())
+	re.False(svr.IsServing())
+	stream := earlyTSOStream(t, client, "")
+	requestEarlyTSO(t, stream, leader.GetClusterID())
 
-	// Capture the log the same way TestPDLeaderResignsBeforeLoggingStepDown
-	// does, and for the same reasons.
-	fname := testutil.InitTempFileLogger(t, "info")
-
-	const resetMsg = "reset the timestamp in memory"
-
-	// Hold the resign open inside Lease.Close, so that there is a window in
-	// which it has started but not finished.
-	waitClose, resumeClose := pauseLeaseClose(t, oldLease)
-	defer resumeClose()
-	// Fail the periodic TSO update while the lease is still valid: that hands
-	// the step-down to the allocator rather than to the campaign loop, which is
-	// the path under test.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"))
-	}()
-
-	// The allocator's resign has started - the leader and the published lease
-	// are gone while cleanup of the captured old lease is still blocked.
-	waitClose()
+	const withdrawalHook = "github.com/tikv/pd/pkg/member/afterMemberLeaderWithdrawn"
+	withdrawn := make(chan struct{})
+	releaseWithdrawal := make(chan struct{})
+	resumeWithdrawal := sync.OnceFunc(func() { close(releaseWithdrawal) })
+	t.Cleanup(resumeWithdrawal)
+	var withdrawnOnce sync.Once
+	re.NoError(failpoint.EnableCall(withdrawalHook, func(id uint64) {
+		if id == leader.GetServerID() {
+			withdrawnOnce.Do(func() { close(withdrawn) })
+			<-releaseWithdrawal
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(withdrawalHook)) })
+	// Withdrawal must cancel cluster work even while lease revocation and
+	// final PD promotion are blocked independently.
+	const serviceCheckHook = "github.com/tikv/pd/server/cluster/afterServiceCheckJobCanceled"
+	serviceCanceled := make(chan struct{})
+	var serviceCanceledOnce sync.Once
+	re.NoError(failpoint.EnableCall(serviceCheckHook, func(id uint64) {
+		if id == leader.GetServerID() {
+			serviceCanceledOnce.Do(func() { close(serviceCanceled) })
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(serviceCheckHook)) })
+	const updateHook = "github.com/tikv/pd/pkg/tso/failedToUpdateTimestamp"
+	re.NoError(failpoint.Enable(updateHook, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(updateHook)) })
+	select {
+	case <-withdrawn:
+	case <-time.After(30 * time.Second):
+		t.Fatal("TSO updater did not withdraw leadership")
+	}
 	m := svr.GetMember()
 	re.Nil(m.GetLeader())
-	re.False(m.GetLeadership().Check())
-	re.Nil(m.GetLeadership().GetLease())
+	re.Same(oldLease, m.GetLeadership().GetLease())
+	re.True(m.GetLeadership().Check())
 
-	// And the reset has not logged yet: the identity cleared first. With the
-	// resign after resetTimestamp, the line is already here.
-	content, err := os.ReadFile(fname)
+	select {
+	case <-serviceCanceled:
+	case <-time.After(30 * time.Second):
+		t.Fatal("service check job was not canceled during leadership withdrawal")
+	}
+	re.Same(oldLease, m.GetLeadership().GetLease())
+	re.True(m.GetLeadership().Check())
+	members, err := client.GetMembers(t.Context(), &pdpb.GetMembersRequest{})
 	re.NoError(err)
-	re.NotContains(string(content), resetMsg)
+	re.Nil(members.GetLeader())
+	requireEarlyTSORejected(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
 
-	// The line does arrive once the blocked close returns, which is what keeps
-	// the assertion above from passing merely because nothing was captured.
-	resumeClose()
+	attempted := make(chan bool, 1)
+	const attemptHook = "github.com/tikv/pd/server/afterPDLeaderPromotionAttempt"
+	re.NoError(failpoint.EnableCall(attemptHook, func(id uint64, promoted bool) {
+		if id == leader.GetServerID() {
+			attempted <- promoted
+		}
+	}))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(attemptHook)) })
+	resumePromotion()
+	select {
+	case promoted := <-attempted:
+		re.False(promoted)
+	case <-time.After(30 * time.Second):
+		t.Fatal("promotion waited for blocked lease revocation")
+	}
+	re.Nil(m.GetLeader())
+	re.False(svr.IsServing())
+	members, err = client.GetMembers(t.Context(), &pdpb.GetMembersRequest{})
+	re.NoError(err)
+	re.Nil(members.GetLeader())
+	requireEarlyTSORejected(t, stream, leader.GetClusterID())
+
+	re.NoError(failpoint.Disable(promotionHook))
+	re.NoError(failpoint.Disable(attemptHook))
+	re.NoError(failpoint.Disable(updateHook))
+	resumeWithdrawal()
 	testutil.Eventually(re, func() bool {
-		content, err := os.ReadFile(fname)
-		re.NoError(err)
-		return strings.Contains(string(content), resetMsg)
-	}, testutil.WithWaitFor(30*time.Second))
+		lease := m.GetLeadership().GetLease()
+		return lease != nil && lease != oldLease && svr.IsServing()
+	})
+	next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), leader.GetClusterID())
+	re.Negative(tsoutil.CompareTimestamp(previous, next))
 }
