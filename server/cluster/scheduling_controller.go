@@ -535,6 +535,15 @@ func (sc *schedulingController) IsPrepared() bool {
 	return sc.coordinator.GetPrepareChecker().IsPrepared()
 }
 
+func (sc *schedulingController) areStoresPrepared() bool {
+	if sc == nil {
+		return false
+	}
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	return sc.coordinator != nil && sc.coordinator.GetPrepareChecker().AreStoresPrepared()
+}
+
 // SetPrepared set the prepare check to prepared. Only for test purpose.
 func (sc *schedulingController) SetPrepared() {
 	sc.mu.RLock()

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -64,6 +66,30 @@ func (suite *affinityHandlerTestSuite) SetupSuite() {
 
 func (suite *affinityHandlerTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityAuditActions() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		re.Equal("?", logutil.RedactString("private-group"))
+		logFile := testutil.InitTempFileLogger(suite.T(), "info")
+		mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"private-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x05})}}},
+			},
+		})
+		mustBatchDeleteAffinityGroups(re, leader.GetAddr(), &handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{"private-group"}, Force: true})
+		data, err := os.ReadFile(logFile)
+		re.NoError(err)
+		re.Equal(1, strings.Count(string(data), "ServiceLabel:CreateAffinityGroups,"))
+		re.Equal(1, strings.Count(string(data), "ServiceLabel:DeleteAffinityGroups,"))
+		for line := range strings.SplitSeq(string(data), "\n") {
+			if strings.Contains(line, "audit log") {
+				re.NotContains(line, "private-group")
+			}
+		}
+	})
 }
 
 func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
@@ -1564,11 +1590,15 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDQueriesMCS() {
 	})
 }
 
+// TestAffinityForwardedHeader verifies scheduling responses and audit metrics on forwarded reads.
 func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
 		re := suite.Require()
-		addr := cluster.GetLeaderServer().GetAddr()
-		mustCreateAffinityGroups(re, addr, &handlers.CreateAffinityGroupsRequest{
+		leader := cluster.GetLeaderServer()
+		initialAudit := leader.GetServer().GetAuditConfig()
+		defer func() { re.NoError(leader.GetServer().SetAuditConfig(*initialAudit)) }()
+		serverAddr := leader.GetAddr()
+		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
 				"forwarded-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte("a")), EndKey: affinityTestKey([]byte("b"))}}},
 				"other":       {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte("c")), EndKey: affinityTestKey([]byte("d"))}}},
@@ -1579,10 +1609,33 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 			count int
 		}{{"", 2}, {"?prefix=forwarded-", 1}} {
 			testutil.Eventually(re, func() bool {
-				result, header, ok := tryGetAffinityGroups(getAffinityGroupURL(addr) + tc.query)
+				result, header, ok := tryGetAffinityGroups(getAffinityGroupURL(serverAddr) + tc.query)
 				return ok && header.Get(apiutil.XForwardedToMicroserviceHeader) == "true" &&
 					len(result.AffinityGroups) == tc.count && result.AffinityGroups["forwarded-1"] != nil
 			})
+		}
+		for _, enabled := range []bool{false, true, false} {
+			re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+			for _, tc := range []struct{ path, service string }{
+				{getAffinityGroupURL(serverAddr), "GetAllAffinityGroups"},
+				{getAffinityGroupURL(serverAddr, "forwarded-1"), "GetAffinityGroup"},
+			} {
+				before := auditMetricCounts(re)
+				response, err := tests.TestDialClient.Get(tc.path)
+				re.NoError(err)
+				re.NoError(response.Body.Close())
+				re.Equal(http.StatusOK, response.StatusCode)
+				re.Equal("true", response.Header.Get(apiutil.XForwardedToMicroserviceHeader))
+				after := auditMetricCounts(re)
+				increment := float64(0)
+				if enabled {
+					increment = 1
+				}
+				for _, family := range []string{"pd_service_audit_requests_total", "pd_service_audit_handling_seconds"} {
+					key := family + ":" + tc.service
+					re.Equal(increment, after[key]-before[key], key)
+				}
+			}
 		}
 	})
 }

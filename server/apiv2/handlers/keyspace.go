@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server"
@@ -39,13 +40,13 @@ const managerUninitializedErr = "keyspace manager is not initialized"
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
 	router.Use(middlewares.BootstrapChecker())
-	router.POST("", CreateKeyspace)
-	router.POST("/id", CreateKeyspaceByID)
-	router.GET("", LoadAllKeyspaces)
-	router.GET("/:name", LoadKeyspace)
-	router.PATCH("/:name/config", UpdateKeyspaceConfig)
-	router.PUT("/:name/state", UpdateKeyspaceState)
-	router.GET("/id/:id", LoadKeyspaceByID)
+	router.POST("", middlewares.AuditWithRedactedBody("CreateKeyspace", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspace)
+	router.POST("/id", middlewares.AuditWithRedactedBody("CreateKeyspaceByID", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspaceByID)
+	router.GET("", middlewares.Audit("LoadAllKeyspaces", audit.PrometheusHistogram), LoadAllKeyspaces)
+	router.GET("/:name", middlewares.Audit("LoadKeyspace", audit.PrometheusHistogram), LoadKeyspace)
+	router.PATCH("/:name/config", middlewares.AuditWithRedactedBody("UpdateKeyspaceConfig", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateKeyspaceConfig)
+	router.PUT("/:name/state", middlewares.AuditWithRedactedBody("UpdateKeyspaceState", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateKeyspaceState)
+	router.GET("/id/:id", middlewares.Audit("LoadKeyspaceByID", audit.PrometheusHistogram), LoadKeyspaceByID)
 }
 
 // CreateKeyspaceParams represents parameters needed when creating a new keyspace.
