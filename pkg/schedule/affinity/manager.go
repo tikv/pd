@@ -90,9 +90,7 @@ type Manager struct {
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
-	// storeConditionsKnown is set when the first availability check records
-	// store conditions. Targets loaded or reapplied from storage start degraded
-	// while conditions are unknown.
+	// storeConditionsKnown reports whether unavailableStores has been populated by a store check.
 	storeConditionsKnown bool
 	// storeConditionsGeneration changes when the last group is deleted, so a
 	// scan that started before the deletion cannot publish its results afterward.
@@ -197,32 +195,14 @@ func (m *Manager) setGroupLocked(group *Group) {
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
 		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
-		availability:        groupDegraded,
-		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
 		AffinityRegionCount: 0,
 		Regions:             make(map[uint64]regionCache),
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	m.setTargetAvailabilityLocked(groupInfo)
 	m.groups[group.ID] = groupInfo
-	// A group read with a target, for example by the watcher, can be used once
-	// its stores are known to be available. The first availability check sets
-	// the groups loaded before it.
-	if m.storeConditionsKnown {
-		m.setTargetAvailabilityLocked(groupInfo)
-	}
-}
-
-// setTargetAvailabilityLocked sets the availability of a group with a target from
-// the store conditions known now. It is needed whenever the target changes,
-// because the availability check applies the conditions only when they change.
-// The write lock of RWMutex must be held.
-func (m *Manager) setTargetAvailabilityLocked(groupInfo *runtimeGroupInfo) {
-	if groupInfo.LeaderStoreID == 0 || len(groupInfo.VoterStoreIDs) == 0 {
-		return
-	}
-	groupInfo.SetAvailability(calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs))
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -262,6 +242,16 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	groupInfo.AffinityVer++
 }
 
+// setTargetAvailabilityLocked resets availability and the degradation deadline for a new or replaced target.
+// The caller must hold m.Lock().
+func (m *Manager) setTargetAvailabilityLocked(groupInfo *runtimeGroupInfo) {
+	availability := groupDegraded
+	if m.storeConditionsKnown {
+		availability = calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
+	}
+	groupInfo.resetTargetAvailability(availability)
+}
+
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -271,10 +261,14 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
-	groupInfo.SetAvailability(groupAvailable)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	groupInfo.persistedGroup = nil
+	if m.storeConditionsKnown {
+		m.setTargetAvailabilityLocked(groupInfo)
+	} else {
+		groupInfo.SetAvailability(groupAvailable)
+	}
 	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil
@@ -713,13 +707,7 @@ func (m *Manager) applyGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Gro
 	groupInfo.Group = *group
 	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
 	groupInfo.persistedGroup = nil
-	// Start a fresh grace period for a changed target or a newly confirmed
-	// local target that is no longer available.
-	groupInfo.availability = groupDegraded
-	groupInfo.degradedExpiredAt = newDegradedExpiredAtFromNow()
-	if m.storeConditionsKnown {
-		m.setTargetAvailabilityLocked(groupInfo)
-	}
+	m.setTargetAvailabilityLocked(groupInfo)
 	m.resetCountLocked(groupInfo)
 }
 

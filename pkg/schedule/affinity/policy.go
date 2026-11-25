@@ -48,7 +48,6 @@ const (
 	storeLeaderEvicted
 	storeBusy
 	storeDisconnected
-	storePreparing
 	storeLowSpace
 	degradedBoundary
 
@@ -68,8 +67,6 @@ func (c storeCondition) String() string {
 		return "busy"
 	case storeDisconnected:
 		return "disconnected"
-	case storePreparing:
-		return "preparing"
 	case storeLowSpace:
 		return "low-space"
 	case storeDown:
@@ -167,10 +164,9 @@ func (m *Manager) checkGroupsAvailability() {
 	hasGroups := len(m.groups) > 0
 	generation := m.storeConditionsGeneration
 	m.RUnlock()
-	if !hasGroups {
-		return
+	if hasGroups {
+		m.applyStoreScan(m.collectUnavailableStores(), generation)
 	}
-	m.applyStoreScan(m.collectUnavailableStores(), generation)
 	m.collectMetrics()
 }
 
@@ -199,50 +195,56 @@ func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 		case store.IsUnhealthy():
 			unavailableStores[store.GetID()] = storeDown
 
-		// Then the conditions that will mark the group as degraded
+		// Check replica-wide conditions before conditions that only affect leaders.
+		case store.IsLowSpace(lowSpaceRatio):
+			unavailableStores[store.GetID()] = storeLowSpace
+		case store.IsDisconnected():
+			unavailableStores[store.GetID()] = storeDisconnected
+		case store.IsBusy():
+			unavailableStores[store.GetID()] = storeBusy
 		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) ||
 			store.EvictedAsSlowStore() || store.EvictedAsStoppingStore() || store.IsEvictedAsSlowTrend():
 			unavailableStores[store.GetID()] = storeLeaderEvicted
-		case store.IsBusy():
-			unavailableStores[store.GetID()] = storeBusy
-		case store.IsDisconnected():
-			unavailableStores[store.GetID()] = storeDisconnected
-		case store.IsLowSpace(lowSpaceRatio):
-			unavailableStores[store.GetID()] = storeLowSpace
-		case store.IsPreparing():
-			unavailableStores[store.GetID()] = storePreparing
 		}
 		// Note: We intentionally do NOT check:
 		// - IsSlow(): Performance issue, not availability issue
+		// - IsPreparing(): New stores need to receive replicas before becoming Serving.
 	}
 	return unavailableStores
 }
 
 func (m *Manager) applyStoreScan(unavailableStores map[uint64]storeCondition, generation uint64) bool {
+	m.RLock()
+	needUpdate := generation == m.storeConditionsGeneration &&
+		(!m.storeConditionsKnown || !maps.Equal(unavailableStores, m.unavailableStores))
+	m.RUnlock()
+	if !needUpdate {
+		return false
+	}
+
 	m.Lock()
-	if generation != m.storeConditionsGeneration || (m.storeConditionsKnown && maps.Equal(unavailableStores, m.unavailableStores)) {
+	wasKnown := m.storeConditionsKnown
+	isUnavailableStoresChanged := !maps.Equal(unavailableStores, m.unavailableStores)
+	if generation != m.storeConditionsGeneration || (wasKnown && !isUnavailableStoresChanged) {
 		m.Unlock()
 		return false
 	}
-	availableGroupCount := 0
-	unavailableGroupCount := 0
 	m.unavailableStores = unavailableStores
 	m.storeConditionsKnown = true
+	groupChanged := false
+	availableGroupCount := 0
+	unavailableGroupCount := 0
 	for _, groupInfo := range m.groups {
 		availability := groupInfo.GetAvailability()
-
-		// A Group in the expired status cannot be restored.
-		if availability == groupExpired {
-			unavailableGroupCount++
-			continue
+		if availability != groupExpired {
+			newAvailability := calcGroupAvailability(unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
+			if availability != newAvailability {
+				m.updateGroupAvailabilityLocked(groupInfo.ID, newAvailability)
+				availability = newAvailability
+				groupChanged = true
+			}
 		}
-
-		// Only Groups in the available or degraded status can be changed automatically.
-		newAvailability := calcGroupAvailability(unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
-		if availability != newAvailability {
-			m.updateGroupAvailabilityLocked(groupInfo.ID, newAvailability)
-		}
-		if newAvailability == groupAvailable {
+		if availability == groupAvailable {
 			availableGroupCount++
 		} else {
 			unavailableGroupCount++
@@ -250,13 +252,14 @@ func (m *Manager) applyStoreScan(unavailableStores map[uint64]storeCondition, ge
 	}
 	m.Unlock()
 
-	if len(unavailableStores) > 0 {
+	applied := isUnavailableStoresChanged || groupChanged
+	if len(unavailableStores) > 0 && availableGroupCount+unavailableGroupCount > 0 {
 		log.Warn("affinity groups invalidated due to unavailable stores",
 			zap.Int("unavailable-store-count", len(unavailableStores)),
 			zap.Int("unavailable-group-count", unavailableGroupCount),
 			zap.Int("available-group-count", availableGroupCount))
 	}
-	return true
+	return applied
 }
 
 func (m *Manager) checkHasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) error {
