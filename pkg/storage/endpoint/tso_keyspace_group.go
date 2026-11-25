@@ -215,17 +215,36 @@ func (*StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
 func (se *StorageEndpoint) LoadKeyspaceGroups(startID uint32, limit int) ([]*KeyspaceGroup, error) {
 	prefix := keypath.KeyspaceGroupIDPath(startID)
 	prefixEnd := clientv3.GetPrefixRangeEnd(keypath.KeyspaceGroupIDPrefix())
-	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
+	_, values, err := se.LoadRange(prefix, prefixEnd, limit)
 	if err != nil {
 		return nil, err
 	}
-	if len(keys) == 0 {
-		return []*KeyspaceGroup{}, nil
+	return decodeKeyspaceGroups(values)
+}
+
+// LoadKeyspaceGroupsInTxn loads all keyspace groups for a check that permits
+// concurrent deletion but must detect newly added or updated groups at commit.
+func LoadKeyspaceGroupsInTxn(txn kv.Txn) ([]*KeyspaceGroup, error) {
+	start := keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)
+	end := clientv3.GetPrefixRangeEnd(keypath.KeyspaceGroupIDPrefix())
+	var values []string
+	var err error
+	if revisionTxn, ok := txn.(kv.RevisionRangeTxn); ok {
+		values, err = revisionTxn.LoadRangeWithRevision(start, end)
+	} else {
+		_, values, err = txn.LoadRange(start, end, 0)
 	}
-	kgs := make([]*KeyspaceGroup, 0, len(keys))
+	if err != nil {
+		return nil, err
+	}
+	return decodeKeyspaceGroups(values)
+}
+
+func decodeKeyspaceGroups(values []string) ([]*KeyspaceGroup, error) {
+	kgs := make([]*KeyspaceGroup, 0, len(values))
 	for _, value := range values {
 		kg := &KeyspaceGroup{}
-		if err = json.Unmarshal([]byte(value), kg); err != nil {
+		if err := json.Unmarshal([]byte(value), kg); err != nil {
 			return nil, err
 		}
 		kgs = append(kgs, kg)

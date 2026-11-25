@@ -1947,6 +1947,35 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	re.ErrorIs(err, errs.ErrModifyDefaultKeyspaceGroup)
 }
 
+func (suite *keyspaceGroupTestSuite) TestMergingSourceIDReuse() {
+	re := suite.Require()
+	group := func(id uint32) *endpoint.KeyspaceGroup {
+		return &endpoint.KeyspaceGroup{ID: id, UserKind: endpoint.Basic.String()}
+	}
+	splitSource := group(3)
+	splitSource.Keyspaces = []uint32{111, 222}
+	splitSource.Members = make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount)
+	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{group(1), group(2), splitSource}))
+	re.NoError(suite.kgm.MergeKeyspaceGroups(constant.DefaultKeyspaceGroupID, []uint32{1, 2}))
+
+	suite.Run("create", func() {
+		re := suite.Require()
+		err := suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{group(4), group(1)})
+		re.True(errs.ErrKeyspaceGroupInMerging.Equal(err), "got %v", err)
+		kg, err := suite.kgm.GetKeyspaceGroupByID(4)
+		re.NoError(err)
+		re.Nil(kg)
+	})
+	suite.Run("split", func() {
+		err := suite.kgm.SplitKeyspaceGroupByID(splitSource.ID, 2, []uint32{222})
+		suite.Require().True(errs.ErrKeyspaceGroupInMerging.Equal(err), "got %v", err)
+	})
+
+	re.NoError(suite.kgm.FinishMergeKeyspaceByID(constant.DefaultKeyspaceGroupID))
+	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{group(1)}))
+	re.NoError(suite.kgm.SplitKeyspaceGroupByID(splitSource.ID, 2, []uint32{222}))
+}
+
 func TestBuildSplitKeyspaces(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
@@ -2294,6 +2323,7 @@ func TestFindNextAvailableKeyspaceGroupID(t *testing.T) {
 		name     string
 		maxCount uint32
 		groupIDs []uint32
+		mergeIDs []uint32
 		wantID   uint32
 		wantOK   bool
 	}{
@@ -2319,6 +2349,14 @@ func TestFindNextAvailableKeyspaceGroupID(t *testing.T) {
 			wantOK:   true,
 		},
 		{
+			name:     "skip merging source ids",
+			maxCount: 6,
+			groupIDs: []uint32{0, 3},
+			mergeIDs: []uint32{1, 2},
+			wantID:   4,
+			wantOK:   true,
+		},
+		{
 			name:     "all ids taken",
 			maxCount: 6,
 			groupIDs: []uint32{0, 1, 2, 3, 4, 5},
@@ -2336,6 +2374,9 @@ func TestFindNextAvailableKeyspaceGroupID(t *testing.T) {
 			groups := make([]*endpoint.KeyspaceGroup, 0, len(tc.groupIDs))
 			for _, id := range tc.groupIDs {
 				groups = append(groups, &endpoint.KeyspaceGroup{ID: id})
+			}
+			if len(tc.mergeIDs) > 0 {
+				groups[0].MergeState = &endpoint.MergeState{MergeList: tc.mergeIDs}
 			}
 			gotID, gotOK := findNextAvailableKeyspaceGroupID(groups, tc.maxCount)
 			require.Equal(t, tc.wantOK, gotOK)

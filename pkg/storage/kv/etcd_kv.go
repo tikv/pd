@@ -316,6 +316,21 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 	return keys, values, err
 }
 
+// LoadRangeWithRevision reads the range and guards it with a single comparison.
+func (txn *etcdTxn) LoadRangeWithRevision(key, endKey string) ([]string, error) {
+	resp, err := etcdutil.EtcdKVGetWithContext(txn.ctx, txn.kv.client, key, clientv3.WithRange(endKey))
+	if err != nil {
+		return nil, err
+	}
+	values := make([]string, 0, len(resp.Kvs))
+	for _, item := range resp.Kvs {
+		values = append(values, string(item.Value))
+	}
+	condition := clientv3.Compare(clientv3.ModRevision(key), "<", resp.Header.Revision+1).WithRange(endKey)
+	txn.conditions = append(txn.conditions, condition)
+	return values, nil
+}
+
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
 	failpoint.InjectCall("beforeTxnCommit", txn.operations)

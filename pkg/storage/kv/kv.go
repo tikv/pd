@@ -138,6 +138,13 @@ type RevisionTxn interface {
 	LoadWithRevision(key string) (string, error)
 }
 
+// RevisionRangeTxn can guard an unbounded range read against inserts and updates
+// using the snapshot revision. Deletions are allowed.
+type RevisionRangeTxn interface {
+	Txn
+	LoadRangeWithRevision(key, endKey string) (values []string, err error)
+}
+
 // ConditionalTxnRunner runs a transaction with additional etcd comparisons.
 // The comparisons and the transaction operations are committed atomically.
 type ConditionalTxnRunner interface {

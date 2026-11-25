@@ -16,6 +16,7 @@ package kv
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sort"
 	"strconv"
@@ -48,6 +49,7 @@ func TestEtcd(t *testing.T) {
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
 	testRevisionLoadConflict(re, kv)
+	testRevisionRangeLoadConflict(re, kv)
 	testRunInTxnWithConditions(re, kv)
 	testRawTxn(re, kv)
 
@@ -236,6 +238,36 @@ func testRevisionLoadConflict(re *require.Assertions, kv *etcdKVBase) {
 	value, err := kv.Load(resultKey)
 	re.NoError(err)
 	re.Empty(value)
+}
+
+func testRevisionRangeLoadConflict(re *require.Assertions, kv *etcdKVBase) {
+	const prefix = "revision-range/"
+	end := clientv3.GetPrefixRangeEnd(prefix)
+	// Use more records than etcd allows comparisons in one transaction.
+	for i := range etcdutil.MaxEtcdTxnOps + 1 {
+		re.NoError(kv.Save(fmt.Sprintf("%s%d", prefix, i), "value"))
+	}
+	re.NoError(kv.RunInTxn(context.Background(), func(txn Txn) error {
+		values, err := txn.(RevisionRangeTxn).LoadRangeWithRevision(prefix, end)
+		re.NoError(err)
+		re.Len(values, etcdutil.MaxEtcdTxnOps+1)
+		re.NoError(kv.Remove(prefix + "0"))
+		return txn.Save("revision-range-result", "committed")
+	}))
+	for _, key := range []string{prefix + "0", prefix + "1"} {
+		err := kv.RunInTxn(context.Background(), func(txn Txn) error {
+			_, err := txn.(RevisionRangeTxn).LoadRangeWithRevision(prefix, end)
+			if err != nil {
+				return err
+			}
+			re.NoError(kv.Save(key, "value"))
+			return txn.Save("revision-range-result", "must-not-commit")
+		})
+		re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	}
+	value, err := kv.Load("revision-range-result")
+	re.NoError(err)
+	re.Equal("committed", value)
 }
 
 // nolint:unparam
