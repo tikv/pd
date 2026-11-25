@@ -82,7 +82,7 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 	ctx, cancel := generation.loadContext(ctx)
 	defer cancel()
 	batch := &gcStateLoadBatch{result: gcStateLoadResult{failed: make(map[uint32]error), joined: make(map[uint32]*gcStateLoadFlight)}}
-	pending, err := m.readGCStateLoadBatch(ctx, generation, next, batch)
+	pending, err := m.loadLocalGCStateBatch(ctx, generation, next, batch)
 	if err != nil {
 		return gcStateLoadResult{}, err
 	}
@@ -120,7 +120,7 @@ func (m *GCStateManager) publishStarterGroup(ctx context.Context, generation *gc
 	}
 }
 
-func (m *GCStateManager) readGCStateLoadBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool), batch *gcStateLoadBatch) ([]*migrationItem, error) {
+func (m *GCStateManager) loadLocalGCStateBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool), batch *gcStateLoadBatch) ([]*migrationItem, error) {
 	failpoint.InjectCall("beforeGCStateLoadManagerLock")
 	m.mu.RLock()
 	defer m.mu.RUnlock()
