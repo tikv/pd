@@ -432,10 +432,16 @@ func TestAffinitySplitFallbackExpiresDespiteStoreLimit(t *testing.T) {
 		checker.maxSplitAttempts = 2
 		regions := putOversizedAffinityRegions(cluster)
 		blocked := regions[:2]
-		healthy := regions[2].Clone(core.WithNewRegionID(4), withAffinitySplitTestRange("z", "zz"))
-		cluster.PutRegion(healthy)
+		healthyParent := regions[2].Clone(withAffinitySplitTestRange("z", "zz"))
 		group := &affinity.Group{ID: "healthy", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 5}}
-		createAffinitySplitTestGroup(t, cluster.GetAffinityManager(), group, healthy)
+		createAffinitySplitTestGroup(t, cluster.GetAffinityManager(), group, healthyParent)
+		healthy := []*core.RegionInfo{
+			healthyParent.Clone(core.WithNewRegionID(4), withAffinitySplitTestRange("z", "zm")),
+			healthyParent.Clone(core.WithNewRegionID(5), withAffinitySplitTestRange("zm", "zz")),
+		}
+		for _, region := range healthy {
+			cluster.PutRegion(region)
+		}
 
 		for _, region := range blocked {
 			controller.tryAddOperators(region)
@@ -465,14 +471,72 @@ func TestAffinitySplitFallbackExpiresDespiteStoreLimit(t *testing.T) {
 			require.Equal(t, before+float64(len(blocked)), promtestutil.ToFloat64(limitRejections))
 		}
 		revisit()
-		require.Empty(t, controller.CheckRegion(healthy))
+		limitWaits := checkerCounter.WithLabelValues(affinityChecker, "wait-split-attempt-limit")
+		before := promtestutil.ToFloat64(limitWaits)
+		for _, region := range healthy {
+			require.Empty(t, controller.CheckRegion(region))
+		}
+		require.Equal(t, before+float64(len(healthy)), promtestutil.ToFloat64(limitWaits))
 		for range 3 {
 			advanceAffinitySplitTime(cluster, affinitySplitAttemptTTL/4)
 			revisit()
 		}
-		advanceAffinitySplitTime(cluster, affinitySplitAttemptTTL/4)
-		requireAffinitySplit(t, controller.CheckRegion(healthy))
+		// Refresh the pending entries within their three-minute TTL.
+		advanceAffinitySplitTime(cluster, affinitySplitAttemptTTL/4-2*time.Minute)
+		revisit()
+		advanceAffinitySplitTime(cluster, 2*time.Minute)
+
+		// The pending retry runs before the key-ordered scan, which encounters
+		// both blocked Regions again before either healthy Region.
+		require.ElementsMatch(t, []uint64{blocked[0].GetID(), blocked[1].GetID()}, controller.GetPendingProcessedRegions())
+		before = promtestutil.ToFloat64(limitWaits)
+		controller.checkPendingProcessedRegions()
+		require.Equal(t, before+float64(len(blocked)), promtestutil.ToFloat64(limitWaits))
+		for _, region := range blocked {
+			controller.tryAddOperators(region)
+			require.Nil(t, ops.GetOperator(region.GetID()))
+			require.NotContains(t, checker.splitAttempts, region.GetID())
+		}
+		require.Equal(t, before+2*float64(len(blocked)), promtestutil.ToFloat64(limitWaits))
+		for _, region := range healthy {
+			requireAffinitySplit(t, controller.CheckRegion(region))
+		}
 	})
+}
+
+func TestAffinitySplitReclaimsUnclaimedReservation(t *testing.T) {
+	requireClassicAffinitySplit(t)
+	for _, reason := range []string{"expired", "merged"} {
+		t.Run(reason, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cluster, controller, _ := newAffinitySplitTest(t)
+				checker := controller.GetAffinityChecker()
+				checker.maxSplitAttempts = 1
+				regions := putOversizedAffinityRegions(cluster)
+				owner, first, next := regions[0], regions[1], regions[2]
+				requireAffinitySplit(t, checker.Check(owner))
+				require.Empty(t, checker.Check(first))
+				require.Empty(t, checker.Check(next))
+
+				advanceAffinitySplitTime(cluster, affinitySplitAttemptTTL)
+				require.Empty(t, checker.Check(owner))
+				require.Contains(t, checker.splitGranted, first.GetID(), "the first waiter gets the only slot")
+				require.Empty(t, checker.Check(next), "the later waiter cannot claim the first waiter's slot")
+
+				if reason == "expired" {
+					advanceAffinitySplitTime(cluster, affinitySplitGrantTTL)
+				} else {
+					next = next.Clone(withAffinitySplitTestRange("g", "z"), core.WithIncVersion())
+					cluster.PutRegion(next)
+					require.Nil(t, cluster.GetRegion(first.GetID()))
+					advanceAffinitySplitTime(cluster, affinitySplitPruneInterval)
+				}
+
+				requireAffinitySplit(t, checker.Check(next))
+				require.Empty(t, checker.splitGranted)
+			})
+		})
+	}
 }
 
 func TestAffinitySplitBeforeLearnerMove(t *testing.T) {

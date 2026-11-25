@@ -16,6 +16,7 @@ package checker
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"math"
 	"slices"
@@ -60,8 +61,14 @@ type AffinityChecker struct {
 	affinityManager  *affinity.Manager
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
-	splitMu          syncutil.Mutex
+
+	// splitMu protects split attempts, reservations, and the FIFO wait queue.
+	splitMu syncutil.Mutex
+	// Attempts and reservations share the same limit.
 	splitAttempts    map[uint64]affinitySplitAttempt
+	splitGranted     map[uint64]time.Time // Reservation deadlines by Region ID.
+	splitWaitQueue   *list.List           // Region IDs in admission order.
+	splitWaitIndex   map[uint64]*list.Element
 	maxSplitAttempts int
 	nextSplitPruneAt time.Time
 	startTime        time.Time
@@ -76,6 +83,9 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		conf:             conf,
 		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
 		splitAttempts:    make(map[uint64]affinitySplitAttempt),
+		splitGranted:     make(map[uint64]time.Time),
+		splitWaitQueue:   list.New(),
+		splitWaitIndex:   make(map[uint64]*list.Element),
 		maxSplitAttempts: affinitySplitMaxAttempts,
 		startTime:        time.Now(),
 	}

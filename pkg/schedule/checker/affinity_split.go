@@ -40,6 +40,9 @@ const (
 	// Expire idle attempts on access or under capacity pressure.
 	affinitySplitAttemptTTL    = time.Hour
 	affinitySplitPruneInterval = time.Second
+	// Leave time for a patrol to claim a reservation, and reclaim it if the
+	// Region no longer reaches split preparation.
+	affinitySplitGrantTTL = 5 * time.Minute
 )
 
 var affinityUnknownSizeWait = defaultAffinityUnknownSizeWait
@@ -57,6 +60,8 @@ type affinitySplitAttempt struct {
 	fallbackRecorded bool
 }
 
+// clearCompletedSplitAttempt releases split state after verifying alignment
+// against the latest Region and affinity target.
 func (c *AffinityChecker) clearCompletedSplitAttempt(region, current *core.RegionInfo) {
 	epoch, currentEpoch := region.GetRegionEpoch(), current.GetRegionEpoch()
 	if epoch.GetVersion() < currentEpoch.GetVersion() || epoch.GetConfVer() < currentEpoch.GetConfVer() {
@@ -68,25 +73,96 @@ func (c *AffinityChecker) clearCompletedSplitAttempt(region, current *core.Regio
 
 	regionID := region.GetID()
 	attempt, tracked := c.splitAttempts[regionID]
-	if !tracked {
+	_, granted := c.splitGranted[regionID]
+	if !tracked && !granted && c.splitWaitIndex[regionID] == nil {
 		return
 	}
 	latest := c.cluster.GetRegion(regionID)
-	if latest == nil {
-		delete(c.splitAttempts, regionID)
-		return
+	if latest != nil {
+		latestEpoch := latest.GetRegionEpoch()
+		if epoch.GetVersion() < latestEpoch.GetVersion() || epoch.GetConfVer() < latestEpoch.GetConfVer() ||
+			latestEpoch.GetVersion() < attempt.version {
+			return
+		}
+		if _, aligned := c.affinityManager.GetRegionAffinityGroupState(latest); !aligned {
+			return
+		}
 	}
-	latestEpoch := latest.GetRegionEpoch()
-	if epoch.GetVersion() < latestEpoch.GetVersion() || epoch.GetConfVer() < latestEpoch.GetConfVer() ||
-		latestEpoch.GetVersion() < attempt.version {
-		return
-	}
-	if _, stillAffinity := c.affinityManager.GetRegionAffinityGroupState(latest); stillAffinity {
-		delete(c.splitAttempts, regionID)
+	delete(c.splitAttempts, regionID)
+	c.removeSplitWaiter(regionID)
+	c.promoteSplitWaiters(time.Now())
+}
+
+// removeSplitWaiter drops any reservation or queue entry for the Region.
+// The caller holds splitMu.
+func (c *AffinityChecker) removeSplitWaiter(regionID uint64) {
+	delete(c.splitGranted, regionID)
+	if entry := c.splitWaitIndex[regionID]; entry != nil {
+		c.splitWaitQueue.Remove(entry)
+		delete(c.splitWaitIndex, regionID)
 	}
 }
 
-// pruneSplitAttempts reclaims idle attempts and operators that never started.
+// stillNeedsSplitAttempt checks whether a waiting Region still qualifies for
+// a split attempt. The caller holds splitMu.
+func (c *AffinityChecker) stillNeedsSplitAttempt(regionID uint64) bool {
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return false
+	}
+	group, aligned := c.affinityManager.GetRegionAffinityGroupState(region)
+	return group != nil && group.AffinitySchedulingAllowed && !aligned && c.needsSplitAttempt(region)
+}
+
+func (c *AffinityChecker) needsSplitAttempt(region *core.RegionInfo) bool {
+	storeConfig := c.cluster.GetStoreConfig()
+	size := region.GetApproximateSize()
+	return size <= 0 || uint64(size) > storeConfig.GetRegionSplitSize() ||
+		uint64(region.GetApproximateKeys()) > storeConfig.GetRegionSplitKeys()
+}
+
+// promoteSplitWaiters reserves free slots in FIFO order. Each queue entry is
+// visited at most once. The caller holds splitMu.
+func (c *AffinityChecker) promoteSplitWaiters(now time.Time) {
+	for c.splitWaitQueue.Len() > 0 && len(c.splitAttempts)+len(c.splitGranted) < c.maxSplitAttempts {
+		regionID := c.splitWaitQueue.Front().Value.(uint64)
+		c.removeSplitWaiter(regionID)
+		if _, tracked := c.splitAttempts[regionID]; !tracked && c.stillNeedsSplitAttempt(regionID) {
+			c.splitGranted[regionID] = now.Add(affinitySplitGrantTTL)
+		}
+	}
+}
+
+// admitSplitAttempt claims a reservation or queues the Region when all slots
+// are in use. Older waiters get any newly released slots first.
+// The caller holds splitMu.
+func (c *AffinityChecker) admitSplitAttempt(regionID uint64, now time.Time) bool {
+	if expiresAt, granted := c.splitGranted[regionID]; granted {
+		delete(c.splitGranted, regionID)
+		if now.Before(expiresAt) {
+			return true
+		}
+	}
+
+	c.promoteSplitWaiters(now)
+	if _, granted := c.splitGranted[regionID]; !granted &&
+		len(c.splitAttempts)+len(c.splitGranted) >= c.maxSplitAttempts && !now.Before(c.nextSplitPruneAt) {
+		c.pruneSplitAttempts(now)
+		c.nextSplitPruneAt = now.Add(affinitySplitPruneInterval)
+		c.promoteSplitWaiters(now)
+	}
+	if _, granted := c.splitGranted[regionID]; granted || len(c.splitAttempts)+len(c.splitGranted) < c.maxSplitAttempts {
+		c.removeSplitWaiter(regionID)
+		return true
+	}
+	if c.splitWaitIndex[regionID] == nil && c.splitWaitQueue.Len() < max(c.maxSplitAttempts, affinitySplitMaxAttempts) {
+		c.splitWaitIndex[regionID] = c.splitWaitQueue.PushBack(regionID)
+	}
+	return false
+}
+
+// pruneSplitAttempts reclaims idle attempts, operators that never started, and
+// reservations that expired or are no longer needed.
 // The caller holds splitMu.
 func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 	for id, attempt := range c.splitAttempts {
@@ -102,6 +178,11 @@ func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 			}
 		}
 	}
+	for id, expiresAt := range c.splitGranted {
+		if !now.Before(expiresAt) || !c.stillNeedsSplitAttempt(id) {
+			delete(c.splitGranted, id)
+		}
+	}
 }
 
 // prepareAffinityPeerMove lets NextGen moves proceed because their snapshots
@@ -110,7 +191,8 @@ func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 // thresholds. Without joint consensus, demoting a voter also adds a peer by
 // removing and recreating it. Each child is checked after its heartbeat reports
 // it. A move can proceed after the wait times out and the cooldown has passed.
-// Attempts are scoped to a Region version and target voters.
+// Attempts are scoped to a Region version and target voters. When capacity
+// is full, Regions wait in FIFO order for a slot.
 func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState,
 	roles map[uint64]placement.PeerRoleType) (*operator.Operator, bool) {
 	if kerneltype.IsNextGen() {
@@ -145,6 +227,10 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		}
 	}
 	if !addsPeer {
+		c.removeSplitWaiter(regionID)
+		if c.splitWaitQueue.Len() > 0 {
+			c.promoteSplitWaiters(time.Now())
+		}
 		return nil, true
 	}
 
@@ -159,15 +245,13 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if sizeUnknown {
 		waitTimeout = affinityUnknownSizeWait
 	}
-	storeConfig := c.cluster.GetStoreConfig()
 	version := region.GetRegionEpoch().GetVersion()
 	previous, tracked := c.splitAttempts[regionID]
 	var (
 		attempt   affinitySplitAttempt
 		splitWait time.Duration
 	)
-	if sizeUnknown || uint64(region.GetApproximateSize()) > storeConfig.GetRegionSplitSize() ||
-		uint64(region.GetApproximateKeys()) > storeConfig.GetRegionSplitKeys() {
+	if c.needsSplitAttempt(region) {
 		now := time.Now()
 		attempt = affinitySplitAttempt{
 			version:       version,
@@ -176,21 +260,15 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		if tracked {
 			if !now.Before(previous.expiresAt) {
 				delete(c.splitAttempts, regionID)
+				tracked = false
 			} else if version < previous.version {
 				return nil, false
 			} else if version == previous.version && slices.Equal(previous.voterStoreIDs, attempt.voterStoreIDs) {
 				attempt = previous
 			}
-		} else if len(c.splitAttempts) >= c.maxSplitAttempts {
-			// Backpressure new attempts rather than resetting existing wait budgets.
-			if now.Before(c.nextSplitPruneAt) {
-				return wait("split-attempt-limit")
-			}
-			c.pruneSplitAttempts(now)
-			c.nextSplitPruneAt = now.Add(affinitySplitPruneInterval)
-			if len(c.splitAttempts) >= c.maxSplitAttempts {
-				return wait("split-attempt-limit")
-			}
+		}
+		if !tracked && !c.admitSplitAttempt(regionID, now) {
+			return wait("split-attempt-limit")
 		}
 		// A split that the controller rejects or cancels before it starts, for
 		// example because the waiting queue is full, sends no request, so the
@@ -247,11 +325,17 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			c.splitAttempts[regionID] = attempt
 			return op, false
 		}
-	} else if tracked && version >= previous.version && (previous.split == nil || version > previous.version ||
-		!slices.Equal(previous.voterStoreIDs, group.VoterStoreIDs)) {
-		// Size can change without an epoch change. Keep the SCAN budget for the
-		// same version and target in case another large snapshot is checked.
-		delete(c.splitAttempts, regionID)
+	} else {
+		c.removeSplitWaiter(regionID)
+		if tracked && version >= previous.version && (previous.split == nil || version > previous.version ||
+			!slices.Equal(previous.voterStoreIDs, group.VoterStoreIDs)) {
+			// Size can change without an epoch change. Keep the SCAN budget for the
+			// same version and target in case another large snapshot is checked.
+			delete(c.splitAttempts, regionID)
+		}
+		if c.splitWaitQueue.Len() > 0 {
+			c.promoteSplitWaiters(time.Now())
+		}
 	}
 	// Merges can leave a positive but stale size. Reuse the merge cooldown;
 	// after a restart its cache is gone, so allow the same time for statistics.
