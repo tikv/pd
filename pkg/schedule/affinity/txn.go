@@ -347,12 +347,16 @@ func (m *Manager) runGroupOpsInTxn(groupOps [][]func(kv.Txn) error) (int, error)
 	return len(groupOps), nil
 }
 
-// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
+// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group
+// and resets target availability using cached store conditions. The updated group
+// can be degraded or expired. Before the first store check, the update marks the
+// group available.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	return m.updateAffinityGroupPeersWithState(groupID, nil, leaderStoreID, voterStoreIDs)
 }
 
-// updateAffinityGroupPeersWithState updates the leader and voter stores of an affinity group and marks it available.
+// updateAffinityGroupPeersWithState updates the leader and voter stores of an affinity group
+// and resets target availability as described by UpdateAffinityGroupPeers.
 // A nil observed state indicates an admin update. Otherwise the runtime group and version must match,
 // its ranges must not conflict, and voter stores can change only when regular scheduling is allowed.
 func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *GroupState, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
