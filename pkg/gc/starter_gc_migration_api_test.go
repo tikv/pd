@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -153,6 +154,9 @@ func TestStarterGCMigrationRejectsInvalidBarrierID(t *testing.T) {
 
 func TestStarterGCMigrationFirstWatch(t *testing.T) {
 	re := require.New(t)
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(modeFlag)) })
 	manager, _, source, cutoff := newStarterGCAPIFixture(t, 1)
 	// A keyspace allocated after the cutoff has no old T to inherit.
 	id := uint32(2)
