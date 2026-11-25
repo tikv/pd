@@ -777,7 +777,14 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					}
 				}
 			}
-			revision = wresp.Header.Revision + 1
+			if len(wresp.Events) > 0 {
+				// For batched history, the header can be ahead of the last event.
+				// Resume after the last event so a new watch still sees later batches.
+				lastEvent := wresp.Events[len(wresp.Events)-1]
+				revision = max(revision, lastEvent.Kv.ModRevision+1)
+			} else {
+				revision = wresp.Header.Revision + 1
+			}
 		}
 		goto watchChanLoop // Use goto to avoid creating a new watchChan
 	}

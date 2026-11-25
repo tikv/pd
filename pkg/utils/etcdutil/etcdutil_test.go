@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -1265,6 +1266,112 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultPaginationAcrossCo
 	}, published)
 	re.NoError(err)
 	re.Equal(advanceRevision+1, revision)
+}
+
+func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
+	re := require.New(t)
+	firstBatchApplied := make(chan struct{})
+	firstBatchHeader := make(chan int64, 1)
+	var firstStreamOpened atomic.Bool
+	_, client, clean := NewTestEtcdCluster(t, 1, &TestEtcdClusterOptions{
+		ClientCfgModifier: func(cfg *clientv3.Config) {
+			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainStreamInterceptor(
+				func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, stream grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+					cs, err := stream(ctx, desc, cc, method, opts...)
+					if err != nil || method != "/etcdserverpb.Watch/Watch" || !firstStreamOpened.CompareAndSwap(false, true) {
+						return cs, err
+					}
+					return &interruptHistoryStream{ClientStream: cs, applied: firstBatchApplied, header: firstBatchHeader}, nil
+				},
+			))
+		},
+	})
+	defer clean()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	const prefix = "batched-history/"
+	const historySize = 1002 // etcd batches historical watch responses at 1000 distinct revisions.
+	snapshot, err := client.Get(ctx, prefix, clientv3.WithPrefix())
+	re.NoError(err)
+	expected := make(map[string]string, historySize+1)
+	for i := range historySize {
+		key, value := fmt.Sprintf("%s%d", prefix, i), fmt.Sprintf("value-%d", i)
+		_, err := client.Put(ctx, key, value)
+		re.NoError(err)
+		expected[key] = value
+	}
+
+	const marker = prefix + "after-disconnect"
+	applied := make(map[string]string, historySize+1)
+	var putCount int
+	var firstBatchLastRev int64
+	watcher := NewLoopWatcher(ctx, &sync.WaitGroup{}, client, "batched-history", prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			applied[string(kv.Key)] = string(kv.Value)
+			putCount++
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func(events []*clientv3.Event) error {
+			if len(events) == 0 {
+				return nil
+			}
+			last := events[len(events)-1].Kv
+			if firstBatchLastRev == 0 {
+				firstBatchLastRev = last.ModRevision
+				close(firstBatchApplied)
+			}
+			if string(last.Key) == marker {
+				cancel()
+			}
+			return nil
+		}, true)
+
+	nextRevision, err := watcher.watch(ctx, snapshot.Header.Revision+1)
+	re.ErrorIs(err, rpctypes.ErrNoLeader)
+	re.Less(firstBatchLastRev, <-firstBatchHeader, "the first batch must end before the response header revision")
+
+	// The marker ends the second watch even if it skips the remaining history.
+	_, err = client.Put(ctx, marker, marker)
+	re.NoError(err)
+	expected[marker] = marker
+	_, err = watcher.watch(ctx, nextRevision)
+	re.NoError(err)
+	re.Contains(applied, marker)
+	re.Len(applied, putCount, "watch replayed events")
+	re.Equal(len(expected), putCount, "watch resumed at revision %d, want %d", nextRevision, firstBatchLastRev+1)
+	re.Equal(firstBatchLastRev+1, nextRevision)
+	re.Equal(expected, applied)
+}
+
+type interruptHistoryStream struct {
+	grpc.ClientStream
+	applied <-chan struct{}
+	header  chan<- int64
+	sent    bool
+}
+
+func (s *interruptHistoryStream) RecvMsg(msg any) error {
+	if s.sent {
+		// Hold back all later responses until LoopWatcher applies the first batch.
+		select {
+		case <-s.applied:
+			return rpctypes.ErrGRPCNoLeader
+		case <-s.Context().Done():
+			return s.Context().Err()
+		}
+	}
+	if err := s.ClientStream.RecvMsg(msg); err != nil {
+		return err
+	}
+	resp := msg.(*etcdserverpb.WatchResponse)
+	if len(resp.Events) > 0 {
+		s.header <- resp.Header.Revision
+		s.sent = true
+	}
+	return nil
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherBreak() {
