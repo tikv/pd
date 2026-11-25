@@ -296,6 +296,7 @@ func (s *testTSODispatcherSuite) TestHandleProcessRequestErrorRemoveConnOnCallee
 		bo,
 		cctx.NewManager[*tsoStream](),
 		mockStreamURL,
+		s.stream,
 		fmt.Errorf("%s", errs.MismatchCalleeIDErr),
 	)
 
@@ -436,7 +437,8 @@ func TestTSORecoveryRefreshesOnRequestErrors(t *testing.T) {
 			dispatcher := newTSODispatcher(t.Context(), provider)
 			defer dispatcher.close()
 			bo := retry.InitialBackoffer(time.Millisecond, time.Millisecond, time.Second)
-			require.True(t, dispatcher.handleProcessRequestError(t.Context(), bo, provider.conCtxMgr, mockStreamURL, fmt.Errorf("%s", message)))
+			stream := &tsoStream{leaderURL: mockStreamURL}
+			require.True(t, dispatcher.handleProcessRequestError(t.Context(), bo, provider.conCtxMgr, mockStreamURL, stream, fmt.Errorf("%s", message)))
 			if leaderChange {
 				require.Equal(t, int32(1), svc.checkCount.Load())
 				require.Zero(t, svc.scheduleCount.Load())
@@ -450,18 +452,25 @@ func TestTSORecoveryRefreshesOnRequestErrors(t *testing.T) {
 
 func TestTSORecoveryUsesKnownNewLeader(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		leaderURL  string
-		forwarding bool
-		proxy      bool
-		checks     int32
-		schedules  int32
+		name          string
+		serverURL     string
+		forwardedHost string
+		leaderURL     string
+		forwarding    bool
+		proxy         bool
+		checks        int32
+		schedules     int32
 	}{
-		{name: "new-direct-leader", leaderURL: "new-leader", checks: 0, schedules: 1},
-		{name: "unchanged-leader", leaderURL: mockStreamURL, checks: 1},
-		{name: "unknown-leader", checks: 1},
-		{name: "forwarded-stream", leaderURL: "new-leader", forwarding: true, checks: 1},
-		{name: "proxy-stream", leaderURL: "new-leader", proxy: true, checks: 1},
+		{name: "new-direct-leader", serverURL: "old-leader", leaderURL: "http://new-leader", schedules: 1},
+		{name: "unchanged-leader", serverURL: "leader", leaderURL: "http://leader", checks: 1},
+		{name: "unchanged-tls-leader", serverURL: "leader", leaderURL: "https://leader", checks: 1},
+		{name: "unknown-leader", serverURL: "leader", checks: 1},
+		{name: "forwarding-enabled-direct-stream", serverURL: "old-leader", leaderURL: "http://new-leader", forwarding: true, schedules: 1},
+		{name: "current-forwarded-target", serverURL: "backup", forwardedHost: "http://leader", leaderURL: "http://leader", forwarding: true, checks: 1},
+		{name: "obsolete-forwarded-target", serverURL: "backup", forwardedHost: "http://old-leader", leaderURL: "http://new-leader", forwarding: true, schedules: 1},
+		{name: "proxy-direct-stream", serverURL: "old-leader", leaderURL: "http://new-leader", proxy: true, schedules: 1},
+		{name: "current-proxy-target", serverURL: "backup", forwardedHost: "http://leader", leaderURL: "http://leader", proxy: true, checks: 1},
+		{name: "obsolete-proxy-target", serverURL: "backup", forwardedHost: "http://old-leader", leaderURL: "http://new-leader", proxy: true, schedules: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &countingServiceDiscovery{servingURL: tc.leaderURL}
@@ -471,9 +480,18 @@ func TestTSORecoveryUsesKnownNewLeader(t *testing.T) {
 			provider := &mockTSOServiceProvider{option: option, conCtxMgr: cctx.NewManager[*tsoStream](), svcDiscovery: svc}
 			dispatcher := newTSODispatcher(t.Context(), provider)
 			defer dispatcher.close()
+			ctx, cancel := context.WithCancel(t.Context())
+			if tc.forwardedHost != "" {
+				ctx = grpcutil.BuildForwardContext(ctx, tc.forwardedHost)
+			}
+			stream := newTSOStream(ctx, tc.serverURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
+			t.Cleanup(func() {
+				cancel()
+				stream.WaitForClosed()
+			})
 			bo := retry.InitialBackoffer(time.Millisecond, time.Millisecond, time.Second)
-			require.True(t, dispatcher.handleProcessRequestError(t.Context(), bo, provider.conCtxMgr, mockStreamURL, fmt.Errorf("%s", errs.NotLeaderErr)))
-			require.Equal(t, tc.checks, svc.checkCount.Load(), "a known new direct leader must not wait for another membership RPC")
+			require.True(t, dispatcher.handleProcessRequestError(t.Context(), bo, provider.conCtxMgr, tc.serverURL, stream, fmt.Errorf("%s", errs.NotLeaderErr)))
+			require.Equal(t, tc.checks, svc.checkCount.Load(), "a known new target leader must not wait for another membership RPC")
 			require.Equal(t, tc.schedules, svc.scheduleCount.Load())
 		})
 	}
@@ -481,15 +499,20 @@ func TestTSORecoveryUsesKnownNewLeader(t *testing.T) {
 
 func TestDispatcherCanceledStreamRefreshesBeforeReconnect(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		streamURL  string
-		leaderURL  string
-		forwarding bool
-		schedules  int32
+		name          string
+		streamURL     string
+		forwardedHost string
+		leaderURL     string
+		forwarding    bool
+		schedules     int32
 	}{
-		{name: "forwarded-stream", streamURL: "backup", leaderURL: "leader", forwarding: true, schedules: 1},
-		{name: "current-direct-leader", streamURL: "leader", leaderURL: "leader", schedules: 1},
-		{name: "obsolete-direct-leader", streamURL: "old-leader", leaderURL: "new-leader"},
+		{name: "current-forwarded-target", streamURL: "backup", forwardedHost: "http://leader", leaderURL: "http://leader", forwarding: true, schedules: 1},
+		{name: "obsolete-forwarded-target", streamURL: "backup", forwardedHost: "http://old-leader", leaderURL: "http://new-leader", forwarding: true},
+		{name: "current-direct-leader", streamURL: "leader", leaderURL: "http://leader", schedules: 1},
+		{name: "current-tls-leader", streamURL: "leader", leaderURL: "https://leader", schedules: 1},
+		{name: "obsolete-direct-leader", streamURL: "old-leader", leaderURL: "http://new-leader"},
+		{name: "forwarding-enabled-current-direct", streamURL: "leader", leaderURL: "http://leader", forwarding: true, schedules: 1},
+		{name: "forwarding-enabled-obsolete-direct", streamURL: "old-leader", leaderURL: "http://new-leader", forwarding: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &countingServiceDiscovery{conn: new(grpc.ClientConn), servingURL: tc.leaderURL}
@@ -508,6 +531,9 @@ func TestDispatcherCanceledStreamRefreshesBeforeReconnect(t *testing.T) {
 			t.Cleanup(client.cancel)
 
 			ctx, cancel := context.WithCancel(client.ctx)
+			if tc.forwardedHost != "" {
+				ctx = grpcutil.BuildForwardContext(ctx, tc.forwardedHost)
+			}
 			stream := newTSOStream(ctx, tc.streamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
 			require.True(t, client.conCtxMgr.Store(ctx, cancel, tc.streamURL, stream))
 			// The deadline watcher cancels this outer context when a request times out.

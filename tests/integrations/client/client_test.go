@@ -386,6 +386,17 @@ func TestTSOFollowerProxy(t *testing.T) {
 	}
 	wg.Wait()
 
+	// Streams created before the transfer still target the old leader through followers.
+	oldLeader := cluster.WaitLeader()
+	re.NoError(cluster.GetServer(oldLeader).ResignLeaderWithRetry())
+	newLeader := cluster.WaitLeaderChange(oldLeader)
+	re.NotEmpty(newLeader)
+	waitLeader(re, cli2.GetServiceDiscovery(), cluster.GetServer(newLeader))
+	physical, logical, err := cli1.GetTS(ctx)
+	re.NoError(err)
+	lastTS := tsoutil.ComposeTS(physical, logical)
+	re.Greater(checkTS(re, cli2, lastTS), lastTS)
+
 	followerServer := cluster.GetServer(cluster.GetFollower())
 	re.NoError(followerServer.Stop())
 	ch := make(chan struct{})
