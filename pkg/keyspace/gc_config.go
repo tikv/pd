@@ -47,7 +47,8 @@ func defaultGCManagementType() string {
 	return UnifiedGC
 }
 
-func isValidGCManagementType(mode string) bool {
+// IsValidGCManagementType reports whether mode is a recognized GC management type.
+func IsValidGCManagementType(mode string) bool {
 	return mode == UnifiedGC || mode == KeyspaceLevelGC
 }
 
@@ -56,7 +57,7 @@ func validateNewGCConfig(config map[string]string) error {
 		return errs.ErrKeyspaceLegacyGCConfigUnsupported
 	}
 	mode, present := config[GCManagementType]
-	if present && !isValidGCManagementType(mode) {
+	if present && !IsValidGCManagementType(mode) {
 		return errs.ErrKeyspaceGCConfigInvalid.FastGenByArgs(mode)
 	}
 	if present && mode != defaultGCManagementType() {
@@ -73,7 +74,7 @@ func setDefaultGCManagementType(config map[string]string) map[string]string {
 	return config
 }
 
-func applyGCConfigMutations(config map[string]string, mutations []*Mutation) error {
+func applyKeyspaceConfigMutationsWithGCPolicy(config map[string]string, mutations []*Mutation) error {
 	oldMode := EffectiveGCManagementType(config)
 	// Validate each requested write, including writes superseded later in the list.
 	// Untouched historical fields may contain values no longer accepted on writes.
@@ -81,7 +82,7 @@ func applyGCConfigMutations(config map[string]string, mutations []*Mutation) err
 		if mutation.Key == legacySafePointVersion {
 			return errs.ErrKeyspaceLegacyGCConfigUnsupported
 		}
-		if mutation.Key == GCManagementType && mutation.Op == OpPut && !isValidGCManagementType(mutation.Value) {
+		if mutation.Key == GCManagementType && mutation.Op == OpPut && !IsValidGCManagementType(mutation.Value) {
 			return errs.ErrKeyspaceGCConfigInvalid.FastGenByArgs(mutation.Value)
 		}
 	}

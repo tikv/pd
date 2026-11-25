@@ -60,7 +60,7 @@ func (d *gcConfigLoadDiagnostics) observe(meta *keyspacepb.KeyspaceMeta, effecti
 	mode, present := meta.Config[keyspace.GCManagementType]
 	legacyVersion, legacyPresent := meta.Config["safe_point_version"]
 	reason := "effective gc mode does not match kernel"
-	if present && mode != effective {
+	if present && !keyspace.IsValidGCManagementType(mode) {
 		reason = "malformed gc_management_type; " + reason
 	}
 	d.details[d.count-1] = gcConfigDiagnostic{

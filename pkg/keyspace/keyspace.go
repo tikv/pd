@@ -845,7 +845,7 @@ func (manager *Manager) UpdateKeyspaceConfigWithPreconditions(name string, mutat
 		if err := checkKeyspaceConfigPreconditions(meta.GetConfig(), preconditions); err != nil {
 			return err
 		}
-		return applyGCConfigMutations(meta.Config, mutations)
+		return applyKeyspaceConfigMutationsWithGCPolicy(meta.Config, mutations)
 	})
 }
 
