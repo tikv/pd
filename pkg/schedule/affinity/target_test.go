@@ -238,7 +238,7 @@ func TestFirstWinSingleFlightAndGlobalBackoff(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				test := newTargetTest(t, "g", "h")
+				test := newTargetTest(t, "g", "h", "i", "j")
 				failures := testutil.ToFloat64(targetWriteFailureCounter)
 				release := make(chan struct{})
 				defer close(release)
@@ -246,29 +246,38 @@ func TestFirstWinSingleFlightAndGlobalBackoff(t *testing.T) {
 				test.reply = func(_ context.Context, targets []GroupTarget) ([]string, error) {
 					if len(test.calls) == 1 {
 						<-release
+					}
+					if len(targets) == 2 {
+						<-release
 						return nil, tc.err
 					}
 					return []string{targets[0].Expected.ID}, nil
 				}
 				g, h := test.target("g", 1, 1, 2), test.target("h", 1, 1, 2)
+				i, j := test.target("i", 1, 1, 2), test.target("j", 1, 1, 2)
 				test.observe("g", 1, 2)
 				test.observe("h", 1, 2)
+				test.observe("i", 1, 2)
 				test.Equal([]GroupTarget{g}, test.calls, "only one request can be in flight")
 				release <- struct{}{}
 				synctest.Wait()
-				test.Len(test.calls, 1, "failure drops pending observations")
-				test.observe("h", 1, 2)
-				test.Len(test.calls, 1, "failure delays all groups")
+				test.Equal([]GroupTarget{g, h, i}, test.calls, "queued groups are sent together")
+				test.observe("j", 1, 2)
+				release <- struct{}{}
+				synctest.Wait()
+				test.Len(test.calls, 3, "failure drops pending observations")
+				test.observe("j", 1, 2)
+				test.Len(test.calls, 3, "failure delays all groups")
 				if !errors.Is(tc.err, ErrTargetWriterNotReady) {
-					failures++
+					failures += 2
 				}
 				test.Equal(failures, testutil.ToFloat64(targetWriteFailureCounter))
 
 				time.Sleep(time.Second)
 				test.observe("h", 1, 2)
 				test.Zero(test.GetAffinityGroupState("h").LeaderStoreID, "HTTP success waits for the watcher")
-				test.observe("g", 1, 2)
-				test.Equal([]GroupTarget{g, h, g}, test.calls, "success does not delay other groups")
+				test.observe("j", 1, 2)
+				test.Equal([]GroupTarget{g, h, i, h, j}, test.calls, "success does not delay other groups")
 			})
 		})
 	}
@@ -277,7 +286,7 @@ func TestFirstWinSingleFlightAndGlobalBackoff(t *testing.T) {
 func TestFirstWinSkippedGroupDoesNotBlockPatrol(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		skippedIDs := []string{"a"}
-		for index := range 1024 {
+		for index := range 1023 {
 			skippedIDs = append(skippedIDs, fmt.Sprintf("a%04d", index))
 		}
 		ids := append(skippedIDs, "b", "c")
@@ -350,7 +359,7 @@ func TestFirstWinSkippedGroupDoesNotBlockPatrol(t *testing.T) {
 		for i := 1; i < len(skippedAt); i++ {
 			test.Equal(time.Second, skippedAt[i].Sub(skippedAt[i-1]))
 		}
-		test.Equal(failures, testutil.ToFloat64(targetWriteFailureCounter))
+		test.Equal(failures+float64(3*len(skippedIDs)), testutil.ToFloat64(targetWriteFailureCounter))
 	})
 }
 

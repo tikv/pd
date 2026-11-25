@@ -105,7 +105,7 @@ func (m *Manager) drainObservedTargets() {
 		for i, obs := range batch {
 			targets[i] = obs.target
 		}
-		_, err := m.targetWriter.WriteGroupTargets(m.ctx, targets)
+		written, err := m.targetWriter.WriteGroupTargets(m.ctx, targets)
 		unsupported := errors.Is(err, ErrTargetWriterUnsupported)
 
 		m.targetWriteMutex.Lock()
@@ -118,7 +118,23 @@ func (m *Manager) drainObservedTargets() {
 					obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
 				}
 			}
+			shouldReport := m.ctx.Err() == nil
 			m.targetWriteMutex.Unlock()
+			if shouldReport && len(written) < len(targets) {
+				skipped := len(targets) - len(written)
+				var firstSkippedID string
+				for _, target := range targets {
+					if !slices.Contains(written, target.Expected.ID) {
+						firstSkippedID = target.Expected.ID
+						break
+					}
+				}
+				targetWriteFailureCounter.Add(float64(skipped))
+				log.Warn("skipped affinity group target writes",
+					zap.Int("skipped-count", skipped),
+					zap.Int("group-count", len(targets)),
+					zap.String("sample-group-id", firstSkippedID))
+			}
 			continue
 		}
 
@@ -143,7 +159,7 @@ func (m *Manager) drainObservedTargets() {
 			}
 			m.metaMutex.Unlock()
 		} else if !errors.Is(err, ErrTargetWriterNotReady) && m.ctx.Err() == nil {
-			targetWriteFailureCounter.Inc()
+			targetWriteFailureCounter.Add(float64(len(targets)))
 			log.Warn("failed to write affinity group targets", zap.Int("group-count", len(batch)), zap.Error(err))
 		}
 		return
