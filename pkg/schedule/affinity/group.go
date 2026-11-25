@@ -163,8 +163,8 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
-	// availability must be used together with degradedExpiredAt. Therefore, GetAvailability and SetAvailability must
-	// always be used to read or modify them, and availability must not be accessed directly.
+	// Use GetAvailability, SetAvailability, and resetTargetAvailability to access availability
+	// together with degradedExpiredAt.
 	availability groupAvailability
 	// degradedExpiredAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
 	degradedExpiredAt uint64
@@ -262,6 +262,17 @@ func (g *runtimeGroupInfo) SetAvailability(newAvailability groupAvailability) {
 			g.availability = groupDegraded
 			g.degradedExpiredAt = newDegradedExpiredAtFromNow()
 		}
+	}
+}
+
+// resetTargetAvailability sets the initial availability for a new or replaced target,
+// starting a fresh degradation window only when the target starts degraded.
+func (g *runtimeGroupInfo) resetTargetAvailability(availability groupAvailability) {
+	g.availability = availability
+	if availability == groupDegraded {
+		g.degradedExpiredAt = newDegradedExpiredAtFromNow()
+	} else {
+		g.degradedExpiredAt = 0
 	}
 }
 

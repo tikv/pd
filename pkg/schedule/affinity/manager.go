@@ -172,18 +172,14 @@ func (m *Manager) initGroupLocked(group *Group) {
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
 		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
-		availability:        groupDegraded,
-		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
 		AffinityRegionCount: 0,
 		Regions:             make(map[uint64]regionCache),
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	m.setTargetAvailabilityLocked(groupInfo)
 	m.groups[group.ID] = groupInfo
-	if m.storeConditionsKnown {
-		groupInfo.SetAvailability(calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs))
-	}
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -223,14 +219,14 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	groupInfo.AffinityVer++
 }
 
-// setTargetAvailabilityLocked resets availability and the degradation deadline for a replacement target.
+// setTargetAvailabilityLocked resets availability and the degradation deadline for a new or replaced target.
 // The caller must hold m.Lock().
 func (m *Manager) setTargetAvailabilityLocked(groupInfo *runtimeGroupInfo) {
-	groupInfo.SetAvailability(groupAvailable)
-	groupInfo.SetAvailability(groupDegraded)
+	availability := groupDegraded
 	if m.storeConditionsKnown {
-		groupInfo.SetAvailability(calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs))
+		availability = calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
 	}
+	groupInfo.resetTargetAvailability(availability)
 }
 
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {

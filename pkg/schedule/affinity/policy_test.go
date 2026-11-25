@@ -421,6 +421,7 @@ func TestAvailabilityCheckWithUnchangedTombstone(t *testing.T) {
 	manager.checkGroupsAvailability()
 	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3}})
 	re.True(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+	re.Zero(getGroupForTest(re, manager, "g").degradedExpiredAt)
 	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
 
 	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 3}})
@@ -436,6 +437,16 @@ func TestAvailabilityCheckWithUnchangedTombstone(t *testing.T) {
 	re.False(state.AffinitySchedulingAllowed)
 	re.False(state.RegularSchedulingAllowed)
 
+	// Shorten the current window without expiring it.
+	freshDeadline := newDegradedExpiredAtFromNow()
+	manager.Lock()
+	manager.groups["g"].degradedExpiredAt = freshDeadline - defaultDegradedExpirationSeconds/2
+	manager.Unlock()
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 3, VoterStoreIDs: []uint64{3, 4}})
+	groupInfo := getGroupForTest(re, manager, "g")
+	re.Equal(groupDegraded, groupInfo.GetAvailability())
+	re.GreaterOrEqual(groupInfo.degradedExpiredAt, freshDeadline)
+
 	storeInfos.PutStore(store4.Clone(core.SetLastHeartbeatTS(now.Add(-2 * time.Hour))))
 	manager.checkGroupsAvailability()
 	re.True(manager.GetAffinityGroupState("g").RegularSchedulingAllowed)
@@ -448,6 +459,12 @@ func TestAvailabilityCheckWithUnchangedTombstone(t *testing.T) {
 	state = manager.GetAffinityGroupState("g")
 	re.True(state.AffinitySchedulingAllowed)
 	re.False(state.RegularSchedulingAllowed)
+	re.Zero(getGroupForTest(re, manager, "g").degradedExpiredAt)
+
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}})
+	groupInfo = getGroupForTest(re, manager, "g")
+	re.Equal(groupExpired, groupInfo.GetAvailability())
+	re.Zero(groupInfo.degradedExpiredAt)
 	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
 }
 
