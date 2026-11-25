@@ -80,6 +80,12 @@ type freeIDBitmapStore interface {
 // share a bucket; a 64-byte bucket covers 512 IDs. Only IDs whose reclamation
 // has completed belong in this index.
 //
+// The last ID in each bucket is intentionally left unreclaimed to simplify
+// the implementation. This breaks free runs at bucket boundaries, so selection
+// and claiming depend only on the current bucket. This costs one reusable ID
+// per bucket (1/512 by default) and lets a single bucket CAS protect the
+// predecessor check, even if a timed-out write commits after a reload.
+//
 // Buckets are persisted in etcd and loaded gradually into an in-memory cache.
 // Reclamation sets an ID's bit; claiming it for a new keyspace clears the bit.
 // update commits the bit change and the caller's keyspace metadata changes in
@@ -95,15 +101,15 @@ type freeIDBitmapStore interface {
 // boundaries. This primitive has no service lifecycle or keyspace metadata
 // dependencies.
 type freeIDBitmap struct {
-	mu               sync.Mutex
-	store            freeIDBitmapStore
-	prefix           string
-	bucketBytes      int
-	initialized      bool
-	buckets          map[uint32]kv.KeyValuePair // Empty entries are needed only outside nextLoad.
-	candidateBuckets []uint32                   // Sorted buckets with at least one candidate.
-	invalid          map[uint32]struct{}
-	nextLoad         uint32 // Loaded prefix end; invalid entries override this coverage.
+	mu          sync.Mutex
+	store       freeIDBitmapStore
+	prefix      string
+	bucketBytes int
+	initialized bool
+	buckets     map[uint32]kv.KeyValuePair // Empty entries are needed only outside nextLoad.
+	freeBuckets []uint32                   // Sorted nonempty buckets; each contains a candidate.
+	invalid     map[uint32]struct{}
+	nextLoad    uint32 // Loaded prefix end; invalid entries override this coverage.
 }
 
 // newFreeIDBitmap creates an empty cache. prefix is the caller-provided etcd
@@ -225,6 +231,9 @@ func (b *freeIDBitmap) loadRangeLocked(ctx context.Context, start, end uint32) e
 		if err != nil || bucket < start || bucket >= end || value.Key != b.bucketKey(bucket) || len(value.Value) != b.bucketBytes || value.ModRevision <= 0 {
 			return errors.New("invalid free ID bitmap encoding or revision")
 		}
+		if value.Value[b.bucketBytes-1]&0x80 != 0 {
+			return errors.New("free ID bitmap contains a reserved bucket-end ID")
+		}
 		loaded[bucket] = value
 	}
 	// Extend contiguous coverage only after the entire range is validated.
@@ -256,19 +265,18 @@ func (b *freeIDBitmap) candidates() *freeIDCandidates {
 }
 
 // Next returns the next cached candidate, releasing the lock before the caller
-// checks its Region. The preceding ID must be known non-free: selecting from
-// the middle of a consecutive free run could split off its earlier IDs and
-// leave them ineligible for reuse. Unknown predecessors are skipped as well.
-// The index limits each lookup to the resumed bucket and, if its candidates
-// were already visited, the next candidate bucket.
+// checks its Region. Within a bucket, only the first ID of each free run is
+// selectable: splitting in its middle could leave earlier IDs unusable.
+// The reserved last bit breaks runs between buckets. Each lookup scans at most
+// the resumed bucket and the next nonempty bucket.
 func (c *freeIDCandidates) Next() (uint32, bool) {
 	b := c.bitmap
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	idsPerBucket := uint32(b.bucketBytes * 8)
 	resumeBucket := c.nextID / idsPerBucket
-	index, _ := slices.BinarySearch(b.candidateBuckets, resumeBucket)
-	for _, bucket := range b.candidateBuckets[index:] {
+	index, _ := slices.BinarySearch(b.freeBuckets, resumeBucket)
+	for _, bucket := range b.freeBuckets[index:] {
 		firstBit := uint32(0)
 		if bucket == resumeBucket {
 			firstBit = c.nextID % idsPerBucket
@@ -287,6 +295,9 @@ func (c *freeIDCandidates) Next() (uint32, bool) {
 // Unknown or invalidated buckets require a reload before their bits can be used.
 func (b *freeIDBitmap) isFreeLocked(id uint32) (free, known bool) {
 	idsPerBucket := uint32(b.bucketBytes * 8)
+	if id%idsPerBucket == idsPerBucket-1 {
+		return false, true
+	}
 	bucket := id / idsPerBucket
 	if _, invalid := b.invalid[bucket]; invalid {
 		return false, false
@@ -308,9 +319,8 @@ func (b *freeIDBitmap) isFreeLocked(id uint32) (free, known bool) {
 // The caller must add its ownership/leadership checks to the same transaction.
 // The callback must use txn for its persistent changes; cache changes belong
 // after a successful return. The successful commit revision becomes the next
-// CAS revision without another Get. On any error the bucket is unavailable
-// until reloaded. An ambiguous
-// commit also requires the caller to reconcile its own metadata before retry.
+// CAS revision without another Get. If commit returns an error, reload the
+// bucket before using it again; each update checks its revision with CAS.
 func (b *freeIDBitmap) update(ctx context.Context, id uint32, free bool, metadata func(kv.Txn) error) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -322,6 +332,9 @@ func (b *freeIDBitmap) updateLocked(ctx context.Context, id uint32, free bool, m
 		return errors.New("free ID bitmap is not initialized or ID is out of range")
 	}
 	idsPerBucket := uint32(b.bucketBytes * 8)
+	if id%idsPerBucket == idsPerBucket-1 {
+		return errors.New("bucket-end keyspace IDs cannot be reclaimed or claimed")
+	}
 	bucket := id / idsPerBucket
 	cached, err := b.loadBucketLocked(ctx, bucket)
 	if err != nil {
@@ -334,6 +347,7 @@ func (b *freeIDBitmap) updateLocked(ctx context.Context, id uint32, free bool, m
 
 	// Commit the bit and metadata together, provided the cached bucket is current.
 	var committedTxn kv.CommittedRevisionTxn
+	commitReady := false
 	err = b.store.RunInTxnWithConditions(ctx, []clientv3.Cmp{
 		clientv3.Compare(clientv3.ModRevision(cached.Key), "=", cached.ModRevision),
 	}, func(txn kv.Txn) error {
@@ -345,14 +359,21 @@ func (b *freeIDBitmap) updateLocked(ctx context.Context, id uint32, free bool, m
 		if err := metadata(txn); err != nil {
 			return err
 		}
+		var err error
 		if updated == "" {
-			return txn.Remove(cached.Key)
+			err = txn.Remove(cached.Key)
+		} else {
+			err = txn.Save(cached.Key, updated)
 		}
-		return txn.Save(cached.Key, updated)
+		commitReady = err == nil
+		return err
 	})
 	if err != nil {
-		// The commit may have succeeded despite the error. Reload before reuse.
-		b.invalidateBucketLocked(bucket)
+		// Callback errors abort before commit and leave the cache valid.
+		// Once commit is possible, an error requires a reload.
+		if commitReady {
+			b.invalidateBucketLocked(bucket)
+		}
 		return err
 	}
 	b.publishLocked(bucket, updated, committedTxn.CommitRevision())
@@ -406,8 +427,7 @@ func (b *freeIDBitmap) updatedBucketValue(value string, bitOffset uint32, free b
 func (b *freeIDBitmap) invalidateBucketLocked(bucket uint32) {
 	delete(b.buckets, bucket)
 	b.invalid[bucket] = struct{}{}
-	b.refreshCandidateBucketLocked(bucket)
-	b.refreshCandidateBucketLocked(bucket + 1)
+	b.updateFreeBucketIndexLocked(bucket)
 }
 
 func (b *freeIDBitmap) publishLocked(bucket uint32, value string, revision int64) {
@@ -420,38 +440,30 @@ func (b *freeIDBitmap) publishLocked(bucket uint32, value string, revision int64
 		b.buckets[bucket] = kv.KeyValuePair{Key: b.bucketKey(bucket), Value: value, ModRevision: revision}
 	}
 	delete(b.invalid, bucket)
-	// A change can affect this bucket's run starts and the next bucket's first bit.
-	b.refreshCandidateBucketLocked(bucket)
-	b.refreshCandidateBucketLocked(bucket + 1)
+	// Every nonempty bucket has a candidate because its predecessor ends in 0.
+	b.updateFreeBucketIndexLocked(bucket)
 }
 
-// refreshCandidateBucketLocked excludes buckets with no eligible run starts,
-// including fully free buckets continuing a run from their predecessor. This
-// keeps Next from scanning a long free run after its first ID is skipped.
-func (b *freeIDBitmap) refreshCandidateBucketLocked(bucket uint32) {
-	_, candidate := b.nextCandidateBitLocked(bucket, 0)
-	index, present := slices.BinarySearch(b.candidateBuckets, bucket)
-	if candidate && !present {
-		b.candidateBuckets = slices.Insert(b.candidateBuckets, index, bucket)
-	} else if !candidate && present {
-		b.candidateBuckets = slices.Delete(b.candidateBuckets, index, index+1)
+// updateFreeBucketIndexLocked maintains the sorted list of nonempty cached buckets.
+func (b *freeIDBitmap) updateFreeBucketIndexLocked(bucket uint32) {
+	nonempty := b.buckets[bucket].Value != ""
+	index, present := slices.BinarySearch(b.freeBuckets, bucket)
+	if nonempty && !present {
+		b.freeBuckets = slices.Insert(b.freeBuckets, index, bucket)
+	} else if !nonempty && present {
+		b.freeBuckets = slices.Delete(b.freeBuckets, index, index+1)
 	}
 }
 
-// nextCandidateBitLocked finds a free bit with a known non-free predecessor.
-// Scanning is bounded by one bucket; candidateBuckets skips ineligible buckets.
+// nextCandidateBitLocked finds a free run's first bit within one bucket.
 func (b *freeIDBitmap) nextCandidateBitLocked(bucket, firstBit uint32) (uint32, bool) {
 	bitmap := b.buckets[bucket].Value
 	for bit := firstBit; bit < uint32(len(bitmap)*8); bit++ {
 		if bitmap[bit/8]&(1<<(bit%8)) == 0 {
 			continue
 		}
-		id := bucket*uint32(b.bucketBytes*8) + bit
-		if id > 0 {
-			free, known := b.isFreeLocked(id - 1)
-			if free || !known {
-				continue
-			}
+		if bit > 0 && bitmap[(bit-1)/8]&(1<<((bit-1)%8)) != 0 {
+			continue
 		}
 		return bit, true
 	}
