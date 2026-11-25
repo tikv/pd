@@ -99,11 +99,10 @@ func (rule *LabelRule) GetKeyRanges() []*KeyRangeRule {
 	return rs
 }
 
-// NewLabelRuleFromJSON validates and adjusts a label rule from JSON.
-// It rejects rules whose labels have all expired.
+// NewLabelRuleFromJSON creates a label rule from the JSON data.
 func NewLabelRuleFromJSON(data []byte) (*LabelRule, error) {
-	lr, err := NewLabelRuleFromJSONWithoutCheck(data)
-	if err != nil {
+	lr := &LabelRule{}
+	if err := json.Unmarshal(data, lr); err != nil {
 		return nil, err
 	}
 	if err := lr.checkAndAdjust(); err != nil {
@@ -250,17 +249,16 @@ func (rule *LabelRule) adjust() error {
 		}
 	}
 	// TODO: change it to switch statement once we support more types.
-	if rule.RuleType != KeyRange {
-		log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
-		return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %s", rule.RuleType))
-	}
-	ranges, err := initKeyRangeRulesFromLabelRuleData(rule.Data)
-	if err != nil {
+	if rule.RuleType == KeyRange {
+		var err error
+		rule.Data, err = initKeyRangeRulesFromLabelRuleData(rule.Data)
+		if err == nil {
+			rule.checkAndRemoveExpireLabels(time.Now())
+		}
 		return err
 	}
-	rule.Data = ranges
-	rule.checkAndRemoveExpireLabels(time.Now())
-	return nil
+	log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
+	return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %s", rule.RuleType))
 }
 
 func (rule *LabelRule) expireBefore(t time.Time) bool {

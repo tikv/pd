@@ -577,23 +577,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		affinityRuleIDs = affinityRuleIDs[:0]
 		return nil
 	}
-	deleteFn := func(kv *mvccpb.KeyValue) error {
-		key := string(kv.Key)
-		log.Debug("delete region label rule", zap.String("key", key))
-		id := strings.TrimPrefix(key, rw.regionLabelPathPrefix)
-		rule := rw.regionLabeler.GetLabelRuleLocked(id)
-		err := rw.regionLabeler.DeleteLabelRuleLocked(id)
-		if err == nil && rule != nil {
-			krs := rule.GetKeyRanges()
-			if krs != nil {
-				suspectKeyRanges = append(suspectKeyRanges, krs...)
-			}
-			if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
-				affinityRuleIDs = append(affinityRuleIDs, id)
-			}
-		}
-		return err
-	}
+	var deleteFn func(*mvccpb.KeyValue) error
 	putFn := func(kv *mvccpb.KeyValue) error {
 		log.Debug("update region label rule", zap.String("key", string(kv.Key)), logutil.ZapRedactByteString("value", kv.Value))
 		rule, err := labeler.LoadLabelRuleFromJSON(kv.Value)
@@ -612,6 +596,23 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 			}
 			if strings.HasPrefix(rule.ID, affinity.LabelRuleIDPrefix) {
 				affinityRuleIDs = append(affinityRuleIDs, rule.ID)
+			}
+		}
+		return err
+	}
+	deleteFn = func(kv *mvccpb.KeyValue) error {
+		key := string(kv.Key)
+		log.Debug("delete region label rule", zap.String("key", key))
+		id := strings.TrimPrefix(key, rw.regionLabelPathPrefix)
+		rule := rw.regionLabeler.GetLabelRuleLocked(id)
+		err := rw.regionLabeler.DeleteLabelRuleLocked(id)
+		if err == nil && rule != nil {
+			krs := rule.GetKeyRanges()
+			if krs != nil {
+				suspectKeyRanges = append(suspectKeyRanges, krs...)
+			}
+			if strings.HasPrefix(id, affinity.LabelRuleIDPrefix) {
+				affinityRuleIDs = append(affinityRuleIDs, id)
 			}
 		}
 		return err
