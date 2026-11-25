@@ -108,7 +108,7 @@ pre-build: ${PD_SERVER_DEP}
 pd-server: pre-build
 	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
-pd-server-failpoint:
+pd-server-failpoint: install-test-tools
 	@$(FAILPOINT_ENABLE)
 	FAILPOINT=1 $(MAKE) pd-server || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
@@ -175,15 +175,20 @@ dashboard-replace-distro-info:
 #### Static tools ####
 
 PD_PKG := github.com/tikv/pd
-PACKAGES := $(shell go list ./...)
+# Discover packages once, when a lint or test target first needs them.
+PACKAGES = $(eval PACKAGES := $$(shell go list ./...))$(PACKAGES)
 
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
+EASYJSON_PACKAGE := github.com/mailru/easyjson/easyjson
 GOLANGCI_LINT_VERSION := 2.14.0
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
-install-tools:
+install-easyjson:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@go install $(EASYJSON_PACKAGE)
+
+install-tools: install-easyjson
 	@set -o pipefail; \
 	if ! $(GO_TOOLS_BIN_PATH)/golangci-lint version 2>/dev/null | grep -Fq 'version $(GOLANGCI_LINT_VERSION) '; then \
 		curl -sSfL https://golangci-lint.run/install.sh | \
@@ -194,13 +199,13 @@ install-tools:
 		prom_dir=$$(go env GOMODCACHE)/github.com/prometheus/prometheus@v0.310.0; \
 		(cd $$prom_dir && GOWORK=off go install ./cmd/promtool); \
 	}
-	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
+	@grep '_' tools.go | sed 's/"//g' | awk '$$2 != "$(EASYJSON_PACKAGE)" {print $$2}' | xargs go install
 
 install-test-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
 	@go install github.com/pingcap/failpoint/failpoint-ctl
 
-.PHONY: install-tools install-test-tools
+.PHONY: install-easyjson install-tools install-test-tools
 
 #### Static checks ####
 
@@ -241,7 +246,7 @@ check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
-generate-easyjson: install-tools
+generate-easyjson: install-easyjson
 	@echo "generating easyjson..."
 	easyjson -all ./pkg/response/region.go
 
@@ -264,17 +269,17 @@ failpoint-disable: install-tools
 
 #### Test ####
 
-ut: pd-ut
+ut: install-test-tools pd-ut
 	@$(FAILPOINT_ENABLE)
 	# only run unit tests
 	./bin/pd-ut run --ignore tests --race --junitfile ./junitfile
 	@$(CLEAN_UT_BINARY)
 	@$(FAILPOINT_DISABLE)
 
-PACKAGE_DIRECTORIES := $(subst $(PD_PKG)/,,$(PACKAGES))
-TEST_PKGS := $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
+PACKAGE_DIRECTORIES = $(subst $(PD_PKG)/,,$(PACKAGES))
+TEST_PKGS = $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/"),$(PACKAGES))
-BASIC_TEST_PKGS := $(filter-out $(PD_PKG)/tests%,$(TEST_PKGS))
+BASIC_TEST_PKGS = $(filter-out $(PD_PKG)/tests%,$(TEST_PKGS))
 
 SUBMODULES := $(filter $(shell find . -iname "go.mod" -exec dirname {} \;),\
 				$(filter-out .,$(shell find . -iname "Makefile" -exec dirname {} \;)))
