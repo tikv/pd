@@ -259,6 +259,8 @@ var (
 	ErrKeyspaceGroupNotInSplit = errors.Normalize("keyspace group %v is not in split state", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupNotInSplit"))
 	// ErrKeyspaceGroupInMerging is used to indicate target keyspace group is in merging state.
 	ErrKeyspaceGroupInMerging = errors.Normalize("keyspace group %v is in merging state", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupInMerging"))
+	// ErrKeyspaceGroupNotEmpty indicates that a keyspace group still contains keyspaces.
+	ErrKeyspaceGroupNotEmpty = errors.Normalize("keyspace group %v still contains keyspaces", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupNotEmpty"))
 	// ErrKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
 	ErrKeyspaceGroupNotInMerging = errors.Normalize("keyspace group %v is not in merging state", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupNotInMerging"))
 	// errKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.

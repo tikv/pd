@@ -1763,6 +1763,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	re.Equal([]uint32{111, 222, 333, 444, 555}, kg1.Keyspaces)
 	re.False(kg1.IsSplitting())
 	re.True(kg1.IsMerging())
+	deleted, err := suite.kgm.DeleteKeyspaceGroupByID(1)
+	re.Nil(deleted)
+	re.ErrorIs(err, errs.ErrKeyspaceGroupInMerging)
 	// finish the merging
 	err = suite.kgm.FinishMergeKeyspaceByID(1)
 	re.NoError(err)
@@ -1772,6 +1775,12 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	re.Equal([]uint32{111, 222, 333, 444, 555}, kg1.Keyspaces)
 	re.False(kg1.IsSplitting())
 	re.False(kg1.IsMerging())
+	deleted, err = suite.kgm.DeleteKeyspaceGroupByID(1)
+	re.Nil(deleted)
+	re.ErrorIs(err, errs.ErrKeyspaceGroupNotEmpty)
+	persisted, err := suite.kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Equal(kg1, persisted)
 
 	// merge a non-existing keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(4, []uint32{5})

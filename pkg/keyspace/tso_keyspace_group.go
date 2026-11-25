@@ -824,7 +824,7 @@ func (m *GroupManager) GetKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup,
 	return kg, nil
 }
 
-// DeleteKeyspaceGroupByID deletes the keyspace group by ID.
+// DeleteKeyspaceGroupByID deletes an empty, non-default keyspace group outside a split or merge.
 func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup, error) {
 	if id == constant.DefaultKeyspaceGroupID {
 		return nil, errs.ErrModifyDefaultKeyspaceGroup
@@ -849,6 +849,12 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 		if kg.IsSplitting() {
 			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(id)
 		}
+		if kg.IsMerging() {
+			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(id)
+		}
+		if len(kg.Keyspaces) > 0 {
+			return errs.ErrKeyspaceGroupNotEmpty.FastGenByArgs(id)
+		}
 		return m.store.DeleteKeyspaceGroup(txn, id)
 	}); err != nil {
 		return nil, err
@@ -857,8 +863,6 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 		return nil, nil
 	}
 
-	// TODO: move out the keyspace to another group
-	// we don't need the keyspace group as the return value
 	m.removeKeyspaceGroupFromCacheLocked(id)
 
 	return kg, nil

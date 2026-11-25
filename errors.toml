@@ -636,6 +636,11 @@ error = '''
 keyspace group mod revision is stale
 '''
 
+["PD:keyspace:ErrKeyspaceGroupNotEmpty"]
+error = '''
+keyspace group %v still contains keyspaces
+'''
+
 ["PD:keyspace:ErrKeyspaceGroupNotEnoughReplicas"]
 error = '''
 not enough replicas in the keyspace group

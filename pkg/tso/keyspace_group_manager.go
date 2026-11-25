@@ -1012,12 +1012,8 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 	kg := kgm.kgs[groupID]
 	if kg != nil {
 		for _, kid := range kg.Keyspaces {
-			// if kid == kg.ID, it means the keyspace still belongs to this keyspace group,
-			//     so we decouple the relationship in the global keyspace lookup table.
-			// if kid != kg.ID, it means the keyspace has been moved to another keyspace group
-			//     which has already declared the ownership of the keyspace, so we don't need
-			//     delete it from the global keyspace lookup table and overwrite the ownership.
-			if kid == kg.ID {
+			// A merge target can already own this keyspace when the source deletion arrives.
+			if owner, ok := kgm.keyspaceLookupTable[kid]; ok && owner == groupID {
 				delete(kgm.keyspaceLookupTable, kid)
 			}
 		}

@@ -248,7 +248,16 @@ func hideKeyspaces(c *gin.Context) bool {
 	return strings.ToLower(c.Query(hideKeyspacesQueryName)) == "true"
 }
 
-// DeleteKeyspaceGroupByID deletes keyspace group by ID.
+// DeleteKeyspaceGroupByID deletes an empty, non-default keyspace group outside a split or merge.
+//
+//	@Tags		swagger,tso-keyspace-groups
+//	@Summary	Delete a keyspace group by ID.
+//	@Param		id	path	uint32	true	"Keyspace group ID."
+//	@Produce	json
+//	@Success	200	{object}	endpoint.KeyspaceGroup
+//	@Failure	400	{string}	string	"Invalid ID, default group, non-empty group, or merge in progress."
+//	@Failure	500	{string}	string	"PD server failed to delete the group."
+//	@Router		/tso/keyspace-groups/{id} [delete]
 func DeleteKeyspaceGroupByID(c *gin.Context) {
 	id, err := validateKeyspaceGroupID(c)
 	if err != nil {
@@ -264,7 +273,9 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 	}
 	kg, err := manager.DeleteKeyspaceGroupByID(id)
 	if err != nil {
-		if errs.ErrModifyDefaultKeyspaceGroup.Equal(err) {
+		if errs.ErrModifyDefaultKeyspaceGroup.Equal(err) ||
+			errs.ErrKeyspaceGroupInMerging.Equal(err) ||
+			errs.ErrKeyspaceGroupNotEmpty.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}

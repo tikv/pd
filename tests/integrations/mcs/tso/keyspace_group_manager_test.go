@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -62,11 +63,8 @@ import (
 type tsoKeyspaceGroupManagerTestSuite struct {
 	suite.Suite
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx context.Context
 
-	// The PD cluster.
-	cluster *tests.TestCluster
 	// pdLeaderServer is the leader server of the PD cluster.
 	pdLeaderServer *tests.TestServer
 	// tsoCluster is the TSO service cluster.
@@ -86,47 +84,29 @@ func TestTSOKeyspaceGroupManagerSuite(t *testing.T) {
 	suite.Run(t, &tsoKeyspaceGroupManagerTestSuite{})
 }
 
-func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
+// Each test starts with fresh group membership, including the default group.
+func (suite *tsoKeyspaceGroupManagerTestSuite) SetupTest() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
+	const patroller = "github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"
+	re.NoError(failpoint.Enable(patroller, `return(true)`))
+	suite.T().Cleanup(func() { re.NoError(failpoint.Disable(patroller)) })
 
-	var err error
-	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.ctx = suite.T().Context()
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
-	err = suite.cluster.RunInitialServers()
+	suite.T().Cleanup(cluster.Destroy)
+	err = cluster.RunInitialServers()
 	re.NoError(err)
-	leaderName := suite.cluster.WaitLeader()
+	leaderName := cluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
+	suite.pdLeaderServer = cluster.GetServer(leaderName)
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())
 	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 3, suite.pdLeaderServer.GetAddr())
 	re.NoError(err)
+	suite.T().Cleanup(suite.tsoCluster.Destroy)
 	suite.allocator = mockid.NewIDAllocator()
 	err = suite.allocator.SetBase(uint64(time.Now().Second()))
 	re.NoError(err)
-}
-
-func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownSuite() {
-	suite.cancel()
-	suite.tsoCluster.Destroy()
-	suite.cluster.Destroy()
-	suite.Require().NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
-}
-
-func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownTest() {
-	cleanupKeyspaceGroups(suite.Require(), suite.pdLeaderServer)
-}
-
-func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
-	keyspaceGroups := handlersutil.MustLoadKeyspaceGroups(re, server, "0", "0")
-	for _, group := range keyspaceGroups {
-		// Do not delete default keyspace group.
-		if group.ID == constant.DefaultKeyspaceGroupID {
-			continue
-		}
-		handlersutil.MustDeleteKeyspaceGroup(re, server, group.ID)
-	}
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestMultiNodes() {
@@ -1038,11 +1018,35 @@ func waitFinishMerge(
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeBeforeInitTSO() {
 	re := suite.Require()
-	// Make sure the TSO of keyspace group `id` won't be initialized before it's merged.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/failedToSaveTimestamp", `return(true)`))
-	// Request the TSO for the default keyspace concurrently via client.
-	id := suite.allocID()
+	// The default group can elect a primary before PD assigns its replicas.
+	// Wait for all TSO servers to apply the assignment and an assigned primary to serve.
+	groupManager := suite.pdLeaderServer.GetServer().GetKeyspaceGroupManager()
+	testutil.Eventually(re, func() bool {
+		group, err := groupManager.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+		if err != nil || group == nil || len(group.Members) != mcs.DefaultKeyspaceGroupReplicaCount {
+			return false
+		}
+		hasPrimary := false
+		for _, server := range suite.tsoCluster.GetServers() {
+			observed := server.GetKeyspaceGroupManager().GetKeyspaceGroups()[constant.DefaultKeyspaceGroupID]
+			if observed == nil || !slices.Equal(observed.Members, group.Members) {
+				return false
+			}
+			if server.IsKeyspaceServingByGroup(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID) {
+				hasPrimary = slices.ContainsFunc(group.Members, func(member endpoint.KeyspaceGroupMember) bool {
+					return member.IsAddressEquivalent(server.GetAdvertiseListenAddr())
+				})
+			}
+		}
+		return hasPrimary
+	})
+
 	cancel := suite.dispatchClient(re, constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+	// Keep the new group's TSO from initializing before the merge.
+	const failSaveTimestamp = "github.com/tikv/pd/pkg/tso/failedToSaveTimestamp"
+	re.NoError(failpoint.Enable(failSaveTimestamp, `return(true)`))
+	suite.T().Cleanup(func() { re.NoError(failpoint.Disable(failSaveTimestamp)) })
+	id := suite.allocID()
 	// Create the keyspace group 1 with keyspaces [7777, 8888, 9999].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -1062,7 +1066,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeBeforeIn
 	waitFinishMerge(re, suite.pdLeaderServer, constant.DefaultKeyspaceGroupID, []uint32{7777, 8888, 9999})
 	// Stop the client.
 	cancel()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToSaveTimestamp"))
 }
 
 // See https://github.com/tikv/pd/issues/6748

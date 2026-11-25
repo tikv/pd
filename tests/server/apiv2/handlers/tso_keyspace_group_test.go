@@ -296,23 +296,42 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 	re.False(ok)
 }
 
-func (suite *keyspaceGroupTestSuite) TestDeleteDefaultKeyspaceGroupReturnsBadRequest() {
+func (suite *keyspaceGroupTestSuite) TestDeleteKeyspaceGroup() {
 	re := suite.Require()
-	httpReq, err := http.NewRequest(
-		http.MethodDelete,
-		suite.server.GetAddr()+keyspaceGroupsPrefix+"/0",
-		http.NoBody,
-	)
-	re.NoError(err)
-	resp, err := tests.TestDialClient.Do(httpReq)
-	re.NoError(err)
-	defer resp.Body.Close()
-	re.Equal(http.StatusBadRequest, resp.StatusCode)
+	const targetID, sourceID = uint32(1), uint32(2)
+	MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{ID: targetID, UserKind: endpoint.Standard.String()},
+			{ID: sourceID, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{111}},
+		},
+	})
+	checkRejected := func(id uint32, expected error) {
+		before := MustLoadKeyspaceGroupByID(re, suite.server, id)
+		request, err := http.NewRequest(
+			http.MethodDelete,
+			fmt.Sprintf("%s%s/%d", suite.server.GetAddr(), keyspaceGroupsPrefix, id),
+			http.NoBody,
+		)
+		re.NoError(err)
+		response, err := tests.TestDialClient.Do(request)
+		re.NoError(err)
+		defer response.Body.Close()
+		re.Equal(http.StatusBadRequest, response.StatusCode)
 
-	var errorMessage string
-	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMessage))
-	re.Equal(errs.ErrModifyDefaultKeyspaceGroup.Error(), errorMessage)
-	re.NotNil(MustLoadKeyspaceGroupByID(re, suite.server, kgconstant.DefaultKeyspaceGroupID))
+		var message string
+		re.NoError(json.NewDecoder(response.Body).Decode(&message))
+		re.Equal(expected.Error(), message)
+		re.Equal(before, MustLoadKeyspaceGroupByID(re, suite.server, id))
+	}
+
+	checkRejected(kgconstant.DefaultKeyspaceGroupID, errs.ErrModifyDefaultKeyspaceGroup)
+	checkRejected(sourceID, errs.ErrKeyspaceGroupNotEmpty.FastGenByArgs(sourceID))
+	MustMergeKeyspaceGroup(re, suite.server, targetID, &handlers.MergeKeyspaceGroupsParams{MergeList: []uint32{sourceID}})
+	checkRejected(targetID, errs.ErrKeyspaceGroupInMerging.FastGenByArgs(targetID))
+	MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{{ID: sourceID, UserKind: endpoint.Standard.String()}},
+	})
+	MustDeleteKeyspaceGroup(re, suite.server, sourceID)
 }
 
 func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
