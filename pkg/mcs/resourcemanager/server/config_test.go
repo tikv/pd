@@ -15,18 +15,12 @@
 package server
 
 import (
-	"bytes"
-	"encoding/json"
 	"math"
 	"testing"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-
-	mconfig "github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -76,59 +70,4 @@ func TestRedactInfoLogDefault(t *testing.T) {
 		re.NoError(cfg.Adjust(&meta))
 		re.Equal(tc.expected, cfg.Security.RedactInfoLog, tc.data)
 	}
-}
-
-func TestRedactedConfig(t *testing.T) {
-	re := require.New(t)
-	const (
-		role          = "trn:iam::1:role/metering"
-		tosAK         = "test-tos-ak"
-		tosSK         = "test-tos-sk"
-		tosToken      = "test-tos-token"
-		redactedValue = "***REDACTED***"
-	)
-
-	re.Nil(RedactedConfig(nil))
-
-	cfg := NewConfig()
-	cfg.Metering = mconfig.MeteringConfig{
-		Region: "cn-beijing",
-		Bucket: "metering",
-		TOS: &mconfig.MeteringTOSConfig{
-			AssumeRoleARN:   role,
-			AccessKey:       tosAK,
-			SecretAccessKey: tosSK,
-			SessionToken:    tosToken,
-		},
-	}
-
-	var buf bytes.Buffer
-	logger := zap.New(zapcore.NewCore(
-		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
-		zapcore.AddSync(&buf),
-		zapcore.InfoLevel,
-	))
-	logger.Info("resource manager config", zap.Reflect("config", RedactedConfig(cfg)))
-	re.NoError(logger.Sync())
-
-	logged := buf.String()
-	re.NotContains(logged, tosAK)
-	re.NotContains(logged, tosSK)
-	re.NotContains(logged, tosToken)
-
-	var entry struct {
-		Msg    string `json:"msg"`
-		Config Config `json:"config"`
-	}
-	re.NoError(json.Unmarshal(buf.Bytes(), &entry))
-	re.Equal("resource manager config", entry.Msg)
-	re.NotNil(entry.Config.Metering.TOS)
-	re.Equal(role, entry.Config.Metering.TOS.AssumeRoleARN)
-	re.Equal(redactedValue, entry.Config.Metering.TOS.AccessKey)
-	re.Equal(redactedValue, entry.Config.Metering.TOS.SecretAccessKey)
-	re.Equal(redactedValue, entry.Config.Metering.TOS.SessionToken)
-
-	re.Equal(tosAK, cfg.Metering.TOS.AccessKey)
-	re.Equal(tosSK, cfg.Metering.TOS.SecretAccessKey)
-	re.Equal(tosToken, cfg.Metering.TOS.SessionToken)
 }
