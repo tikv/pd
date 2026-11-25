@@ -336,29 +336,36 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 	for i := 0; i < len(ops); i++ {
 		op := ops[i]
 		desc := op.Desc()
+		var relatedOp *Operator
 		isMerge := false
 		if op.HasRelatedMergeRegion() {
-			if i+1 >= len(ops) {
+			remaining := ops[i+1:]
+			if len(remaining) == 0 {
 				// should not be here forever
 				log.Error("orphan merge operators found", zap.String("desc", desc), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("orphan operator found")))
 				return added
 			}
-			if !ops[i+1].HasRelatedMergeRegion() {
+			relatedOp = remaining[0]
+			if !relatedOp.HasRelatedMergeRegion() {
 				log.Error("merge operator should be paired", zap.String("desc",
-					ops[i+1].Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
+					relatedOp.Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
 				return added
 			}
 			isMerge = true
 		}
-		if pass, reason := oc.checkAddOperator(false, op); !pass {
+		pass, reason := oc.checkAddOperator(false, op)
+		if pass && isMerge && !op.isPairedMergeOperator(relatedOp) {
+			pass = false
+			reason = RelatedMergeRegion
+		}
+		if !pass {
 			_ = op.Cancel(reason)
 			oc.buryOperator(op)
 			if isMerge {
 				// Merge operation have two operators, cancel them all
 				i++
-				next := ops[i]
-				_ = next.Cancel(reason)
-				oc.buryOperator(next)
+				_ = relatedOp.Cancel(reason)
+				oc.buryOperator(relatedOp)
 			}
 			continue
 		}
@@ -367,7 +374,7 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 			// count two merge operators as one, so wopStatus.ops[desc] should
 			// not be updated here
 			// TODO: call checkAddOperator ...
-			oc.wop.PutMergeOperators([]*Operator{op, ops[i+1]})
+			oc.wop.PutMergeOperators([]*Operator{op, relatedOp})
 			i++
 			added++
 		} else {
@@ -486,6 +493,13 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 				zap.Reflect("old", old))
 			operatorCounter.WithLabelValues(op.Desc(), "already-have").Inc()
 			return false, AlreadyExist
+		}
+		if op.HasRelatedMergeRegion() && !op.hasMergePair() {
+			log.Warn("trying to add unpaired merge operator",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Reflect("operator", op))
+			operatorCounter.WithLabelValues(op.Desc(), "unpaired-merge").Inc()
+			return false, RelatedMergeRegion
 		}
 		if op.Status() != CREATED {
 			log.Error("trying to add operator with unexpected status",
@@ -705,14 +719,21 @@ func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) 
 }
 
 func (oc *Controller) removeOperatorWithoutBury(op *Operator) bool {
+	if oc.deleteOperatorWithoutBury(op) {
+		if op.HasRelatedMergeRegion() {
+			oc.removeRelatedMergeOperator(op)
+		}
+		return true
+	}
+	return false
+}
+
+func (oc *Controller) deleteOperatorWithoutBury(op *Operator) bool {
 	regionID := op.RegionID()
 	if oc.operators.CompareAndDelete(regionID, op) {
 		oc.counts.dec(op.SchedulerKind())
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
-		if op.HasRelatedMergeRegion() {
-			oc.removeRelatedMergeOperator(op)
-		}
 		return true
 	}
 	return false
@@ -728,10 +749,11 @@ func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
 		return
 	}
 	relatedOp := relatedOpi.(*Operator)
-	if relatedOp != nil && relatedOp.Status() != CANCELED {
-		oc.removeOperatorWithoutBury(relatedOp)
-		relatedOp.Cancel(RelatedMergeRegion)
-		oc.buryOperator(relatedOp)
+	if relatedOp != nil && op.isPairedMergeOperator(relatedOp) && relatedOp.Status() != CANCELED {
+		if oc.deleteOperatorWithoutBury(relatedOp) {
+			relatedOp.Cancel(RelatedMergeRegion)
+			oc.buryOperator(relatedOp)
+		}
 	}
 }
 

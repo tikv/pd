@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -1430,4 +1431,216 @@ func (suite *operatorControllerTestSuite) TestMergeOperatorsSynchronousCancellat
 			}
 		})
 	}
+}
+
+func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOperator() {
+	newSetup := func() (*mockcluster.Cluster, *Controller, *core.RegionInfo, *core.RegionInfo) {
+		opts := mockconfig.NewTestOptions()
+		cluster := mockcluster.NewCluster(suite.ctx, opts)
+		stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false)
+		controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+		cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+		cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+		cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+		source := suite.newRegionInfo(301, "3a", "3b", 10, 10, []uint64{301, 1}, []uint64{302, 2})
+		target := suite.newRegionInfo(302, "3b", "3c", 10, 10, []uint64{303, 1}, []uint64{304, 2})
+		cluster.PutRegion(source)
+		cluster.PutRegion(target)
+		return cluster, controller, source, target
+	}
+
+	suite.Run("AddOperator replaces one side of merge pair", func() {
+		re := suite.Require()
+		cluster, controller, source, target := newSetup()
+		mergeOps, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+		re.NoError(err)
+		re.True(controller.AddOperator(mergeOps...))
+		oldSourceOp := mergeOps[0]
+		oldTargetOp := mergeOps[1]
+
+		newOp := NewOperator("admin-transfer", "test", target.GetID(), target.GetRegionEpoch(), OpAdmin, 10, TransferLeader{FromStore: 1, ToStore: 2})
+		re.True(controller.AddOperator(newOp))
+
+		re.Same(newOp, controller.GetOperator(target.GetID()))
+		re.Nil(controller.GetOperator(source.GetID()))
+		re.Equal(STARTED, newOp.Status())
+		re.Equal(REPLACED, oldTargetOp.Status())
+		re.Equal(CANCELED, oldSourceOp.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		re.Equal(uint64(1), controller.OperatorCount(OpAdmin))
+	})
+
+	suite.Run("PromoteWaitingOperator replaces one side of merge pair", func() {
+		re := suite.Require()
+		cluster, controller, source, target := newSetup()
+		mergeOps, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+		re.NoError(err)
+		re.True(controller.AddOperator(mergeOps...))
+		oldSourceOp := mergeOps[0]
+		oldTargetOp := mergeOps[1]
+
+		newOp := NewOperator("admin-transfer", "test", target.GetID(), target.GetRegionEpoch(), OpAdmin, 10, TransferLeader{FromStore: 1, ToStore: 2})
+		re.Equal(1, controller.AddWaitingOperator(newOp))
+
+		re.Same(newOp, controller.GetOperator(target.GetID()))
+		re.Nil(controller.GetOperator(source.GetID()))
+		re.Equal(STARTED, newOp.Status())
+		re.Equal(REPLACED, oldTargetOp.Status())
+		re.Equal(CANCELED, oldSourceOp.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		re.Equal(uint64(1), controller.OperatorCount(OpAdmin))
+	})
+
+	suite.Run("AddOperator replaces merge pair with higher priority merge pair", func() {
+		re := suite.Require()
+		cluster, controller, source, target := newSetup()
+		oldOps, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+		re.NoError(err)
+		re.True(controller.AddOperator(oldOps...))
+
+		newOps, err := CreateMergeRegionOperator("admin-merge-region", cluster, source, target, OpAdmin|OpMerge)
+		re.NoError(err)
+		re.True(controller.AddOperator(newOps...))
+
+		re.Same(newOps[0], controller.GetOperator(source.GetID()))
+		re.Same(newOps[1], controller.GetOperator(target.GetID()))
+		re.Equal(STARTED, newOps[0].Status())
+		re.Equal(STARTED, newOps[1].Status())
+		re.Equal(REPLACED, oldOps[0].Status())
+		re.Equal(CANCELED, oldOps[1].Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		re.Equal(uint64(2), controller.OperatorCount(OpAdmin))
+	})
+
+	suite.Run("stale related merge cleanup ignores newer merge pair on same regions", func() {
+		re := suite.Require()
+		cluster, controller, source, target := newSetup()
+		oldOps, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+		re.NoError(err)
+		newOps, err := CreateMergeRegionOperator("admin-merge-region", cluster, source, target, OpAdmin|OpMerge)
+		re.NoError(err)
+		re.True(controller.AddOperator(newOps...))
+
+		// Simulate a delayed removeRelatedMergeOperator from an already-replaced older merge operator.
+		controller.removeRelatedMergeOperator(oldOps[1])
+
+		re.Same(newOps[0], controller.GetOperator(source.GetID()))
+		re.Same(newOps[1], controller.GetOperator(target.GetID()))
+		re.Equal(STARTED, newOps[0].Status())
+		re.Equal(STARTED, newOps[1].Status())
+		re.Equal(uint64(2), controller.OperatorCount(OpAdmin))
+	})
+
+	suite.Run("stale related merge cleanup ignores unrelated operator on partner region", func() {
+		re := suite.Require()
+		cluster, controller, source, target := newSetup()
+		oldOps, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+		re.NoError(err)
+		unrelatedOp := NewOperator("admin-transfer", "test", source.GetID(), source.GetRegionEpoch(), OpAdmin, 10, TransferLeader{FromStore: 1, ToStore: 2})
+		re.True(controller.AddOperator(unrelatedOp))
+
+		controller.removeRelatedMergeOperator(oldOps[1])
+
+		re.Same(unrelatedOp, controller.GetOperator(source.GetID()))
+		re.Equal(STARTED, unrelatedOp.Status())
+		re.Equal(uint64(1), controller.OperatorCount(OpAdmin))
+	})
+
+	suite.Run("synced manual pairs support interleaved and split AddOperator and resist stale cleanup", func() {
+		re := suite.Require()
+		cluster, controller, source, target := newSetup()
+		extra := suite.newRegionInfo(303, "3c", "3d", 10, 10, []uint64{305, 1}, []uint64{306, 2})
+		cluster.PutRegion(extra)
+
+		newSyncedPair := func() (*Operator, *Operator) {
+			opA := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10, TransferLeader{FromStore: 1, ToStore: 2})
+			opB := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, TransferLeader{FromStore: 1, ToStore: 2})
+			opA.Sync(opB)
+			return opA, opB
+		}
+
+		// Interleaved submission: AddOperator(A, X, B)
+		oldA, oldB := newSyncedPair()
+		extraOp := NewOperator("extra-transfer", "test", extra.GetID(), extra.GetRegionEpoch(), OpLeader, 10, TransferLeader{FromStore: 1, ToStore: 2})
+		re.True(controller.AddOperator(oldA, extraOp, oldB))
+		re.True(controller.RemoveOperator(extraOp))
+
+		// Pause after removing oldA from the map (before its removeRelatedMergeOperator runs),
+		// remove oldB, install a newer generation via split AddOperator(newA)/AddOperator(newB),
+		// then resume oldA cleanup.
+		re.True(controller.deleteOperatorWithoutBury(oldA))
+		re.True(controller.deleteOperatorWithoutBury(oldB))
+		re.True(oldA.Cancel(AdminStop))
+		re.True(oldB.Cancel(AdminStop))
+		controller.buryOperator(oldA)
+		controller.buryOperator(oldB)
+
+		newA, newB := newSyncedPair()
+		re.True(controller.AddOperator(newA))
+		re.True(controller.AddOperator(newB))
+		controller.removeRelatedMergeOperator(oldA)
+
+		re.Same(newA, controller.GetOperator(source.GetID()))
+		re.Same(newB, controller.GetOperator(target.GetID()))
+		re.Equal(STARTED, newA.Status())
+		re.Equal(STARTED, newB.Status())
+		re.Equal(uint64(2), controller.OperatorCount(OpMerge))
+
+		// Normal removal of one side of the split-submitted synced pair still cancels its partner.
+		re.True(controller.RemoveOperator(newA))
+		re.Nil(controller.GetOperator(source.GetID()))
+		re.Nil(controller.GetOperator(target.GetID()))
+		re.Equal(CANCELED, newB.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+	})
+
+	suite.Run("unpaired manual merge operators without Sync are rejected without races", func() {
+		re := suite.Require()
+		_, controller, source, target := newSetup()
+		newUnsyncedPair := func() (*Operator, *Operator) {
+			opA := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10, TransferLeader{FromStore: 1, ToStore: 2})
+			opB := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, TransferLeader{FromStore: 1, ToStore: 2})
+			opA.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+			opB.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+			return opA, opB
+		}
+
+		// Both AddOperator and AddWaitingOperator reject operators missing Sync pairing.
+		opA, opB := newUnsyncedPair()
+		re.False(controller.AddOperator(opA, opB))
+		re.Nil(controller.GetOperator(source.GetID()))
+		re.Nil(controller.GetOperator(target.GetID()))
+		re.Equal(CANCELED, opA.Status())
+		re.Equal(CANCELED, opB.Status())
+
+		opA2, opB2 := newUnsyncedPair()
+		re.Equal(0, controller.AddWaitingOperator(opA2, opB2))
+		re.Nil(controller.GetOperator(source.GetID()))
+		re.Nil(controller.GetOperator(target.GetID()))
+		re.Equal(CANCELED, opA2.Status())
+		re.Equal(CANCELED, opB2.Status())
+
+		// Reusing the same unsynced source concurrently across both entry points must not race.
+		sharedA, partner1 := newUnsyncedPair()
+		partner2 := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, TransferLeader{FromStore: 1, ToStore: 2})
+		partner2.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			controller.AddOperator(sharedA, partner1)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			controller.AddWaitingOperator(sharedA, partner2)
+		}()
+		close(start)
+		wg.Wait()
+		re.Nil(controller.GetOperator(source.GetID()))
+		re.Nil(controller.GetOperator(target.GetID()))
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+	})
 }
