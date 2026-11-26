@@ -207,8 +207,7 @@ func InitMemoryHook() {
 		return
 	}
 	if physicalValue > cgroupValue && cgroupValue != 0 {
-		MemTotal = MemTotalCGroup
-		MemUsed = MemUsedCGroup
+		useCgroupMemoryHook(cgroupValue)
 		sysutil.RegisterGetMemoryCapacity(MemTotalCGroup)
 		log.Info("use cgroup memory hook", zap.Int64("cgroup-memory-size", int64(cgroupValue)), zap.Int64("physical-memory-size", int64(physicalValue)))
 	} else {
@@ -218,6 +217,16 @@ func InitMemoryHook() {
 	mustNil(err)
 	_, err = MemUsed()
 	mustNil(err)
+}
+
+func useCgroupMemoryHook(cgroupValue uint64) {
+	MemTotal = MemTotalCGroup
+	MemUsed = MemUsedCGroup
+	// The package initializer populated these shared caches through the
+	// physical-memory hooks. Replace the total immediately and invalidate the
+	// usage cache before the cgroup hooks are used.
+	memLimit.set(cgroupValue, time.Now())
+	memUsage.set(0, time.Time{})
 }
 
 // InstanceMemUsed returns the memory usage of this process
