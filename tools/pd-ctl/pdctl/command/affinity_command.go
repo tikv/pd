@@ -284,32 +284,38 @@ func affinityRangeShowCommandFunc(cmd *cobra.Command, _ []string) error {
 // the label rule of the group, with the keys in hex.
 func getAffinityGroupRanges(cmd *cobra.Command, groupID string) (affinityGroupRanges, error) {
 	ruleID := affinity.GetLabelRuleID(groupID)
-	rules, err := PDCli.GetRegionLabelRulesByIDs(cmd.Context(), []string{ruleID})
-	if err != nil {
-		return affinityGroupRanges{}, errors.Annotatef(err, "failed to get the key ranges of affinity group %s", groupID)
-	}
 	result := affinityGroupRanges{ID: groupID, Ranges: []affinityKeyRange{}}
-	foundRule := false
-	for _, rule := range rules {
-		if rule == nil || rule.ID != ruleID {
-			continue
-		}
-		foundRule = true
-		data, _ := rule.Data.([]any)
-		for _, item := range data {
-			keyRange, _ := item.(map[string]any)
-			start, _ := keyRange["start_key"].(string)
-			end, _ := keyRange["end_key"].(string)
-			result.Ranges = append(result.Ranges, affinityKeyRange{StartKey: start, EndKey: end})
-		}
-	}
-	// A label rule can outlive its group, while a group can have no rule.
-	if !foundRule {
-		if _, err := PDCli.GetAffinityGroup(cmd.Context(), groupID); err != nil {
+	for attempt := range 2 {
+		rules, err := PDCli.GetRegionLabelRulesByIDs(cmd.Context(), []string{ruleID})
+		if err != nil {
 			return affinityGroupRanges{}, errors.Annotatef(err, "failed to get the key ranges of affinity group %s", groupID)
 		}
+		for _, rule := range rules {
+			if rule == nil || rule.ID != ruleID {
+				continue
+			}
+			data, _ := rule.Data.([]any)
+			for _, item := range data {
+				keyRange, _ := item.(map[string]any)
+				start, _ := keyRange["start_key"].(string)
+				end, _ := keyRange["end_key"].(string)
+				result.Ranges = append(result.Ranges, affinityKeyRange{StartKey: start, EndKey: end})
+			}
+			return result, nil
+		}
+		if attempt == 1 {
+			break
+		}
+		// A group with ranges may have been created after the first rule lookup.
+		state, err := PDCli.GetAffinityGroup(cmd.Context(), groupID)
+		if err != nil {
+			return affinityGroupRanges{}, errors.Annotatef(err, "failed to get the key ranges of affinity group %s", groupID)
+		}
+		if state.RangeCount == 0 {
+			return result, nil
+		}
 	}
-	return result, nil
+	return affinityGroupRanges{}, errors.Errorf("affinity group %s reports key ranges but its label rule is missing, please retry", groupID)
 }
 
 func affinityRangeAddCommandFunc(cmd *cobra.Command, _ []string) error {

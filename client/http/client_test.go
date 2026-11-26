@@ -167,7 +167,8 @@ func TestGetAffinityGroupsByPrefix(t *testing.T) {
 	re.Contains(groups, "_tidb_ks1_pt_100_p101")
 }
 
-func TestAffinityGroupPathEscaping(t *testing.T) {
+func TestAffinityGroupPathValidation(t *testing.T) {
+	validID := "Group_1-" + strings.Repeat("g", 56)
 	for _, tc := range []struct {
 		method string
 		query  string
@@ -192,14 +193,17 @@ func TestAffinityGroupPathEscaping(t *testing.T) {
 		transport := NewHTTPClientWithRequestChecker(func(req *http.Request) error {
 			calls++
 			require.Equal(t, tc.method, req.Method)
-			require.Equal(t, "/pd/api/v2/affinity-groups/..%2Fa%3Fforce=true%23%25%20b"+tc.query, req.URL.RequestURI())
+			require.Equal(t, "/pd/api/v2/affinity-groups/"+validID+tc.query, req.URL.RequestURI())
 			return nil
 		})
 		c := newClientWithMockServiceDiscovery("affinity-path", []string{"http://127.0.0.1"}, WithHTTPClient(transport))
 		t.Cleanup(c.Close)
 		require.ErrorContains(t, tc.send(c, ""), "group ID must not be empty")
+		for _, id := range []string{"g/", "../g", "a/b", "../a?force=true#% b", "a b", "g\n", validID + "g"} {
+			require.ErrorContains(t, tc.send(c, id), "invalid group ID", "%s %q", tc.method, id)
+		}
 		require.Zero(t, calls)
-		require.NoError(t, tc.send(c, "../a?force=true#% b"))
+		require.NoError(t, tc.send(c, validID))
 		require.Equal(t, 1, calls)
 	}
 }

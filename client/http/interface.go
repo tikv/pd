@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -1291,9 +1292,14 @@ func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[st
 	return resp.AffinityGroups, nil
 }
 
+var affinityGroupIDPattern = regexp.MustCompile("^[-A-Za-z0-9_]{1,64}$")
+
 func validateAffinityGroupID(groupID string) error {
 	if groupID == "" {
 		return errors.New("group ID must not be empty")
+	}
+	if !affinityGroupIDPattern.MatchString(groupID) {
+		return errors.Errorf("invalid group ID %q: expected 1 to 64 ASCII letters, digits, underscores, or hyphens", groupID)
 	}
 	return nil
 }

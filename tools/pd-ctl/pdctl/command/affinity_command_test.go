@@ -15,6 +15,7 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"io"
@@ -39,7 +40,49 @@ func TestAffinityRangeAddDoesNotReadLabelRules(t *testing.T) {
 	cmd.SetArgs([]string{"range", "add", "--group-id", "custom", "--range", "7800000174800000ff0000000064000000fc,7800000174800000ff0000000065000000fc"})
 	re.NoError(cmd.Execute())
 	re.Equal("custom", client.calledID)
-	re.False(client.readLabelRules)
+	re.Zero(client.labelRuleReads)
+}
+
+func TestAffinityRangeShowMissingLabelRule(t *testing.T) {
+	previous := PDCli
+	t.Cleanup(func() { PDCli = previous })
+
+	for _, tc := range []struct {
+		name         string
+		rangeCount   int
+		missingReads int
+		wantReads    int
+		wantJSON     string
+	}{
+		{"empty group", 0, 1, 1, `{"id":"custom","ranges":[]}`},
+		{"rule found on retry", 1, 1, 2, `{"id":"custom","ranges":[{"start_key":"0a","end_key":"0b"}]}`},
+		{"rule still missing", 1, 2, 2, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &affinityTestClient{
+				rangeCount:       tc.rangeCount,
+				missingRuleReads: tc.missingReads,
+				ruleData:         []any{map[string]any{"start_key": "0a", "end_key": "0b"}},
+			}
+			PDCli = client
+			cmd := NewAffinityCommand()
+			cmd.PersistentPreRunE = nil
+			cmd.SilenceUsage = true
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{"range", "show", "--group-id", "custom"})
+			err := cmd.Execute()
+			require.Equal(t, tc.wantReads, client.labelRuleReads)
+			if tc.wantJSON == "" {
+				require.ErrorContains(t, err, "affinity group custom reports key ranges but its label rule is missing, please retry")
+				require.Empty(t, out.String())
+				return
+			}
+			require.NoError(t, err)
+			require.JSONEq(t, tc.wantJSON, out.String())
+		})
+	}
 }
 
 func TestAffinityCommandsRejectPositionalArgs(t *testing.T) {
@@ -121,19 +164,25 @@ func TestParseAffinityKeyRanges(t *testing.T) {
 
 type affinityTestClient struct {
 	pd.Client
-	calledID       string
-	readLabelRules bool
+	calledID         string
+	labelRuleReads   int
+	missingRuleReads int
+	rangeCount       int
+	ruleData         []any
 }
 
 func (c *affinityTestClient) GetAffinityGroup(_ context.Context, groupID string) (*pd.AffinityGroupState, error) {
 	c.calledID = groupID
-	return &pd.AffinityGroupState{ID: groupID}, nil
+	return &pd.AffinityGroupState{ID: groupID, RangeCount: c.rangeCount}, nil
 }
 
 func (c *affinityTestClient) GetRegionLabelRulesByIDs(_ context.Context, ruleIDs []string) ([]*pd.LabelRule, error) {
-	c.readLabelRules = true
+	c.labelRuleReads++
 	c.calledID = ruleIDs[0]
-	return []*pd.LabelRule{{ID: c.calledID}}, nil
+	if c.labelRuleReads <= c.missingRuleReads {
+		return nil, nil
+	}
+	return []*pd.LabelRule{{ID: c.calledID, Data: c.ruleData}}, nil
 }
 
 func (c *affinityTestClient) DeleteAffinityGroup(_ context.Context, groupID string, _ bool) error {
