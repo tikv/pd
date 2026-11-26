@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -267,6 +268,10 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 		if l.GetRegionLabel(region, mergeOptionLabel) == mergeOptionValueDeny || l.GetRegionLabel(adjacent, mergeOptionLabel) == mergeOptionValueDeny {
 			return false
 		}
+	}
+
+	if finder, ok := cluster.(keyspace.BoundaryFinder); ok && !keyspace.CanMergeAcrossMetadata(start, end, finder) {
+		return false
 	}
 
 	policy := cluster.GetSharedConfig().GetKeyType()

@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -67,6 +68,11 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if len(keys) == 0 && c.cluster.GetCheckerConfig().IsPlacementRulesEnabled() {
 		desc = "rule-split-region"
 		keys = c.ruleManager.GetSplitKeys(start, end)
+	}
+
+	if finder, ok := c.cluster.(keyspace.BoundaryFinder); ok && len(keys) == 0 {
+		desc = "keyspace-split-region"
+		keys, _ = keyspace.MetadataSplitKeys(start, end, finder)
 	}
 
 	if len(keys) == 0 {

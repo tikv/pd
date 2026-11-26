@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -77,6 +78,9 @@ type persistedConfig struct {
 	Schedule       sc.ScheduleConfig    `json:"schedule"`
 	Replication    sc.ReplicationConfig `json:"replication"`
 	Store          sc.StoreConfig       `json:"store"`
+	PDServer       struct {
+		KeyType string `json:"key-type"`
+	} `json:"pd-server"`
 }
 
 // UnmarshalJSON consumes persisted schedule-field presence while decoding, so
@@ -160,6 +164,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		}
 		log.Info("update scheduling config", zap.Reflect("new", cfg))
 		AdjustScheduleCfg(&cfg.Schedule)
+		cw.pdRawKeyType.Store(strings.TrimSpace(cfg.PDServer.KeyType) == constant.Raw.String())
 		cw.SetClusterVersion(&cfg.ClusterVersion)
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)

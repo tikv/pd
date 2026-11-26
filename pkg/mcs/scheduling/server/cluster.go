@@ -93,7 +93,7 @@ type Cluster struct {
 	ruleWatcher       *rule.Watcher
 	affinityWatcher   *mcsaffinity.Watcher
 	keyspaceWatcher   *keyspace_meta.Watcher
-	keyspaceCache     *keyspace.Cache
+	keyspaceCache     keyspace.BoundaryCache
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	pdLeader          atomic.Value
@@ -164,7 +164,6 @@ func NewCluster(
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
 		hbStreams:         hbStreams,
-		keyspaceCache:     keyspace.NewCache(),
 		checkMembershipCh: checkMembershipCh,
 		httpClient:        httpClient,
 		backendAddress:    backendAddress,
@@ -245,8 +244,13 @@ func (c *Cluster) GetAffinityManager() *affinity.Manager {
 }
 
 // GetKeyspaceCache returns the keyspace cache.
-func (c *Cluster) GetKeyspaceCache() *keyspace.Cache {
-	return c.keyspaceCache
+func (c *Cluster) GetKeyspaceCache() *keyspace.BoundaryCache {
+	return &c.keyspaceCache
+}
+
+// GetKeyspaceBoundaryIDs looks up both boundary modes for standalone scheduling.
+func (c *Cluster) GetKeyspaceBoundaryIDs(raw, txn *keyspace.IDRange, limit int) (rawIDs, txnIDs []uint32, ready bool) {
+	return c.keyspaceCache.Lookup(raw, txn, limit, c.persistConfig.GetKeyspaceFallbackKeyType())
 }
 
 // GetRegionSplitter returns the region splitter.
