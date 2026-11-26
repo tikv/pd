@@ -176,9 +176,10 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
-	// Manager.targetWriteMutex protects the per-group cooldown and the last
-	// candidate sent, which is deduplicated during that cooldown.
+	// Manager.targetWriteMutex protects the per-group cooldown, the last
+	// candidate sent, and whether PD confirmed it.
 	lastSentTarget  *observedTarget
+	lastSentWritten bool
 	targetSendAfter time.Time
 	// persistedGroup holds the last stored group while Group holds a local target.
 	// It is nil when Group itself holds the stored target.
@@ -326,6 +327,18 @@ func (g *runtimeGroupInfo) IsRegularSchedulingAllowed() bool {
 
 // AdjustGroup validates the group and sets default values.
 func (m *Manager) AdjustGroup(g *Group) error {
+	if err := validateGroupStructure(g); err != nil {
+		return err
+	}
+	for _, storeID := range g.VoterStoreIDs {
+		if m.storeSetInformer.GetStore(storeID) == nil {
+			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("store %d does not exist", storeID))
+		}
+	}
+	return nil
+}
+
+func validateGroupStructure(g *Group) error {
 	if err := ValidateGroupID(g.ID); err != nil {
 		return err
 	}
@@ -338,20 +351,13 @@ func (m *Manager) AdjustGroup(g *Group) error {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided together")
 	}
 
-	voterStoreIDs := slices.Clone(g.VoterStoreIDs)
-	slices.Sort(voterStoreIDs)
+	voterStoreIDs := sortedStoreIDs(g.VoterStoreIDs)
 	if slice.HasDupInSorted(voterStoreIDs) {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("duplicate voter store ID")
 	}
 	if !slices.Contains(voterStoreIDs, g.LeaderStoreID) {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("leader must be in voter stores")
 	}
-	for _, storeID := range voterStoreIDs {
-		if m.storeSetInformer.GetStore(storeID) == nil {
-			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("store %d does not exist", storeID))
-		}
-	}
-
 	return nil
 }
 

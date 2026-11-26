@@ -81,11 +81,11 @@ func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []Grou
 		if target.ExpectedModRevision < 0 {
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("expected modification revision must be non-negative")
 		}
-		// AdjustGroup permits an entirely unset target when creating a group.
+		// Group creation permits an entirely unset target.
 		if target.LeaderStoreID == 0 && len(target.VoterStoreIDs) == 0 {
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
 		}
-		if err := m.AdjustGroup(&Group{ID: target.Expected.ID, LeaderStoreID: target.LeaderStoreID, VoterStoreIDs: target.VoterStoreIDs}); err != nil {
+		if err := validateGroupStructure(&Group{ID: target.Expected.ID, LeaderStoreID: target.LeaderStoreID, VoterStoreIDs: target.VoterStoreIDs}); err != nil {
 			return nil, err
 		}
 		target.Expected.VoterStoreIDs = sortedStoreIDs(target.Expected.VoterStoreIDs)

@@ -66,8 +66,7 @@ func (m *Manager) recoverLocalObservedTarget(obs *observedTarget) bool {
 	m.RLock()
 	group := m.groups[id]
 	active := (len(queued) > 0 && queued[0].matches(group)) || (inFlight && sending.matches(group)) ||
-		(now.Before(m.targetWriteRetryAt) && !m.targetEndpointUnsupported) ||
-		(group != nil && group.lastSentTarget != nil && now.Before(group.targetSendAfter) && group.lastSentTarget.matches(group))
+		(group != nil && group.lastSentWritten && now.Before(group.targetSendAfter) && group.lastSentTarget.matches(group))
 	m.RUnlock()
 	if active {
 		return false
@@ -156,7 +155,7 @@ func (m *Manager) popObservedTargets(now time.Time) ([]observedTarget, time.Time
 			continue
 		}
 		skip := 0
-		for skip < len(queued) {
+		for skip < len(queued) && !queued[skip].persistOnly {
 			target := &queued[skip].target
 			if m.checkHasUnavailableStoreLocked(target.LeaderStoreID, target.VoterStoreIDs) == nil {
 				break
@@ -230,7 +229,6 @@ func (m *Manager) drainObservedTargets() {
 		for i, obs := range batch {
 			targets[i] = obs.target
 			m.sendingTargets[obs.target.Expected.ID] = obs
-			obs.groupInfoPtr.lastSentTarget = &obs
 		}
 		m.targetWriteMutex.Unlock()
 
@@ -245,6 +243,8 @@ func (m *Manager) drainObservedTargets() {
 			// PD can skip individual targets in a successful response. Keep any
 			// remaining candidates queued for after the cooldown.
 			for _, obs := range batch {
+				obs.groupInfoPtr.lastSentTarget = &obs
+				obs.groupInfoPtr.lastSentWritten = slices.Contains(written, obs.target.Expected.ID)
 				obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
 			}
 			shouldReport := m.ctx.Err() == nil

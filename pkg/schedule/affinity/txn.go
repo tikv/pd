@@ -348,9 +348,9 @@ func (m *Manager) runGroupOpsInTxn(groupOps [][]func(kv.Txn) error) (int, error)
 }
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group
-// and resets target availability using cached store conditions. The updated group
-// can be degraded or expired. Before the first store check, the update marks the
-// group available.
+// and resets target availability using cached store conditions. Before the first
+// store scan, it checks the candidate stores directly and marks the group
+// available on success.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	return m.updateAffinityGroupPeersWithState(groupID, nil, leaderStoreID, voterStoreIDs)
 }
@@ -426,7 +426,7 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 			result := observation.target.result()
 			matchesStored := sameStoredGroup(&observation.target.Expected, result)
 			if !group.AffinitySchedulingAllowed && (matchesStored || sameStoredGroup(&group.Group, result)) {
-				if !m.recoverLocalObservedTarget(&observation) {
+				if !m.recoverLocalObservedTarget(&observation) && matchesStored {
 					return m.GetAffinityGroupState(groupID), nil
 				}
 			}

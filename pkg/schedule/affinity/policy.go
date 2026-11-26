@@ -281,9 +281,12 @@ func (m *Manager) checkHasUnavailableStoreLocked(leaderStoreID uint64, voterStor
 		lowSpaceRatio = m.conf.GetLowSpaceRatio()
 	}
 	for _, storeID := range voterStoreIDs {
+		store := m.storeSetInformer.GetStore(storeID)
 		condition := m.unavailableStores[storeID]
-		if !m.storeConditionsKnown {
-			condition = m.checkStoreCondition(m.storeSetInformer.GetStore(storeID), lowSpaceRatio)
+		if store == nil {
+			condition = storeRemoved
+		} else if !m.storeConditionsKnown {
+			condition = m.checkStoreCondition(store, lowSpaceRatio)
 		}
 		if condition != storeAvailable && (!condition.affectsLeaderOnly() || storeID == leaderStoreID) {
 			return errs.ErrAffinityGroupContent.GenWithStackByArgs(fmt.Sprintf("store %d is %s", storeID, condition.String()))

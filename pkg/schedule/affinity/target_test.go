@@ -161,6 +161,20 @@ func TestUpdateAffinityGroupTargetsBusyLeader(t *testing.T) {
 	test.Equal(&change.Expected, test.stored("changed"))
 }
 
+func TestUpdateAffinityGroupTargetsSkipsDeletedStore(t *testing.T) {
+	test := newTargetTest(t, "g", "h")
+	test.checkGroupsAvailability()
+	test.True(test.storeConditionsKnown)
+	stores := test.storeSetInformer.(*core.StoresInfo)
+	stores.DeleteStore(stores.GetStore(2))
+
+	deleted := test.target("g", 1, 1, 2)
+	healthy := test.target("h", 1, 1, 3)
+	test.write([]string{"h"}, deleted, healthy)
+	test.Equal(&deleted.Expected, test.stored("g"))
+	test.Equal(healthy.result(), test.stored("h"))
+}
+
 func TestFirstGroupRejectsRemovingStoreBeforeScan(t *testing.T) {
 	test := newTargetTest(t)
 	stores := test.storeSetInformer.(*core.StoresInfo)
@@ -571,6 +585,38 @@ func TestFirstWinQueuedRelearnPrecedesLocalRecovery(t *testing.T) {
 		test.Equal([]GroupTarget{blocking, relearn}, test.calls)
 		test.Equal(relearn.result(), pd.stored("g"))
 	})
+}
+
+func TestFirstWinRecoversStoredTargetAfterWriteAttempt(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		attemptID string
+		written   []string
+		replyErr  error
+		recovered bool
+	}{
+		{name: "unrelated failure", attemptID: "h", replyErr: errors.New("PD unavailable"), recovered: true},
+		{name: "skipped", attemptID: "g", recovered: true},
+		{name: "written", attemptID: "g", written: []string{"g"}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				test := newTargetTest(t, "g", "h")
+				test.write([]string{"g"}, test.target("g", 1, 1, 2))
+				test.checkGroupsAvailability()
+				test.ExpireAffinityGroup("g")
+				test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
+					return scenario.written, scenario.replyErr
+				})
+
+				test.observe(scenario.attemptID, 2, 3)
+				test.Len(test.calls, 1)
+				test.observe("g", 1, 2)
+				test.Equal(scenario.recovered, test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+				test.Len(test.calls, 1, "local recovery does not write to PD")
+			})
+		})
+	}
 }
 
 func TestFirstWinSkipsNewlyUnavailableQueuedTarget(t *testing.T) {
