@@ -104,20 +104,20 @@ func (suite *regionSplitterTestSuite) TestRegionSplitter() {
 	tc.AddLeaderStore(4, 1)
 	tc.AddLeaderRegionWithRange(1, "eee", "hhh", 2, 3, 4)
 	splitter := NewRegionSplitter(tc, handler, tc.AddPendingProcessedRegions)
-	newRegions := map[uint64]struct{}{}
+	requestResults := &splitRequestResults{newRegions: make(map[uint64]struct{})}
 	// assert success
-	failureKeys := splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
+	failureKeys := splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, requestResults)
 	re.Empty(failureKeys)
-	re.Len(newRegions, 2)
+	re.Len(requestResults.newRegions, 2)
 
 	percentage, newRegionsID := splitter.SplitRegions(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, 1)
 	re.Equal(100, percentage)
 	re.Len(newRegionsID, 2)
 	// assert out of range
-	newRegions = map[uint64]struct{}{}
-	failureKeys = splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
+	requestResults = &splitRequestResults{newRegions: make(map[uint64]struct{})}
+	failureKeys = splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, requestResults)
 	re.Len(failureKeys, 2)
-	re.Empty(newRegions)
+	re.Empty(requestResults.newRegions)
 
 	percentage, newRegionsID = splitter.SplitRegions(suite.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, 1)
 	re.Equal(0, percentage)
@@ -144,7 +144,7 @@ func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
 		[]byte("fff"),
 		[]byte("zzz"),
 	}
-	groupKeys, pendingKeys := splitter.groupKeysByRegion(keys)
+	groupKeys, pendingKeys := splitter.groupKeysByRegion(keys, &splitRequestResults{})
 	re.Equal([][]byte{[]byte("bbb"), []byte("ddd"), []byte("zzz")}, pendingKeys)
 	re.Len(groupKeys, 2)
 	for k, v := range groupKeys {
@@ -203,6 +203,13 @@ func (suite *regionSplitterTestSuite) TestExistingBoundaries() {
 		{
 			name:       "existing between new keys",
 			keys:       [][]byte{[]byte("fff"), []byte("eee"), []byte("ggg")},
+			percentage: 100,
+			newIDs:     []uint64{1001, 1002},
+			lookups:    map[string]int{"eee": 1, "fff": 1, "ggg": 1},
+		},
+		{
+			name:       "existing after new keys",
+			keys:       [][]byte{[]byte("fff"), []byte("ggg"), []byte("eee")},
 			percentage: 100,
 			newIDs:     []uint64{1001, 1002},
 			lookups:    map[string]int{"eee": 1, "fff": 1, "ggg": 1},
@@ -271,11 +278,15 @@ func (suite *regionSplitterTestSuite) TestExistingBoundaries() {
 
 type regionLookupCountingCluster struct {
 	*mockcluster.Cluster
-	lookups map[string]int
+	lookups  map[string]int
+	onLookup func([]byte, int)
 }
 
 func (c *regionLookupCountingCluster) GetRegionByKey(key []byte) *core.RegionInfo {
 	c.lookups[string(key)]++
+	if c.onLookup != nil {
+		c.onLookup(key, c.lookups[string(key)])
+	}
 	return c.Cluster.GetRegionByKey(key)
 }
 
@@ -332,28 +343,96 @@ func TestSplitRegionsConcurrentBoundary(t *testing.T) {
 }
 
 func TestSplitRegionsBoundaryCreatedDuringBackoff(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		tc := newSplitterTestCluster(ctx)
-		calls := 0
-		handler := &splitRegionsHandlerFunc{
-			split: func(*core.RegionInfo, [][]byte) error {
-				calls++
-				return errors.New("split operator rejected")
-			},
+	for _, accepted := range []bool{false, true} {
+		name := "rejected split"
+		if accepted {
+			name = "accepted split"
 		}
-		go func() {
-			time.Sleep(initialSleepDuration / 2)
-			tc.AddLeaderRegionWithRange(1, "eee", "fff", 2, 3, 4)
-			tc.AddLeaderRegionWithRange(3, "fff", "hhh", 2, 3, 4)
-		}()
-		splitter := NewRegionSplitter(tc, handler, tc.AddPendingProcessedRegions)
-		percentage, ids := splitter.SplitRegions(ctx, [][]byte{[]byte("fff")}, 10)
-		require.Equal(t, 100, percentage)
-		require.Empty(t, ids)
-		require.Equal(t, 1, calls, "the retry must recognize the newly existing boundary")
-	})
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				tc := newSplitterTestCluster(ctx)
+				calls := 0
+				handler := &splitRegionsHandlerFunc{
+					split: func(*core.RegionInfo, [][]byte) error {
+						calls++
+						if accepted {
+							return nil
+						}
+						return errors.New("split operator rejected")
+					},
+				}
+				go func() {
+					delay := initialSleepDuration / 2
+					if accepted {
+						delay += timeout
+					}
+					time.Sleep(delay)
+					tc.AddLeaderRegionWithRange(1, "eee", "fff", 2, 3, 4)
+					tc.AddLeaderRegionWithRange(3, "fff", "hhh", 2, 3, 4)
+				}()
+				splitter := NewRegionSplitter(tc, handler, tc.AddPendingProcessedRegions)
+				percentage, ids := splitter.SplitRegions(ctx, [][]byte{[]byte("fff")}, 10)
+				require.Equal(t, 100, percentage)
+				if accepted {
+					require.Equal(t, []uint64{3}, ids, "preserve this request's accepted split across retries")
+				} else {
+					require.Empty(t, ids)
+				}
+				require.Equal(t, 1, calls, "the retry must recognize the newly existing boundary")
+			})
+		})
+	}
+}
+
+func TestSplitRegionsLateAcceptedBoundary(t *testing.T) {
+	for _, cancelAfterScan := range []bool{false, true} {
+		name := "attempt timeout"
+		if cancelAfterScan {
+			name = "request cancellation"
+		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				tc := &regionLookupCountingCluster{
+					Cluster: newSplitterTestCluster(ctx),
+					lookups: make(map[string]int),
+				}
+				tc.onLookup = func(key []byte, count int) {
+					if bytes.Equal(key, []byte("iii")) && count == 2 {
+						// The second heartbeat arrives after polling, just before reconciliation.
+						tc.AddLeaderRegionWithRange(2, "hhh", "iii", 2, 3, 4)
+						tc.AddLeaderRegionWithRange(4, "iii", "zzz", 2, 3, 4)
+					}
+				}
+				realHandler := &splitRegionsHandler{cluster: tc}
+				calls := 0
+				handler := &splitRegionsHandlerFunc{
+					split: func(_ *core.RegionInfo, keys [][]byte) error {
+						calls++
+						if bytes.Equal(keys[0], []byte("fff")) {
+							tc.AddLeaderRegionWithRange(1, "eee", "fff", 2, 3, 4)
+							tc.AddLeaderRegionWithRange(3, "fff", "hhh", 2, 3, 4)
+						}
+						return nil
+					},
+					scan: func(group *regionGroupKeys, results *splitKeyResults) {
+						realHandler.ScanRegionsByKeyRange(group, results)
+						if cancelAfterScan {
+							cancel()
+						}
+					},
+				}
+				splitter := NewRegionSplitter(tc, handler, tc.AddPendingProcessedRegions)
+				percentage, ids := splitter.SplitRegions(ctx, [][]byte{[]byte("fff"), []byte("iii")}, 0)
+				require.Equal(t, 2, calls, "both split operators must have been accepted")
+				require.Equal(t, 100, percentage)
+				require.ElementsMatch(t, []uint64{3, 4}, ids, "both accepted splits must be available to scatter")
+			})
+		})
+	}
 }
 
 func TestSplitRegionsRetryBackoff(t *testing.T) {
@@ -396,30 +475,51 @@ func TestSplitRegionsRetryBackoff(t *testing.T) {
 }
 
 func TestSplitRegionsCancellationDuringDispatch(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		tc := newSplitterTestCluster(ctx)
-		calls := 0
-		handler := &splitRegionsHandlerFunc{
-			split: func(*core.RegionInfo, [][]byte) error {
-				calls++
-				cancel()
-				return nil
-			},
+	for _, boundariesArrive := range []bool{false, true} {
+		name := "boundaries unavailable"
+		if boundariesArrive {
+			name = "boundaries arrive after cancellation"
 		}
-		splitter := NewRegionSplitter(tc, handler, tc.AddPendingProcessedRegions)
-		keys := [][]byte{[]byte("eee"), []byte("fff"), []byte("hhh"), []byte("iii")}
-		percentage, ids := splitter.SplitRegions(ctx, keys, 10)
-		require.Equal(t, 50, percentage, "preserve completed boundaries on cancellation")
-		require.Empty(t, ids)
-		require.Equal(t, 1, calls, "stop dispatching additional operators after cancellation")
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				tc := newSplitterTestCluster(ctx)
+				calls := 0
+				var acceptedID uint64
+				handler := &splitRegionsHandlerFunc{
+					split: func(region *core.RegionInfo, _ [][]byte) error {
+						calls++
+						acceptedID = region.GetID() + 2
+						cancel()
+						if boundariesArrive {
+							tc.AddLeaderRegionWithRange(1, "eee", "fff", 2, 3, 4)
+							tc.AddLeaderRegionWithRange(3, "fff", "hhh", 2, 3, 4)
+							tc.AddLeaderRegionWithRange(2, "hhh", "iii", 2, 3, 4)
+							tc.AddLeaderRegionWithRange(4, "iii", "zzz", 2, 3, 4)
+						}
+						return nil
+					},
+				}
+				splitter := NewRegionSplitter(tc, handler, tc.AddPendingProcessedRegions)
+				keys := [][]byte{[]byte("eee"), []byte("fff"), []byte("hhh"), []byte("iii")}
+				percentage, ids := splitter.SplitRegions(ctx, keys, 10)
+				if boundariesArrive {
+					require.Equal(t, 100, percentage)
+					require.Equal(t, []uint64{acceptedID}, ids, "exclude the split that was never dispatched")
+				} else {
+					require.Equal(t, 50, percentage, "preserve completed boundaries on cancellation")
+					require.Empty(t, ids)
+				}
+				require.Equal(t, 1, calls, "stop dispatching additional operators after cancellation")
 
-		percentage, ids = splitter.SplitRegions(ctx, keys, 10)
-		require.Zero(t, percentage)
-		require.Empty(t, ids)
-		require.Equal(t, 1, calls, "a cancelled request must not dispatch any operators")
-	})
+				percentage, ids = splitter.SplitRegions(ctx, keys, 10)
+				require.Zero(t, percentage)
+				require.Empty(t, ids)
+				require.Equal(t, 1, calls, "a cancelled request must not dispatch any operators")
+			})
+		})
+	}
 }
 
 func TestSplitRegionsCancellationWithPartialResults(t *testing.T) {
