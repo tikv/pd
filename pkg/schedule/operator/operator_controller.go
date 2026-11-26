@@ -581,6 +581,7 @@ func (oc *Controller) ensureSingleMergePair(op *Operator) *mergePairToken {
 		if relatedOpi, ok := oc.operators.Load(relatedID); ok {
 			if relatedOp := relatedOpi.(*Operator); relatedOp != nil &&
 				op.hasReciprocalMergeRegion(relatedOp) &&
+				op.hasCompatibleMergeSteps(relatedOp) &&
 				!IsEndStatus(relatedOp.Status()) {
 				if pair := relatedOp.mergePair.Load(); pair != nil && pair.claimed.CompareAndSwap(false, true) {
 					if op.mergePair.CompareAndSwap(nil, pair) {
@@ -619,6 +620,7 @@ func (oc *Controller) findSplitMergePairToRebind(op, oldOp *Operator) *mergePair
 	if relatedOp == nil ||
 		!op.hasReciprocalMergeRegion(relatedOp) ||
 		!oldOp.hasReciprocalMergeRegion(relatedOp) ||
+		!op.hasCompatibleMergeSteps(relatedOp) ||
 		relatedOp.mergePair.Load() != oldPair ||
 		IsEndStatus(relatedOp.Status()) {
 		return nil

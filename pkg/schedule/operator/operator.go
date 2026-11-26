@@ -185,6 +185,44 @@ func (o *Operator) hasReciprocalMergeRegion(other *Operator) bool {
 	return o.GetRelatedMergeRegion() == other.RegionID() && other.GetRelatedMergeRegion() == o.RegionID()
 }
 
+func (o *Operator) findMergeRegionStep() (MergeRegion, bool) {
+	for _, step := range o.steps {
+		if mr, ok := step.(MergeRegion); ok {
+			return mr, true
+		}
+	}
+	return MergeRegion{}, false
+}
+
+// hasCompatibleMergeSteps reports whether two reciprocal merge operators
+// describe complementary halves of the same directed merge. Synthetic
+// operators that carry RelatedMergeRegion without MergeRegion steps remain
+// compatible with each other, whereas operators with MergeRegion steps must
+// agree on FromRegion/ToRegion IDs and carry opposite IsPassive roles.
+func (o *Operator) hasCompatibleMergeSteps(other *Operator) bool {
+	s1, ok1 := o.findMergeRegionStep()
+	s2, ok2 := other.findMergeRegionStep()
+	if !ok1 && !ok2 {
+		return true
+	}
+	if ok1 != ok2 {
+		return false
+	}
+	if s1.FromRegion.GetId() == 0 || s1.ToRegion.GetId() == 0 {
+		return false
+	}
+	if s1.FromRegion.GetId() != s2.FromRegion.GetId() || s1.ToRegion.GetId() != s2.ToRegion.GetId() {
+		return false
+	}
+	if s1.IsPassive == s2.IsPassive {
+		return false
+	}
+	if s1.IsPassive {
+		return o.RegionID() == s1.ToRegion.GetId() && other.RegionID() == s1.FromRegion.GetId()
+	}
+	return o.RegionID() == s1.FromRegion.GetId() && other.RegionID() == s1.ToRegion.GetId()
+}
+
 func (o *Operator) isPairedMergeOperator(other *Operator) bool {
 	if !o.hasReciprocalMergeRegion(other) {
 		return false
@@ -197,7 +235,7 @@ func (o *Operator) isPairedMergeOperator(other *Operator) bool {
 // atomically assigns a shared mergePairToken when neither operator was paired
 // via Sync.
 func (o *Operator) ensureMergePair(other *Operator) bool {
-	if !o.hasReciprocalMergeRegion(other) {
+	if !o.hasReciprocalMergeRegion(other) || !o.hasCompatibleMergeSteps(other) {
 		return false
 	}
 	p1, p2 := o.mergePair.Load(), other.mergePair.Load()

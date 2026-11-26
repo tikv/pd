@@ -1803,6 +1803,90 @@ func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOp
 		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
 		re.Equal(uint64(0), controller.OperatorCount(OpAdmin))
 
+		// Reversed-direction replacement (B->A passive on source replacing A->B active on source)
+		// must NOT rebind to the old A->B passive on target even when priorities match.
+		abStep := MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta()}
+		abActive := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10, abStep)
+		abStep.IsPassive = true
+		abPassive := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, abStep)
+		abActive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+		abPassive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+		abPassive.SetPriorityLevel(abActive.GetPriorityLevel() + 1)
+		re.True(controller.AddOperator(abActive))
+		re.True(controller.AddOperator(abPassive))
+
+		baStep := MergeRegion{FromRegion: target.GetMeta(), ToRegion: source.GetMeta()}
+		baActive := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, baStep)
+		baStep.IsPassive = true
+		baPassive := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10, baStep)
+		baActive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+		baPassive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+		baActive.SetPriorityLevel(abPassive.GetPriorityLevel())
+		baPassive.SetPriorityLevel(abPassive.GetPriorityLevel())
+		re.True(controller.AddOperator(baPassive))
+		re.Equal(REPLACED, abActive.Status())
+		re.Equal(CANCELED, abPassive.Status())
+		re.Nil(controller.GetOperator(target.GetID()))
+		re.True(controller.AddOperator(baActive))
+		re.Same(baPassive, controller.GetOperator(source.GetID()))
+		re.Same(baActive, controller.GetOperator(target.GetID()))
+		re.True(baPassive.isPairedMergeOperator(baActive))
+		re.True(controller.RemoveOperator(baPassive))
+		re.Equal(CANCELED, baActive.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+
+		// Same-direction complementary MergeRegion steps submitted in reverse order
+		// still rebind cleanly when replacing an unpaired lower-priority orphan.
+		sameDirStep := MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta()}
+		orphanMergeA := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10, sameDirStep)
+		orphanMergeA.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+		re.True(controller.AddOperator(orphanMergeA))
+		revMergeA := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpAdmin|OpMerge, 10, sameDirStep)
+		sameDirStep.IsPassive = true
+		revMergeB := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpAdmin|OpMerge, 10, sameDirStep)
+		revMergeA.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+		revMergeB.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+		re.True(controller.AddOperator(revMergeB))
+		re.True(controller.AddOperator(revMergeA))
+		re.Same(revMergeA, controller.GetOperator(source.GetID()))
+		re.Same(revMergeB, controller.GetOperator(target.GetID()))
+		re.Equal(REPLACED, orphanMergeA.Status())
+		re.True(revMergeA.isPairedMergeOperator(revMergeB))
+		re.True(controller.RemoveOperator(revMergeA))
+		re.Equal(CANCELED, revMergeB.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		re.Equal(uint64(0), controller.OperatorCount(OpAdmin))
+
+		// An incompatible opposite-direction split operator must not claim the initial
+		// token of an active merge half, so replacing it with the real partner preserves
+		// and pairs the intended merge operators.
+		keepABStep := MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta()}
+		keepABActive := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10, keepABStep)
+		keepABActive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+		keepABActive.SetPriorityLevel(keepABActive.GetPriorityLevel() + 1)
+		re.True(controller.AddOperator(keepABActive))
+
+		wrongBAStep := MergeRegion{FromRegion: target.GetMeta(), ToRegion: source.GetMeta()}
+		wrongBAActive := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, wrongBAStep)
+		wrongBAActive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+		re.True(controller.AddOperator(wrongBAActive))
+		re.False(keepABActive.isPairedMergeOperator(wrongBAActive))
+
+		keepABStep.IsPassive = true
+		keepABPassive := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpAdmin|OpMerge, 10, keepABStep)
+		keepABPassive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+		re.True(controller.AddOperator(keepABPassive))
+		re.Equal(REPLACED, wrongBAActive.Status())
+		re.Same(keepABActive, controller.GetOperator(source.GetID()))
+		re.Same(keepABPassive, controller.GetOperator(target.GetID()))
+		re.Equal(STARTED, keepABActive.Status())
+		re.Equal(STARTED, keepABPassive.Status())
+		re.True(keepABActive.isPairedMergeOperator(keepABPassive))
+		re.True(controller.RemoveOperator(keepABActive))
+		re.Equal(CANCELED, keepABPassive.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		re.Equal(uint64(0), controller.OperatorCount(OpAdmin))
+
 		// Concurrent split AddOperator(opA) and AddOperator(opB) without Sync must share one token
 		// so removing either half always cancels its partner.
 		for iter := range 50 {
@@ -1835,26 +1919,36 @@ func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOp
 			re.Equal(uint64(0), controller.OperatorCount(OpMerge))
 		}
 
-		// Concurrent reuse of the same unsynced source across both entry points must not race.
-		sharedA, partner1 := newUnsyncedPair(OpMerge)
-		partner2 := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, TransferLeader{FromStore: 1, ToStore: 2})
-		partner2.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
-		start := make(chan struct{})
-		wg := new(sync.WaitGroup)
-		wg.Go(func() {
-			<-start
-			controller.AddOperator(sharedA, partner1)
-		})
-		wg.Go(func() {
-			<-start
-			controller.AddWaitingOperator(sharedA, partner2)
-		})
-		close(start)
-		wg.Wait()
-		controller.RemoveOperators(AdminStop)
-		re.Nil(controller.GetOperator(source.GetID()))
-		re.Nil(controller.GetOperator(target.GetID()))
-		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		// Concurrent ensureMergePair calls racing on the same unsynced source must
+		// pair with exactly one partner without racing or leaving a broken token.
+		for range 50 {
+			sharedA, partner1 := newUnsyncedPair(OpMerge)
+			partner2 := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, TransferLeader{FromStore: 1, ToStore: 2})
+			partner2.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+			start := make(chan struct{})
+			wg := new(sync.WaitGroup)
+			var ok1, ok2 bool
+			wg.Go(func() {
+				<-start
+				ok1 = sharedA.ensureMergePair(partner1)
+			})
+			wg.Go(func() {
+				<-start
+				ok2 = sharedA.ensureMergePair(partner2)
+			})
+			close(start)
+			wg.Wait()
+			re.NotEqual(ok1, ok2)
+			if ok1 {
+				re.True(sharedA.isPairedMergeOperator(partner1))
+				re.False(sharedA.isPairedMergeOperator(partner2))
+				re.False(partner2.hasMergePair())
+			} else {
+				re.True(sharedA.isPairedMergeOperator(partner2))
+				re.False(sharedA.isPairedMergeOperator(partner1))
+				re.False(partner1.hasMergePair())
+			}
+		}
 	})
 
 	suite.Run("AddWaitingOperator rejects non-reciprocal or half-synced merge pairs", func() {
@@ -1881,6 +1975,16 @@ func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOp
 		re.Equal(0, controller.AddWaitingOperator(syncedA, unsyncedB))
 		re.Equal(CANCELED, syncedA.Status())
 		re.Equal(CANCELED, unsyncedB.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+
+		// Opposite-direction MergeRegion steps with reciprocal metadata are rejected.
+		oppA := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10, MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta()})
+		oppB := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, MergeRegion{FromRegion: target.GetMeta(), ToRegion: source.GetMeta()})
+		oppA.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+		oppB.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+		re.Equal(0, controller.AddWaitingOperator(oppA, oppB))
+		re.Equal(CANCELED, oppA.Status())
+		re.Equal(CANCELED, oppB.Status())
 		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
 	})
 
