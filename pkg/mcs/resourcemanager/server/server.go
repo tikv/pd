@@ -332,6 +332,17 @@ func (s *Server) Close() {
 	log.Info("resource manager server is closed")
 }
 
+// RedactedConfig returns a shallow copy of cfg with Volcengine TOS metering
+// credentials masked for logging and external inspection.
+func RedactedConfig(cfg *Config) *Config {
+	if cfg == nil {
+		return nil
+	}
+	cloned := *cfg
+	cloned.Metering = metering.RedactedConfig(cloned.Metering)
+	return &cloned
+}
+
 // GetConfig returns the config.
 func (s *Server) GetConfig() *Config {
 	return s.cfg
@@ -516,7 +527,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	log.Sync()
 	versioninfo.Log(serviceName)
-	log.Info("resource manager config", zap.Reflect("config", cfg))
+	log.Info("resource manager config", zap.Reflect("config", RedactedConfig(cfg)))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 	ctx, cancel := context.WithCancel(context.Background())
