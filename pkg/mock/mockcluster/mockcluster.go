@@ -503,6 +503,25 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	return items
 }
 
+// AddRegionWithReadCPUInfo adds region with specified leader, followers, read bytes and read CPU.
+func (mc *Cluster) AddRegionWithReadCPUInfo(
+	regionID uint64, leaderStoreID uint64,
+	readBytes, readCPU uint64,
+	reportInterval uint64,
+	otherPeerStoreIDs []uint64) []*statistics.HotPeerStat {
+	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
+	r = r.Clone(core.SetReadBytes(readBytes), core.SetReadCPUUsage(readCPU), core.SetReportInterval(0, reportInterval))
+	var items []*statistics.HotPeerStat
+	for range utils.DefaultAotSize {
+		items = mc.CheckRegionRead(r)
+		for _, item := range items {
+			mc.Update(item, utils.Read)
+		}
+	}
+	mc.PutRegion(r)
+	return items
+}
+
 // AddRegionWithPeerReadInfo adds region with specified peer read info.
 func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStoreID, readBytes, readKeys, reportInterval uint64,
 	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
@@ -736,6 +755,13 @@ func (mc *Cluster) UpdateStorageReadQuery(storeID uint64, queryRead uint64) {
 	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
 		newStats.QueryStats = core.RandomKindReadQuery(queryRead)
 		newStats.BytesRead = queryRead * 100
+	})
+}
+
+// UpdateStorageCPUUsage updates store CPU usage, reported as one gRPC thread.
+func (mc *Cluster) UpdateStorageCPUUsage(storeID uint64, cpuUsage uint64) {
+	mc.updateStorageStatistics(storeID, func(newStats *pdpb.StoreStats) {
+		newStats.CpuUsages = []*pdpb.RecordPair{{Key: "grpc-server-0", Value: cpuUsage}}
 	})
 }
 
