@@ -34,7 +34,8 @@ check: tiup test
 
 tiup:
 	@echo "==> Checking tiup installation"
-	@TIUP_DIR="$${TIUP_HOME:-$(HOME)/.tiup}"; \
+	@set -eu; \
+	TIUP_DIR="$${TIUP_HOME:-$(HOME)/.tiup}"; \
 	mkdir -p "$$TIUP_DIR"; \
 	TIUP_DIR="$$(cd "$$TIUP_DIR" && pwd -P)"; \
 	if [ -n "$${TIUP_HOME:-}" ]; then \
@@ -60,6 +61,7 @@ tiup:
 	else \
 		LOCK_FILE="$$TIUP_DIR/.realcluster-playground-install.lock"; \
 		run_install() { \
+			set -eu; \
 			TIUP_BIN="$$(resolve_tiup_bin)"; \
 			if [ ! -x "$$TIUP_BIN" ] || [ ! -f "$$TIUP_DIR/bin/root.json" ]; then \
 				echo "Installing tiup..."; \
@@ -90,7 +92,7 @@ tiup:
 			fi; \
 		}; \
 		if command -v flock >/dev/null 2>&1; then \
-			(exec 9>>"$$LOCK_FILE"; flock -x 9; run_install); \
+			(set -eu; exec 9>>"$$LOCK_FILE" && flock -x 9 && run_install); \
 		elif command -v perl >/dev/null 2>&1; then \
 			export -f resolve_tiup_bin run_install; \
 			export TIUP_DIR; \

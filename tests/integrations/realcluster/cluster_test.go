@@ -2038,7 +2038,7 @@ func (r *recordingTestingT) FailNow() {
 }
 
 func TestEnsurePlaygroundInstalledConcurrentSerialization(t *testing.T) {
-	setupIncompletePlayground := func(t *testing.T) (tiupHome, fakeTiUP, playgroundBin, installLog string) {
+	setupIncompletePlayground := func(t *testing.T, expectedProbes int) (tiupHome, fakeTiUP, playgroundBin, installLog string) {
 		re := require.New(t)
 		tiupHome = filepath.Join(t.TempDir(), "tiup-home")
 		verDir := filepath.Join(tiupHome, "components", "playground", "v1.16.0")
@@ -2058,15 +2058,16 @@ ver_dir=%q
 bin_path=%q
 barrier_dir=%q
 install_log=%q
+expected_probes=%d
 if [ "$1" = "--version" ]; then
   echo "1.16.0 tiup"
   exit 0
 fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
-  if [ ! -x "$bin_path" ]; then
+  if [ ! -x "$bin_path" ] && [ "$expected_probes" -gt 1 ]; then
     : > "$barrier_dir/probe-$$-$(date +%%s%%N 2>/dev/null || echo 0)"
     i=0
-    while [ "$(ls -1 "$barrier_dir" | wc -l)" -lt 2 ] && [ "$i" -lt 100 ]; do
+    while [ "$(ls -1 "$barrier_dir" | wc -l)" -lt "$expected_probes" ] && [ "$i" -lt 100 ]; do
       sleep 0.02
       i=$((i + 1))
     done
@@ -2083,7 +2084,7 @@ if [ "$1" = "install" ] && [ "$2" = "playground" ]; then
   exit 0
 fi
 exit 1
-`, verDir, playgroundBin, barrierDir, installLog)
+`, verDir, playgroundBin, barrierDir, installLog, expectedProbes)
 		re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
 		re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
 		return tiupHome, fakeTiUP, playgroundBin, installLog
@@ -2091,7 +2092,7 @@ exit 1
 
 	t.Run("cross-process concurrent startups install once across distinct TMPDIR", func(t *testing.T) {
 		re := require.New(t)
-		tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t)
+		tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t, 2)
 		execPath, err := os.Executable()
 		re.NoError(err)
 
@@ -2138,11 +2139,13 @@ exit 1
 		}
 		execPath, err := os.Executable()
 		re.NoError(err)
-		makefileDir := filepath.Dir(realClusterTestSourceFile())
-		re.True(fileExists(filepath.Join(makefileDir, "Makefile")))
+		makefileDir := findRealClusterMakefileDir(t)
+		if makefileDir == "" {
+			t.Skip("Makefile not found from test working directory")
+		}
 
 		for _, makeFirst := range []bool{false, true} {
-			tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t)
+			tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t, 2)
 
 			var goOut, makeOut strings.Builder
 			goCmd := exec.Command(execPath, "-test.run=^TestHelperEnsurePlaygroundInstalled$") //nolint:gosec
@@ -2183,9 +2186,55 @@ exit 1
 		}
 	})
 
+	t.Run("make tiup aborts without cleanup when lock fails", func(t *testing.T) {
+		re := require.New(t)
+		if _, err := exec.LookPath("make"); err != nil {
+			t.Skip("make not found in PATH")
+		}
+		makefileDir := findRealClusterMakefileDir(t)
+		if makefileDir == "" {
+			t.Skip("Makefile not found from test working directory")
+		}
+
+		// Case 1: read-only TIUP_HOME prevents opening the lock file.
+		if os.Geteuid() != 0 {
+			tiupHome, _, _, installLog := setupIncompletePlayground(t, 1)
+			marker := filepath.Join(tiupHome, "components", "playground", "v1.16.0", "download-in-progress")
+			re.NoError(os.Chmod(tiupHome, 0555)) //nolint:gosec
+			t.Cleanup(func() {
+				_ = os.Chmod(tiupHome, 0750) //nolint:gosec
+			})
+
+			cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+			cmd.Env = append(os.Environ(), "TIUP_HOME="+tiupHome)
+			out, err := cmd.CombinedOutput()
+			re.Error(err, "expected make tiup to fail on read-only TIUP_HOME, output:\n%s", string(out))
+			re.True(fileExists(marker), "incomplete directory must be preserved when lock file open fails")
+			re.False(fileExists(installLog), "installer must not run when lock file open fails")
+		}
+
+		// Case 2: failing flock binary must abort before cleanup and install.
+		tiupHome, _, _, installLog := setupIncompletePlayground(t, 1)
+		marker := filepath.Join(tiupHome, "components", "playground", "v1.16.0", "download-in-progress")
+		shimDir := t.TempDir()
+		badFlock := filepath.Join(shimDir, "flock")
+		re.NoError(os.WriteFile(badFlock, []byte("#!/bin/sh\nexit 1\n"), 0600))
+		re.NoError(os.Chmod(badFlock, 0700)) //nolint:gosec
+
+		cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+		cmd.Env = append(os.Environ(),
+			"PATH="+shimDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+			"TIUP_HOME="+tiupHome,
+		)
+		out, err := cmd.CombinedOutput()
+		re.Error(err, "expected make tiup to fail when flock returns non-zero, output:\n%s", string(out))
+		re.True(fileExists(marker), "incomplete directory must be preserved when flock fails")
+		re.False(fileExists(installLog), "installer must not run when flock fails")
+	})
+
 	t.Run("in-process concurrent startups install once and preserve binary", func(t *testing.T) {
 		re := require.New(t)
-		tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t)
+		tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t, 2)
 
 		rec1 := &recordingTestingT{}
 		rec2 := &recordingTestingT{}
@@ -2212,7 +2261,16 @@ exit 1
 	})
 }
 
-func realClusterTestSourceFile() string {
-	_, file, _, _ := runtime.Caller(0)
-	return file
+func findRealClusterMakefileDir(t *testing.T) string {
+	t.Helper()
+	if wd, err := os.Getwd(); err == nil && fileExists(filepath.Join(wd, "Makefile")) {
+		return wd
+	}
+	if _, file, _, ok := runtime.Caller(0); ok && filepath.IsAbs(file) {
+		dir := filepath.Dir(file)
+		if fileExists(filepath.Join(dir, "Makefile")) {
+			return dir
+		}
+	}
+	return ""
 }
