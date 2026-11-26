@@ -98,9 +98,7 @@ func validateMeteringConfig(c *config.MeteringConfig) error {
 		return errors.New("type is required for the metering config")
 	}
 	switch c.Type {
-	case storage.ProviderTypeS3:
-		fallthrough
-	case storage.ProviderTypeOSS:
+	case storage.ProviderTypeS3, storage.ProviderTypeOSS, storage.ProviderTypeTOS:
 		if len(c.Region) == 0 {
 			return errors.New("region is required for the metering config")
 		}

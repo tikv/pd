@@ -15,15 +15,22 @@
 package handlers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -34,9 +41,15 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	kgconstant "github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -50,6 +63,109 @@ type keyspaceGroupTestSuite struct {
 
 func TestKeyspaceGroupTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceGroupTestSuite))
+}
+
+func TestEvictTSOPrimaryAuditBody(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(cfg *config.Config, _ string) {
+		cfg.Security.RedactInfoLog = logutil.RedactInfoLogOFF
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	forwarded := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tso/api/v1/primary/evict" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		forwarded <- string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+	entry := &discovery.ServiceRegistryEntry{ServiceAddr: target.URL}
+	value, err := entry.Serialize()
+	re.NoError(err)
+	_, err = leader.GetServer().GetClient().Put(ctx, keypath.RegistryPath(mcsconstant.TSOServiceName, target.URL), value)
+	re.NoError(err)
+	logFile := testutil.InitTempFileLogger(t, "info")
+	const payload = `{"new_primary":"replacement"}`
+	response, err := tests.TestDialClient.Post(leader.GetAddr()+"/pd/api/v2/ms/tso/primary/evict?node="+url.QueryEscape(target.URL), "application/json", strings.NewReader(payload))
+	re.NoError(err)
+	defer response.Body.Close()
+	re.Equal(http.StatusNoContent, response.StatusCode)
+	re.JSONEq(payload, <-forwarded)
+	data, err := os.ReadFile(logFile)
+	re.NoError(err)
+	re.Contains(string(data), "ServiceLabel:EvictTSOPrimary,")
+	re.Contains(string(data), "replacement")
+}
+
+func TestAuditEarlyRejection(t *testing.T) {
+	for _, redaction := range []logutil.RedactInfoLogType{logutil.RedactInfoLogOFF, logutil.RedactInfoLogMarker} {
+		t.Run(fmt.Sprintf("redaction=%d", redaction), func(t *testing.T) {
+			re := require.New(t)
+			cluster, err := tests.NewTestCluster(t.Context(), 3, func(cfg *config.Config, _ string) {
+				cfg.Security.RedactInfoLog = redaction
+			})
+			re.NoError(err)
+			defer cluster.Destroy()
+			re.NoError(cluster.RunInitialServers())
+			re.NotEmpty(cluster.WaitLeader())
+			leader := cluster.GetLeaderServer()
+			follower := cluster.GetServer(cluster.GetFollower())
+			re.NotNil(follower)
+			for _, bootstrapped := range []bool{false, true} {
+				if bootstrapped {
+					re.NoError(leader.BootstrapCluster())
+				}
+				for _, enabled := range []bool{false, true} {
+					re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+					follower.GetServer().GetServiceMiddlewarePersistOptions().SetAuditConfig(&config.AuditConfig{EnableAudit: enabled})
+					for _, target := range []struct {
+						name   string
+						server *tests.TestServer
+						status int
+						header string
+					}{
+						{name: "leader", server: leader, status: http.StatusInternalServerError},
+						{name: "follower", server: follower, status: http.StatusInternalServerError, header: apiutil.PDRedirectorHeader + ": already-forwarded\r\n"},
+					} {
+						if bootstrapped && target.name == "leader" {
+							target.status = http.StatusBadRequest
+						}
+						t.Run(fmt.Sprintf("bootstrap=%t/audit=%t/%s", bootstrapped, enabled, target.name), func(t *testing.T) {
+							re := require.New(t)
+							address, err := url.Parse(target.server.GetAddr())
+							re.NoError(err)
+							conn, err := net.Dial("tcp", address.Host)
+							re.NoError(err)
+							defer conn.Close()
+							re.NoError(conn.SetDeadline(time.Now().Add(10 * time.Second)))
+							// Send headers only: the native rejection must precede any
+							// 100 Continue or attempt to consume the pending body.
+							_, err = fmt.Fprintf(conn,
+								"POST /pd/api/v2/tso/keyspace-groups/invalid/split HTTP/1.1\r\nHost: %s\r\nContent-Length: 100000\r\nExpect: 100-continue\r\n%sConnection: close\r\n\r\n",
+								address.Host, target.header)
+							re.NoError(err)
+							response, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodPost})
+							re.NoError(err)
+							re.NoError(response.Body.Close())
+							re.Equal(target.status, response.StatusCode)
+						})
+					}
+				}
+			}
+		})
+	}
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {

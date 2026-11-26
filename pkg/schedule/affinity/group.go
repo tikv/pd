@@ -76,6 +76,7 @@ type Phase string
 const (
 	// PhasePending indicates that the Group is still determining the StoreIDs.
 	// If the Group has no KeyRanges, it remains in PhasePending forever.
+	// Overlapping key ranges also keep a group pending until the conflict is repaired.
 	PhasePending = Phase("pending")
 	// PhasePreparing indicates that the Group is scheduling Regions according to the required Peers.
 	PhasePreparing = Phase("preparing")
@@ -130,10 +131,18 @@ type GroupState struct {
 	AffinityRegionCount int `json:"affinity_region_count"`
 
 	// affinityVer is used to mark the version of the cache.
-	affinityVer uint64
+	affinityVer   uint64
+	rangeConflict bool
 	// groupInfoPtr is a pointer to the original information.
 	// It is used only for pointer comparison and should not access any internal data.
 	groupInfoPtr *runtimeGroupInfo
+}
+
+// MatchesTarget reports whether both states describe the same version and peer
+// placement of an affinity group.
+func (g *GroupState) MatchesTarget(other *GroupState) bool {
+	return g.ID == other.ID && g.groupInfoPtr == other.groupInfoPtr && g.affinityVer == other.affinityVer &&
+		g.LeaderStoreID == other.LeaderStoreID && slices.Equal(g.VoterStoreIDs, other.VoterStoreIDs)
 }
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
@@ -163,8 +172,8 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
-	// availability must be used together with degradedExpiredAt. Therefore, GetAvailability and SetAvailability must
-	// always be used to read or modify them, and availability must not be accessed directly.
+	// Use GetAvailability, SetAvailability, and resetTargetAvailability to access availability
+	// together with degradedExpiredAt.
 	availability groupAvailability
 	// degradedExpiredAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
 	degradedExpiredAt uint64
@@ -179,6 +188,8 @@ type runtimeGroupInfo struct {
 	LabelRule *labeler.LabelRule
 	// RangeCount counts how many KeyRanges exist in the Label.
 	RangeCount int
+	// rangeConflict disables affinity for the entire group until its ranges no longer overlap.
+	rangeConflict bool
 }
 
 // newGroupState creates a GroupState from the given runtimeGroupInfo.
@@ -207,6 +218,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		RegionCount:               len(g.Regions),
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
+		rangeConflict:             g.rangeConflict,
 		groupInfoPtr:              g,
 	}
 }
@@ -265,18 +277,29 @@ func (g *runtimeGroupInfo) SetAvailability(newAvailability groupAvailability) {
 	}
 }
 
+// resetTargetAvailability sets the initial availability for a new or replaced target,
+// starting a fresh degradation window only when the target starts degraded.
+func (g *runtimeGroupInfo) resetTargetAvailability(availability groupAvailability) {
+	g.availability = availability
+	if availability == groupDegraded {
+		g.degradedExpiredAt = newDegradedExpiredAtFromNow()
+	} else {
+		g.degradedExpiredAt = 0
+	}
+}
+
 func newDegradedExpiredAtFromNow() uint64 {
 	return uint64(time.Now().Unix()) + defaultDegradedExpirationSeconds
 }
 
 // IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
 func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
-	return g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
+	return !g.rangeConflict && g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
 }
 
 // IsRegularSchedulingAllowed indicates whether balance scheduling is allowed.
 func (g *runtimeGroupInfo) IsRegularSchedulingAllowed() bool {
-	return g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
+	return g.rangeConflict || g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
 }
 
 // AdjustGroup validates the group and sets default values.

@@ -305,6 +305,7 @@ var (
 	affinityCheckerAbnormalReplicaCounter         = checkerCounter.WithLabelValues(affinityChecker, "abnormal-replica")
 	affinityCheckerLearnerMoveCounter             = checkerCounter.WithLabelValues(affinityChecker, "learner-move")
 	affinityCheckerLearnerPeerConflictCounter     = checkerCounter.WithLabelValues(affinityChecker, "learner-peer-conflict")
+	affinityCheckerSplitTimeoutCounter            = checkerCounter.WithLabelValues(affinityChecker, "split-timeout-fallback")
 
 	// Affinity merge checker metrics
 	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")

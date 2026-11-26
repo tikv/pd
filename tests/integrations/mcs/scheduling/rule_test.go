@@ -24,9 +24,14 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
@@ -70,6 +75,69 @@ func (suite *ruleTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+}
+
+func (suite *ruleTestSuite) TestAffinityOverlapStartup() {
+	re := suite.Require()
+	raftCluster := suite.pdLeaderServer.GetRaftCluster()
+	change := func(id, start, end string) affinity.GroupKeyRanges {
+		return affinity.GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte(start), EndKey: []byte(end)}}}
+	}
+	a, b := change("overlap-a", "a", "d"), change("overlap-b", "b", "c")
+	snapshot, watch := change("paired-snapshot", "x", "y"), change("paired-watch", "y", "z")
+	ids := []string{a.GroupID, b.GroupID, snapshot.GroupID, watch.GroupID}
+	// Persist the overlap before restarting PD.
+	store := raftCluster.GetStorage()
+	re.NoError(store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		for _, group := range []affinity.GroupKeyRanges{a, b} {
+			id := group.GroupID
+			re.NoError(store.SaveAffinityGroup(txn, id, &affinity.Group{ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}))
+			re.NoError(store.SaveRegionRule(txn, affinity.GetLabelRuleID(id), affinity.MakeLabelRule(group)))
+		}
+		return nil
+	}))
+	raftCluster.Stop()
+	raftCluster.Wait()
+	re.NoError(raftCluster.Start(suite.pdLeaderServer.GetServer(), false))
+	pd := raftCluster.GetAffinityManager()
+	defer func() { re.NoError(pd.DeleteAffinityGroups(ids, true)) }()
+	re.NoError(pd.CreateAffinityGroups([]affinity.GroupKeyRanges{snapshot}))
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	cluster := tc.WaitForPrimaryServing(re).GetCluster()
+	mcs, rules := cluster.GetAffinityManager(), cluster.GetRegionLabeler()
+	re.NoError(pd.CreateAffinityGroups([]affinity.GroupKeyRanges{watch}))
+	for _, change := range []affinity.GroupKeyRanges{snapshot, watch} {
+		testutil.Eventually(re, func() bool {
+			state := mcs.GetAffinityGroupState(change.GroupID)
+			return state != nil && state.RangeCount == 1 && rules.GetLabelRule(affinity.GetLabelRuleID(change.GroupID)) != nil
+		})
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 10, StartKey: b.KeyRanges[0].StartKey, EndKey: b.KeyRanges[0].EndKey}, nil)
+	for _, manager := range []*affinity.Manager{pd, mcs} {
+		for _, id := range ids[:2] {
+			manager.RestoreAffinityGroup(id)
+			state := manager.GetAffinityGroupState(id)
+			re.Equal(affinity.PhasePending, state.Phase)
+			re.False(state.AffinitySchedulingAllowed)
+			re.True(state.RegularSchedulingAllowed)
+			re.Equal(1, state.RangeCount)
+		}
+		group, _ := manager.GetRegionAffinityGroupState(region)
+		re.Nil(group)
+	}
+	re.NoError(pd.DeleteAffinityGroups(ids[:1], true))
+	testutil.Eventually(re, func() bool {
+		group, _ := mcs.GetRegionAffinityGroupState(region)
+		return group != nil && group.ID == b.GroupID
+	})
+	re.NoError(pd.DeleteAffinityGroups(ids, true))
+	for _, id := range ids {
+		testutil.Eventually(re, func() bool {
+			return !mcs.IsGroupExist(id) && rules.GetLabelRule(affinity.GetLabelRuleID(id)) == nil
+		})
+	}
 }
 
 func (suite *ruleTestSuite) TestRuleWatch() {

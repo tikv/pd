@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -145,49 +146,50 @@ func TestMetaServiceGroupMinStartTSIsolation(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	storage, manager, groupClient, _ := newMetaServiceGroupGCFixture(t)
+	setTestTSOWindow(t, storage, 90)
 	// Reports on PD and under another keyspace must not substitute for the assigned group's report.
-	re.NoError(storage.Save(keypath.CompatibleTiDBMinStartTSPrefix(1)+"wrong-backend", "30"))
-	_, err := groupClient.Put(ctx, keypath.CompatibleTiDBMinStartTSPrefix(2)+"other-keyspace", "20")
+	re.NoError(storage.Save(keypath.CompatibleTiDBMinStartTSPrefix(1)+"wrong-backend", strconv.FormatUint(gcTestTS(30), 10)))
+	_, err := groupClient.Put(ctx, keypath.CompatibleTiDBMinStartTSPrefix(2)+"other-keyspace", strconv.FormatUint(gcTestTS(20), 10))
 	re.NoError(err)
 	reportKey := keypath.CompatibleTiDBMinStartTSPrefix(1) + "tidb-group"
-	_, err = groupClient.Put(ctx, reportKey, "100")
+	_, err = groupClient.Put(ctx, reportKey, strconv.FormatUint(gcTestTS(100), 10))
 	re.NoError(err)
 	disabled := false
 	re.NoError(manager.metaServiceGroupManager.PatchStatus(ctx, "group1", &keyspace.MetaServiceGroupStatusPatch{Enabled: &disabled}))
 	now := time.Now()
-	_, err = manager.SetGCBarrier(1, "backup", 80, time.Hour, now)
+	_, err = manager.SetGCBarrier(1, "backup", gcTestTS(80), time.Hour, now)
 	re.NoError(err)
-	result, err := manager.AdvanceTxnSafePoint(1, 200, now)
+	result, err := manager.AdvanceTxnSafePoint(1, gcTestTS(200), now)
 	re.NoError(err)
-	re.Equal(uint64(80), result.NewTxnSafePoint)
+	re.Equal(gcTestTS(80), result.NewTxnSafePoint)
 	re.Contains(result.BlockerDescription, "backup")
 	_, err = manager.DeleteGCBarrier(1, "backup")
 	re.NoError(err)
-	_, err = manager.SetGlobalGCBarrier(ctx, "global-backup", 90, time.Hour, now)
+	_, err = manager.SetGlobalGCBarrier(ctx, "global-backup", gcTestTS(90), time.Hour, now)
 	re.NoError(err)
-	result, err = manager.AdvanceTxnSafePoint(1, 200, now)
+	result, err = manager.AdvanceTxnSafePoint(1, gcTestTS(200), now)
 	re.NoError(err)
-	re.Equal(uint64(90), result.NewTxnSafePoint)
+	re.Equal(gcTestTS(90), result.NewTxnSafePoint)
 	re.Contains(result.BlockerDescription, "global-backup")
 	_, err = manager.DeleteGlobalGCBarrier(ctx, "global-backup")
 	re.NoError(err)
-	minimum, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
+	minimum, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, gcTestTS(200), math.MaxInt64, now)
 	re.NoError(err)
 	re.True(updated)
-	re.Equal(uint64(100), minimum.SafePoint)
+	re.Equal(gcTestTS(100), minimum.SafePoint)
 	re.Equal("tidb_min_start_ts_tidb-group", minimum.ServiceID)
 
 	// Reading a changed report must not reuse a cached result or decrease an existing safe point.
-	_, err = groupClient.Put(ctx, reportKey, "50")
+	_, err = groupClient.Put(ctx, reportKey, strconv.FormatUint(gcTestTS(50), 10))
 	re.NoError(err)
-	result, err = manager.AdvanceTxnSafePoint(1, 200, now)
+	result, err = manager.AdvanceTxnSafePoint(1, gcTestTS(200), now)
 	re.NoError(err)
-	re.Equal(uint64(100), result.NewTxnSafePoint)
-	_, err = groupClient.Put(ctx, reportKey, "150")
+	re.Equal(gcTestTS(100), result.NewTxnSafePoint)
+	_, err = groupClient.Put(ctx, reportKey, strconv.FormatUint(gcTestTS(150), 10))
 	re.NoError(err)
-	result, err = manager.AdvanceTxnSafePoint(1, 200, now)
+	result, err = manager.AdvanceTxnSafePoint(1, gcTestTS(200), now)
 	re.NoError(err)
-	re.Equal(uint64(150), result.NewTxnSafePoint)
+	re.Equal(gcTestTS(150), result.NewTxnSafePoint)
 }
 
 func TestMetaServiceGroupReportReadDoesNotBlockOtherScopes(t *testing.T) {
@@ -199,8 +201,9 @@ func TestMetaServiceGroupReportReadDoesNotBlockOtherScopes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			re := require.New(t)
 			ctx := context.Background()
-			_, manager, groupClient, _ := newMetaServiceGroupGCFixture(t)
-			_, err := groupClient.Put(ctx, keypath.CompatibleTiDBMinStartTSPrefix(1)+"tidb-group", "160")
+			storage, manager, groupClient, _ := newMetaServiceGroupGCFixture(t)
+			setTestTSOWindow(t, storage, 140)
+			_, err := groupClient.Put(ctx, keypath.CompatibleTiDBMinStartTSPrefix(1)+"tidb-group", strconv.FormatUint(gcTestTS(160), 10))
 			re.NoError(err)
 			now := time.Now()
 			reached, resume := make(chan struct{}), make(chan struct{})
@@ -221,13 +224,13 @@ func TestMetaServiceGroupReportReadDoesNotBlockOtherScopes(t *testing.T) {
 				defer close(blockedDone)
 				if legacy {
 					var minimum *endpoint.ServiceSafePoint
-					minimum, _, blockedErr = manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
+					minimum, _, blockedErr = manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, gcTestTS(200), math.MaxInt64, now)
 					if blockedErr == nil {
 						blockedSafePoint = minimum.SafePoint
 					}
 				} else {
 					var result AdvanceTxnSafePointResult
-					result, blockedErr = manager.AdvanceTxnSafePoint(1, 200, now)
+					result, blockedErr = manager.AdvanceTxnSafePoint(1, gcTestTS(200), now)
 					blockedSafePoint = result.NewTxnSafePoint
 				}
 			}()
@@ -246,15 +249,15 @@ func TestMetaServiceGroupReportReadDoesNotBlockOtherScopes(t *testing.T) {
 			var healthyErr error
 			go func() {
 				defer close(healthyDone)
-				_, healthyErr = manager.SetGCBarrier(constant.NullKeyspaceID, "healthy-local", 120, time.Hour, now)
+				_, healthyErr = manager.SetGCBarrier(constant.NullKeyspaceID, "healthy-local", gcTestTS(120), time.Hour, now)
 				if healthyErr != nil {
 					return
 				}
-				_, healthyErr = manager.SetGlobalGCBarrier(ctx, "healthy-global", 140, time.Hour, now)
+				_, healthyErr = manager.SetGlobalGCBarrier(ctx, "healthy-global", gcTestTS(140), time.Hour, now)
 				if healthyErr != nil {
 					return
 				}
-				healthyResult, healthyErr = manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 200, now)
+				healthyResult, healthyErr = manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, gcTestTS(200), now)
 			}()
 			t.Cleanup(func() {
 				release()
@@ -263,14 +266,14 @@ func TestMetaServiceGroupReportReadDoesNotBlockOtherScopes(t *testing.T) {
 			select {
 			case <-healthyDone:
 				re.NoError(healthyErr)
-				re.Equal(uint64(120), healthyResult.NewTxnSafePoint)
+				re.Equal(gcTestTS(120), healthyResult.NewTxnSafePoint)
 			case <-time.After(5 * time.Second):
 				t.Fatal("group report read blocked unrelated GC barrier updates and advancement")
 			}
 			release()
 			<-blockedDone
 			re.NoError(blockedErr)
-			re.Equal(uint64(140), blockedSafePoint, "the global barrier installed during preparation must block group A")
+			re.Equal(gcTestTS(140), blockedSafePoint, "the global barrier installed during preparation must block group A")
 		})
 	}
 }
@@ -935,7 +938,7 @@ func TestTxnSafePointRoutingRevisionScopes(t *testing.T) {
 		mutated := false
 		re.NoError(failpoint.EnableCall(hook, func() {
 			mutated = true
-			_, err := manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: keyspace.GCManagementType, Value: keyspace.KeyspaceLevelGC}})
+			_, err := manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: "unrelated", Value: "updated"}})
 			re.NoError(err)
 		}))
 		defer func() { re.NoError(failpoint.Disable(hook)) }()
@@ -950,9 +953,6 @@ func TestTxnSafePointRoutingRevisionScopes(t *testing.T) {
 		revision, err := storage.Load(keypath.GCStateRevisionPath())
 		re.NoError(err)
 		re.Equal(beforeRevision, revision)
-		// Restore unified GC so the retry verifies redirected writes.
-		_, err = manager.keyspaceManager.UpdateKeyspaceConfig("ks1", []*keyspace.Mutation{{Op: keyspace.OpPut, Key: keyspace.GCManagementType, Value: keyspace.UnifiedGC}})
-		re.NoError(err)
 		minimum, updated, err := manager.CompatibleUpdateServiceGCSafePoint(1, keypath.GCWorkerServiceSafePointID, 200, math.MaxInt64, now)
 		re.NoError(err)
 		re.True(updated)

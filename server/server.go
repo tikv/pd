@@ -58,6 +58,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
@@ -158,6 +159,8 @@ type Server struct {
 
 	// for PD leader election.
 	member *member.Member
+	// Embedded TSO can serve during the rest of PD leader initialization.
+	tsoMember *embeddedTSOMember
 	// etcd client
 	client *clientv3.Client
 	// electionClient is used for leader election.
@@ -266,7 +269,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	// 3. Disable microservice and disable keyspace group. (both serverless scenario and non-serverless scenario)
 	// We should separate the keyspace group from the microservice later.
 	isKeyspaceGroupEnabled := len(services) != 0
-	log.Info("PD config", zap.Bool("enable-keyspace-group", isKeyspaceGroupEnabled), zap.Reflect("config", cfg))
+	log.Info("PD config", zap.Bool("enable-keyspace-group", isKeyspaceGroupEnabled), zap.Reflect("config", RedactedConfig(cfg)))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
@@ -541,9 +544,17 @@ func (s *Server) startServer(ctx context.Context, migrationCutoff int64) error {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	tsoStorage := storage.NewStorageWithEtcdBackend(s.electionClient)
-	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, tsoStorage, s)
+	s.tsoMember = &embeddedTSOMember{Member: s.member}
+	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.tsoMember, tsoStorage, s)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
+	s.cluster.SetTSOReadyCallback(func(lease *election.Lease) {
+		if lease != nil {
+			s.tsoMember.beginTerm(lease)
+		} else {
+			s.tsoMember.endTerm()
+		}
+	})
 	// This package's own heartbeat/bucket-report metrics can't be cleaned up from
 	// within RaftCluster's bury path without an import cycle, so RaftCluster invokes
 	// this callback instead.
@@ -877,6 +888,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
+	failpoint.InjectCall("beforeBootstrapClusterStart", s.member.ID())
 	if err := s.cluster.Start(s, true); err != nil {
 		return nil, err
 	}
@@ -1232,6 +1244,17 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	cfg.RateLimitConfig = *s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
 	cfg.GRPCRateLimitConfig = *s.serviceMiddlewarePersistOptions.GetGRPCRateLimitConfig().Clone()
 	return cfg
+}
+
+// RedactedConfig returns a shallow copy of cfg with Volcengine TOS metering
+// credentials masked for logging and external inspection.
+func RedactedConfig(cfg *config.Config) *config.Config {
+	if cfg == nil {
+		return nil
+	}
+	cloned := cfg.Clone()
+	cloned.Metering = metering.RedactedConfig(cloned.Metering)
+	return cloned
 }
 
 // GetConfig gets the config information.
@@ -2064,14 +2087,14 @@ func (s *Server) campaignLeader() {
 		}
 		return
 	}
+	// Stop any cluster started by an overlapping bootstrap even if this
+	// campaign exits before createRaftCluster. The reset deferred below runs
+	// first, withdrawing serving before Stop waits for background jobs.
+	defer s.stopRaftCluster()
 	// Start timing from when leader is successfully elected
 	leaderReadyStart := time.Now()
 	log.Info("leader election succeeded, start leader ready process")
 
-	// Start keepalive the leadership and enable TSO service.
-	// TSO service is strictly enabled/disabled by PD leader lease for 2 reasons:
-	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
-	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetLeaderOnce sync.Once
 	// As soon as the leadership keepalive is cancelled, another member has a
@@ -2085,6 +2108,7 @@ func (s *Server) campaignLeader() {
 	// not consult IsServing. Resigning first bounds that to the in-memory stores
 	// at the top of Member.Resign.
 	resetLeader := func() {
+		s.tsoMember.endTerm()
 		cancel()
 		s.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
@@ -2108,6 +2132,7 @@ func (s *Server) campaignLeader() {
 	keepLeaderDuration := time.Since(keepLeaderStart)
 	log.Info("keep leader lease completed", zap.Duration("cost", keepLeaderDuration), zap.String("campaign-leader-name", s.Name()))
 
+	failpoint.InjectCall("beforeLeaderReloadConfig", s.member.ID())
 	reloadConfigStart := time.Now()
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Warn("failed to reload configuration", errs.ZapError(err), zap.Duration("cost", time.Since(reloadConfigStart)))
@@ -2143,15 +2168,22 @@ func (s *Server) campaignLeader() {
 	callbacksDuration := time.Since(callbacksStart)
 	log.Info("trigger leader callback functions completed", zap.Duration("cost", callbacksDuration))
 
+	if kerneltype.IsNextGen() {
+		if err := s.storage.GetGCStateProvider().MigrateNativeBRBarrier(ctx, s.client); err != nil {
+			log.Warn("failed to migrate legacy native_br GC barrier", errs.ZapError(err))
+			return
+		}
+	}
+
 	// Try to create raft cluster.
 	createRaftClusterStart := time.Now()
 	if err := s.createRaftCluster(); err != nil {
+		resetLeaderOnce.Do(resetLeader)
 		log.Warn("failed to create raft cluster", errs.ZapError(err), zap.Duration("cost", time.Since(createRaftClusterStart)))
 		return
 	}
 	createRaftClusterDuration := time.Since(createRaftClusterStart)
 	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
-	defer s.stopRaftCluster()
 	failpoint.Inject("rebaseErr", func(val failpoint.Value) {
 		if memberFailpointEnabled(val, s.member.ID()) {
 			failpoint.Return()
@@ -2159,6 +2191,7 @@ func (s *Server) campaignLeader() {
 	})
 	rebaseStart := time.Now()
 	if err := s.idAllocator.Rebase(); err != nil {
+		resetLeaderOnce.Do(resetLeader)
 		log.Warn("failed to sync id from etcd", errs.ZapError(err), zap.Duration("cost", time.Since(rebaseStart)))
 		return
 	}
@@ -2188,14 +2221,15 @@ func (s *Server) campaignLeader() {
 	// It is the last step of stepping up: from here on only the loop below
 	// notices an expired lease, so nothing that can block may sit between it
 	// and the loop.
-	s.member.PromoteSelf()
+	// The early TSO updater can resign while the cluster is still initializing.
+	failpoint.InjectCall("beforePDLeaderPromoted", s.member.ID())
+	promoted := s.member.TryPromoteSelf()
+	failpoint.InjectCall("afterPDLeaderPromotionAttempt", s.member.ID(), promoted)
+	if !promoted {
+		stepDownAndLog("leadership was withdrawn before promotion, PD leader will step down")
+		return
+	}
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
-	// Registered a second time on purpose, and it is not dead code: deferred
-	// calls run last in first out, so this one runs before the stopRaftCluster
-	// defer above, which waits on background jobs that can take an unbounded
-	// time. The leadership has to be gone before that wait starts.
-	// `resetLeaderOnce` is what makes the duplicate invocation harmless.
-	defer resetLeaderOnce.Do(resetLeader)
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 

@@ -41,9 +41,11 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -1240,8 +1242,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	re.False(prepareChecker2.IsPrepared())
 	re.False(coordinator2.ShouldRun())
 
-	// Send only a small number of region heartbeats (insufficient for prepare checker)
-	for i := uint64(1); i <= 50; i++ {
+	// Collecting 99% of regions must not prepare the new primary.
+	for i := uint64(1); i <= 99; i++ {
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 			Region: &metapb.Region{
@@ -1259,7 +1261,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	}
 
 	testutil.Eventually(re, func() bool {
-		return cluster2.GetNotFromStorageRegionsCnt() == 50
+		return cluster2.GetNotFromStorageRegionsCnt() == 99
 	})
 
 	// The prepare checker should still be checking and potentially not satisfied
@@ -1270,23 +1272,21 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	re.False(isPrepared)
 	re.False(shouldRun)
 
-	// Send enough regions to eventually satisfy the prepare checker
-	for i := uint64(51); i <= 100; i++ {
-		regionReq := &pdpb.RegionHeartbeatRequest{
-			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
-			Region: &metapb.Region{
-				Id:       i,
-				Peers:    peers,
-				StartKey: fmt.Appendf(nil, "k%03d", i),
-				EndKey:   fmt.Appendf(nil, "k%03d", i+1),
-			},
-			Leader:          leaderPeer,
-			ApproximateSize: 10 * units.MiB,
-			ApproximateKeys: 100,
-		}
-		err = stream.Send(regionReq)
-		re.NoError(err)
+	// Collect the last region to satisfy the prepare checker.
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region: &metapb.Region{
+			Id:       100,
+			Peers:    peers,
+			StartKey: []byte("k100"),
+			EndKey:   []byte("k101"),
+		},
+		Leader:          leaderPeer,
+		ApproximateSize: 10 * units.MiB,
+		ApproximateKeys: 100,
 	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
 
 	// Finally verify that once prepared, the coordinator should be ready to run
 	testutil.Eventually(re, func() bool {
@@ -1465,6 +1465,95 @@ func (suite *serverTestSuite) TestBatchSplit() {
 
 	suite.TearDownSuite()
 	suite.SetupSuite()
+}
+
+// TestAffinitySplitNotifications delivers denial and recovery through PD.
+func (suite *serverTestSuite) TestAffinitySplitNotifications() {
+	re := suite.Require()
+	defer func() {
+		suite.TearDownSuite()
+		suite.SetupSuite()
+	}()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	cluster := tc.WaitForPrimaryServing(re).GetCluster()
+	suite.pdLeader.GetPersistOptions().SetAffinityScheduleLimit(4)
+	persistConfig(re, suite.pdLeader)
+
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	header := testutil.NewRequestHeader(suite.pdLeader.GetClusterID())
+	for id := uint64(1); id <= 3; id++ {
+		resp, err := s.PutStore(suite.ctx, &pdpb.PutStoreRequest{Header: header, Store: &metapb.Store{
+			Id: id, Address: fmt.Sprintf("mock://tikv-%d:%d", id, id), Version: "7.0.0",
+			NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano(),
+		}})
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	manager := suite.pdLeader.GetRaftCluster().GetAffinityManager()
+	const groupID = "split-notifications"
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}},
+	}}))
+	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetAddr())
+	defer conn.Close()
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
+	notifications := make(chan *pdpb.RegionHeartbeatResponse, 4)
+	go func() {
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				return
+			}
+			if split := resp.GetChangeSplit(); split != nil {
+				select {
+				case notifications <- resp:
+				default:
+				}
+			}
+		}
+	}()
+	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 33, StoreId: 3}}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: header, Region: &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader: peers[0], ApproximateSize: 5 * units.MiB, ApproximateKeys: 500,
+	}
+	testutil.Eventually(re, func() bool {
+		re.NoError(stream.Send(regionReq))
+		region := cluster.GetRegion(10)
+		return region != nil && !cluster.GetAffinityManager().AllowSplit(region, pdpb.SplitReason_SIZE)
+	})
+	splitResp, err := grpcPDClient.AskBatchSplit(suite.ctx, &pdpb.AskBatchSplitRequest{
+		Header: header, Region: regionReq.GetRegion(), SplitCount: 1, Reason: pdpb.SplitReason_SIZE,
+	})
+	re.NoError(err)
+	re.Contains(splitResp.GetHeader().GetError().GetMessage(), "cannot split affinity region")
+	// Resend unchanged metadata so recovery is exercised without a cache update.
+	expectSplit := func(enabled bool) {
+		testutil.Eventually(re, func() bool {
+			re.NoError(stream.Send(regionReq))
+			select {
+			case resp := <-notifications:
+				re.Equal(uint64(10), resp.GetRegionId())
+				re.Equal(peers[0], resp.GetTargetPeer())
+				re.Equal(enabled, resp.GetChangeSplit().GetAutoSplitEnabled())
+				return true
+			default:
+				return false
+			}
+		})
+	}
+	expectSplit(false)
+	re.NoError(manager.DeleteAffinityGroups([]string{groupID}, true))
+	expectSplit(true)
 }
 
 func (suite *serverTestSuite) TestBatchSplitCompatibility() {

@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -31,13 +32,23 @@ import (
 // RegisterAffinity registers affinity group related handlers to router paths.
 func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
-	router.Use(middlewares.BootstrapChecker())
-	router.POST("", PostAffinityGroups)
-	router.PATCH("", BatchModifyAffinityGroups)
-	router.PUT("/:group_id", UpdateAffinityGroupPeers)
-	router.DELETE("/:group_id", DeleteAffinityGroup)
-	router.GET("", GetAllAffinityGroups)
-	router.GET("/:group_id", GetAffinityGroup)
+	bootstrap := middlewares.BootstrapChecker()
+	createAudit := middlewares.Audit("CreateAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram)
+	deleteAudit := middlewares.Audit("DeleteAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram)
+	router.POST("", bootstrap, func(c *gin.Context) {
+		if _, hasDelete := c.GetQuery("delete"); hasDelete {
+			deleteAudit(c)
+		} else {
+			createAudit(c)
+		}
+	}, PostAffinityGroups)
+	router.PATCH("", bootstrap, middlewares.Audit("BatchModifyAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram), BatchModifyAffinityGroups)
+	router.PUT("/:group_id", bootstrap, middlewares.Audit("UpdateAffinityGroupPeers", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateAffinityGroupPeers)
+	router.DELETE("/:group_id", bootstrap, middlewares.Audit("DeleteAffinityGroup", audit.LocalLogLabel, audit.PrometheusHistogram), DeleteAffinityGroup)
+	// Count reads forwarded to scheduling as well as reads handled locally.
+	affinityRedirect := middlewares.AffinityMicroserviceRedirector()
+	router.GET("", middlewares.Audit("GetAllAffinityGroups", audit.PrometheusHistogram), affinityRedirect, bootstrap, GetAllAffinityGroups)
+	router.GET("/:group_id", middlewares.Audit("GetAffinityGroup", audit.PrometheusHistogram), affinityRedirect, bootstrap, GetAffinityGroup)
 }
 
 // --- API Structures ---
@@ -267,7 +278,7 @@ func deleteAffinityGroups(c *gin.Context) {
 // BatchModifyAffinityGroups batch modifies key ranges for multiple affinity groups.
 //
 //	@Tags		affinity-groups
-//	@Summary	Batch modify key ranges for affinity groups. Remove operations are executed before add operations.
+//	@Summary	Batch modify key ranges for affinity groups. Add operations are persisted before remove operations; a partial failure keeps the committed prefix in this order.
 //	@Param		body	body	BatchModifyAffinityGroupsRequest	true	"Batch modify request with add and remove operations"
 //	@Produce	json
 //	@Success	200	{object}	AffinityGroupsResponse	"Updated affinity groups"

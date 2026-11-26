@@ -331,18 +331,37 @@ func TestFullSyncWithAddMember(t *testing.T) {
 		loadRegionLen = len(pd2.GetServer().GetBasicCluster().GetRegions())
 		return loadRegionLen == regionLen
 	})
+	// The restarted leader only has persisted metadata. Full sync must not
+	// make the follower ready while those regions still have no leaders.
+	testutil.Eventually(re, func() bool {
+		bc := pd2.GetServer().GetBasicCluster()
+		return bc.GetNotFromStorageRegionsCnt() == regionLen && bc.GetStoreLeaderCount(1) == 0
+	})
 	re.NoError(cluster.ResignLeader())
-	re.Equal("pd2", cluster.WaitLeader())
+	re.Equal("pd2", cluster.WaitLeaderChange(leaderServer.GetServer().Name()))
 	loadRegionLen = len(pd2.GetServer().GetRegions())
 	re.Equal(regionLen, loadRegionLen)
+	rc = pd2.GetServer().GetRaftCluster()
+	re.False(rc.GetCoordinator().ShouldRun())
+	re.False(rc.IsPrepared())
+	for _, region := range regions[:regionLen-1] {
+		re.NoError(rc.HandleRegionHeartbeat(region))
+	}
+	testutil.Eventually(re, func() bool {
+		return rc.GetStoreLeaderCount(1) == regionLen-1
+	})
+	re.False(rc.GetCoordinator().ShouldRun())
+	re.NoError(rc.HandleRegionHeartbeat(regions[regionLen-1]))
+	testutil.Eventually(re, rc.IsPrepared)
 }
 
 func TestRemovingStoreAfterLeaderTransfer(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
+	// Accelerate store checks without speeding up unrelated cluster jobs.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyNodeStateCheck", `return(true)`))
 	t.Cleanup(func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyNodeStateCheck"))
 	})
 	var stateChecks atomic.Uint64
 	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/blockCheckStores", func() {
@@ -451,7 +470,7 @@ func TestPrepareChecker(t *testing.T) {
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
-	re.NotEqual(leaderServer.GetServer().Name(), cluster.WaitLeader())
+	re.NotEmpty(cluster.WaitLeaderChange(leaderServer.GetServer().Name()))
 	leaderServer = cluster.GetLeaderServer()
 	rc = leaderServer.GetServer().GetRaftCluster()
 	for _, region := range regions {
@@ -512,7 +531,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
-	re.NotEqual(leaderServer.GetServer().Name(), cluster.WaitLeader())
+	re.NotEmpty(cluster.WaitLeaderChange(leaderServer.GetServer().Name()))
 	rc = cluster.GetLeaderServer().GetRaftCluster()
 	re.True(rc.IsPrepared())
 
@@ -520,7 +539,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
-	re.NotEqual(leaderServer.GetServer().Name(), cluster.WaitLeader())
+	re.NotEmpty(cluster.WaitLeaderChange(leaderServer.GetServer().Name()))
 	rc = cluster.GetLeaderServer().GetServer().GetRaftCluster()
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
