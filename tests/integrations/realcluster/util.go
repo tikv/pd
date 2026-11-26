@@ -453,6 +453,14 @@ func readProcessesFromProc(procRoot string) ([]procInfo, error) {
 		if len(args) == 0 && state != 'Z' && state != 'X' {
 			continue
 		}
+		recheckStatBytes, err := os.ReadFile(filepath.Join(procDir, "stat")) //nolint:gosec
+		if err != nil {
+			continue
+		}
+		_, _, _, recheckStartTime, ok := parseProcStat(recheckStatBytes)
+		if !ok || recheckStartTime != startTime {
+			continue
+		}
 		procs = append(procs, procInfo{
 			pid:       pid,
 			ppid:      ppid,

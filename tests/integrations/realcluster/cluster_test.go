@@ -597,6 +597,9 @@ func TestClusterIsolationWithIdenticalTagDifferentTiUPHome(t *testing.T) {
 		re := require.New(t)
 
 		repoDir := t.TempDir()
+		if spacedPaths {
+			repoDir = filepath.Join(repoDir, "repo dir")
+		}
 		re.NoError(os.MkdirAll(filepath.Join(repoDir, "bin"), 0750))
 		re.NoError(os.MkdirAll(filepath.Join(repoDir, "third_bin"), 0750))
 		for _, rel := range []string{"bin/pd-server", "third_bin/tikv-server"} {
@@ -646,9 +649,16 @@ exit 1
 		}
 
 		startFakeServer := func(binaryName string, extraArgs ...string) int {
-			args := append([]string{filepath.Join(repoDir, "bin", binaryName), "-test.run=^TestHelperFakeServer$", "--"}, extraArgs...)
+			fakeBin := filepath.Join(repoDir, "bin", binaryName)
+			if target, err := os.Readlink(fakeBin); err != nil || target != os.Args[0] {
+				if rmErr := os.Remove(fakeBin); rmErr != nil && !os.IsNotExist(rmErr) {
+					re.NoError(rmErr)
+				}
+				re.NoError(os.Symlink(os.Args[0], fakeBin))
+			}
+			args := append([]string{fakeBin, "-test.run=^TestHelperFakeServer$", "--"}, extraArgs...)
 			cmd := &exec.Cmd{
-				Path:        os.Args[0],
+				Path:        fakeBin,
 				Args:        args,
 				Env:         append(os.Environ(), "PD_TEST_HELPER_FAKE_SERVER=1"),
 				SysProcAttr: &syscall.SysProcAttr{Setpgid: true},
@@ -1260,7 +1270,9 @@ func TestClusterWaitTimeoutBudget(t *testing.T) {
 		re.NoError(os.WriteFile(filepath.Join(repoDir, rel), []byte("#!/bin/sh\n"), 0600))
 	}
 
-	readyFile := filepath.Join(t.TempDir(), "display.ready")
+	markerDir := t.TempDir()
+	displayStartedFile := filepath.Join(markerDir, "display.started")
+	readyFile := filepath.Join(markerDir, "display.ready")
 	fakeTiUP := filepath.Join(t.TempDir(), "tiup")
 	script := fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
@@ -1275,6 +1287,9 @@ if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
   exit 0
 fi
 if [ "$1" = "playground" ] && [ "$2" = "display" ]; then
+  if [ ! -f %q ]; then
+    : > %q
+  fi
   if [ -f %q ]; then
     echo "Pid Role Uptime"
     exit 0
@@ -1283,7 +1298,7 @@ if [ "$1" = "playground" ] && [ "$2" = "display" ]; then
   exit 1
 fi
 exit 1
-`, readyFile)
+`, displayStartedFile, displayStartedFile, readyFile)
 	re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
 	re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
 
@@ -1301,17 +1316,45 @@ exit 1
 	clusterPollPeriod = 20 * time.Millisecond
 
 	// A full cluster that becomes ready after clusterWaitTimeout (200ms) still
-	// succeeds within fullClusterWaitTimeout (2s).
-	readyTimer := time.AfterFunc(350*time.Millisecond, func() {
-		_ = os.WriteFile(readyFile, []byte("ready"), 0600)
+	// succeeds within fullClusterWaitTimeout (2s). Arm the delay only after the
+	// first display poll runs so scheduling pauses before launch cannot make the
+	// marker appear prematurely.
+	stopMarker := make(chan struct{})
+	markerDone := make(chan struct{})
+	readyErrCh := make(chan error, 1)
+	go func() {
+		defer close(markerDone)
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for !fileExists(displayStartedFile) {
+			select {
+			case <-stopMarker:
+				readyErrCh <- nil
+				return
+			case <-ticker.C:
+			}
+		}
+		timer := time.NewTimer(350 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-stopMarker:
+			readyErrCh <- nil
+			return
+		case <-timer.C:
+		}
+		readyErrCh <- os.WriteFile(readyFile, []byte("ready"), 0600)
+	}()
+	t.Cleanup(func() {
+		close(stopMarker)
+		<-markerDone
 	})
-	defer readyTimer.Stop()
 
 	fullTag := fmt.Sprintf("pd_real_cluster_test_full_budget_%d", time.Now().UnixNano())
 	fullCluster := newCluster(re, fullTag, filepath.Join(t.TempDir(), fullTag), "")
 	defer fullCluster.stop()
 	start := time.Now()
 	fullCluster.start()
+	re.NoError(<-readyErrCh)
 	re.GreaterOrEqual(time.Since(start), 300*time.Millisecond)
 
 	// A tikv-slim cluster still enforces the shorter clusterWaitTimeout.

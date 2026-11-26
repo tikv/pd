@@ -39,7 +39,10 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	re := s.Require()
 	ctx := context.Background()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", s.cluster.pdEndpoints())
+	pdEndpoints := s.cluster.pdEndpoints()
+	re.NotEmpty(pdEndpoints)
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", pdEndpoints)
+	re.NotNil(pdHTTPCli)
 	defer pdHTTPCli.Close()
 	resp, err := pdHTTPCli.GetStores(ctx)
 	re.NoError(err)
@@ -107,7 +110,10 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	checkLabelsAreEqual()
 	// Restart to reload the label
 	s.cluster.restart()
-	pdHTTPCli = http.NewClient("pd-real-cluster-test", s.cluster.pdEndpoints())
+	pdEndpoints = s.cluster.pdEndpoints()
+	re.NotEmpty(pdEndpoints)
+	pdHTTPCli = http.NewClient("pd-real-cluster-test", pdEndpoints)
+	re.NotNil(pdHTTPCli)
 	defer pdHTTPCli.Close()
 	checkLabelsAreEqual()
 }
