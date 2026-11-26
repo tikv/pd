@@ -278,6 +278,28 @@ func (suite *metaTestSuite) TestMetadataBoundaryScheduling() {
 	re.NoError(err)
 	checkModes(nil, nil)
 	checkMerges(2)
+
+	// Reuse the regions, now with each covering exactly one adjacent keyspace.
+	right = region(2, bounds.RawLeftBound, bounds.RawRightBound)
+	cluster.GetBasicCluster().PutRegion(right)
+	re.Empty(cluster.GetRegionLabeler().GetSplitKeys(left.GetStartKey(), right.GetEndKey()))
+	rawConfig := map[string]string{keyspace.RegionBoundType: "raw"}
+	a, b := meta(legacyID-1, rawConfig), meta(legacyID, rawConfig)
+	checkAdjacentMerge := func(live []uint32, wantOps int) {
+		re.NoError(store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			if err := store.SaveKeyspaceMeta(txn, a); err != nil {
+				return err
+			}
+			return store.SaveKeyspaceMeta(txn, b)
+		}))
+		checkModes(live, nil)
+		checkMerges(wantOps)
+	}
+	checkAdjacentMerge([]uint32{b.GetId(), a.GetId()}, 0)
+	a.State = keyspacepb.KeyspaceState_TOMBSTONE
+	checkAdjacentMerge([]uint32{b.GetId()}, 0) // B's left boundary still protects it from A's residual data.
+	b.State = keyspacepb.KeyspaceState_TOMBSTONE
+	checkAdjacentMerge(nil, 2)
 }
 
 func (suite *metaTestSuite) getRaftCluster() *cluster.RaftCluster {

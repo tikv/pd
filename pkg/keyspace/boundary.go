@@ -56,6 +56,8 @@ func MetadataSplitKeys(start, end []byte, finder BoundaryFinder) ([][]byte, bool
 // CanMergeAcrossMetadata reports whether metadata confirms there is no
 // keyspace boundary strictly inside [start, end).
 func CanMergeAcrossMetadata(start, end []byte, finder BoundaryFinder) bool {
+	// A tombstoned keyspace may still have data in TiKV. Keep the live
+	// neighbor's boundary so its region does not absorb that leftover data.
 	keys, ok := findMetadataSplitKeys(start, end, finder, 1)
 	return ok && len(keys) == 0
 }
