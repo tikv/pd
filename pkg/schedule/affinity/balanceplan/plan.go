@@ -204,6 +204,16 @@ type groupState struct {
 	iso     []*isoTarget // per rule: isolation every target must reach
 }
 
+type leaderChecks struct {
+	checked  []int
+	rejected bool
+}
+
+func (c *leaderChecks) reset() {
+	c.checked = c.checked[:0]
+	c.rejected = false
+}
+
 type planner struct {
 	in               *Input
 	opt              Options
@@ -217,6 +227,7 @@ type planner struct {
 	stop             StopReason
 	blocked          bool
 	placementLimited bool
+	leaderChecks     leaderChecks // reused for each group's candidate scan
 	pk               picker
 	parts            [maxDepth]partScratch
 	results          [maxDepth + 1][2][]choice
@@ -311,11 +322,16 @@ func supported(g *Group, stores int, valid func(*Rule) bool) bool {
 	seen := make(map[int]bool, len(g.Voters))
 	for k, s := range g.Voters {
 		ri := ruleIndex(g, k)
-		if s < 0 || s >= stores || ri < 0 || ri >= len(g.Rules) || seen[s] {
+		if s < 0 || s >= stores || ri < 0 || ri >= len(g.Rules) || seen[s] || slices.Contains(g.Exclude, s) {
 			return false
 		}
 		seen[s] = true
 		counts[ri]++
+	}
+	for _, s := range g.Forced {
+		if !seen[s] {
+			return false
+		}
 	}
 	for ri, r := range g.Rules {
 		if !valid(r) || counts[ri] != r.Count {
@@ -439,23 +455,19 @@ func (p *planner) prepareRules() {
 				break
 			}
 		}
-		r.domainOf, r.domains = make([]int32, p.n), p.n
-		if r.level == depth {
+		if r.level < depth {
+			r.domainOf = make([]int32, p.n)
+			values := make([]int32, p.n)
 			for s := range p.n {
-				r.domainOf[s] = int32(s)
+				values[s] = r.Location[s][r.level]
 			}
-			continue
-		}
-		values := make([]int32, p.n)
-		for s := range p.n {
-			values[s] = r.Location[s][r.level]
-		}
-		slices.Sort(values)
-		values = slices.Compact(values)
-		r.domains = len(values)
-		for s := range p.n {
-			i, _ := slices.BinarySearch(values, r.Location[s][r.level])
-			r.domainOf[s] = int32(i)
+			slices.Sort(values)
+			values = slices.Compact(values)
+			r.domains = len(values)
+			for s := range p.n {
+				i, _ := slices.BinarySearch(values, r.Location[s][r.level])
+				r.domainOf[s] = int32(i)
+			}
 		}
 	}
 }
@@ -496,7 +508,7 @@ func (p *planner) layout() ([][]int, []int) {
 	return voters, leaders
 }
 
-func (p *planner) setLayout(voters [][]int, leaders []int, rules [][]int) {
+func (p *planner) setLayout(voters [][]int, leaders []int) {
 	for i := range p.gs {
 		g := &p.gs[i]
 		for _, s := range g.cur {
@@ -504,22 +516,11 @@ func (p *planner) setLayout(voters [][]int, leaders []int, rules [][]int) {
 		}
 		p.l[g.lead]--
 		g.cur, g.lead = slices.Clone(voters[i]), leaders[i]
-		if rules != nil {
-			g.curRule = slices.Clone(rules[i])
-		}
 		for _, s := range g.cur {
 			p.v[s]++
 		}
 		p.l[g.lead]++
 	}
-}
-
-func (p *planner) rules() [][]int {
-	out := make([][]int, len(p.gs))
-	for i := range p.gs {
-		out[i] = slices.Clone(p.gs[i].curRule)
-	}
-	return out
 }
 
 // stopped reports cancellation or an exhausted work budget.
@@ -535,8 +536,7 @@ func (p *planner) stopped() bool {
 }
 
 // greedy runs the source-ordered complete-target sweeps from the working
-// layout. It returns the best layout among the start and every sweep end and
-// leaves that layout installed.
+// layout and returns the final layout without discarding tie-break improvements.
 // Groups with different candidate stores may stop at a local optimum;
 // see #11502.
 func (p *planner) greedy(seed uint64) ([][]int, []int, Score) {
@@ -546,9 +546,6 @@ func (p *planner) greedy(seed uint64) ([][]int, []int, Score) {
 		g.startV = append(g.startV[:0], g.cur...)
 		g.startLd = g.lead
 	}
-	best := p.score()
-	bestV, bestL := p.layout()
-	bestR := p.rules()
 	members := make([][]int, p.n)
 	pending := make([]bool, len(p.gs))
 	order := make([]int, len(p.gs))
@@ -605,24 +602,16 @@ func (p *planner) greedy(seed uint64) ([][]int, []int, Score) {
 			}
 		}
 		slices.SortFunc(rest, func(a, b int) int {
-			la, lb := p.l[p.gs[a].lead], p.l[p.gs[b].lead]
-			if la != lb {
-				return lb - la
-			}
-			return a - b
+			return cmp.Or(cmp.Compare(p.l[p.gs[b].lead], p.l[p.gs[a].lead]), cmp.Compare(a, b))
 		})
 		for _, i := range rest {
 			if p.stopped() {
 				break
 			}
+			p.leaderChecks.reset()
 			if p.visitLeader(&p.gs[i]) {
 				moved = true
 			}
-		}
-		if value := p.score(); value.Less(best) {
-			best = value
-			bestV, bestL = p.layout()
-			bestR = p.rules()
 		}
 		// Choices depend only on counts, so a sweep without any change
 		// would repeat itself in every later sweep.
@@ -630,12 +619,13 @@ func (p *planner) greedy(seed uint64) ([][]int, []int, Score) {
 			break
 		}
 	}
-	p.setLayout(bestV, bestL, bestR)
-	return bestV, bestL, best
+	voters, leaders := p.layout()
+	return voters, leaders, p.score()
 }
 
 // visit replaces one group's target and reports a change.
 func (p *planner) visit(g *groupState) bool {
+	p.leaderChecks.reset()
 	for _, s := range g.cur {
 		p.v[s]--
 	}
@@ -651,31 +641,52 @@ func (p *planner) visit(g *groupState) bool {
 	}
 	p.l[g.lead]++
 	if !ok {
+		if p.stopped() {
+			p.visits++
+			if p.leaderChecks.rejected && !g.LeaderPinned {
+				// Report any unchecked fallback without changing the target.
+				p.pickLeader(g)
+			}
+			return false
+		}
 		return p.visitLeader(g)
 	}
 	p.visits++
 	return changed
 }
 
-// visitLeader keeps the voters and picks the leader by (count, keep, count in
-// other tables, ID).
+// visitLeader keeps the voters and updates the leader when a better one is available.
 func (p *planner) visitLeader(g *groupState) bool {
 	p.visits++
 	p.work += int64(len(g.cur))
 	if g.LeaderPinned {
 		return false
 	}
+	best := p.pickLeader(g)
+	if best == g.lead {
+		return false
+	}
+	p.l[g.lead]--
+	g.lead = best
+	p.l[best]++
+	return true
+}
+
+// pickLeader ranks the current voters by (count, keep, count in other tables, ID).
+func (p *planner) pickLeader(g *groupState) int {
 	old := g.lead
-	p.l[old]--
 	key := func(s int) [4]int {
+		count := p.l[s]
 		moved, other := 0, 0
-		if s != old {
+		if s == old {
+			count--
+		} else {
 			moved = 1
 		}
 		if p.otherL != nil {
 			other = p.otherL[s]
 		}
-		return [4]int{p.l[s], moved, other, s}
+		return [4]int{count, moved, other, s}
 	}
 	best := old
 	hosts := p.leaderHosts(g)
@@ -684,23 +695,27 @@ func (p *planner) visitLeader(g *groupState) bool {
 		if !slices.Contains(hosts, ri) || !p.leaderCapable(g, g.Rules[ri], s) {
 			continue
 		}
-		if a, b := key(s), key(best); slices.Compare(a[:], b[:]) < 0 && p.checkTarget(g, g.cur, s).Status == TargetSatisfied {
+		if a, b := key(s), key(best); slices.Compare(a[:], b[:]) < 0 && p.checkLeader(g, s) {
 			best = s
 		}
 	}
-	g.lead = best
-	p.l[best]++
-	return best != old
+	return best
 }
 
-func (p *planner) checkTarget(g *groupState, voters []int, leader int) TargetFeedback {
+func (p *planner) checkLeader(g *groupState, leader int) bool {
+	if slices.Contains(p.leaderChecks.checked, leader) {
+		return false
+	}
 	if g.CheckTarget == nil {
-		return TargetFeedback{}
+		return true
 	}
 	if p.stopped() {
-		return TargetFeedback{Status: TargetRejected}
+		if p.leaderChecks.rejected {
+			p.placementLimited = true
+		}
+		return false
 	}
-	return p.runTargetCheck(g, voters, leader)
+	return p.runTargetCheck(g, g.cur, leader).Status == TargetSatisfied
 }
 
 // runTargetCheck records a callback's result after the caller checks for a stop.
@@ -708,6 +723,11 @@ func (p *planner) runTargetCheck(g *groupState, voters []int, leader int) Target
 	feedback := g.CheckTarget(voters, leader, p.opt.WorkBudget-p.work)
 	p.work += max(1, feedback.Work)
 	p.blocked = p.blocked || feedback.Status == TargetTemporarilyBlocked
+	p.leaderChecks.rejected = p.leaderChecks.rejected || feedback.Status == TargetRejected
+	// A leader-only target checked by choose can reappear in visitLeader.
+	if leader != g.lead && (slices.Equal(voters, g.cur) || sameSet(voters, g.cur)) {
+		p.leaderChecks.checked = append(p.leaderChecks.checked, leader)
+	}
 	return feedback
 }
 
@@ -716,11 +736,11 @@ func (p *planner) runTargetCheck(g *groupState, voters []int, leader int) Target
 // Later visits may make an earlier change unnecessary. It repeats until a
 // pass reverts nothing; every other pass reverts at least one group, so it ends.
 // Trials share the search's cancellation and work budget. A cutoff keeps the
-// last accepted layout, whose score is never worse than the saved best layout.
+// last accepted layout, whose score is never worse than the greedy layout.
 // A reverted group also gets the rule assignment of its input target back,
 // which chainLeaders reads.
 func (p *planner) revert(origV [][]int, origL []int, voters [][]int, leaders []int) Score {
-	p.setLayout(voters, leaders, nil)
+	p.setLayout(voters, leaders)
 	cur := p.score()
 	if p.stopped() {
 		return cur
@@ -799,6 +819,9 @@ func (p *planner) chainLeaders(leaders []int) int64 {
 	at := make([]int, len(p.gs)+1)
 	var alt []int
 	for i := range p.gs {
+		if p.stopped() {
+			break
+		}
 		g := &p.gs[i]
 		at[i] = len(alt)
 		p.work += int64(len(g.cur))
@@ -806,12 +829,16 @@ func (p *planner) chainLeaders(leaders []int) int64 {
 			continue
 		}
 		hosts := p.leaderHosts(g)
+		p.leaderChecks.reset()
 		for k, s := range g.cur {
 			// Later rounds may return to this leader; its validity is known.
-			if ri := g.curRule[k]; slices.Contains(hosts, ri) && p.leaderCapable(g, g.Rules[ri], s) && (s == g.lead || p.checkTarget(g, g.cur, s).Status == TargetSatisfied) {
+			if ri := g.curRule[k]; slices.Contains(hosts, ri) && p.leaderCapable(g, g.Rules[ri], s) && (s == g.lead || p.checkLeader(g, s)) {
 				alt = append(alt, s)
 			}
 		}
+	}
+	if p.stopped() {
+		return 0
 	}
 	at[len(p.gs)] = len(alt)
 	start := make([]int, p.n+1) // the groups led at s are led[start[s]:start[s+1]]

@@ -153,11 +153,7 @@ func TestLeaderChainStops(t *testing.T) {
 			before := p.score()
 			switch reason {
 			case StopCanceled:
-				checks := 0
-				p.opt.Cancel = func() bool {
-					checks++
-					return checks > 2 // Entry and the first round can run.
-				}
+				p.opt.Cancel = func() bool { return p.visits > 0 } // Stop after the first round.
 			case StopBudget:
 				p.opt.WorkBudget = p.work + 11 // Entry charges ten voters.
 			}
@@ -170,6 +166,25 @@ func TestLeaderChainStops(t *testing.T) {
 			require.Equal(t, p.score(), scoreOf(in, voters, leaders))
 		})
 	}
+}
+
+func TestLeaderChainStopsBuildingAdjacency(t *testing.T) {
+	in := general(1000, 3, 0, 3)
+	for i := range in.Groups {
+		in.Groups[i].LeaderPinned = i != 0
+	}
+	calls := 0
+	in.Groups[0].CheckTarget = func(_ []int, _ int, limit int64) TargetFeedback {
+		calls++
+		return TargetFeedback{Work: limit}
+	}
+	const budget = 10
+	p := newPlanner(in, Options{WorkBudget: budget})
+	_, leaders := p.layout()
+	require.Zero(t, p.chainLeaders(leaders))
+	require.Equal(t, StopBudget, p.stop)
+	require.Equal(t, 1, calls)
+	require.EqualValues(t, budget, p.work, "pinned groups after the cutoff must not be scanned")
 }
 
 func deepPaths(stores, depth int, domain func(int) int) [][]int32 {
@@ -305,6 +320,18 @@ func TestUnsupportedGroupsStayFixed(t *testing.T) {
 		})
 	}
 	checkNoGroups(t, general(3, 40, 3, 15))
+
+	t.Run("excluded current voter", func(t *testing.T) {
+		in, g := singleGroup(5, 2, 2)
+		g.Exclude = []int{1, 3} // No eligible voter remains in the second zone.
+		in.BaseVoters[1] = 3
+		checkNoGroups(t, in)
+	})
+	t.Run("forced store outside current voters", func(t *testing.T) {
+		in, g := singleGroup(3, 0, 2)
+		g.Forced = []int{2}
+		checkNoGroups(t, in)
+	})
 }
 
 // General isolation must count scans and stop within one visit of the budget.
@@ -339,6 +366,51 @@ func TestOtherTablesSpreadTies(t *testing.T) {
 		require.False(t, slices.ContainsFunc(voters, func(store int) bool { return in.OtherVoters[store] != 0 }), "busy store in %v", voters)
 	}
 	require.Equal(t, alone.Score, r.Score) // only ties change
+}
+
+func TestGreedyKeepsSweepTieBreaks(t *testing.T) {
+	t.Run("other tables' voters", func(t *testing.T) {
+		in := leaderLayout(5, []int{0, 1}, []int{0, 2})
+		in.Groups[0].LeaderPinned, in.Groups[1].LeaderPinned = true, true
+		in.Groups[0].Rules = []*Rule{{Count: 2, Stores: []int{0, 1, 2, 3}}}
+		in.Groups[1].Rules = []*Rule{{Count: 2, Stores: []int{0, 2, 4}}}
+		in.BaseVoters = []int{0, 2, 1, 1, 0}
+		in.OtherVoters = []int{0, 0, 0, 1, 0}
+
+		// The first group moves to 3 before the second group frees store 2.
+		p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
+		first, _, score := p.greedy(0)
+		require.ElementsMatch(t, []int{0, 3}, first[0])
+		require.ElementsMatch(t, []int{0, 4}, first[1])
+
+		p = newPlanner(in, Options{Sweeps: 2, WorkBudget: DefaultWorkBudget})
+		second, _, finalScore := p.greedy(0)
+		require.Equal(t, score, finalScore)
+		require.ElementsMatch(t, []int{0, 2}, second[0])
+		require.ElementsMatch(t, []int{0, 4}, second[1])
+	})
+
+	t.Run("original voter", func(t *testing.T) {
+		in := leaderLayout(4, []int{0, 1}, []int{1})
+		in.Groups[0].LeaderPinned = true
+		in.Groups[0].Rules = []*Rule{{Count: 2, Stores: []int{0, 1, 2}}}
+		in.Groups[1].Rules = []*Rule{{Count: 1, Stores: []int{1, 3}}}
+		in.Groups[1].RuleOf = nil
+		in.BaseLeaders[1] = 1
+
+		// The first group moves off store 1. The second can then trade
+		// store 1 for 3 to improve the leader score, so the first can return.
+		p := newPlanner(in, Options{Sweeps: 1, WorkBudget: DefaultWorkBudget})
+		first, _, score := p.greedy(0)
+		require.ElementsMatch(t, []int{0, 2}, first[0])
+		require.Equal(t, []int{3}, first[1])
+
+		p = newPlanner(in, Options{Sweeps: 2, WorkBudget: DefaultWorkBudget})
+		second, _, finalScore := p.greedy(0)
+		require.Equal(t, score, finalScore)
+		require.ElementsMatch(t, in.Groups[0].Voters, second[0])
+		require.Equal(t, []int{3}, second[1])
+	})
 }
 
 func TestScaleOutKeepsExistingTargets(t *testing.T) {
@@ -823,6 +895,86 @@ func TestLeaderChecks(t *testing.T) {
 		} else {
 			require.Equal(t, StopBudget, p.stop)
 		}
+	}
+}
+
+func TestCanceledChoiceKeepsLeader(t *testing.T) {
+	in := general(1, 2, 0, 2)
+	in.BaseLeaders[0] = 2
+	checks := 0
+	r := Plan(in, Options{Cancel: func() bool {
+		checks++
+		return checks == 2
+	}})
+	require.Equal(t, StopCanceled, r.Stop)
+	require.Zero(t, r.Changed)
+	require.Equal(t, []int{0}, r.Leaders)
+}
+
+func TestLeaderFallbackSkipsAlreadyCheckedTarget(t *testing.T) {
+	in, g := singleGroup(3, 0, 3)
+	in.BaseLeaders[0] = 2
+	var checked []int
+	g.CheckTarget = func(_ []int, leader int, _ int64) TargetFeedback {
+		checked = append(checked, leader)
+		if leader == 1 {
+			return TargetFeedback{Status: TargetRejected, Work: 1}
+		}
+		return TargetFeedback{Work: 1}
+	}
+	r := Plan(in, Options{WorkBudget: 11})
+	require.Equal(t, []int{1, 2}, checked)
+	require.Equal(t, []int{2}, r.Leaders)
+	require.EqualValues(t, 9, r.Baseline.Leader)
+	require.EqualValues(t, 5, r.Score.Leader)
+}
+
+func TestLeaderPlacementCutoffs(t *testing.T) {
+	for _, path := range []string{"fixed voters", "fallback", "voter-change cutoff", "leader-only choice", "no alternative", "chain"} {
+		t.Run(path, func(t *testing.T) {
+			in, g := singleGroup(4, 0, 3)
+			in.BaseLeaders[0] = 2
+			opt := Options{Sweeps: 1, WorkBudget: 100}
+			var checked []int
+			calls := 0
+			g.CheckTarget = func(voters []int, leader int, limit int64) TargetFeedback {
+				calls++
+				if !sameSet(voters, g.Voters) {
+					if path == "voter-change cutoff" {
+						return TargetFeedback{Status: TargetRejected, Work: limit}
+					}
+					return TargetFeedback{Status: TargetRejected}
+				}
+				checked = append(checked, leader)
+				if leader == 1 {
+					return TargetFeedback{Status: TargetRejected, Work: limit}
+				}
+				return TargetFeedback{}
+			}
+			switch path {
+			case "fixed voters":
+				g.Forced = g.Voters
+			case "fallback", "voter-change cutoff":
+				in.BaseVoters[2] = 3 // The full target search first tries changing a voter.
+			case "leader-only choice", "no alternative":
+				g.Rules[0].Stores = g.Voters
+				if path == "no alternative" {
+					g.CanLead[2] = false
+				}
+			case "chain":
+				g.Rules[0].Stores = g.Voters
+				in.BaseLeaders[0] = 0 // No individual leader move improves the score.
+			}
+			r := Plan(in, opt)
+			if path == "voter-change cutoff" {
+				require.Equal(t, 1, calls)
+				require.Empty(t, checked)
+			} else {
+				require.Equal(t, []int{1}, checked)
+			}
+			require.Equal(t, StopBudget, r.Stop)
+			require.Equal(t, path != "no alternative", r.PlacementLimited)
+		})
 	}
 }
 
