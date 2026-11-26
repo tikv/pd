@@ -86,6 +86,11 @@ func fileExists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
+func isExecutable(path string) bool {
+	info, err := os.Stat(path) //nolint:gosec
+	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
+}
+
 func isProcessRunning(pid int) bool {
 	process, err := os.FindProcess(pid)
 	if err != nil {
@@ -260,6 +265,21 @@ func readProcessesFromProc(procRoot string) ([]procInfo, error) {
 	return procs, nil
 }
 
+func hasLivePGIDMembers(procs []procInfo, targetPGID, selfPID int) bool {
+	if targetPGID <= 0 {
+		return false
+	}
+	for _, p := range procs {
+		if p.pid <= 0 || p.pid == selfPID || p.state == 'Z' || p.state == 'X' {
+			continue
+		}
+		if p.pgid == targetPGID {
+			return true
+		}
+	}
+	return false
+}
+
 func collectOwnedTreePIDs(procs []procInfo, targetPGID, selfPID int) map[int]struct{} {
 	owned := make(map[int]struct{})
 	if targetPGID <= 0 {
@@ -267,11 +287,22 @@ func collectOwnedTreePIDs(procs []procInfo, targetPGID, selfPID int) map[int]str
 	}
 	childrenByPPID := make(map[int][]int, len(procs))
 	existing := make(map[int]struct{}, len(procs))
-	queue := []int{targetPGID}
-	queued := map[int]struct{}{targetPGID: {}}
+	var queue []int
+	queued := make(map[int]struct{})
 
 	for _, p := range procs {
-		if p.pid <= 0 || p.pid == selfPID || p.state == 'Z' || p.state == 'X' {
+		if p.pid <= 0 || p.pid == selfPID {
+			continue
+		}
+		if p.state == 'Z' || p.state == 'X' {
+			// An un-reaped zombie still in targetPGID cannot have had its PID reused;
+			// traverse its live descendants without adding the zombie itself to owned.
+			if p.pgid == targetPGID {
+				if _, ok := queued[p.pid]; !ok {
+					queued[p.pid] = struct{}{}
+					queue = append(queue, p.pid)
+				}
+			}
 			continue
 		}
 		existing[p.pid] = struct{}{}

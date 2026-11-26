@@ -70,7 +70,16 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	defer func() {
 		// The restarted client is closed before this cleanup runs because defers
 		// run in LIFO order, so use a fresh client to restore the store labels.
-		cleanupCli := http.NewClient("pd-real-cluster-test", s.cluster.pdEndpoints())
+		endpoints := s.cluster.pdEndpoints()
+		if len(endpoints) == 0 {
+			s.T().Log("skip restoring store labels: no PD endpoints available")
+			return
+		}
+		cleanupCli := http.NewClient("pd-real-cluster-test", endpoints)
+		if cleanupCli == nil {
+			s.T().Log("skip restoring store labels: failed to initialize PD HTTP client")
+			return
+		}
 		defer cleanupCli.Close()
 		if hasOriginalZone {
 			re.NoError(cleanupCli.SetStoreLabels(ctx, firstStore.Store.ID, map[string]string{

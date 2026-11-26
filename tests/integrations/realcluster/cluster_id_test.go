@@ -24,7 +24,6 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 func TestClusterID(t *testing.T) {
@@ -45,19 +44,32 @@ func TestClusterID(t *testing.T) {
 		cluster2.start()
 
 		var ep1, ep2 []string
-		testutil.Eventually(re, func() bool {
+		warmUpCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
 			ep1 = cluster1.pdEndpoints()
 			ep2 = cluster2.pdEndpoints()
-			if len(ep1) != 1 || len(ep2) != 1 || ep1[0] == ep2[0] {
-				return false
+			if len(ep1) == 1 && len(ep2) == 1 && ep1[0] != ep2[0] {
+				clusterID1, ok1 := fetchClusterID(warmUpCtx, ep1)
+				if ok1 && clusterID1 != 0 {
+					clusterID2, ok2 := fetchClusterID(warmUpCtx, ep2)
+					if ok2 && clusterID2 != 0 && clusterID1 != clusterID2 {
+						break
+					}
+				}
 			}
-			clusterID1, ok := fetchClusterID(ctx, ep1)
-			if !ok || clusterID1 == 0 {
-				return false
+			if warmUpCtx.Err() != nil {
+				re.FailNowf("clusters did not serve distinct cluster IDs before timeout", "ep1: %v, ep2: %v, err: %v", ep1, ep2, warmUpCtx.Err())
 			}
-			clusterID2, ok := fetchClusterID(ctx, ep2)
-			return ok && clusterID2 != 0 && clusterID1 != clusterID2
-		}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(500*time.Millisecond))
+			select {
+			case <-warmUpCtx.Done():
+				re.FailNowf("clusters did not serve distinct cluster IDs before timeout", "ep1: %v, ep2: %v, err: %v", ep1, ep2, warmUpCtx.Err())
+			case <-ticker.C:
+			}
+		}
 
 		pdEndpoints := []string{ep1[0], ep2[0]}
 		// Try to create a client with the mixed endpoints.

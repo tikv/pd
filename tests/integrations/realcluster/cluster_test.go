@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -32,19 +33,61 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
+type triggerDeadlineCtx struct {
+	context.Context
+	done chan struct{}
+}
+
+func newTriggerDeadlineCtx() *triggerDeadlineCtx {
+	return &triggerDeadlineCtx{
+		Context: context.Background(),
+		done:    make(chan struct{}),
+	}
+}
+
+func (c *triggerDeadlineCtx) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c *triggerDeadlineCtx) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func (c *triggerDeadlineCtx) trigger() {
+	close(c.done)
+}
+
 func TestWaitForClusterReady(t *testing.T) {
 	t.Run("times out instead of resetting deadline each tick", func(t *testing.T) {
 		re := require.New(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
-		defer cancel()
+		dctx := newTriggerDeadlineCtx()
 
 		calls := 0
-		err := waitForClusterReady(ctx, 10*time.Millisecond, func(context.Context) (string, error) {
+		err := waitForClusterReady(dctx, 5*time.Millisecond, func(context.Context) (string, error) {
 			calls++
+			if calls == 2 {
+				dctx.trigger()
+			}
 			return "Error: no playground running", errors.New("exit status 1")
 		})
 		re.ErrorIs(err, context.DeadlineExceeded)
-		re.GreaterOrEqual(calls, 2)
+		re.ErrorContains(err, "exit status 1")
+		re.Equal(2, calls)
+
+		// Also verify real wall-clock timeout returns promptly without relying on tick count.
+		wallCtx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		err = waitForClusterReady(wallCtx, 10*time.Millisecond, func(context.Context) (string, error) {
+			return "Error: no playground running", errors.New("exit status 1")
+		})
+		re.ErrorIs(err, context.DeadlineExceeded)
+		re.Less(time.Since(start), 2*time.Second)
 	})
 
 	t.Run("returns nil once check succeeds", func(t *testing.T) {
@@ -66,27 +109,42 @@ func TestWaitForClusterReady(t *testing.T) {
 
 	t.Run("kills blocking child process group on deadline", func(t *testing.T) {
 		re := require.New(t)
-		pidFile := filepath.Join(t.TempDir(), "child.pid")
-		cmdStr := fmt.Sprintf("sleep 30 & echo $! > %q; wait", pidFile)
+		tmpDir := t.TempDir()
+		pidFile := filepath.Join(tmpDir, "child.pid")
+		tmpPIDFile := pidFile + ".tmp"
+		cmdStr := fmt.Sprintf("sleep 30 & pid=$!; echo \"$pid\" > %q && mv %q %q; wait", tmpPIDFile, tmpPIDFile, pidFile)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-		defer cancel()
+		dctx := newTriggerDeadlineCtx()
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- waitForClusterReady(dctx, 10*time.Millisecond, func(checkCtx context.Context) (string, error) {
+				return runCommandWithOutputContext(checkCtx, cmdStr, "")
+			})
+		}()
 
-		start := time.Now()
-		err := waitForClusterReady(ctx, 20*time.Millisecond, func(checkCtx context.Context) (string, error) {
-			return runCommandWithOutputContext(checkCtx, cmdStr, "")
-		})
-		elapsed := time.Since(start)
+		var childPID int
+		re.Eventually(func() bool {
+			pidBytes, readErr := os.ReadFile(pidFile) //nolint:gosec
+			if readErr != nil {
+				return false
+			}
+			parsed, parseErr := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+			if parseErr != nil || parsed <= 0 {
+				return false
+			}
+			childPID = parsed
+			return isProcessRunning(childPID)
+		}, 5*time.Second, 20*time.Millisecond)
+
+		triggeredAt := time.Now()
+		dctx.trigger()
+
+		err := <-errCh
 		re.ErrorIs(err, context.DeadlineExceeded)
-		re.Less(elapsed, 2*time.Second)
-
-		pidBytes, readErr := os.ReadFile(pidFile)
-		re.NoError(readErr)
-		childPID, parseErr := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
-		re.NoError(parseErr)
+		re.Less(time.Since(triggeredAt), 2*time.Second)
 		re.Eventually(func() bool {
 			return !isProcessRunning(childPID)
-		}, time.Second, 20*time.Millisecond)
+		}, 2*time.Second, 20*time.Millisecond)
 	})
 }
 
@@ -332,6 +390,44 @@ func TestSelectOwnedPIDs(t *testing.T) {
 	re.Equal([]int{101, 102, 103, 104}, selectOwnedPIDs(procs, dataDir1, 101, 500))
 	re.Equal([]int{201, 202, 203}, selectOwnedPIDs(procs, dataDir2, 201, 500))
 	re.Equal([]int{301, 302}, selectOwnedPIDs(procs, dataDir10, 301, 500))
+
+	// Reused launcher PID in a different PGID and its descendants must NOT be selected.
+	reusedProcs := []procInfo{
+		{
+			pid: 42001, ppid: 41000, pgid: 41000, state: 'S',
+			args: []string{"/usr/bin/unrelated"},
+		},
+		{
+			pid: 42002, ppid: 42001, pgid: 41000, state: 'S',
+			args: []string{"/usr/bin/unrelated-child"},
+		},
+	}
+	re.Empty(selectOwnedPIDs(reusedProcs, "", 42001, 500))
+	re.False(hasLivePGIDMembers(reusedProcs, 42001, 500))
+
+	// If another live process still belongs to target PGID 42001 while PID 42001
+	// was reused in PGID 41000, only the true PGID 42001 member is selected.
+	mixedProcs := append(reusedProcs, procInfo{
+		pid: 42003, ppid: 1, pgid: 42001, state: 'S',
+		args: []string{"/bin/tiup-playground", "nightly"},
+	})
+	re.Equal([]int{42003}, selectOwnedPIDs(mixedProcs, "", 42001, 500))
+	re.True(hasLivePGIDMembers(mixedProcs, 42001, 500))
+
+	// An un-reaped zombie still in targetPGID must not be selected itself,
+	// while its live escaped descendant is still traversed.
+	zombieParentProcs := []procInfo{
+		{
+			pid: 43001, ppid: 500, pgid: 43001, state: 'Z',
+			args: []string{"/bin/tiup", "playground", "nightly"},
+		},
+		{
+			pid: 43002, ppid: 43001, pgid: 43002, state: 'S',
+			args: []string{"/bin/helper"},
+		},
+	}
+	re.Equal([]int{43002}, selectOwnedPIDs(zombieParentProcs, "", 43001, 500))
+	re.False(hasLivePGIDMembers(zombieParentProcs, 43001, 500))
 }
 
 func TestTagUniqueAcrossProcesses(t *testing.T) {
@@ -876,9 +972,291 @@ func TestHelperSetupSuitePartialStartFailure(t *testing.T) {
 	tiupBin = os.Getenv("PD_TEST_HELPER_TIUP")
 	playgroundLogDir = os.Getenv("PD_TEST_HELPER_LOGDIR")
 	clusterWaitTimeout = 200 * time.Millisecond
+	fullClusterWaitTimeout = 200 * time.Millisecond
 	clusterPollPeriod = 40 * time.Millisecond
 
 	suite.Run(t, &helperFailingSuite{
 		suiteName: "partial_fail_suite",
 	})
+}
+
+func TestClusterWaitTimeoutBudget(t *testing.T) {
+	re := require.New(t)
+
+	// Full clusters include TiFlash, whose default TiUP --tiflash.timeout is 120s
+	// after PD and TiDB startup, so fullClusterWaitTimeout must exceed both.
+	re.Greater(fullClusterWaitTimeout, 120*time.Second)
+	re.Greater(fullClusterWaitTimeout, clusterWaitTimeout)
+	re.Equal(clusterWaitTimeout, (&cluster{mode: "tikv-slim"}).waitTimeout())
+	re.Equal(fullClusterWaitTimeout, (&cluster{mode: ""}).waitTimeout())
+	re.Equal(fullClusterWaitTimeout, (&cluster{mode: "ms"}).waitTimeout())
+
+	repoDir := t.TempDir()
+	re.NoError(os.MkdirAll(filepath.Join(repoDir, "bin"), 0750))
+	re.NoError(os.MkdirAll(filepath.Join(repoDir, "third_bin"), 0750))
+	for _, rel := range []string{"bin/pd-server", "third_bin/tikv-server", "third_bin/tidb-server", "third_bin/tiflash"} {
+		re.NoError(os.WriteFile(filepath.Join(repoDir, rel), []byte("#!/bin/sh\n"), 0600))
+	}
+
+	readyFile := filepath.Join(t.TempDir(), "display.ready")
+	fakeTiUP := filepath.Join(t.TempDir(), "tiup")
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
+  echo "/fake/tiup-playground"
+  exit 0
+fi
+if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
+  trap 'kill "$child" 2>/dev/null; exit 0' TERM
+  sleep 30 &
+  child=$!
+  wait "$child"
+  exit 0
+fi
+if [ "$1" = "playground" ] && [ "$2" = "display" ]; then
+  if [ -f %q ]; then
+    echo "Pid Role Uptime"
+    exit 0
+  fi
+  echo "Error: no playground running"
+  exit 1
+fi
+exit 1
+`, readyFile)
+	re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
+	re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
+
+	origRepo, origBin, origLogDir := realClusterRepoRoot, tiupBin, playgroundLogDir
+	origTimeout, origFullTimeout, origPoll := clusterWaitTimeout, fullClusterWaitTimeout, clusterPollPeriod
+	t.Cleanup(func() {
+		realClusterRepoRoot, tiupBin, playgroundLogDir = origRepo, origBin, origLogDir
+		clusterWaitTimeout, fullClusterWaitTimeout, clusterPollPeriod = origTimeout, origFullTimeout, origPoll
+	})
+	realClusterRepoRoot = repoDir
+	tiupBin = fakeTiUP
+	playgroundLogDir = t.TempDir()
+	clusterWaitTimeout = 200 * time.Millisecond
+	fullClusterWaitTimeout = 2 * time.Second
+	clusterPollPeriod = 20 * time.Millisecond
+
+	// A full cluster that becomes ready after clusterWaitTimeout (200ms) still
+	// succeeds within fullClusterWaitTimeout (2s).
+	readyTimer := time.AfterFunc(350*time.Millisecond, func() {
+		_ = os.WriteFile(readyFile, []byte("ready"), 0600)
+	})
+	defer readyTimer.Stop()
+
+	fullTag := fmt.Sprintf("pd_real_cluster_test_full_budget_%d", time.Now().UnixNano())
+	fullCluster := newCluster(re, fullTag, filepath.Join(t.TempDir(), fullTag), "")
+	defer fullCluster.stop()
+	start := time.Now()
+	fullCluster.start()
+	re.GreaterOrEqual(time.Since(start), 300*time.Millisecond)
+
+	// A tikv-slim cluster still enforces the shorter clusterWaitTimeout.
+	re.NoError(os.Remove(readyFile))
+	rec := &failNowRecorder{}
+	done := make(chan struct{})
+	slimTag := fmt.Sprintf("pd_real_cluster_test_slim_budget_%d", time.Now().UnixNano())
+	go func() {
+		defer close(done)
+		c := newCluster(require.New(rec), slimTag, filepath.Join(t.TempDir(), slimTag), "tikv-slim", map[string]int{"pd": 1, "kv": 1})
+		defer c.stop()
+		c.start()
+	}()
+	<-done
+	re.True(rec.failed)
+}
+
+func TestClusterStopPGIDSignalGuard(t *testing.T) {
+	type signalCall struct {
+		pid int
+		sig syscall.Signal
+	}
+
+	setupEnv := func(t *testing.T, tiupScript string) (*sync.Mutex, *[]signalCall) {
+		t.Helper()
+		re := require.New(t)
+		repoDir := t.TempDir()
+		re.NoError(os.MkdirAll(filepath.Join(repoDir, "bin"), 0750))
+		re.NoError(os.MkdirAll(filepath.Join(repoDir, "third_bin"), 0750))
+		for _, rel := range []string{"bin/pd-server", "third_bin/tikv-server"} {
+			re.NoError(os.WriteFile(filepath.Join(repoDir, rel), []byte("#!/bin/sh\n"), 0600))
+		}
+		fakeTiUP := filepath.Join(t.TempDir(), "tiup")
+		re.NoError(os.WriteFile(fakeTiUP, []byte(tiupScript), 0600))
+		re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
+
+		origRepo, origBin, origLogDir := realClusterRepoRoot, tiupBin, playgroundLogDir
+		origTimeout, origPoll, origGrace := clusterWaitTimeout, clusterPollPeriod, clusterStopGraceTimeout
+		origKill := killProcess
+		var mu sync.Mutex
+		var calls []signalCall
+		t.Cleanup(func() {
+			realClusterRepoRoot, tiupBin, playgroundLogDir = origRepo, origBin, origLogDir
+			clusterWaitTimeout, clusterPollPeriod, clusterStopGraceTimeout = origTimeout, origPoll, origGrace
+			killProcess = origKill
+		})
+		realClusterRepoRoot = repoDir
+		tiupBin = fakeTiUP
+		playgroundLogDir = t.TempDir()
+		clusterWaitTimeout = 2 * time.Second
+		clusterPollPeriod = 20 * time.Millisecond
+		clusterStopGraceTimeout = 150 * time.Millisecond
+		killProcess = func(pid int, sig syscall.Signal) error {
+			mu.Lock()
+			calls = append(calls, signalCall{pid: pid, sig: sig})
+			mu.Unlock()
+			return origKill(pid, sig)
+		}
+		return &mu, &calls
+	}
+
+	t.Run("skips final group SIGKILL after clean launcher exit", func(t *testing.T) {
+		re := require.New(t)
+		script := `#!/bin/sh
+if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
+  echo "/fake/tiup-playground"
+  exit 0
+fi
+if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
+  trap 'kill "$child" 2>/dev/null; exit 0' TERM
+  sleep 30 &
+  child=$!
+  wait "$child"
+  exit 0
+fi
+if [ "$1" = "playground" ] && [ "$2" = "display" ]; then
+  echo "Pid Role Uptime"
+  exit 0
+fi
+exit 1
+`
+		mu, calls := setupEnv(t, script)
+		tag := fmt.Sprintf("pd_real_cluster_test_pgid_clean_%d", time.Now().UnixNano())
+		c := newCluster(re, tag, filepath.Join(t.TempDir(), tag), "tikv-slim", map[string]int{"pd": 1, "kv": 1})
+		defer c.stop()
+		c.start()
+		pgid := c.pgid
+		re.Positive(pgid)
+
+		c.stop()
+
+		mu.Lock()
+		recorded := append([]signalCall(nil), (*calls)...)
+		mu.Unlock()
+		var sawGroupTerm, sawGroupKill bool
+		for _, call := range recorded {
+			if call.pid == -pgid && call.sig == syscall.SIGTERM {
+				sawGroupTerm = true
+			}
+			if call.pid == -pgid && call.sig == syscall.SIGKILL {
+				sawGroupKill = true
+			}
+		}
+		re.True(sawGroupTerm, "expected initial group SIGTERM")
+		re.False(sawGroupKill, "must not send final group SIGKILL after launcher is reaped with no live PGID members")
+	})
+
+	t.Run("sends final group SIGKILL when group member survives reaped launcher", func(t *testing.T) {
+		re := require.New(t)
+		childPIDFile := filepath.Join(t.TempDir(), "survivor.pid")
+		tmpPIDFile := childPIDFile + ".tmp"
+		script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
+  echo "/fake/tiup-playground"
+  exit 0
+fi
+if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
+  sh -c 'trap "" TERM; echo $$ > %q && mv %q %q; sleep 30' &
+  trap 'exit 0' TERM
+  sleep 30 &
+  wait
+  exit 0
+fi
+if [ "$1" = "playground" ] && [ "$2" = "display" ]; then
+  echo "Pid Role Uptime"
+  exit 0
+fi
+exit 1
+`, tmpPIDFile, tmpPIDFile, childPIDFile)
+		mu, calls := setupEnv(t, script)
+		tag := fmt.Sprintf("pd_real_cluster_test_pgid_survivor_%d", time.Now().UnixNano())
+		c := newCluster(re, tag, filepath.Join(t.TempDir(), tag), "tikv-slim", map[string]int{"pd": 1, "kv": 1})
+		defer c.stop()
+		c.start()
+		pgid := c.pgid
+		re.Positive(pgid)
+
+		var survivorPID int
+		re.Eventually(func() bool {
+			b, err := os.ReadFile(childPIDFile) //nolint:gosec
+			if err != nil {
+				return false
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+			if err != nil || pid <= 0 {
+				return false
+			}
+			survivorPID = pid
+			return isProcessRunning(survivorPID)
+		}, 5*time.Second, 20*time.Millisecond)
+		t.Cleanup(func() {
+			if survivorPID > 0 && isProcessRunning(survivorPID) {
+				_ = syscall.Kill(survivorPID, syscall.SIGKILL)
+			}
+		})
+
+		c.stop()
+
+		re.Eventually(func() bool {
+			return !isProcessRunning(survivorPID)
+		}, 2*time.Second, 20*time.Millisecond)
+
+		mu.Lock()
+		recorded := append([]signalCall(nil), (*calls)...)
+		mu.Unlock()
+		var sawGroupKill bool
+		for _, call := range recorded {
+			if call.pid == -pgid && call.sig == syscall.SIGKILL {
+				sawGroupKill = true
+			}
+		}
+		re.True(sawGroupKill, "expected final group SIGKILL when a member in PGID survives SIGTERM")
+	})
+}
+
+func TestResolveTiUPBinAndRelativeTiUPHome(t *testing.T) {
+	re := require.New(t)
+	origBin := tiupBin
+	t.Cleanup(func() { tiupBin = origBin })
+	tiupBin = ""
+
+	defaultHome := t.TempDir()
+	t.Setenv("HOME", defaultHome)
+
+	// Relative TIUP_HOME resolves to an absolute path and requires an executable tiup binary.
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+	t.Setenv("TIUP_HOME", ".tiup-local")
+
+	absExpectedHome := filepath.Join(workDir, ".tiup-local")
+	re.Equal(absExpectedHome, tiupHome())
+	re.Equal(filepath.Join(absExpectedHome, "data", "tag1"), dataDirForTag("tag1"))
+
+	customBin := filepath.Join(absExpectedHome, "bin", "tiup")
+	re.NoError(os.MkdirAll(filepath.Dir(customBin), 0750))
+	re.NoError(os.WriteFile(customBin, []byte("#!/bin/sh\n"), 0600))
+	// Non-executable custom binary must fall back to default $HOME/.tiup/bin/tiup.
+	re.Equal(filepath.Join(defaultHome, ".tiup", "bin", "tiup"), resolveTiUPBin())
+
+	re.NoError(os.Chmod(customBin, 0700)) //nolint:gosec
+	re.Equal(customBin, resolveTiUPBin())
+
+	// Literal TIUP_HOME containing glob metacharacters works with os.RemoveAll.
+	globHome := filepath.Join(t.TempDir(), "ci[dev")
+	t.Setenv("TIUP_HOME", globHome)
+	dataDir := dataDirForTag("tag_glob")
+	re.NoError(os.MkdirAll(dataDir, 0750))
+	re.NoError(os.RemoveAll(dataDir))
+	re.False(fileExists(dataDir))
 }

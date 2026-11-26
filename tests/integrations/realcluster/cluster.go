@@ -53,12 +53,7 @@ func (s *clusterSuite) SetupSuite() {
 
 	tag := s.tag()
 	dataDir := dataDirForTag(tag)
-	matches, err := filepath.Glob(dataDir)
-	re.NoError(err)
-
-	for _, match := range matches {
-		re.NoError(os.RemoveAll(match))
-	}
+	re.NoError(os.RemoveAll(dataDir))
 
 	s.cluster = newCluster(re, tag, dataDir, s.mode)
 	s.T().Cleanup(s.cluster.stop)
@@ -85,6 +80,9 @@ func (s *clusterSuite) tag() string {
 
 func tiupHome() string {
 	if home := os.Getenv("TIUP_HOME"); home != "" {
+		if abs, err := filepath.Abs(home); err == nil {
+			return abs
+		}
 		return home
 	}
 	return filepath.Join(os.Getenv("HOME"), ".tiup")
@@ -95,20 +93,25 @@ func dataDirForTag(tag string) string {
 }
 
 var (
-	playgroundLogDir    = "/tmp/real_cluster/playground"
-	tiupBin             = ""
-	realClusterRepoRoot = ""
-	clusterWaitTimeout  = 100 * time.Second
-	clusterPollPeriod   = time.Second
+	playgroundLogDir        = "/tmp/real_cluster/playground"
+	tiupBin                 = ""
+	realClusterRepoRoot     = ""
+	clusterWaitTimeout      = 100 * time.Second
+	fullClusterWaitTimeout  = 300 * time.Second
+	clusterPollPeriod       = time.Second
+	clusterStopGraceTimeout = 3 * time.Second
+	tiupProbeTimeout        = 30 * time.Second
+	tiupInstallTimeout      = 3 * time.Minute
+	killProcess             = syscall.Kill
 )
 
 func resolveTiUPBin() string {
 	if tiupBin != "" {
 		return tiupBin
 	}
-	if home := os.Getenv("TIUP_HOME"); home != "" {
-		candidate := filepath.Join(home, "bin", "tiup")
-		if fileExists(candidate) {
+	if os.Getenv("TIUP_HOME") != "" {
+		candidate := filepath.Join(tiupHome(), "bin", "tiup")
+		if isExecutable(candidate) {
 			return candidate
 		}
 	}
@@ -163,6 +166,18 @@ func (c *cluster) restart() {
 	log.Info("restart success")
 }
 
+func isWaitDone(waitDone <-chan struct{}) bool {
+	if waitDone == nil {
+		return true
+	}
+	select {
+	case <-waitDone:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *cluster) stop() {
 	if c.pgid == 0 && c.waitDone == nil {
 		return
@@ -170,45 +185,44 @@ func (c *cluster) stop() {
 
 	pgid := c.pgid
 	waitDone := c.waitDone
-	if err := c.collectPids(); err != nil {
+	hasGroupMembers, err := c.collectPids()
+	if err != nil {
 		log.Warn("failed to collect pids", zap.String("tag", c.tag), zap.Error(err))
 	}
 
-	if pgid > 0 {
-		_ = syscall.Kill(-pgid, syscall.SIGTERM)
+	if pgid > 0 && (!isWaitDone(waitDone) || hasGroupMembers) {
+		_ = killProcess(-pgid, syscall.SIGTERM)
 	}
 	for _, pid := range c.pids {
 		// First try SIGTERM
-		_ = syscall.Kill(pid, syscall.SIGTERM)
+		_ = killProcess(pid, syscall.SIGTERM)
 	}
 
-	// Wait up to 3s for graceful exit, then force kill survivors.
-	deadline := time.Now().Add(3 * time.Second)
+	// Wait up to clusterStopGraceTimeout for graceful exit, then force kill survivors.
+	deadline := time.Now().Add(clusterStopGraceTimeout)
 	for time.Now().Before(deadline) {
-		waitFinished := waitDone == nil
-		if !waitFinished {
-			select {
-			case <-waitDone:
-				waitFinished = true
-			default:
-			}
-		}
-		if waitFinished && !slices.ContainsFunc(c.pids, isProcessRunning) {
+		if isWaitDone(waitDone) && !slices.ContainsFunc(c.pids, isProcessRunning) {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if pgid > 0 {
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
-	}
-	// Re-scan once before force-killing to catch any component spawned while shutting down.
-	if err := c.collectPids(); err != nil {
+	// Re-scan before force-killing to catch any component spawned while shutting down
+	// and verify whether the process group still has live members.
+	hasGroupMembers, err = c.collectPids()
+	if err != nil {
 		log.Warn("failed to refresh pids", zap.String("tag", c.tag), zap.Error(err))
+	}
+	if pgid > 0 && (!isWaitDone(waitDone) || hasGroupMembers) {
+		// Only signal -pgid while the launcher is un-reaped or live members remain in
+		// the group, avoiding signaling a released PGID after clean shutdown. When the
+		// launcher was already reaped, a narrow check-to-signal window remains if the
+		// last group member exits between the process scan and killProcess.
+		_ = killProcess(-pgid, syscall.SIGKILL)
 	}
 	var killed []int
 	for _, pid := range c.pids {
 		if isProcessRunning(pid) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
+			_ = killProcess(pid, syscall.SIGKILL)
 			killed = append(killed, pid)
 		}
 	}
@@ -277,6 +291,9 @@ func (c *cluster) deploy() {
 	playgroundArgs := buildPlaygroundArgs(c.mode, c.tag, c.portOffset, c.instances)
 	cmd := exec.Command(bin, playgroundArgs...) //nolint:gosec
 	cmd.Dir = repoRoot
+	if os.Getenv("TIUP_HOME") != "" {
+		cmd.Env = append(os.Environ(), "TIUP_HOME="+tiupHome())
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -299,7 +316,9 @@ func ensurePlaygroundInstalled(re *require.Assertions, bin string) {
 		return
 	}
 	log.Info("installing tiup playground component before starting cluster")
-	output, err := runExecWithOutputContext(context.Background(), "", bin, "install", "playground")
+	ctx, cancel := context.WithTimeout(context.Background(), tiupInstallTimeout)
+	defer cancel()
+	output, err := runExecWithOutputContext(ctx, "", bin, "install", "playground")
 	if output != "" {
 		log.Info(output)
 	}
@@ -307,7 +326,9 @@ func ensurePlaygroundInstalled(re *require.Assertions, bin string) {
 }
 
 func isPlaygroundInstalled(bin string) bool {
-	output, err := runExecWithOutputContext(context.Background(), "", bin, "--binary", "playground")
+	ctx, cancel := context.WithTimeout(context.Background(), tiupProbeTimeout)
+	defer cancel()
+	output, err := runExecWithOutputContext(ctx, "", bin, "--binary", "playground")
 	return err == nil && strings.TrimSpace(output) != ""
 }
 
@@ -369,18 +390,20 @@ func buildPlaygroundArgs(mode, tag string, portOffset int, instances map[string]
 	return playgroundOpts
 }
 
-// collectPids collects PIDs owned by this cluster's process tree or cluster data directory.
-func (c *cluster) collectPids() error {
+// collectPids collects PIDs owned by this cluster's process tree or cluster data directory,
+// and reports whether any live process still belongs to c.pgid.
+func (c *cluster) collectPids() (bool, error) {
 	procs, err := listProcesses()
 	if err != nil {
-		return fmt.Errorf("failed to collect pids: %w", err)
+		return false, fmt.Errorf("failed to collect pids: %w", err)
 	}
-	for _, pid := range selectOwnedPIDs(procs, c.datadir, c.pgid, os.Getpid()) {
+	selfPID := os.Getpid()
+	for _, pid := range selectOwnedPIDs(procs, c.datadir, c.pgid, selfPID) {
 		if !slices.Contains(c.pids, pid) {
 			c.pids = append(c.pids, pid)
 		}
 	}
-	return nil
+	return hasLivePGIDMembers(procs, c.pgid, selfPID), nil
 }
 
 func selectOwnedPIDs(procs []procInfo, dataDir string, targetPGID, selfPID int) []int {
@@ -419,10 +442,18 @@ func matchesEscapedClusterProcess(p procInfo, cleanDataDir string) bool {
 	return matchesClusterServerDataDir(binName, procArgs, cleanDataDir)
 }
 
+func (c *cluster) waitTimeout() time.Duration {
+	if c.mode == "tikv-slim" {
+		return clusterWaitTimeout
+	}
+	return fullClusterWaitTimeout
+}
+
 func (c *cluster) waitReady() {
 	re := c.re
-	log.Info("start to wait TiUP ready", zap.String("tag", c.tag))
-	ctx, cancel := context.WithTimeout(context.Background(), clusterWaitTimeout)
+	timeout := c.waitTimeout()
+	log.Info("start to wait TiUP ready", zap.String("tag", c.tag), zap.Duration("timeout", timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	bin := resolveTiUPBin()
