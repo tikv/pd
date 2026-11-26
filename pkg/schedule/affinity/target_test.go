@@ -175,6 +175,23 @@ func TestUpdateAffinityGroupTargetsSkipsDeletedStore(t *testing.T) {
 	test.Equal(healthy.result(), test.stored("h"))
 }
 
+func TestUpdateAffinityGroupTargetsReplayWithDeletedStore(t *testing.T) {
+	test := newTargetTest(t, "g", "h")
+	test.checkGroupsAvailability()
+	test.True(test.storeConditionsKnown)
+	replay := test.target("g", 1, 1, 2)
+	test.write([]string{"g"}, replay)
+	test.True(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+	test.ExpireAffinityGroup("g")
+	stores := test.storeSetInformer.(*core.StoresInfo)
+	stores.DeleteStore(stores.GetStore(2))
+
+	healthy := test.target("h", 1, 1, 3)
+	test.write([]string{"g", "h"}, replay, healthy)
+	test.False(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+	test.Equal(healthy.result(), test.stored("h"))
+}
+
 func TestFirstGroupRejectsRemovingStoreBeforeScan(t *testing.T) {
 	test := newTargetTest(t)
 	stores := test.storeSetInformer.(*core.StoresInfo)

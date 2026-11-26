@@ -55,7 +55,7 @@ func (obs *observedTarget) sameCandidate(other observedTarget) bool {
 
 // recoverLocalObservedTarget lets an earlier async attempt take precedence over
 // synchronous recovery of the previous target. Caller holds metaMutex.
-func (m *Manager) recoverLocalObservedTarget(obs *observedTarget) bool {
+func (m *Manager) recoverLocalObservedTarget(obs *observedTarget) {
 	m.targetWriteMutex.Lock()
 	defer m.targetWriteMutex.Unlock()
 
@@ -69,10 +69,9 @@ func (m *Manager) recoverLocalObservedTarget(obs *observedTarget) bool {
 		(group != nil && group.lastSentWritten && now.Before(group.targetSendAfter) && group.lastSentTarget.matches(group))
 	m.RUnlock()
 	if active {
-		return false
+		return
 	}
 	m.applyLocalObservedTarget(obs)
-	return true
 }
 
 // sendObservedTarget queues distinct current candidates in observation order.

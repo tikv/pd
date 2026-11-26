@@ -182,7 +182,7 @@ func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bo
 			changed := m.syncGroupTargetLocked(group, stored)
 			if written && !changed && !group.IsAvailable() && m.storeConditionsKnown &&
 				group == initialGroup && group.AffinityVer == initialVer &&
-				calcGroupAvailability(m.unavailableStores, group.LeaderStoreID, group.VoterStoreIDs) == groupAvailable {
+				m.checkHasUnavailableStoreLocked(group.LeaderStoreID, group.VoterStoreIDs) == nil {
 				m.setTargetAvailabilityLocked(group)
 				m.resetCountLocked(group)
 			}
