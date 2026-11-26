@@ -15,6 +15,8 @@
 package schedulers
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -40,6 +42,67 @@ type scatterRangeSchedulerConfig struct {
 	RangeName string `json:"range-name"`
 	StartKey  string `json:"start-key"`
 	EndKey    string `json:"end-key"`
+}
+
+// scatterRangeSchedulerConfigJSON is the JSON form of scatterRangeSchedulerConfig.
+//
+// StartKey and EndKey hold raw key bytes (e.g. TiDB table keys such as
+// "t\x80\x00..."), which are usually not valid UTF-8. encoding/json replaces
+// invalid UTF-8 with U+FFFD when it marshals a string, so the persisted keys
+// were corrupted and a reloaded scheduler (e.g. after a PD leader transfer)
+// worked on a wrong range. The hex fields keep the exact bytes. The string
+// fields are kept for compatibility with older versions and existing tools.
+type scatterRangeSchedulerConfigJSON struct {
+	RangeName   string `json:"range-name"`
+	StartKey    string `json:"start-key"`
+	EndKey      string `json:"end-key"`
+	StartKeyHex string `json:"start-key-hex,omitempty"`
+	EndKeyHex   string `json:"end-key-hex,omitempty"`
+}
+
+// MarshalJSON implements json.Marshaler.
+// It does not take the lock because callers like persist() already hold it.
+func (conf *scatterRangeSchedulerConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&scatterRangeSchedulerConfigJSON{
+		RangeName:   conf.RangeName,
+		StartKey:    conf.StartKey,
+		EndKey:      conf.EndKey,
+		StartKeyHex: hex.EncodeToString([]byte(conf.StartKey)),
+		EndKeyHex:   hex.EncodeToString([]byte(conf.EndKey)),
+	})
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+// The hex fields take precedence. A config persisted by an older version has
+// no hex fields, so the string fields are used as before.
+func (conf *scatterRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
+	var c struct {
+		scatterRangeSchedulerConfigJSON
+		StartKeyHex *string `json:"start-key-hex"`
+		EndKeyHex   *string `json:"end-key-hex"`
+	}
+	if err := json.Unmarshal(data, &c); err != nil {
+		return err
+	}
+	startKey, endKey := c.StartKey, c.EndKey
+	if c.StartKeyHex != nil {
+		key, err := hex.DecodeString(*c.StartKeyHex)
+		if err != nil {
+			return err
+		}
+		startKey = string(key)
+	}
+	if c.EndKeyHex != nil {
+		key, err := hex.DecodeString(*c.EndKeyHex)
+		if err != nil {
+			return err
+		}
+		endKey = string(key)
+	}
+	conf.RangeName = c.RangeName
+	conf.StartKey = startKey
+	conf.EndKey = endKey
+	return nil
 }
 
 func (conf *scatterRangeSchedulerConfig) buildWithArgs(args []string) error {
