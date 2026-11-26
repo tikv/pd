@@ -26,7 +26,10 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-const maxTargetBatchSize = 128
+const (
+	maxTargetBatchSize        = 128
+	maxPendingTargetsPerGroup = 16
+)
 
 type observedTarget struct {
 	target       GroupTarget
@@ -50,59 +53,61 @@ func (obs *observedTarget) sameCandidate(other observedTarget) bool {
 		slices.Equal(obs.target.VoterStoreIDs, other.target.VoterStoreIDs)
 }
 
-// sendObservedTarget queues the latest observation per group for a single writer.
-// Repeats of the last sent target cannot displace a different queued candidate.
+// sendObservedTarget queues distinct current candidates in observation order.
+// A full queue keeps its existing candidates.
 // A 404 pauses HTTP attempts but lets groups use observations locally.
 // Caller holds metaMutex.
 func (m *Manager) sendObservedTarget(obs observedTarget) {
 	id := obs.target.Expected.ID
-	m.RLock()
-	current := obs.matches(m.groups[id])
-	m.RUnlock()
-	if !current {
-		return
-	}
 	m.targetWriteMutex.Lock()
+	queued := m.pendingTargets[id]
+	m.RLock()
+	group := m.groups[id]
+	current := obs.matches(group)
+	// A group's queued candidates all share the same instance, version, and revision.
+	staleQueue := len(queued) > 0 && !queued[0].matches(group)
+	m.RUnlock()
 	now := time.Now()
 	retrying := now.Before(m.targetWriteRetryAt)
 	if retrying && m.targetEndpointUnsupported {
 		m.targetWriteMutex.Unlock()
-		if !obs.persistOnly {
+		if current && !obs.persistOnly {
 			m.applyLocalObservedTarget(&obs)
 		}
 		return
 	}
-	if m.ctx.Err() != nil || retrying {
+	if !current || m.ctx.Err() != nil || retrying {
 		m.targetWriteMutex.Unlock()
 		return
+	}
+	defer m.targetWriteMutex.Unlock()
+
+	if staleQueue {
+		// Keep the ID's position while replacing the obsolete queue.
+		m.pendingTargets[id] = nil
+		queued = nil
 	}
 	if sending, ok := m.sendingTargets[id]; ok && obs.sameCandidate(sending) {
-		m.targetWriteMutex.Unlock()
 		return
 	}
-	queued, hasQueued := m.pendingTargets[id]
-	if lastSent := obs.groupInfoPtr.lastSentTarget; lastSent != nil && obs.sameCandidate(*lastSent) {
-		if now.Before(obs.groupInfoPtr.targetSendAfter) {
-			m.targetWriteMutex.Unlock()
+	for _, pending := range queued {
+		if obs.sameCandidate(pending) {
 			return
 		}
-		if hasQueued && !obs.sameCandidate(queued) {
-			m.RLock()
-			keepQueued := queued.matches(m.groups[id])
-			m.RUnlock()
-			if keepQueued {
-				m.targetWriteMutex.Unlock()
-				return
-			}
-		}
 	}
-	if !hasQueued {
+	if lastSent := group.lastSentTarget; now.Before(group.targetSendAfter) && lastSent != nil && obs.sameCandidate(*lastSent) {
+		return
+	}
+	if len(queued) == maxPendingTargetsPerGroup {
+		return
+	}
+	if _, indexed := m.pendingTargets[id]; !indexed {
 		m.pendingTargetIDs = append(m.pendingTargetIDs, id)
 	}
 	if m.pendingTargets == nil {
-		m.pendingTargets = make(map[string]observedTarget)
+		m.pendingTargets = make(map[string][]observedTarget)
 	}
-	m.pendingTargets[id] = obs
+	m.pendingTargets[id] = append(queued, obs)
 	if !m.targetDrainRunning {
 		m.targetDrainRunning = true
 		go m.drainObservedTargets()
@@ -110,11 +115,10 @@ func (m *Manager) sendObservedTarget(obs observedTarget) {
 		close(m.targetDrainWake)
 		m.targetDrainWake = nil
 	}
-	m.targetWriteMutex.Unlock()
 }
 
-// popObservedTargets moves current, ready observations into the sending batch and
-// returns the earliest cooldown deadline of any deferred observations it encounters.
+// popObservedTargets takes at most one current candidate per group in FIFO order
+// and returns the earliest cooldown deadline it encounters.
 // Caller holds targetWriteMutex.
 func (m *Manager) popObservedTargets(now time.Time) ([]observedTarget, time.Time) {
 	batch := make([]observedTarget, 0, min(maxTargetBatchSize, len(m.pendingTargetIDs)))
@@ -125,11 +129,12 @@ func (m *Manager) popObservedTargets(now time.Time) ([]observedTarget, time.Time
 		id := m.pendingTargetIDs[0]
 		m.pendingTargetIDs[0] = ""
 		m.pendingTargetIDs = m.pendingTargetIDs[1:]
-		obs := m.pendingTargets[id]
-		if !obs.matches(m.groups[id]) {
+		queued := m.pendingTargets[id]
+		if len(queued) == 0 || !queued[0].matches(m.groups[id]) {
 			delete(m.pendingTargets, id)
 			continue
 		}
+		obs := queued[0]
 		if sendAfter := obs.groupInfoPtr.targetSendAfter; now.Before(sendAfter) {
 			m.pendingTargetIDs = append(m.pendingTargetIDs, id)
 			if retryAt.IsZero() || sendAfter.Before(retryAt) {
@@ -138,7 +143,12 @@ func (m *Manager) popObservedTargets(now time.Time) ([]observedTarget, time.Time
 			continue
 		}
 		batch = append(batch, obs)
-		delete(m.pendingTargets, id)
+		if len(queued) == 1 {
+			delete(m.pendingTargets, id)
+		} else {
+			m.pendingTargets[id] = slices.Delete(queued, 0, 1)
+			m.pendingTargetIDs = append(m.pendingTargetIDs, id)
+		}
 	}
 	if len(m.pendingTargetIDs) == 0 {
 		m.pendingTargetIDs = nil
@@ -198,7 +208,7 @@ func (m *Manager) drainObservedTargets() {
 		m.targetEndpointUnsupported = unsupported
 		if err == nil {
 			// PD can skip individual targets in a successful response. Keep any
-			// different candidate already queued for after the cooldown.
+			// remaining candidates queued for after the cooldown.
 			for _, obs := range batch {
 				obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
 			}
@@ -225,7 +235,7 @@ func (m *Manager) drainObservedTargets() {
 		m.targetWriteRetryAt = finish.Add(time.Second)
 		if unsupported {
 			for _, id := range m.pendingTargetIDs {
-				batch = append(batch, m.pendingTargets[id])
+				batch = append(batch, m.pendingTargets[id]...)
 			}
 		}
 		clear(m.pendingTargets)

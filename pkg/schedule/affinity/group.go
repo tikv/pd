@@ -176,7 +176,8 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
-	// Manager.targetWriteMutex protects the last candidate sent and the cooldown deadline.
+	// Manager.targetWriteMutex protects the per-group cooldown and the last
+	// candidate sent, which is deduplicated during that cooldown.
 	lastSentTarget  *observedTarget
 	targetSendAfter time.Time
 	// persistedGroup holds the last stored group while Group holds a local target.

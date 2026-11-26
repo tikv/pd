@@ -74,7 +74,7 @@ type Manager struct {
 	targetWriter TargetWriter
 	// targetWriteMutex protects the queue, backoff, and per-group state for background first-win requests.
 	targetWriteMutex          syncutil.Mutex
-	pendingTargets            map[string]observedTarget
+	pendingTargets            map[string][]observedTarget // FIFO candidates by group ID
 	pendingTargetIDs          []string
 	sendingTargets            map[string]observedTarget
 	targetDrainRunning        bool

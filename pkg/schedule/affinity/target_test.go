@@ -15,12 +15,10 @@
 package affinity
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"runtime"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -28,6 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -144,7 +143,7 @@ func TestUpdateAffinityGroupTargetsValidation(t *testing.T) {
 }
 
 func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
-	t.Run("waiting for metaMutex", func(t *testing.T) {
+	t.Run("canceled after locking metadata", func(t *testing.T) {
 		test := newTargetTest(t, "g")
 		targets := []GroupTarget{test.target("g", 1, 1, 2)}
 		ctx, cancel := context.WithCancel(t.Context())
@@ -154,19 +153,10 @@ func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
 			transactions++
 			return test.store.RunInTxn(txnCtx, apply)
 		})
-		done := make(chan struct{})
-		var written []string
-		var err error
-		test.metaMutex.Lock()
-		go func() {
-			defer close(done)
-			written, err = test.UpdateAffinityGroupTargets(ctx, targets)
-		}()
-		waiting := waitForTargetMetaMutex(done)
-		cancel()
-		test.metaMutex.Unlock()
-		<-done
-		test.True(waiting, "the update must reach metaMutex before cancellation")
+		const hook = "github.com/tikv/pd/pkg/schedule/affinity/afterLockGroupTarget"
+		test.NoError(failpoint.EnableCall(hook, func() { cancel() }))
+		defer func() { test.NoError(failpoint.Disable(hook)) }()
+		written, err := test.UpdateAffinityGroupTargets(ctx, targets)
 		test.Zero(transactions)
 		test.ErrorIs(err, context.Canceled)
 		test.Empty(written)
@@ -214,34 +204,6 @@ func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
 		test.observe("second", 1, 2)
 		test.Equal(targets[1:], test.calls, "a stopped Manager sends no further requests")
 	})
-}
-
-func waitForTargetMetaMutex(done <-chan struct{}) bool {
-	// GetStore runs during validation, before the loop checks cancellation.
-	// Observe the blocked update while the test still owns metaMutex.
-	stack := make([]byte, 64<<10)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		select {
-		case <-done:
-			return false
-		default:
-		}
-		n := runtime.Stack(stack, true)
-		if n == len(stack) {
-			stack = make([]byte, 2*len(stack))
-			continue
-		}
-		for goroutine := range bytes.SplitSeq(stack[:n], []byte("\n\n")) {
-			header, frames, _ := bytes.Cut(goroutine, []byte("\n"))
-			if bytes.Contains(header, []byte("[sync.Mutex.Lock]")) &&
-				bytes.Contains(frames, []byte("/affinity.(*Manager).updateGroupTarget(")) {
-				return true
-			}
-		}
-		runtime.Gosched()
-	}
-	return false
 }
 
 func TestSyncRecreatedAffinityGroup(t *testing.T) {
@@ -408,9 +370,6 @@ func TestFirstWinSkippedGroupDoesNotBlockPatrol(t *testing.T) {
 			test.observe(first, 1, 2)
 			for _, id := range skipped[1:] {
 				test.ObserveAvailableRegion(region, test.GetAffinityGroupState(id))
-			}
-			if patrol == 0 {
-				test.observe("b", 1, 2)
 			}
 			test.observe("b", 2, 3)
 			test.observe("c", 3, 4)
@@ -597,10 +556,127 @@ func TestFirstWinRetriesDifferentQueuedTargetAfterCooldown(t *testing.T) {
 				} else {
 					test.Equal([]GroupTarget{first, other}, test.calls)
 					test.Zero(pd.stored("g").LeaderStoreID)
+					if scenario == "duplicate only" {
+						pd.applyStoreConditions(nil)
+						test.observe("g", 1, 2)
+						test.Equal([]GroupTarget{first, other, first}, test.calls)
+						test.Equal(first.result(), pd.stored("g"))
+					}
 				}
 			})
 		})
 	}
+}
+
+type targetAttempt struct {
+	at      time.Time
+	targets []GroupTarget
+}
+
+func (test *targetTest) recordTargetAttempts(reply func(context.Context, []GroupTarget) ([]string, error)) <-chan targetAttempt {
+	attempts := make(chan targetAttempt, maxPendingTargetsPerGroup+2)
+	test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+		at := time.Now()
+		written, err := reply(ctx, targets)
+		attempts <- targetAttempt{at: at, targets: targets}
+		return written, err
+	})
+	return attempts
+}
+
+func (test *targetTest) expectTargetAttempt(attempts <-chan targetAttempt, at time.Time, target GroupTarget) {
+	select {
+	case attempt := <-attempts:
+		test.Equal(at, attempt.at)
+		test.Equal([]GroupTarget{target}, attempt.targets)
+	case <-time.After(time.Millisecond):
+		test.FailNow("expected a target attempt at the cooldown deadline")
+	}
+}
+
+func TestFirstWinTriesDistinctCandidatesInPatrolOrder(t *testing.T) {
+	for name, scenario := range map[string]struct {
+		patrolOrder []uint64
+		sendOrder   []uint64
+	}{
+		"healthy candidate second": {patrolOrder: []uint64{1, 2, 3}, sendOrder: []uint64{1, 2}},
+		"healthy candidate third":  {patrolOrder: []uint64{1, 3, 2}, sendOrder: []uint64{1, 3, 2}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				pd := newTargetTest(t, "g")
+				pd.applyStoreConditions(map[uint64]storeCondition{1: storeBusy, 3: storeBusy})
+				test := newTargetTestWithStorage(t, t.Context(), pd.store)
+				attempts := test.recordTargetAttempts(pd.UpdateAffinityGroupTargets)
+				healthy := test.target("g", 2, 1, 2, 3)
+
+				keys := []string{"a", "b", "c", "d"}
+				regions := make([]*core.RegionInfo, 0, len(scenario.patrolOrder))
+				for i, leader := range scenario.patrolOrder {
+					voters := []uint64{1, 2, 3}
+					voters[0], voters[leader-1] = voters[leader-1], voters[0]
+					keyRange := pdtestutil.TxnKeyspaceRange([]byte(keys[i]), []byte(keys[i+1]))
+					regions = append(regions, generateRegionForTest(uint64(i+1), voters, keyRange))
+				}
+				want := make([]GroupTarget, 0, len(scenario.sendOrder))
+				for _, leader := range scenario.sendOrder {
+					want = append(want, test.target("g", leader, 1, 2, 3))
+				}
+				patrol := func() {
+					for _, region := range regions {
+						test.ObserveAvailableRegion(region, test.GetAffinityGroupState("g"))
+						synctest.Wait()
+					}
+				}
+
+				start := time.Now()
+				patrol()
+				test.expectTargetAttempt(attempts, start, want[0])
+				for i := 1; i < len(want); i++ {
+					test.Zero(pd.stored("g").LeaderStoreID)
+					time.Sleep(time.Second - time.Millisecond)
+					patrol()
+					test.Empty(attempts, "patrol observations cannot bypass cooldown")
+					time.Sleep(time.Millisecond)
+					test.expectTargetAttempt(attempts, start.Add(time.Duration(i)*time.Second), want[i])
+					synctest.Wait()
+				}
+				persisted := pd.stored("g")
+				test.Equal(healthy.result(), persisted)
+				test.SyncGroupFromEtcdWithRevision(persisted, 1)
+				synctest.Sleep(time.Second + time.Millisecond)
+				test.Empty(attempts, "the watch update invalidates remaining candidates")
+			})
+		})
+	}
+}
+
+func TestFirstWinPendingTargetLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		test := newTargetTest(t, "g")
+		// Establish store conditions before queuing targets so the first periodic
+		// scan does not change the group's affinity version while the queue drains.
+		test.checkGroupsAvailability()
+		attempts := test.recordTargetAttempts(func(context.Context, []GroupTarget) ([]string, error) { return nil, nil })
+		start := time.Now()
+		test.observe("g", 1, 2)
+		test.expectTargetAttempt(attempts, start, test.target("g", 1, 1, 2))
+		// Submit one more candidate than fits while the first candidate cools down.
+		stores := test.storeSetInformer.(*core.StoresInfo)
+		for i := range maxPendingTargetsPerGroup + 1 {
+			leader := uint64(i + 2)
+			stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: leader, NodeState: metapb.NodeState_Serving}, core.SetLastHeartbeatTS(time.Now())))
+			test.observe("g", leader, 1)
+		}
+		test.Empty(attempts)
+		for i := range maxPendingTargetsPerGroup {
+			leader := uint64(i + 2)
+			time.Sleep(time.Second)
+			test.expectTargetAttempt(attempts, start.Add(time.Duration(i+1)*time.Second), test.target("g", leader, 1, leader))
+		}
+		synctest.Sleep(time.Second + time.Millisecond)
+		test.Empty(attempts, "the overflow candidate was dropped")
+	})
 }
 
 func TestFirstWinReconcilesLocalTarget(t *testing.T) {
@@ -613,6 +689,7 @@ func TestFirstWinReconcilesLocalTarget(t *testing.T) {
 		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
 			if len(test.calls) == 1 {
 				test.ObserveAvailableRegion(targetRegion(2, 3), state("h"))
+				test.ObserveAvailableRegion(targetRegion(3, 4), state("h"))
 			}
 			if len(test.calls) <= 2 {
 				return nil, fmt.Errorf("404 Not Found: %w", ErrTargetWriterUnsupported)
@@ -627,6 +704,7 @@ func TestFirstWinReconcilesLocalTarget(t *testing.T) {
 		test.True(local.AffinitySchedulingAllowed)
 		test.Zero(pd.stored("g").LeaderStoreID)
 		test.True(state("h").HasUnpersistedTarget(), "the queued observation also falls back to a local target")
+		test.Equal(uint64(2), state("h").LeaderStoreID, "fallback uses the first healthy queued candidate")
 		test.observe("g", 4, 1)
 		test.Len(test.calls, 1, "the cooldown allows local targets without sending HTTP requests")
 		test.Equal(local, state("g"))

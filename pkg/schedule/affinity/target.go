@@ -20,6 +20,7 @@ import (
 	"slices"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -122,6 +123,7 @@ func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []Grou
 func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bool, error) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
+	failpoint.InjectCall("afterLockGroupTarget")
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
