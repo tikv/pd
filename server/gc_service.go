@@ -35,7 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -156,9 +155,10 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 	}, nil
 }
 
-// UpdateServiceGCSafePoint update the safepoint for specific service
+// UpdateServiceGCSafePoint updates the safe point for a service.
 //
-// Deprecated: Use SetGCBarrier instead.
+// Deprecated: Use SetGlobalGCBarrier and DeleteGlobalGCBarrier for cluster-wide "native_br" protection.
+// Use SetGCBarrier and DeleteGCBarrier for protection within a single GC scope.
 //
 //nolint:staticcheck
 func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (resp *pdpb.UpdateServiceGCSafePointResponse, errRet error) {
@@ -204,26 +204,21 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	if rc == nil {
 		return &pdpb.UpdateServiceGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
-	nowTSO, err := s.getGlobalTSO(ctx)
-	if err != nil {
-		return nil, err
-	}
-	now, _ := tsoutil.ParseTimestamp(nowTSO)
 	serviceID := string(request.ServiceId)
-	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTTL(), now)
+	min, updated, err := s.gcStateManager.UpdateServiceSafePointV1(ctx, serviceID, request.GetSafePoint(), request.GetTTL(), time.Time{})
 	if err != nil {
 		return nil, err
 	}
 	if updated {
 		log.Info("update service GC safe point",
 			zap.String("service-id", serviceID),
-			zap.Int64("expire-at", now.Unix()+request.GetTTL()),
-			zap.Uint64("safepoint", request.GetSafePoint()))
+			zap.Int64("ttl", request.GetTTL()),
+			zap.Uint64("requested-safepoint", request.GetSafePoint()))
 	}
 	return &pdpb.UpdateServiceGCSafePointResponse{
 		Header:       grpcutil.WrapHeader(),
 		ServiceId:    []byte(min.ServiceID),
-		TTL:          min.ExpiredAt - now.Unix(),
+		TTL:          min.ExpiredAt - time.Now().Unix(),
 		MinSafePoint: min.SafePoint,
 	}, nil
 }
@@ -390,22 +385,15 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 		return &pdpb.UpdateServiceSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	nowTSO, err := s.getGlobalTSO(ctx)
-	if err != nil {
-		return nil, err
-	}
-	now, _ := tsoutil.ParseTimestamp(nowTSO)
-
 	serviceID := string(request.ServiceId)
-	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(request.GetKeyspaceId(), serviceID, request.GetSafePoint(), request.GetTtl(), now)
-
+	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(request.GetKeyspaceId(), serviceID, request.GetSafePoint(), request.GetTtl(), time.Time{})
 	if err != nil {
 		return nil, err
 	}
 	return &pdpb.UpdateServiceSafePointV2Response{
 		Header:       grpcutil.WrapHeader(),
 		ServiceId:    []byte(min.ServiceID),
-		Ttl:          min.ExpiredAt - now.Unix(),
+		Ttl:          min.ExpiredAt - time.Now().Unix(),
 		MinSafePoint: min.SafePoint,
 	}, nil
 }
@@ -1032,20 +1020,28 @@ func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGl
 		return &pdpb.SetGlobalGCBarrierResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	now := time.Now()
 	barrierID := request.GetBarrierId()
 	barrierTS := request.GetBarrierTs()
 	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
-	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, now)
+	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, time.Time{})
 	if err != nil {
 		return &pdpb.SetGlobalGCBarrierResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
+	// Set returns the applied TTL. Reads and deletes report the remaining TTL.
+	ttlSeconds := request.GetTtlSeconds()
+	if newBarrier.ExpirationTime.Time == nil {
+		ttlSeconds = math.MaxInt64
+	}
 	return &pdpb.SetGlobalGCBarrierResponse{
-		Header:         grpcutil.WrapHeader(),
-		NewBarrierInfo: globalGCBarrierToProto(newBarrier, now),
+		Header: grpcutil.WrapHeader(),
+		NewBarrierInfo: &pdpb.GlobalGCBarrierInfo{
+			BarrierId:  newBarrier.BarrierID,
+			BarrierTs:  newBarrier.BarrierTS,
+			TtlSeconds: ttlSeconds,
+		},
 	}, nil
 }
 

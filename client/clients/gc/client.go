@@ -126,21 +126,28 @@ type GCStatesClient interface {
 	// barrierTS, until the global GC barrier is expired (defined by ttl) or manually deleted (by calling
 	// DeleteGlobalGCBarrier).
 	//
-	// When this method is called on an existing global GC barrier, it updates the barrierTS and ttl of the existing global
-	// GC barrier and the expiration time will become the current time plus the ttl.
-	// This means that calling this method on an existing global GC barrier can extend its lifetime arbitrarily.
+	// Updating an existing global GC barrier sets its barrierTS and refreshes its TTL.
 	//
-	// Passing non-positive value to ttl is not allowed. Passing `time.Duration(math.MaxInt64)` to ttl indicates that the
-	// global GC barrier should never expire. The ttl might be rounded up, and the actual ttl is guaranteed no less than the
-	// specified duration.
+	// The TTL must be positive. A TTL of time.Duration(math.MaxInt64) means the barrier never expires.
+	// A finite TTL starts at the time PD uses to check existing barriers for expiration in the successful
+	// admission attempt. PD adds the TTL to that time and rounds the expiration up to a whole second.
+	// The TTL can elapse while PD reads the TSO windows or commits the barrier.
 	//
 	// The barrierID must be non-empty.
 	//
-	// The given barrierTS must be greater than or equal to the current txn safe points of all keyspaces,
-	// otherwise an error will be returned.
+	// Passing zero asks PD to select the smallest active global barrier timestamp, including the
+	// current record for this ID. With no active barrier, PD selects the greater of the persisted
+	// TSO window bound and the unified GC txn safe point. An explicit timestamp must meet the same bound.
+	// On rejection the existing timestamp and expiration are preserved.
 	//
-	// Currently, the caller is responsible for guaranteeing the given barrierTS does not exceed any of the max allocated
-	// timestamps of all TSOs in the cluster. Note that a cluster might have multiple TSOs for different keyspaces.
+	// During a rolling upgrade, wait until all eligible PD leaders support automatic selection
+	// before passing zero. In deployments with a separate TSO service, upgrade every pd-tso
+	// instance to a version that retains deleted groups' TSO windows before resuming GC or
+	// relying on the window bound for either explicit or automatically selected timestamps.
+	//
+	// The returned BarrierTS is the timestamp stored. Pass it explicitly to renew at that point.
+	// It may be ahead of timestamps already issued. Obtain a read or backup timestamp separately
+	// and ensure it is at least BarrierTS before relying on this protection.
 	//
 	// When this function executes successfully, its result is never nil.
 	SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*GlobalGCBarrierInfo, error)
@@ -160,6 +167,8 @@ type GCStatesClient interface {
 // other possible components that are responsible for being the center of controlling GC of the cluster.
 type InternalController interface {
 	// AdvanceTxnSafePoint tries to advance the txn safe point to the given target.
+	// The caller must ensure that target does not exceed a timestamp already issued
+	// by the TSO for this GC scope.
 	//
 	// Returns a struct AdvanceTxnSafePointResult, which contains the old txn safe point, the target, and the new
 	// txn safe point it finally made it to advance to. If there's something blocking the txn safe point from being

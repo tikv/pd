@@ -575,6 +575,7 @@ var (
 	ErrGCBarrierTSBehindTxnSafePoint       = errors.Normalize("trying to set a GC barrier on ts %d which is already behind the txn safe point %d", errors.RFCCodeText("PD:gc:ErrGCBarrierTSBehindTxnSafePoint"))
 	ErrReservedGCBarrierID                 = errors.Normalize("trying to set a GC barrier with a barrier ID that is reserved: %v", errors.RFCCodeText("PD:gc:ErrReservedGCBarrierID"))
 	ErrGlobalGCBarrierTSBehindTxnSafePoint = errors.Normalize("trying to set a global GC barrier on ts %d which is already behind the txn safe point %d of keyspace %s", errors.RFCCodeText("PD:gc:ErrGlobalGCBarrierTSBehindTxnSafePoint"))
+	ErrGlobalGCBarrierTSUnsafe             = errors.Normalize("cannot guarantee global GC protection at timestamp %d (minimum accepted timestamp %d)", errors.RFCCodeText("PD:gc:ErrGlobalGCBarrierTSUnsafe"))
 )
 
 // id alloc errors

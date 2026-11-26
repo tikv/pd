@@ -331,7 +331,6 @@ func TestForwardTSORelated(t *testing.T) {
 	cfg.EnableTSODynamicSwitching = false
 	err := leaderServer.SetMicroserviceConfig(*cfg)
 	re.NoError(err)
-	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO(re)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
@@ -635,9 +634,10 @@ func (suite *PDServiceForward) addRegions() {
 func (suite *PDServiceForward) checkUnavailableTSO(re *require.Assertions) {
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.Error(err)
-	// try to update gc safe point
-	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1) //nolint:staticcheck
-	re.Error(err)
+	// PD uses its wall clock for the service GC safe point TTL, so the update succeeds without TSO.
+	min, err := suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1) //nolint:staticcheck
+	re.NoError(err)
+	re.Equal(uint64(0), min)
 	// try to set external ts
 	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
 	re.Error(err)
