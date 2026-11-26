@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -68,6 +69,117 @@ func TestKeyspaceGroupManagerTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceGroupManagerTestSuite))
 }
 
+<<<<<<< HEAD
+=======
+func TestKeyspaceGroupPrimaryElectionPurposeIncludesGroupID(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal("keyspace group primary election 00000", keyspaceGroupPrimaryElectionPurpose(0))
+	re.Equal("keyspace group primary election 00012", keyspaceGroupPrimaryElectionPurpose(12))
+	re.Equal("keyspace group primary election 12345", keyspaceGroupPrimaryElectionPurpose(12345))
+}
+
+func TestDeletedGroupCleanerPreservesTimestamp(t *testing.T) {
+	re := require.New(t)
+	const cleaner = "github.com/tikv/pd/pkg/tso/fastDeletedGroupCleaner"
+	re.NoError(failpoint.Enable(cleaner, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(cleaner)) })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	manager := &KeyspaceGroupManager{ctx: ctx, storage: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)}
+	defer func() {
+		cancel()
+		manager.wg.Wait()
+	}()
+	manager.initialize()
+	const groupID uint32 = 1
+	window := time.Now().Add(time.Hour)
+	re.NoError(manager.storage.Save(keypath.TimestampPath(groupID), string(typeutil.Uint64ToBytes(uint64(window.UnixNano())))))
+	manager.deletedGroups[groupID] = struct{}{}
+	manager.requestedGroups[groupID] = struct{}{}
+
+	manager.wg.Add(1)
+	go manager.deletedGroupCleaner()
+
+	re.Eventually(func() bool {
+		return manager.getDeletedGroupNum() == 0
+	}, 5*time.Second, 10*time.Millisecond)
+	manager.RLock()
+	_, requested := manager.requestedGroups[groupID]
+	manager.RUnlock()
+	re.False(requested)
+	persisted, err := manager.storage.LoadTimestamp(groupID)
+	re.NoError(err)
+	re.Equal(window.UnixNano(), persisted.UnixNano())
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		groupID    = uint32(1)
+		keyspaceID = uint32(100)
+	)
+	splitGroup := &endpoint.KeyspaceGroup{
+		ID:                  groupID,
+		Keyspaces:           []uint32{keyspaceID},
+		KeyspaceLookupTable: map[uint32]struct{}{keyspaceID: {}},
+		SplitState: &endpoint.SplitState{
+			SplitSource: constant.DefaultKeyspaceGroupID,
+		},
+	}
+	newerSplitGroup := *splitGroup
+	newerSplitGroup.SplitState = &endpoint.SplitState{SplitSource: groupID + 1}
+
+	var kgm *KeyspaceGroupManager
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			re.Equal(http.MethodDelete, req.Method)
+			re.Equal("/pd/api/v2/tso/keyspace-groups/1/split", req.URL.Path)
+
+			re.True(kgm.TryRLock(), "state lock should remain available while the finish request is in flight")
+			kgm.RUnlock()
+			_, _, currentGroupID, _, err := kgm.FindGroupByKeyspaceID(keyspaceID)
+			re.NoError(err)
+			re.Equal(groupID, currentGroupID)
+
+			kgm.Lock()
+			kgm.kgs[groupID] = &newerSplitGroup
+			kgm.Unlock()
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+		}),
+	}
+
+	ctx := t.Context()
+	kgm = &KeyspaceGroupManager{
+		ctx:        ctx,
+		httpClient: client,
+		cfg: &TestServiceConfig{
+			BackendEndpoints: "http://backend.test",
+		},
+		metrics: newKeyspaceGroupMetrics(),
+	}
+	kgm.initialize()
+	kgm.kgs[groupID] = splitGroup
+	kgm.allocators[groupID] = &Allocator{}
+	kgm.keyspaceLookupTable[keyspaceID] = groupID
+
+	re.NoError(kgm.finishSplitKeyspaceGroup(groupID))
+
+	kgm.RLock()
+	currentGroup := kgm.kgs[groupID]
+	kgm.RUnlock()
+	re.Same(&newerSplitGroup, currentGroup)
+	re.Equal(groupID+1, currentGroup.SplitSource())
+}
+
+>>>>>>> 18b84d6d7a (tso: retain source timestamp windows after group deletion (#11675))
 func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -98,7 +210,9 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 
 func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastDeletedGroupCleaner", "return(true)"))
+	const cleaner = "github.com/tikv/pd/pkg/tso/fastDeletedGroupCleaner"
+	re.NoError(failpoint.Enable(cleaner, "return(true)"))
+	suite.T().Cleanup(func() { re.NoError(failpoint.Disable(cleaner)) })
 
 	// Start with the empty keyspace group assignment.
 	mgr := suite.newUniqueKeyspaceGroupManager(0)
@@ -112,25 +226,25 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	// Add keyspace group 1.
 	suite.applyEtcdEvents(re, []*etcdEvent{generateKeyspaceGroupPutEvent(1, []uint32{1}, []string{svcAddr})})
 	// Check if the TSO key is created.
+	var savedWindow time.Time
 	testutil.Eventually(re, func() bool {
 		ts, err := mgr.storage.LoadTimestamp(1)
 		re.NoError(err)
+		savedWindow = ts
 		return ts != typeutil.ZeroTime
 	})
 	// Delete keyspace group 1.
 	suite.applyEtcdEvents(re, []*etcdEvent{generateKeyspaceGroupDeleteEvent(1)})
-	// Check if the TSO key is deleted.
+	// Wait for the local allocator and cleanup work to finish.
 	testutil.Eventually(re, func() bool {
-		ts, err := mgr.storage.LoadTimestamp(1)
-		re.NoError(err)
-		return ts.Equal(typeutil.ZeroTime)
+		mgr.RLock()
+		defer mgr.RUnlock()
+		_, pending := mgr.deletedGroups[1]
+		return mgr.kgs[1] == nil && mgr.allocators[1] == nil && !pending
 	})
-	// Check if the keyspace group is deleted completely.
-	mgr.RLock()
-	re.Nil(mgr.allocators[1])
-	re.Nil(mgr.kgs[1])
-	re.NotContains(mgr.deletedGroups, 1)
-	mgr.RUnlock()
+	currentWindow, err := mgr.storage.LoadTimestamp(1)
+	re.NoError(err)
+	re.False(currentWindow.Before(savedWindow))
 	// Try to delete the default keyspace group.
 	suite.applyEtcdEvents(re, []*etcdEvent{generateKeyspaceGroupDeleteEvent(constant.DefaultKeyspaceGroupID)})
 	// Default keyspace group should NOT be deleted.
@@ -143,8 +257,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	ts, err := mgr.storage.LoadTimestamp(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotEmpty(ts)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastDeletedGroupCleaner"))
 }
 
 // TestNewKeyspaceGroupManager tests the initialization of KeyspaceGroupManager.
