@@ -34,7 +34,10 @@ import (
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
-const managerUninitializedErr = "keyspace manager is not initialized"
+const (
+	managerUninitializedErr    = "keyspace manager is not initialized"
+	regionBoundTypeReadOnlyErr = "region_bound_type is managed by PD"
+)
 
 // RegisterKeyspace register keyspace related handlers to router paths.
 func RegisterKeyspace(r *gin.RouterGroup) {
@@ -80,6 +83,10 @@ func CreateKeyspace(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
+	if _, ok := createParams.Config[keyspace.RegionBoundType]; ok {
+		c.AbortWithStatusJSON(http.StatusBadRequest, regionBoundTypeReadOnlyErr)
+		return
+	}
 	req := &keyspace.CreateKeyspaceRequest{
 		Name:       createParams.Name,
 		Config:     createParams.Config,
@@ -122,6 +129,10 @@ func CreateKeyspaceByID(c *gin.Context) {
 	err := c.BindJSON(createParams)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	if _, ok := createParams.Config[keyspace.RegionBoundType]; ok {
+		c.AbortWithStatusJSON(http.StatusBadRequest, regionBoundTypeReadOnlyErr)
 		return
 	}
 	req := &keyspace.CreateKeyspaceByIDRequest{
