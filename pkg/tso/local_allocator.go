@@ -112,7 +112,8 @@ func (lta *LocalTSOAllocator) IsInitialize() bool {
 // UpdateTSO is used to update the TSO in memory and the time window in etcd
 // for all local TSO allocators this PD server hold.
 func (lta *LocalTSOAllocator) UpdateTSO() error {
-	return lta.timestampOracle.UpdateTimestamp()
+	_, err := lta.timestampOracle.UpdateTimestamp(intervalUpdate)
+	return err
 }
 
 // SetTSO sets the physical part with given TSO.
