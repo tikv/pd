@@ -16,17 +16,26 @@ package schedulers
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 )
 
@@ -245,6 +254,48 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendV2() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
+func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendCancelsTombstonedCandidate() {
+	suite.checkEvictSlowTrendCancelsRemovedCandidate(false)
+}
+
+func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendCancelsDeletedCandidate() {
+	suite.checkEvictSlowTrendCancelsRemovedCandidate(true)
+}
+
+func (suite *evictSlowTrendTestSuite) checkEvictSlowTrendCancelsRemovedCandidate(deleteRecord bool) {
+	re := suite.Require()
+	es := suite.es.(*evictSlowTrendScheduler)
+	const storeID = 5
+	gauge := storeSlowTrendEvictedStatusGauge
+	gauge.Reset()
+	suite.T().Cleanup(gauge.Reset)
+	suite.tc.AddLeaderStore(storeID, 0)
+	es.conf.captureCandidate(storeID)
+
+	// Confirm the candidate is still waiting on other stores' heartbeats.
+	ops, _ := es.Schedule(suite.tc, false)
+	re.Empty(ops)
+	re.Equal(uint64(storeID), es.conf.candidate())
+	re.Zero(es.conf.evictedStore())
+
+	store := suite.tc.GetStore(storeID).Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	suite.tc.PutStore(store)
+	if deleteRecord {
+		suite.tc.DeleteStore(store)
+	}
+	// The tombstone case would otherwise pass the heartbeat check and start eviction.
+	otherStore := suite.tc.GetStore(1)
+	suite.tc.PutStore(otherStore.Clone(core.SetLastHeartbeatTS(es.conf.captureTS())))
+
+	re.NotPanics(func() {
+		ops, _ = es.Schedule(suite.tc, false)
+	})
+	re.Empty(ops)
+	re.Zero(es.conf.candidate())
+	re.Zero(es.conf.evictedStore())
+	re.Zero(promtestutil.CollectAndCount(gauge))
+}
+
 func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPrepare() {
 	re := suite.Require()
 	es2, ok := suite.es.(*evictSlowTrendScheduler)
@@ -257,4 +308,203 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPrepare() {
 	re.Equal(uint64(1), es2.conf.evictedStore())
 	// prepare with evict store.
 	suite.es.PrepareConfig(suite.tc)
+}
+
+type evictionConfigSaveHook struct {
+	endpoint.ConfigStorage
+	afterSave func()
+}
+
+func (h *evictionConfigSaveHook) SaveSchedulerConfig(name string, data []byte) error {
+	if err := h.ConfigStorage.SaveSchedulerConfig(name, data); err != nil {
+		return err
+	}
+	if run := h.afterSave; run != nil {
+		h.afterSave = nil
+		run()
+	}
+	return nil
+}
+
+func (suite *evictSlowTrendTestSuite) TestEvictionDoesNotPublishMetricsWhenStoreIsRemovedDuringSave() {
+	for _, state := range []string{"tombstone", "deleted"} {
+		suite.Run(state, func() {
+			re := suite.Require()
+			const storeID = 5
+			gauge := storeSlowTrendEvictedStatusGauge
+			gauge.Reset()
+			suite.T().Cleanup(gauge.Reset)
+			suite.tc.AddLeaderStore(storeID, 0)
+			backend := &evictionConfigSaveHook{ConfigStorage: storage.NewStorageWithMemoryBackend()}
+			scheduler, err := CreateScheduler(types.EvictSlowTrendScheduler, suite.oc, backend, ConfigSliceDecoder(types.EvictSlowTrendScheduler, nil))
+			re.NoError(err)
+			es := scheduler.(*evictSlowTrendScheduler)
+			es.conf.captureCandidate(storeID)
+			otherStore := suite.tc.GetStore(1)
+			suite.tc.PutStore(otherStore.Clone(core.SetLastHeartbeatTS(es.conf.captureTS())))
+			backend.afterSave = func() {
+				store := suite.tc.GetStore(storeID).Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+				suite.tc.PutStore(store)
+				if state == "deleted" {
+					suite.tc.DeleteStore(store)
+				}
+				DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
+			}
+
+			ops, _ := es.Schedule(suite.tc, false)
+
+			re.Empty(ops)
+			re.Nil(backend.afterSave)
+			re.Zero(promtestutil.CollectAndCount(gauge))
+		})
+	}
+}
+
+const recoveredSlowTrendMetric = `
+# HELP pd_scheduler_store_slow_trend_evicted_status Store evicted by slow trend status for schedule
+# TYPE pd_scheduler_store_slow_trend_evicted_status gauge
+pd_scheduler_store_slow_trend_evicted_status{address=%q,store="%d"} 0
+`
+
+func (suite *evictSlowTrendTestSuite) TestEvictedStoreMetricsCleanup() {
+	es := suite.es.(*evictSlowTrendScheduler)
+	gauge := storeSlowTrendEvictedStatusGauge
+	for _, state := range []string{"recovered", "tombstone", "deleted"} {
+		suite.Run(state, func() {
+			re := suite.Require()
+			const storeID = 5
+			gauge.Reset()
+			suite.T().Cleanup(gauge.Reset)
+			suite.tc.AddLeaderStore(storeID, 0)
+			re.NoError(es.prepareEvictLeader(suite.tc, storeID))
+			store := suite.tc.GetStore(storeID)
+			gauge.WithLabelValues(store.GetAddress(), "5").Set(1)
+			switch state {
+			case "recovered":
+				es.cleanupEvictLeader(suite.tc)
+				expected := fmt.Sprintf(recoveredSlowTrendMetric, store.GetAddress(), storeID)
+				re.NoError(promtestutil.CollectAndCompare(gauge, strings.NewReader(expected)))
+			case "tombstone":
+				suite.tc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+				gauge.DeleteLabelValues(store.GetAddress(), "5") // Simulate prior metric cleanup.
+			case "deleted":
+				suite.tc.DeleteStore(store)
+			}
+			if state != "recovered" {
+				re.NotPanics(func() {
+					ops, _ := es.Schedule(suite.tc, false)
+					re.Empty(ops)
+				})
+				re.Zero(promtestutil.CollectAndCount(gauge))
+			}
+			re.Zero(es.conf.evictedStore())
+		})
+	}
+}
+
+// buryAfterEvictionStoreLookupCluster returns a live snapshot after the store has
+// been buried and its metrics deleted, modeling burial just after the lookup.
+type buryAfterEvictionStoreLookupCluster struct {
+	sche.SchedulerCluster
+	storeID      uint64
+	deleteRecord bool
+	buried       bool
+}
+
+func (c *buryAfterEvictionStoreLookupCluster) GetStore(id uint64) *core.StoreInfo {
+	store := c.SchedulerCluster.GetStore(id)
+	if id == c.storeID && !c.buried && store != nil && !store.IsRemoved() {
+		c.buried = true
+		cluster := c.GetBasicCluster()
+		tombstone := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+		cluster.PutStore(tombstone)
+		if c.deleteRecord {
+			cluster.DeleteStore(tombstone)
+		}
+		DeleteStoreMetrics(strconv.FormatUint(id, 10))
+	}
+	return store
+}
+
+func (suite *evictSlowTrendTestSuite) TestEvictionDoesNotPublishMetricsForRemovedStore() {
+	es := suite.es.(*evictSlowTrendScheduler)
+	gauge := storeSlowTrendEvictedStatusGauge
+	for _, state := range []string{"already_tombstoned", "concurrent_tombstone", "concurrent_delete"} {
+		suite.Run(state, func() {
+			re := suite.Require()
+			const storeID = 5
+			gauge.Reset()
+			suite.T().Cleanup(gauge.Reset)
+			suite.tc.AddLeaderStore(storeID, 0)
+			re.NoError(es.prepareEvictLeader(suite.tc, storeID))
+			re.Empty(es.scheduleEvictLeader(suite.tc))
+			re.Equal(1, promtestutil.CollectAndCount(gauge))
+
+			if state == "already_tombstoned" {
+				store := suite.tc.GetStore(storeID)
+				suite.tc.PutStore(store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+				DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
+				re.Empty(es.scheduleEvictLeader(suite.tc))
+			} else {
+				racingCluster := &buryAfterEvictionStoreLookupCluster{
+					SchedulerCluster: suite.tc,
+					storeID:          storeID,
+					deleteRecord:     state == "concurrent_delete",
+				}
+				re.Empty(es.scheduleEvictLeader(racingCluster))
+				re.True(racingCluster.buried)
+			}
+			re.Zero(promtestutil.CollectAndCount(gauge))
+		})
+	}
+}
+
+func (suite *evictSlowTrendTestSuite) TestEvictionCleanupDoesNotRepublishAfterBury() {
+	es := suite.es.(*evictSlowTrendScheduler)
+	gauge := storeSlowTrendEvictedStatusGauge
+	for _, state := range []string{"tombstone", "deleted"} {
+		suite.Run(state, func() {
+			re := suite.Require()
+			const storeID = 5
+			gauge.Reset()
+			suite.T().Cleanup(gauge.Reset)
+			suite.tc.AddLeaderStore(storeID, 0)
+			re.NoError(es.prepareEvictLeader(suite.tc, storeID))
+			re.Empty(es.scheduleEvictLeader(suite.tc))
+			racingCluster := &buryAfterEvictionStoreLookupCluster{
+				SchedulerCluster: suite.tc,
+				storeID:          storeID,
+				deleteRecord:     state == "deleted",
+			}
+
+			es.cleanupEvictLeader(racingCluster)
+
+			re.True(racingCluster.buried)
+			re.Zero(promtestutil.CollectAndCount(gauge))
+			re.Zero(es.conf.evictedStore())
+		})
+	}
+}
+
+func (suite *evictSlowTrendTestSuite) TestEvictionCleanupAfterStoreAddressChange() {
+	re := suite.Require()
+	es := suite.es.(*evictSlowTrendScheduler)
+	gauge := storeSlowTrendEvictedStatusGauge
+	const storeID = 5
+	gauge.Reset()
+	suite.T().Cleanup(gauge.Reset)
+	suite.tc.AddLeaderStore(storeID, 0)
+	store := suite.tc.GetStore(storeID)
+	suite.tc.PutStore(store.Clone(core.SetStoreAddress("old-address", "", "")))
+	re.NoError(es.prepareEvictLeader(suite.tc, storeID))
+	re.Empty(es.scheduleEvictLeader(suite.tc))
+	re.Equal(1, promtestutil.CollectAndCount(gauge))
+	store = suite.tc.GetStore(storeID)
+	suite.tc.PutStore(store.Clone(core.SetStoreAddress("new-address", "", "")))
+
+	es.cleanupEvictLeader(suite.tc)
+
+	expected := fmt.Sprintf(recoveredSlowTrendMetric, "new-address", storeID)
+	re.NoError(promtestutil.CollectAndCompare(gauge, strings.NewReader(expected)))
+	re.Zero(es.conf.evictedStore())
 }
