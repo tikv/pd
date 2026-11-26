@@ -1675,21 +1675,67 @@ func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOp
 		re.Equal(CANCELED, higherB.Status())
 		re.Equal(uint64(0), controller.OperatorCount(OpAdmin))
 
-		// Reverse-order higher-priority split replacement must not claim a lower-priority orphan's token.
-		orphanA, _ := newUnsyncedPair(OpMerge)
-		re.True(controller.AddOperator(orphanA))
+		// Reverse-order higher-priority unsynced split replacement of a complete pair
+		// preserves both replacement operators because the existing pair's token is already claimed.
+		origA, origB := newUnsyncedPair(OpMerge)
+		re.True(controller.AddOperator(origA))
+		re.True(controller.AddOperator(origB))
 		revA, revB := newUnsyncedPair(OpAdmin | OpMerge)
 		re.True(controller.AddOperator(revB))
 		re.True(controller.AddOperator(revA))
 		re.Same(revA, controller.GetOperator(source.GetID()))
 		re.Same(revB, controller.GetOperator(target.GetID()))
-		re.Equal(REPLACED, orphanA.Status())
+		re.Equal(CANCELED, origA.Status())
+		re.Equal(REPLACED, origB.Status())
 		re.Equal(STARTED, revA.Status())
 		re.Equal(STARTED, revB.Status())
 		re.True(controller.RemoveOperator(revA))
 		re.Equal(CANCELED, revB.Status())
 		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
 		re.Equal(uint64(0), controller.OperatorCount(OpAdmin))
+
+		// Synced higher-priority pair submitted in reverse order also preserves both halves
+		// even when replacing an unpaired lower-priority orphan.
+		orphanA, _ := newUnsyncedPair(OpMerge)
+		re.True(controller.AddOperator(orphanA))
+		syncedRevA, syncedRevB := newUnsyncedPair(OpAdmin | OpMerge)
+		syncedRevA.Sync(syncedRevB)
+		re.True(controller.AddOperator(syncedRevB))
+		re.True(controller.AddOperator(syncedRevA))
+		re.Same(syncedRevA, controller.GetOperator(source.GetID()))
+		re.Same(syncedRevB, controller.GetOperator(target.GetID()))
+		re.Equal(REPLACED, orphanA.Status())
+		re.Equal(STARTED, syncedRevA.Status())
+		re.Equal(STARTED, syncedRevB.Status())
+		re.True(controller.RemoveOperator(syncedRevA))
+		re.Equal(CANCELED, syncedRevB.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		re.Equal(uint64(0), controller.OperatorCount(OpAdmin))
+
+		// Legacy split-submitted reciprocal merge pair with different priorities shares
+		// one pair token so removing either half cancels its partner cleanly.
+		for _, removePassive := range []bool{true, false} {
+			step := MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta()}
+			active := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10, step)
+			step.IsPassive = true
+			passive := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, step)
+			active.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+			passive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+			passive.SetPriorityLevel(active.GetPriorityLevel() + 1)
+
+			re.True(controller.AddOperator(active))
+			re.True(controller.AddOperator(passive))
+			if removePassive {
+				re.True(controller.RemoveOperator(passive, AdminStop))
+				re.Equal(CANCELED, active.Status())
+			} else {
+				re.True(controller.RemoveOperator(active, AdminStop))
+				re.Equal(CANCELED, passive.Status())
+			}
+			re.Nil(controller.GetOperator(source.GetID()))
+			re.Nil(controller.GetOperator(target.GetID()))
+			re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		}
 
 		// Concurrent split AddOperator(opA) and AddOperator(opB) without Sync must share one token
 		// so removing either half always cancels its partner.

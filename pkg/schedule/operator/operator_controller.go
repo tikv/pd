@@ -581,7 +581,6 @@ func (oc *Controller) ensureSingleMergePair(op *Operator) *mergePairToken {
 		if relatedOpi, ok := oc.operators.Load(relatedID); ok {
 			if relatedOp := relatedOpi.(*Operator); relatedOp != nil &&
 				op.hasReciprocalMergeRegion(relatedOp) &&
-				op.GetPriorityLevel() == relatedOp.GetPriorityLevel() &&
 				!IsEndStatus(relatedOp.Status()) {
 				if pair := relatedOp.mergePair.Load(); pair != nil && pair.claimed.CompareAndSwap(false, true) {
 					if op.mergePair.CompareAndSwap(nil, pair) {
