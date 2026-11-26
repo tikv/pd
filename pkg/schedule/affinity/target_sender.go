@@ -90,10 +90,8 @@ func (m *Manager) sendObservedTarget(obs observedTarget) {
 	if sending, ok := m.sendingTargets[id]; ok && obs.sameCandidate(sending) {
 		return
 	}
-	for _, pending := range queued {
-		if obs.sameCandidate(pending) {
-			return
-		}
+	if slices.ContainsFunc(queued, obs.sameCandidate) {
+		return
 	}
 	if lastSent := group.lastSentTarget; now.Before(group.targetSendAfter) && lastSent != nil && obs.sameCandidate(*lastSent) {
 		return
