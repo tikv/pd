@@ -24,6 +24,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -423,6 +424,103 @@ func TestGrantLeaseFailed(t *testing.T) {
 	re.NotEmpty(cluster.GetLeader())
 	re.NotEqual(leader, cluster.GetLeader())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
+}
+
+func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		members      int
+		microservice bool
+		expireLease  bool
+	}{
+		{name: "expired-lease", members: 3, expireLease: true},
+		{name: "microservice-expired-lease", members: 3, microservice: true, expireLease: true},
+		{name: "single-member-expired-lease", members: 1, expireLease: true},
+		{name: "other-initialization-error", members: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			newCluster := tests.NewTestCluster
+			if tc.microservice {
+				newCluster = tests.NewTestClusterWithKeyspaceGroup
+			}
+			cluster, err := newCluster(t.Context(), tc.members)
+			re.NoError(err)
+			t.Cleanup(cluster.Destroy)
+			re.NoError(cluster.RunInitialServers())
+			oldLeaderName := cluster.WaitLeader()
+			re.NotEmpty(oldLeaderName)
+			oldLeader := cluster.GetServer(oldLeaderName)
+			re.NoError(oldLeader.BootstrapCluster())
+			svr := oldLeader.GetServer()
+			var previous *pdpb.Timestamp
+			if !tc.microservice {
+				client := earlyTSOClient(t, oldLeader)
+				previous = requestEarlyTSO(t, earlyTSOStream(t, client, ""), oldLeader.GetClusterID())
+			}
+
+			// Hold the first new campaign after Keep starts. Renewal failures keep
+			// the etcd lease alive while its local deadline expires, as can happen
+			// when a slow election finishes before the first renewal response.
+			const reloadHook = "github.com/tikv/pd/server/beforeLeaderReloadConfig"
+			reached, release := make(chan struct{}), make(chan struct{})
+			resume := sync.OnceFunc(func() { close(release) })
+			var attempts atomic.Int32
+			re.NoError(failpoint.EnableCall(reloadHook, func(id uint64) {
+				if id == oldLeader.GetServerID() && attempts.Add(1) == 1 {
+					close(reached)
+					<-release
+				}
+			}))
+			t.Cleanup(func() {
+				resume()
+				re.NoError(failpoint.Disable(reloadHook))
+			})
+			oldLeader.ResetPDLeader()
+			select {
+			case <-reached:
+			case <-time.After(30 * time.Second):
+				t.Fatal("new campaign did not reach config reload")
+			}
+			lease := svr.GetMember().GetLeadership().GetLease()
+			re.NotNil(lease)
+			if tc.expireLease {
+				const renewHook = "github.com/tikv/pd/pkg/election/keepAliveFailed"
+				re.NoError(failpoint.Enable(renewHook, fmt.Sprintf(`return("leader election@%s")`, oldLeaderName)))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(renewHook)) })
+				testutil.Eventually(re, lease.IsExpired, testutil.WithWaitFor(15*time.Second))
+			} else {
+				const failureHook = "github.com/tikv/pd/server/cluster/raftClusterReturn"
+				re.NoError(failpoint.Enable(failureHook, "1*return(true)"))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(failureHook)) })
+			}
+			re.False(svr.IsServing(), "an initializing member must not serve PD requests")
+			resume()
+
+			// Observe the first recovered leader, so the existing transfer after
+			// several failed campaigns cannot hide a retry on the failed member.
+			newLeaderName := cluster.WaitLeader()
+			re.NotEmpty(newLeaderName)
+			if tc.expireLease && tc.members > 1 {
+				re.NotEqual(oldLeaderName, newLeaderName)
+				re.Equal(int32(1), attempts.Load(), "failed member retried before handing off etcd")
+				re.False(svr.IsServing())
+			} else {
+				re.Equal(oldLeaderName, newLeaderName)
+				re.Equal(int32(2), attempts.Load())
+			}
+			newLeader := cluster.GetServer(newLeaderName)
+			re.True(newLeader.GetServer().IsServing())
+			re.Equal(newLeader.GetServerID(), newLeader.GetServer().GetMember().GetEtcdLeader())
+			re.NotSame(lease, newLeader.GetServer().GetMember().GetLeadership().GetLease())
+			re.True(newLeader.GetServer().DirectlyGetRaftCluster().IsRunning())
+			if previous != nil {
+				client := earlyTSOClient(t, newLeader)
+				next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), newLeader.GetClusterID())
+				re.Negative(tsoutil.CompareTimestamp(previous, next))
+			}
+		})
+	}
 }
 
 func TestGetLeader(t *testing.T) {
