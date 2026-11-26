@@ -233,7 +233,10 @@ func TestNewWriterWithTOSConfig(t *testing.T) {
 
 	t.Run("assume role without static credentials", func(t *testing.T) {
 		t.Setenv("VOLCSTACK_ACCESS_KEY_ID", "")
+		t.Setenv("VOLCSTACK_ACCESS_KEY", "")
 		t.Setenv("VOLCSTACK_SECRET_ACCESS_KEY", "")
+		t.Setenv("VOLCSTACK_SECRET_KEY", "")
+		t.Setenv("VOLCSTACK_SESSION_TOKEN", "")
 		t.Setenv("VOLCENGINE_OIDC_TOKEN_FILE", "")
 		t.Setenv("VOLCENGINE_OIDC_ROLE_TRN", "")
 
