@@ -396,7 +396,6 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 	timer := time.NewTimer(constants.RetryInterval)
 	defer timer.Stop()
 	// Retry several times before falling back to the follower when the network problem happens
-retryLoop:
 	for attempts := 0; attempts < constants.MaxRetryTimes; {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -413,9 +412,6 @@ retryLoop:
 		if c.conCtxMgr.Exist(url) {
 			// Just trigger the clean up of the stale connection contexts.
 			c.conCtxMgr.GC(func(curURL string) bool { return curURL != url })
-			return nil
-		}
-		if c.hasUsableStream() {
 			return nil
 		}
 		if cc != nil {
@@ -477,27 +473,16 @@ retryLoop:
 			networkErrNum++
 		}
 		attempts++
-		// Subscribe before rechecking availability so a concurrent successful build
-		// can wake this retry even while the dispatcher is waiting inside this call.
-		updated := c.conCtxMgr.Updated()
-		// A usable stream needs no additional discovery. Refresh failed attempts
-		// before waiting so a leader change can interrupt the retry interval.
+		// Refresh failed attempts before waiting so a leader change can interrupt
+		// the retry interval. The dispatcher can use existing follower streams
+		// while the updater restores a direct leader stream.
 		c.svcDiscovery.ScheduleCheckMemberChanged()
-		for {
-			if c.hasUsableStream() {
-				return nil
-			}
-			select {
-			case <-ctx.Done():
-				return err
-			case <-timer.C:
-				continue retryLoop
-			case <-leaderSwitched:
-				// Retry with the new leader without waiting for the interval.
-				continue retryLoop
-			case <-updated:
-				updated = c.conCtxMgr.Updated()
-			}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-timer.C:
+		case <-leaderSwitched:
+			// Retry with the new leader without waiting for the interval.
 		}
 	}
 
@@ -532,15 +517,6 @@ retryLoop:
 		}
 	}
 	return err
-}
-
-func (c *Cli) hasUsableStream() bool {
-	leaderURL := c.getLeaderURL()
-	return c.conCtxMgr.Find(func(cc *cctx.ConnectionCtx[*tsoStream]) bool {
-		return cc.Ctx.Err() == nil && cc.Stream != nil &&
-			!cc.Stream.hasNewLeader(leaderURL) && cc.Stream.GetRecvError() == nil &&
-			cc.Stream.state.Load() != streamStateClosing
-	}) != nil
 }
 
 func (c *Cli) checkLeader(

@@ -1338,3 +1338,87 @@ func TestTSOConnectionUpdaterSwitchesProxyDuringLeaderChanges(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, nextPhysical, physical)
 }
+
+func TestTSOConnectionUpdaterRestoresDirectStreamAfterProxyDisabled(t *testing.T) {
+	for _, forwarding := range []bool{false, true} {
+		t.Run(fmt.Sprintf("forwarding-%t", forwarding), func(t *testing.T) {
+			const leaderURL, followerURL = "leader", "follower"
+			svc := &countingServiceDiscovery{
+				serviceURLs: []string{leaderURL, followerURL},
+				servingURL:  leaderURL,
+				conns: map[string]*grpc.ClientConn{
+					leaderURL:   newTSOHealthTestConn(t, leaderURL, healthpb.HealthCheckResponse_NOT_SERVING),
+					followerURL: newTSOHealthTestConn(t, followerURL, healthpb.HealthCheckResponse_SERVING),
+				},
+			}
+			var builds atomic.Int64
+			var directBuilds atomic.Int32
+			directStarted, releaseDirect := make(chan struct{}), make(chan struct{})
+			builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+				url := followerURL
+				if grpcutil.GetForwardedHost(ctx, metadata.FromOutgoingContext) == "" {
+					url = leaderURL
+					if directBuilds.Add(1) == 1 {
+						close(directStarted)
+					}
+					select {
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					case <-releaseDirect:
+					}
+				}
+				inner := newMockTSOStreamImpl(ctx, resultModeGenerated)
+				inner.resGenPhysical += builds.Add(1)
+				return newTSOStream(ctx, url, inner), nil
+			})
+			option := opt.NewOption()
+			option.EnableForwarding = forwarding
+			option.SetEnableTSOFollowerProxy(true)
+			client := NewClient(t.Context(), option, svc, builder)
+			client.leaderURL.Store(leaderURL)
+			t.Cleanup(func() {
+				client.cancel()
+				client.wg.Wait()
+				client.conCtxMgr.ReleaseAll()
+			})
+			client.updateConnectionCtxs(client.ctx)
+			require.False(t, client.conCtxMgr.Exist(leaderURL))
+			follower := client.conCtxMgr.GetConnectionCtx(followerURL)
+			require.NotNil(t, follower)
+			require.Zero(t, directBuilds.Load())
+
+			// Keep the proxy stream when the leader recovers and proxy mode is disabled.
+			svc.conns[leaderURL] = newTSOHealthTestConn(t, leaderURL, healthpb.HealthCheckResponse_SERVING)
+			option.SetEnableTSOFollowerProxy(false)
+			client.scheduleUpdateTSOConnectionCtxs()
+			td, req := startRecoveryDispatcher(t, client)
+			select {
+			case <-directStarted:
+			case <-time.After(time.Second):
+				t.Fatal("disabling follower proxy did not start direct leader recovery")
+			}
+			physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
+			require.NoError(t, err, "direct recovery must not block requests on the retained follower stream")
+			require.Positive(t, physical)
+			require.NoError(t, follower.Ctx.Err())
+
+			close(releaseDirect)
+			require.Eventually(t, func() bool {
+				return client.conCtxMgr.Exist(leaderURL) && !client.conCtxMgr.Exist(followerURL)
+			}, time.Second, 10*time.Millisecond, "disabling follower proxy must restore direct mode")
+			require.Equal(t, int32(1), directBuilds.Load())
+			require.ErrorIs(t, follower.Ctx.Err(), context.Canceled)
+			next := &Request{
+				requestCtx: td.ctx,
+				clientCtx:  td.ctx,
+				done:       make(chan error, 1),
+				start:      time.Now(),
+				pool:       &sync.Pool{},
+			}
+			td.push(next)
+			nextPhysical, _, err := next.waitTimeout(constants.RetryInterval / 2)
+			require.NoError(t, err)
+			require.Greater(t, nextPhysical, physical)
+		})
+	}
+}
