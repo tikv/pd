@@ -593,42 +593,8 @@ func (oc *Controller) ensureSingleMergePair(op *Operator) *mergePairToken {
 			}
 		}
 	}
-	op.mergePair.CompareAndSwap(nil, &mergePairToken{splitInferred: true})
+	op.mergePair.CompareAndSwap(nil, &mergePairToken{})
 	return nil
-}
-
-// findSplitMergePairToRebind checks whether oldOp holds a lazily inferred split
-// pair token shared with a higher-priority reciprocal partner whose priority
-// matches op. That happens when an unsynced replacement interleaves with a
-// lower-priority split pair (e.g. lowA -> highA -> lowB -> highB or
-// orphanA -> revB -> revA). Rebinding op to that token before replacing oldOp
-// keeps the new higher-priority pair intact instead of canceling relatedOp.
-func (oc *Controller) findSplitMergePairToRebind(op, oldOp *Operator) *mergePairToken {
-	oldPair := oldOp.mergePair.Load()
-	if oldPair == nil || !oldPair.splitInferred {
-		return nil
-	}
-	relatedID := op.GetRelatedMergeRegion()
-	if relatedID == 0 {
-		return nil
-	}
-	relatedOpi, ok := oc.operators.Load(relatedID)
-	if !ok {
-		return nil
-	}
-	relatedOp := relatedOpi.(*Operator)
-	if relatedOp == nil ||
-		!op.hasReciprocalMergeRegion(relatedOp) ||
-		!oldOp.hasReciprocalMergeRegion(relatedOp) ||
-		!op.hasCompatibleMergeSteps(relatedOp) ||
-		relatedOp.mergePair.Load() != oldPair ||
-		IsEndStatus(relatedOp.Status()) {
-		return nil
-	}
-	if !isHigherPriorityOperator(relatedOp, oldOp) || op.GetPriorityLevel() != relatedOp.GetPriorityLevel() {
-		return nil
-	}
-	return oldPair
 }
 
 func releaseSplitMergePair(op *Operator, claimedPair *mergePairToken) {
@@ -669,17 +635,8 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 			operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
 			return false
 		}
-		var reboundPair, prevPair *mergePairToken
-		if needSplitPairLock && claimedPair == nil {
-			if reboundPair = oc.findSplitMergePairToRebind(op, oldOp); reboundPair != nil {
-				prevPair = op.mergePair.Swap(reboundPair)
-			}
-		}
 		// replace old operator
 		if !oc.operators.CompareAndSwap(regionID, oldOp, op) {
-			if reboundPair != nil {
-				op.mergePair.Store(prevPair)
-			}
 			oc.counts.dec(kind)
 			releaseSplitMergePair(op, claimedPair)
 			if needSplitPairLock {
@@ -693,15 +650,12 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 				zap.Reflect("new", op))
 			return false
 		}
-		if reboundPair != nil {
-			oldOp.mergePair.CompareAndSwap(reboundPair, nil)
-		}
 		if needSplitPairLock {
 			oc.splitMergePairMu.Unlock()
 		}
 		oc.counts.dec(oldOp.SchedulerKind())
 		oc.ack(oldOp)
-		if reboundPair == nil && oldOp.HasRelatedMergeRegion() {
+		if oldOp.HasRelatedMergeRegion() {
 			oc.removeRelatedMergeOperator(oldOp)
 		}
 		if !oldOp.Replace() {
