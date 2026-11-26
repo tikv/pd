@@ -1193,16 +1193,15 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCB
 				actualKeyspaces[keyspaceID] = struct{}{}
 			})
 
-		// Filter out invalid GC states that may be stale in the cache.
-		keyspacesToRemove := make([]uint32, 0)
 		for keyspaceID := range gcStates {
-			if _, ok := actualKeyspaces[keyspaceID]; !ok {
-				keyspacesToRemove = append(keyspacesToRemove, keyspaceID)
+			if _, ok := actualKeyspaces[keyspaceID]; ok {
+				continue
 			}
-		}
-		for _, keyspaceID := range keyspacesToRemove {
 			delete(gcStates, keyspaceID)
-			m.gcStateCache.remove(keyspaceID)
+			// An incomplete scan may not have reached an active keyspace yet.
+			if err == nil {
+				m.gcStateCache.remove(keyspaceID)
+			}
 		}
 
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})

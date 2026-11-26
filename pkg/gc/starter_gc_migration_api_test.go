@@ -124,6 +124,27 @@ func TestStarterGCMigrationFirstGCOperation(t *testing.T) {
 	re.Equal(uint64(101), state.TxnSafePoint)
 }
 
+func TestStarterGCMigrationFailedScanPreservesCache(t *testing.T) {
+	re := require.New(t)
+	const failing, healthy uint32 = 1, 2
+	m, _, _, _ := newStarterGCFixture(t, 2, func(_, source *clientv3.Client) {
+		_, err := source.Put(t.Context(), keypath.TxnSafePointPath(failing), "malformed")
+		re.NoError(err)
+	}, nil)
+	_, err := m.GetGCState(healthy, true)
+	re.NoError(err)
+	before, ok := m.gcStateCache.load(healthy)
+	re.True(ok)
+
+	// The scan reaches the failing keyspace before it visits the cached one.
+	states, err := m.GetAllKeyspacesGCStates(t.Context(), true)
+	re.ErrorContains(err, "invalid transaction safe point")
+	re.NotContains(states, healthy)
+	after, ok := m.gcStateCache.load(healthy)
+	re.True(ok)
+	re.Equal(before, after)
+}
+
 func TestStarterGCMigrationRejectsInvalidBarrierID(t *testing.T) {
 	re := require.New(t)
 	manager, destination, source, cutoff := newStarterGCAPIFixture(t, 1)
