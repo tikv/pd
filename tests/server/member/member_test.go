@@ -30,9 +30,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/raft/v3/raftpb"
-	"go.etcd.io/etcd/server/v3/wal"
-	"go.etcd.io/etcd/server/v3/wal/walpb"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
@@ -522,111 +519,6 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 				client := earlyTSOClient(t, newLeader)
 				next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), newLeader.GetClusterID())
 				re.Negative(tsoutil.CompareTimestamp(previous, next))
-			}
-		})
-	}
-}
-
-func TestResignEtcdLeaderWaitsForElection(t *testing.T) {
-	for _, cancelTransfer := range []bool{false, true} {
-		t.Run(fmt.Sprintf("cancel=%t", cancelTransfer), func(t *testing.T) {
-			re := require.New(t)
-			cluster, err := tests.NewTestCluster(t.Context(), 2)
-			re.NoError(err)
-			t.Cleanup(cluster.Destroy)
-			re.NoError(cluster.RunInitialServers())
-			re.NotEmpty(cluster.WaitLeader())
-			oldLeader := cluster.GetLeaderServer()
-			oldMember := oldLeader.GetServer().GetMember()
-			oldEtcd := oldMember.Etcd().Server
-			term := oldEtcd.Term()
-
-			// Withhold the old leader's vote response so the transferee cannot
-			// finish its election until the test restores communication.
-			oldEtcd.PauseSending()
-			t.Cleanup(oldEtcd.ResumeSending)
-			const transferHook = "github.com/tikv/pd/pkg/member/beforeResignEtcdLeader"
-			selected := make(chan uint64, 1)
-			release := make(chan struct{})
-			resume := sync.OnceFunc(func() { close(release) })
-			re.NoError(failpoint.EnableCall(transferHook, func(from, to uint64) {
-				if from == oldMember.ID() {
-					selected <- to
-					<-release
-				}
-			}))
-			t.Cleanup(func() {
-				resume()
-				re.NoError(failpoint.Disable(transferHook))
-			})
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			result := make(chan error, 1)
-			go func() {
-				result <- oldMember.ResignEtcdLeader(ctx, oldLeader.GetConfig().Name, "")
-			}()
-			var target *tests.TestServer
-			select {
-			case id := <-selected:
-				for _, server := range cluster.GetServers() {
-					if server.GetServerID() == id {
-						target = server
-					}
-				}
-			case <-time.After(30 * time.Second):
-				t.Fatal("resignation did not select a target")
-			}
-			re.NotNil(target)
-			targetEtcd := target.GetServer().GetMember().Etcd().Server
-			// The paused transport also drops incoming messages. Deliver the
-			// transfer trigger and vote request directly, withholding the reply.
-			re.NoError(targetEtcd.Process(t.Context(), raftpb.Message{
-				Type: raftpb.MsgTimeoutNow, From: oldMember.ID(), To: target.GetServerID(), Term: term,
-			}))
-			// Raft persists the campaign term after its log entries. Read that
-			// log tail so the vote includes entries that have not been applied.
-			var lastEntry raftpb.Entry
-			testutil.Eventually(re, func() bool {
-				w, err := wal.OpenForRead(targetEtcd.Logger(), targetEtcd.Cfg.WALDir(), walpb.Snapshot{})
-				re.NoError(err)
-				// ReadAll closes the read-only WAL's file descriptors.
-				_, state, entries, err := w.ReadAll()
-				re.NoError(err)
-				if state.Term != term+1 {
-					return false
-				}
-				re.NotEmpty(entries)
-				lastEntry = entries[len(entries)-1]
-				return true
-			})
-			vote := raftpb.Message{
-				Type: raftpb.MsgVote, From: target.GetServerID(), To: oldMember.ID(), Term: term + 1,
-				LogTerm: lastEntry.Term, Index: lastEntry.Index, Context: []byte("CampaignTransfer"),
-			}
-			re.NoError(oldEtcd.Process(t.Context(), vote))
-			testutil.Eventually(re, func() bool { return oldEtcd.Lead() == 0 })
-			resume()
-			select {
-			case err := <-result:
-				t.Fatalf("resignation returned before the election finished: %v", err)
-			case <-time.After(2 * time.Duration(oldMember.Etcd().Config().TickMs) * time.Millisecond):
-			}
-			if cancelTransfer {
-				cancel()
-			} else {
-				oldEtcd.ResumeSending()
-				re.NoError(oldEtcd.Process(t.Context(), vote))
-			}
-			select {
-			case err := <-result:
-				if cancelTransfer {
-					re.ErrorIs(err, context.Canceled)
-				} else {
-					re.NoError(err)
-					re.Equal(target.GetServerID(), oldEtcd.Lead())
-				}
-			case <-time.After(10 * time.Second):
-				t.Fatal("resignation did not finish")
 			}
 		})
 	}

@@ -476,22 +476,26 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	if err != nil {
 		return errs.ErrEtcdMoveLeader.Wrap(err).GenWithStackByCause()
 	}
-	ticker := time.NewTicker(time.Duration(m.etcd.Config().TickMs) * time.Millisecond)
+	return waitForEtcdLeader(moveCtx, m.etcd.Server, term, nextEtcdLeaderID, time.Duration(m.etcd.Config().TickMs)*time.Millisecond)
+}
+
+func waitForEtcdLeader(ctx context.Context, status etcdserver.RaftStatusGetter, term, target uint64, interval time.Duration) error {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		currentTerm := m.etcd.Server.Term()
-		leader := m.etcd.Server.Lead()
-		if leader == nextEtcdLeaderID {
+		currentTerm := status.Term()
+		leader := uint64(status.Leader())
+		if leader == target {
 			return nil
 		}
 		// The transferee's vote can clear the old leader before the election
 		// finishes. Keep waiting while no successor is known.
-		if leader != 0 && (currentTerm != term || leader != m.ID()) {
+		if leader != 0 && (currentTerm != term || leader != uint64(status.ID())) {
 			return errs.ErrNotLeader
 		}
 		select {
-		case <-moveCtx.Done():
-			return errs.ErrEtcdMoveLeader.Wrap(moveCtx.Err()).GenWithStackByCause()
+		case <-ctx.Done():
+			return errs.ErrEtcdMoveLeader.Wrap(ctx.Err()).GenWithStackByCause()
 		case <-ticker.C:
 		}
 	}
