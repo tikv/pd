@@ -106,9 +106,6 @@ func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []Grou
 		if err := ctx.Err(); err != nil {
 			return written, err
 		}
-		if err := m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs); err != nil {
-			continue
-		}
 		ok, err := m.updateGroupTarget(ctx, target)
 		if err != nil {
 			return written, err
@@ -130,6 +127,14 @@ func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bo
 	if err := m.ctx.Err(); err != nil {
 		return false, err
 	}
+	m.RLock()
+	initialGroup := m.groups[target.Expected.ID]
+	var initialVer uint64
+	if initialGroup != nil {
+		initialVer = initialGroup.AffinityVer
+	}
+	m.RUnlock()
+
 	var stored *Group
 	written := false
 	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
@@ -156,6 +161,9 @@ func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bo
 			if conflict {
 				return nil
 			}
+			if err := m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs); err != nil {
+				return nil
+			}
 			if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
 				return err
 			}
@@ -170,9 +178,12 @@ func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bo
 		m.Lock()
 		if group, ok := m.groups[stored.ID]; ok {
 			wasUnpersisted := group.persistedGroup != nil
-			// A retry can refresh an already persisted target once store conditions
-			// are known. Sync handles confirmation of local targets.
-			if changed := m.syncGroupTargetLocked(group, stored); written && !changed && !wasUnpersisted && m.storeConditionsKnown {
+			// A retry can restore a healthy persisted target. Sync handles
+			// confirmation of local targets.
+			changed := m.syncGroupTargetLocked(group, stored)
+			if written && !changed && !wasUnpersisted && m.storeConditionsKnown &&
+				group == initialGroup && group.AffinityVer == initialVer &&
+				calcGroupAvailability(m.unavailableStores, group.LeaderStoreID, group.VoterStoreIDs) == groupAvailable {
 				availability, deadline := group.GetAvailability(), group.degradedExpiredAt
 				m.setTargetAvailabilityLocked(group)
 				if availability != group.GetAvailability() || deadline != group.degradedExpiredAt {

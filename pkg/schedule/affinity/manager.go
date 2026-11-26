@@ -625,23 +625,20 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 
 	m.Lock()
 	defer m.Unlock()
-	// Check if the group exists again to avoid other threads modifying the group.
-	groupInfo, exists := m.groups[group.ID]
 	switch {
 	case !exists:
 		m.initGroupLocked(group)
-	case matchesStored && groupInfo.persistedGroup != nil:
+	case matchesStored && existingGroup.persistedGroup != nil:
 		// A newer etcd write can reassert the stored peers after a local replacement.
 		// Apply it and invalidate observations made before the write.
-		m.applyGroupTargetLocked(groupInfo, group)
+		m.applyGroupTargetLocked(existingGroup, group)
 	default:
-		changed := m.syncGroupTargetLocked(groupInfo, group)
-		if !changed && matchesStored && groupInfo.IsExpired() && m.storeConditionsKnown {
+		changed := m.syncGroupTargetLocked(existingGroup, group)
+		if !changed && matchesStored && existingGroup.IsExpired() && m.storeConditionsKnown &&
+			calcGroupAvailability(m.unavailableStores, existingGroup.LeaderStoreID, existingGroup.VoterStoreIDs) == groupAvailable {
 			// A newer write can restore a healthy target after the group has expired.
-			m.setTargetAvailabilityLocked(groupInfo)
-			if groupInfo.IsAvailable() {
-				m.resetCountLocked(groupInfo)
-			}
+			m.setTargetAvailabilityLocked(existingGroup)
+			m.resetCountLocked(existingGroup)
 		}
 	}
 	if modRevision > 0 {

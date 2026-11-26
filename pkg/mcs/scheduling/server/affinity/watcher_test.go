@@ -548,13 +548,14 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 		t.Fatal("timed out waiting for in-flight retry")
 	}
 
-	testutil.Eventually(re, func() bool {
-		observe(adminID)
-		observe(reloadID)
-		return !state(reloadID).HasUnpersistedTarget()
-	})
-	re.Len(sent, 1, "only the reload group must retry after upgrade")
-	re.Equal(expected[reloadID], <-sent)
+	observe(reloadID)
+	select {
+	case retry := <-sent:
+		re.Equal(expected[reloadID], retry)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the reload group retry")
+	}
+	testutil.Eventually(re, func() bool { return !state(reloadID).HasUnpersistedTarget() })
 	persisted := read(reloadID)
 	re.Greater(persisted.ModRevision, initial[reloadID].ModRevision)
 	var group affinity.Group

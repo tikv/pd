@@ -214,14 +214,29 @@ func (m *Manager) drainObservedTargets() {
 			}
 			shouldReport := m.ctx.Err() == nil
 			m.targetWriteMutex.Unlock()
-			if shouldReport && len(written) < len(targets) {
+			if len(written) < len(targets) {
 				skipped := len(targets) - len(written)
 				var firstSkippedID string
-				for _, target := range targets {
-					if !slices.Contains(written, target.Expected.ID) {
-						firstSkippedID = target.Expected.ID
-						break
+				for _, obs := range batch {
+					id := obs.target.Expected.ID
+					if slices.Contains(written, id) {
+						continue
 					}
+					if firstSkippedID == "" {
+						firstSkippedID = id
+					}
+					if obs.persistOnly {
+						m.Lock()
+						group := m.groups[id]
+						if group == obs.groupInfoPtr && group.AffinityVer == obs.affinityVer &&
+							group.modRevision == obs.target.ExpectedModRevision && group.persistedGroup != nil {
+							m.applyGroupTargetLocked(group, group.persistedGroup)
+						}
+						m.Unlock()
+					}
+				}
+				if !shouldReport {
+					continue
 				}
 				targetWriteFailureCounter.Add(float64(skipped))
 				log.Warn("skipped affinity group target writes",

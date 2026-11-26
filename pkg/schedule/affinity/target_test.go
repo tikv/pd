@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -44,9 +46,10 @@ var targetTestRange = pdtestutil.TxnKeyspaceRange(nonOverlappingRange.StartKey, 
 type targetTest struct {
 	*require.Assertions
 	*Manager
-	store storage.Storage
-	calls []GroupTarget
-	reply func(context.Context, []GroupTarget) ([]string, error)
+	store   storage.Storage
+	callsMu sync.Mutex
+	calls   []GroupTarget
+	reply   func(context.Context, []GroupTarget) ([]string, error)
 }
 
 func newTargetTest(t *testing.T, ids ...string) *targetTest {
@@ -97,7 +100,9 @@ func (test *targetTest) useWriter(reply func(context.Context, []GroupTarget) ([]
 }
 
 func (test *targetTest) WriteGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
+	test.callsMu.Lock()
 	test.calls = append(test.calls, targets...)
+	test.callsMu.Unlock()
 	return test.reply(ctx, targets)
 }
 
@@ -140,6 +145,40 @@ func TestUpdateAffinityGroupTargetsValidation(t *testing.T) {
 	}
 	test.Zero(test.stored("g").LeaderStoreID)
 	test.Equal([]uint64{1, 2, 3}, test.GetAffinityGroupState(success.Expected.ID).VoterStoreIDs)
+}
+
+func TestUpdateAffinityGroupTargetsBusyLeader(t *testing.T) {
+	test := newTargetTest(t, "replayed", "changed")
+	replay := test.target("replayed", 1, 1, 2)
+	test.write([]string{"replayed", "changed"}, replay, test.target("changed", 2, 1, 2))
+	change := test.target("changed", 1, 1, 2)
+	test.applyStoreConditions(map[uint64]storeCondition{1: storeBusy})
+	test.ExpireAffinityGroup("replayed")
+	expired := test.GetAffinityGroupState("replayed")
+
+	test.write([]string{"replayed"}, replay, change)
+	test.Equal(expired, test.GetAffinityGroupState("replayed"))
+	test.Equal(&change.Expected, test.stored("changed"))
+}
+
+func TestUpdateAffinityGroupTargetsReplayPreservesConcurrentExpiration(t *testing.T) {
+	test := newTargetTest(t, "g")
+	test.checkGroupsAvailability()
+	target := test.target("g", 1, 1, 2)
+	test.write([]string{"g"}, target)
+	before := test.GetAffinityGroupState("g")
+	var expired *GroupState
+	test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+		err := test.store.RunInTxn(ctx, apply)
+		var ok bool
+		expired, ok = test.ExpireAffinityGroupIf(before)
+		test.True(ok)
+		return err
+	})
+
+	test.write([]string{"g"}, target)
+	test.Equal(groupExpired, test.groups["g"].GetAvailability())
+	test.Equal(expired, test.GetAffinityGroupState("g"))
 }
 
 func TestUpdateAffinityGroupTargetsContextCancellation(t *testing.T) {
@@ -278,6 +317,12 @@ func TestFirstWinStoreConditions(t *testing.T) {
 		degraded.modRevision = 3
 		test.Equal(degraded, state(loaded.ID))
 		test.Equal(deadline, test.groups["loaded"].degradedExpiredAt)
+		test.ExpireAffinityGroup("loaded")
+		expired := state(loaded.ID)
+		test.SyncGroupFromEtcdWithRevision(loaded, 4)
+		expired.modRevision = 4
+		test.Equal(groupExpired, test.groups["loaded"].GetAvailability())
+		test.Equal(expired, state(loaded.ID))
 	})
 }
 
@@ -543,7 +588,10 @@ func TestFirstWinRetriesDifferentQueuedTargetAfterCooldown(t *testing.T) {
 				// A different group can wake the sender during g's cooldown.
 				time.Sleep(time.Second - time.Millisecond)
 				test.observe("h", 3, 4)
-				test.Equal([]GroupTarget{first, other}, test.calls)
+				test.callsMu.Lock()
+				calls := slices.Clone(test.calls)
+				test.callsMu.Unlock()
+				test.Equal([]GroupTarget{first, other}, calls)
 				test.Equal(other.result(), pd.stored("h"))
 				if scenario == "stale revision" {
 					test.SyncGroupFromEtcdWithRevision(&second.Expected, 1)
@@ -738,6 +786,41 @@ func TestFirstWinReconcilesLocalTarget(t *testing.T) {
 		test.False(state("h").HasUnpersistedTarget())
 		test.Equal(groupDegraded, test.groups["h"].GetAvailability())
 		test.Equal(newDegradedExpiredAtFromNow(), test.groups["h"].degradedExpiredAt)
+	})
+}
+
+func TestFirstWinReplacesRejectedLocalTarget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pd := newTargetTest(t, "g")
+		test := newTargetTestWithStorage(t, t.Context(), pd.store)
+		test.checkGroupsAvailability()
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+			if len(test.calls) == 1 {
+				return nil, ErrTargetWriterUnsupported
+			}
+			return pd.UpdateAffinityGroupTargets(ctx, targets)
+		})
+
+		initial := pd.stored("g")
+		test.observe("g", 1, 2)
+		local := test.GetAffinityGroupState("g")
+		test.True(local.HasUnpersistedTarget())
+		test.Equal(uint64(1), local.LeaderStoreID)
+
+		pd.applyStoreConditions(map[uint64]storeCondition{1: storeBusy})
+		time.Sleep(time.Second)
+		test.observe("g", 1, 2)
+		test.Len(test.calls, 2)
+		reverted := test.GetAffinityGroupState("g")
+		test.False(reverted.HasUnpersistedTarget())
+		test.Equal(*initial, reverted.Group)
+		test.Greater(reverted.affinityVer, local.affinityVer)
+
+		time.Sleep(time.Second)
+		test.observe("g", 2, 3)
+		test.Len(test.calls, 3)
+		test.Equal(test.calls[2].result(), pd.stored("g"))
+		test.Equal(uint64(2), pd.stored("g").LeaderStoreID)
 	})
 }
 

@@ -404,7 +404,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 //	@Description	Each target commits independently, so an HTTP 500 on a later target leaves earlier commits in place.
 //	@Param		body	body	affinity.GroupTargetsRequest	true	"Targets with the groups they were decided from"
 //	@Produce	json
-//	@Success	200	{object}	affinity.GroupTargetsResponse	"IDs of the groups whose targets were written"
+//	@Success	200	{object}	affinity.GroupTargetsResponse	"IDs of groups whose targets were newly written or already stored with the requested peers"
 //	@Failure	400	{string}	string							"The input is invalid."
 //	@Failure	500	{string}	string							"PD server failed to proceed the request."
 //	@Router		/affinity-groups/targets [post]
