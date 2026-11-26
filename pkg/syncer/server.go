@@ -285,7 +285,17 @@ func recvSyncRegionRequest(ctx context.Context, stream pdpb.PD_SyncRegionsServer
 func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.SyncRegionRequest, stream pdpb.PD_SyncRegionsServer) error {
 	startIndex := request.GetStartIndex()
 	name := request.GetMember().GetName()
+<<<<<<< HEAD
 	records := s.history.recordsFrom(startIndex)
+=======
+	if startIndex == 0 || startIndex > endIndex {
+		return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
+	}
+	if startIndex < endIndex {
+		s.history.observeRequiredWindow(endIndex - startIndex)
+	}
+	records := s.history.recordsBetween(startIndex, endIndex)
+>>>>>>> 8179ce7c2d (server: resync follower region cache reset (#10689))
 	if len(records) == 0 {
 		if s.history.getNextIndex() == startIndex {
 			log.Info("requested server has already in sync with server",
@@ -348,8 +358,8 @@ func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.Regio
 
 func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream pdpb.PD_SyncRegionsServer) error {
 	regions := s.server.GetRegions()
-	lastIndex := 0
 	start := time.Now()
+	lastIndex := 0
 	metas := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
 	stats := make([]*pdpb.RegionStat, 0, maxSyncRegionBatchSize)
 	leaders := make([]*metapb.Peer, 0, maxSyncRegionBatchSize)
@@ -404,6 +414,33 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 	}
 	log.Info("requested server has completed full synchronization with server",
 		zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
+<<<<<<< HEAD
+=======
+	records, nextIndex, ok := s.history.retainedRecordsFrom(syncStartIndex)
+	if !ok {
+		return status.Errorf(codes.ResourceExhausted,
+			"history records from full sync start index %d to %d are no longer available",
+			syncStartIndex, nextIndex)
+	}
+	if len(records) > 0 {
+		catchUpStartIndex := syncStartIndex
+		if len(regions) == 0 {
+			catchUpStartIndex = 0
+		}
+		if err := s.syncHistoryRecordsLocked(catchUpStartIndex, records, syncStream); err != nil {
+			return err
+		}
+		syncStream.advanceSendIndexLocked(len(records))
+	}
+	resp := &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: nextIndex,
+	}
+	if err := syncStream.sendStreamIfOpen(resp); err != nil {
+		log.Warn("failed to send sync region completion response", errs.ZapError(errs.ErrGRPCSend, err))
+		return err
+	}
+>>>>>>> 8179ce7c2d (server: resync follower region cache reset (#10689))
 	return nil
 }
 
@@ -412,11 +449,24 @@ func (s *RegionSyncer) bindStream(name string, stream ServerStream) *regionSyncS
 	syncStream := newRegionSyncStream(stream)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+<<<<<<< HEAD
+=======
+	startIndex := s.history.getNextIndex()
+	syncStream := newRegionSyncStream(stream, startIndex)
+	s.bindStreamLocked(name, syncStream)
+	return syncStream, startIndex
+}
+
+func (s *RegionSyncer) bindStreamLocked(name string, syncStream *regionSyncStream) {
+>>>>>>> 8179ce7c2d (server: resync follower region cache reset (#10689))
 	if oldStream := s.mu.streams[name]; oldStream != nil {
 		oldStream.close()
 	}
 	s.mu.streams[name] = syncStream
+<<<<<<< HEAD
 	return syncStream
+=======
+>>>>>>> 8179ce7c2d (server: resync follower region cache reset (#10689))
 }
 
 func (s *RegionSyncer) unbindStream(name string, stream *regionSyncStream) {
