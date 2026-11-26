@@ -38,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -433,9 +434,14 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 		members      int
 		microservice bool
 		expireLease  bool
+		commitAt     string
 	}{
 		{name: "expired-lease", members: 3, expireLease: true},
 		{name: "microservice-expired-lease", members: 3, microservice: true, expireLease: true},
+		{name: "expired-lease-at-commit", members: 3, expireLease: true, commitAt: "rules"},
+		{name: "microservice-expired-lease-at-commit", members: 3, microservice: true, expireLease: true, commitAt: "rules"},
+		{name: "keyspace-group-expired-lease-at-commit", members: 3, microservice: true, expireLease: true, commitAt: "keyspace-group"},
+		{name: "live-lease-txn-conflict", members: 3, microservice: true, commitAt: "keyspace-group"},
 		{name: "single-member-expired-lease", members: 1, expireLease: true},
 		{name: "other-initialization-error", members: 3},
 	} {
@@ -485,18 +491,62 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 			}
 			lease := svr.GetMember().GetLeadership().GetLease()
 			re.NotNil(lease)
+			resumeInitialization := resume
+			var commitKey, commitValue string
+			if tc.commitAt != "" {
+				commitKey = keypath.RulesPathPrefix()
+				if tc.commitAt == "keyspace-group" {
+					commitKey = keypath.KeyspaceGroupIDPath(0)
+				}
+				resp, err := svr.GetClient().Get(t.Context(), commitKey, clientv3.WithPrefix())
+				re.NoError(err)
+				re.NotEmpty(resp.Kvs)
+				commitValue = string(resp.Kvs[0].Value)
+				_, err = svr.GetClient().Delete(t.Context(), commitKey, clientv3.WithPrefix())
+				re.NoError(err)
+				const commitHook = "github.com/tikv/pd/pkg/storage/kv/beforeTxnCommit"
+				commitReached, commitRelease := make(chan struct{}), make(chan struct{})
+				resumeInitialization = sync.OnceFunc(func() { close(commitRelease) })
+				var once sync.Once
+				re.NoError(failpoint.EnableCall(commitHook, func(ops []clientv3.Op) {
+					for _, op := range ops {
+						if op.IsPut() && strings.HasPrefix(string(op.KeyBytes()), commitKey) {
+							once.Do(func() { close(commitReached) })
+							<-commitRelease
+							return
+						}
+					}
+				}))
+				t.Cleanup(func() { resumeInitialization(); re.NoError(failpoint.Disable(commitHook)) })
+				resume()
+				select {
+				case <-commitReached:
+				case <-time.After(30 * time.Second):
+					t.Fatal("initialization did not reach metadata commit")
+				}
+			}
 			if tc.expireLease {
 				const renewHook = "github.com/tikv/pd/pkg/election/keepAliveFailed"
 				re.NoError(failpoint.Enable(renewHook, fmt.Sprintf(`return("leader election@%s")`, oldLeaderName)))
 				t.Cleanup(func() { re.NoError(failpoint.Disable(renewHook)) })
 				testutil.Eventually(re, lease.IsExpired, testutil.WithWaitFor(15*time.Second))
+				if tc.commitAt != "" {
+					_, err := svr.GetClient().Revoke(t.Context(), lease.GetID())
+					re.NoError(err)
+				}
+			} else if tc.commitAt != "" {
+				// Restoring the loaded key conflicts with the pending transaction
+				// while the initializing member still owns a valid lease.
+				_, err := svr.GetClient().Put(t.Context(), commitKey, commitValue)
+				re.NoError(err)
+				re.True(svr.GetMember().IsLeaseValid(lease))
 			} else {
 				const failureHook = "github.com/tikv/pd/server/cluster/raftClusterReturn"
 				re.NoError(failpoint.Enable(failureHook, "1*return(true)"))
 				t.Cleanup(func() { re.NoError(failpoint.Disable(failureHook)) })
 			}
 			re.False(svr.IsServing(), "an initializing member must not serve PD requests")
-			resume()
+			resumeInitialization()
 
 			// Observe the first recovered leader, so the existing transfer after
 			// several failed campaigns cannot hide a retry on the failed member.
