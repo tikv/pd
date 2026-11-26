@@ -31,6 +31,8 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/raft/v3/raftpb"
+	"go.etcd.io/etcd/server/v3/wal"
+	"go.etcd.io/etcd/server/v3/wal/walpb"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
@@ -581,9 +583,25 @@ func TestResignEtcdLeaderWaitsForElection(t *testing.T) {
 			re.NoError(targetEtcd.Process(t.Context(), raftpb.Message{
 				Type: raftpb.MsgTimeoutNow, From: oldMember.ID(), To: target.GetServerID(), Term: term,
 			}))
+			// Raft persists the campaign term after its log entries. Read that
+			// log tail so the vote includes entries that have not been applied.
+			var lastEntry raftpb.Entry
+			testutil.Eventually(re, func() bool {
+				w, err := wal.OpenForRead(targetEtcd.Logger(), targetEtcd.Cfg.WALDir(), walpb.Snapshot{})
+				re.NoError(err)
+				// ReadAll closes the read-only WAL's file descriptors.
+				_, state, entries, err := w.ReadAll()
+				re.NoError(err)
+				if state.Term != term+1 {
+					return false
+				}
+				re.NotEmpty(entries)
+				lastEntry = entries[len(entries)-1]
+				return true
+			})
 			vote := raftpb.Message{
 				Type: raftpb.MsgVote, From: target.GetServerID(), To: oldMember.ID(), Term: term + 1,
-				LogTerm: targetEtcd.Term(), Index: targetEtcd.AppliedIndex(), Context: []byte("CampaignTransfer"),
+				LogTerm: lastEntry.Term, Index: lastEntry.Index, Context: []byte("CampaignTransfer"),
 			}
 			re.NoError(oldEtcd.Process(t.Context(), vote))
 			testutil.Eventually(re, func() bool { return oldEtcd.Lead() == 0 })
