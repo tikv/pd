@@ -70,6 +70,47 @@ func TestNeedMerge(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
+=======
+func TestIsEmptyRegion(t *testing.T) {
+	tests := []struct {
+		size  int64
+		keys  int64
+		empty bool
+	}{
+		{size: 1, keys: 0, empty: true},
+		{size: 1, keys: 1, empty: false},
+		{size: 1, keys: 2, empty: false},
+		{size: 2, keys: 1, empty: false},
+		{size: 2, keys: 0, empty: false},
+		{size: 0, keys: 0, empty: true},
+	}
+	for _, tt := range tests {
+		require.Equal(t, tt.empty, IsEmptyRegion(tt.size, tt.keys))
+	}
+}
+
+func TestRegionFromHeartbeatIAKVSize(t *testing.T) {
+	re := require.New(t)
+	heartbeat := &pdpb.RegionHeartbeatRequest{
+		Region:              &metapb.Region{},
+		ApproximateKvSize:   100 * units.MiB,
+		ApproximateIaKvSize: 40 * units.MiB,
+	}
+
+	region := RegionFromHeartbeat(heartbeat, 1)
+	re.Equal(int64(100), region.GetApproximateKvSize())
+	re.Equal(int64(40), region.GetApproximateIAKvSize())
+	re.Equal(int64(40), region.Clone().GetApproximateIAKvSize())
+
+	oldHeartbeat := &pdpb.RegionHeartbeatRequest{
+		Region:            &metapb.Region{},
+		ApproximateKvSize: 100 * units.MiB,
+	}
+	re.Zero(RegionFromHeartbeat(oldHeartbeat, 1).GetApproximateIAKvSize())
+}
+
+>>>>>>> bcd573daf7 (core, statistics, operator: account for keys in empty regions (#11295))
 func TestSortedEqual(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {

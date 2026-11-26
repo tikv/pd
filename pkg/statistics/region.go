@@ -93,7 +93,13 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, op
 	approximateKeys := r.GetApproximateKeys()
 	approximateSize := r.GetApproximateSize()
 	approximateKvSize := r.GetApproximateKvSize()
+<<<<<<< HEAD
 	if approximateSize <= core.EmptyRegionApproximateSize {
+=======
+	approximateIAKvSize := min(r.GetApproximateIAKvSize(), approximateKvSize)
+	approximateColumnarKvSize := r.GetApproximateColumnarKvSize()
+	if core.IsEmptyRegion(approximateSize, approximateKeys) {
+>>>>>>> bcd573daf7 (core, statistics, operator: account for keys in empty regions (#11295))
 		s.EmptyCount++
 	}
 	s.StorageSize += approximateSize
