@@ -1288,25 +1288,26 @@ func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
 	})
 	defer clean()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
 	const prefix = "batched-history/"
 	const historySize = 1002 // etcd batches historical watch responses at 1000 distinct revisions.
-	snapshot, err := client.Get(ctx, prefix, clientv3.WithPrefix())
+	setupCtx := t.Context()
+	snapshot, err := client.Get(setupCtx, prefix, clientv3.WithPrefix())
 	re.NoError(err)
 	expected := make(map[string]string, historySize+1)
 	for i := range historySize {
 		key, value := fmt.Sprintf("%s%d", prefix, i), fmt.Sprintf("value-%d", i)
-		_, err := client.Put(ctx, key, value)
+		_, err := client.Put(setupCtx, key, value)
 		re.NoError(err)
 		expected[key] = value
 	}
 
+	watchCtx, cancelWatch := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancelWatch()
 	const marker = prefix + "after-disconnect"
 	applied := make(map[string]string, historySize+1)
 	var putCount int
 	var firstBatchLastRev int64
-	watcher := NewLoopWatcher(ctx, &sync.WaitGroup{}, client, "batched-history", prefix,
+	watcher := NewLoopWatcher(watchCtx, &sync.WaitGroup{}, client, "batched-history", prefix,
 		func([]*clientv3.Event) error { return nil },
 		func(kv *mvccpb.KeyValue) error {
 			applied[string(kv.Key)] = string(kv.Value)
@@ -1324,20 +1325,20 @@ func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
 				close(firstBatchApplied)
 			}
 			if string(last.Key) == marker {
-				cancel()
+				cancelWatch()
 			}
 			return nil
 		}, true)
 
-	nextRevision, err := watcher.watch(ctx, snapshot.Header.Revision+1)
+	nextRevision, err := watcher.watch(watchCtx, snapshot.Header.Revision+1)
 	re.ErrorIs(err, rpctypes.ErrNoLeader)
 	re.Less(firstBatchLastRev, <-firstBatchHeader, "the first batch must end before the response header revision")
 
 	// The marker ends the second watch even if it skips the remaining history.
-	_, err = client.Put(ctx, marker, marker)
+	_, err = client.Put(watchCtx, marker, marker)
 	re.NoError(err)
 	expected[marker] = marker
-	_, err = watcher.watch(ctx, nextRevision)
+	_, err = watcher.watch(watchCtx, nextRevision)
 	re.NoError(err)
 	re.Contains(applied, marker)
 	re.Len(applied, putCount, "watch replayed events")
