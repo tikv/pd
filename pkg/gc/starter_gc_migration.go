@@ -19,7 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 
 	"github.com/gogo/protobuf/proto"
@@ -122,40 +121,34 @@ func (m *GCStateManager) migrateStarterBatch(ctx context.Context, generation *gc
 	}
 }
 
-// Read the frozen values together even on retry. After a failed commit, write
-// the remaining scopes individually so a changing route cannot block its peers.
+// Each source group is a subset of the bounded loader batch. Retry its pending
+// items together after refreshing local revisions and resolving their routes.
 func (m *GCStateManager) migrateStarterGroup(ctx context.Context, generation *gcStateGeneration, groupID string, items []*migrationItem, attempt int) {
-	configRevision, err := m.readSourceTxnSafePoints(ctx, groupID, items)
+	configRevision, err := m.loadSourceTxnSafePoints(ctx, groupID, items)
 	ready := make([]*migrationItem, 0, len(items))
 	for _, item := range items {
 		if err != nil {
 			item.err = err
-		}
-		if item.err == nil {
+		} else if item.err == nil {
 			ready = append(ready, item)
 		}
 	}
-	writeBatchSize := endpoint.MaxGCSafePointBatchSize
-	if attempt > 0 {
-		writeBatchSize = 1
-	}
-	for batch := range slices.Chunk(ready, writeBatchSize) {
-		if err := m.commitStarterBatch(ctx, generation, batch, groupID, configRevision); err != nil {
-			// A failed CAS invalidates data conflicts observed before the commit too.
-			for _, item := range batch {
-				item.err = err
-			}
+	if err := m.commitStarterBatch(ctx, generation, ready, groupID, configRevision); err != nil {
+		// A failed CAS invalidates data conflicts observed before the commit too.
+		for _, item := range ready {
+			item.err = err
 		}
 	}
-	if attempt < 2 {
-		if retry := m.reloadRetryableItems(ctx, items); len(retry) > 0 {
-			m.migrateStarterBatch(ctx, generation, retry, attempt+1, nil)
-		}
+	// The last commit can also succeed without a reply. Recheck its revision
+	// even when there are no more write attempts.
+	if retry := m.reloadRetryableItems(ctx, items); attempt < 2 && len(retry) > 0 {
+		m.migrateStarterBatch(ctx, generation, retry, attempt+1, nil)
 	}
 }
 
 // A CAS conflict or lost reply may already have installed or advanced T.
 // Recheck the local revisions before looking up any frozen source again.
+// Items still pending retain their errors until another attempt.
 func (m *GCStateManager) reloadRetryableItems(ctx context.Context, items []*migrationItem) []*migrationItem {
 	var ids []uint32
 	var retryable []*migrationItem
@@ -176,10 +169,11 @@ func (m *GCStateManager) reloadRetryableItems(ctx context.Context, items []*migr
 			continue
 		}
 		item.localRead = pairs[i]
-		var needsMigration bool
-		needsMigration, item.err = needsStarterMigration(item.localRead, m.migrationCutoff)
+		needsMigration, err := needsStarterMigration(item.localRead, m.migrationCutoff)
 		if needsMigration {
 			pending = append(pending, item)
+		} else {
+			item.err = err
 		}
 	}
 	return pending
@@ -237,20 +231,22 @@ func (item *migrationItem) resolveSourceGroup(row *mvccpb.KeyValue, cutoff int64
 		return "", err
 	}
 	item.metaRevision = row.ModRevision
-	groupID, hasGroup := meta.Config[keyspace.MetaServiceGroupIDKey]
-	if row.CreateRevision > cutoff || !hasGroup {
-		item.sourceTxnSafePoint = item.localRead.TxnSafePoint
+	groupID := meta.Config[keyspace.MetaServiceGroupIDKey]
+	if row.CreateRevision > cutoff || groupID == "" {
 		return "", nil
 	}
-	if groupID == "" || !config.IsValidMetaServiceGroupID(groupID) {
+	if !config.IsValidMetaServiceGroupID(groupID) {
 		return "", fmt.Errorf("invalid meta-service group %q for keyspace %d", groupID, id)
 	}
 	return groupID, nil
 }
 
-func (m *GCStateManager) readSourceTxnSafePoints(ctx context.Context, groupID string, items []*migrationItem) (int64, error) {
+func (m *GCStateManager) loadSourceTxnSafePoints(ctx context.Context, groupID string, items []*migrationItem) (int64, error) {
 	if groupID == "" {
-		return -1, nil // No external group configuration to check.
+		for _, item := range items {
+			item.sourceTxnSafePoint = item.localRead.TxnSafePoint
+		}
+		return 0, nil
 	}
 	if m.metaServiceGroupManager == nil {
 		return 0, fmt.Errorf("unavailable meta-service group %q", groupID)
@@ -277,6 +273,9 @@ func (m *GCStateManager) readSourceTxnSafePoints(ctx context.Context, groupID st
 }
 
 func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcStateGeneration, items []*migrationItem, groupID string, configRevision int64) error {
+	if len(items) == 0 {
+		return nil
+	}
 	ids := make([]uint32, len(items))
 	for i, item := range items {
 		ids[i] = item.localRead.KeyspaceID
@@ -298,7 +297,7 @@ func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcS
 	}
 	var conflicts []migrationConflict
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		if configRevision >= 0 {
+		if groupID != "" {
 			if err := wb.ExpectConfigRevision(configRevision); err != nil {
 				return err
 			}
@@ -340,15 +339,20 @@ func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcS
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errs.ErrEtcdTxnInternal) {
 		return err
+	}
+	message := "Starter GC migration conflict"
+	if err != nil {
+		message = "Starter GC migration conflict with uncertain commit outcome"
 	}
 	for _, conflict := range conflicts {
 		local := conflict.item.localRead
-		log.Error("Starter GC migration conflict",
+		log.Error(message,
 			zap.Uint32("keyspace-id", local.KeyspaceID), zap.String("meta-service-group-id", groupID),
 			zap.Uint64("local-txn-safe-point", local.TxnSafePoint), zap.Uint64("local-gc-safe-point", conflict.gcSafePoint),
-			zap.Uint64("frozen-txn-safe-point", conflict.item.sourceTxnSafePoint), zap.Uint64("chosen-txn-safe-point", local.TxnSafePoint))
+			zap.Uint64("frozen-txn-safe-point", conflict.item.sourceTxnSafePoint), zap.Uint64("chosen-txn-safe-point", local.TxnSafePoint),
+			zap.NamedError("commit-error", err))
 	}
-	return nil
+	return err
 }

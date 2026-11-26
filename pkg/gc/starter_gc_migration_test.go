@@ -262,14 +262,19 @@ func TestStarterGCMigrationConcurrentTakeover(t *testing.T) {
 	require.Equal(t, advancedRevision, rev)
 }
 
-func TestStarterGCMigrationFullBatchAmbiguousCommit(t *testing.T) {
+func TestStarterGCMigrationFullBatchAmbiguousFinalCommit(t *testing.T) {
 	const count = endpoint.MaxGCSafePointBatchSize
+	ctx := t.Context()
 	var loseReply atomic.Bool
-	manager, dest, _, cutoff := newStarterGCFixture(t, count, nil, func(cfg *clientv3.Config) {
+	manager, dest, _, cutoff := newStarterGCFixture(t, count, func(dest, _ *clientv3.Client) {
+		_, err := dest.Put(ctx, keypath.TxnSafePointPath(1), "120")
+		require.NoError(t, err)
+	}, func(cfg *clientv3.Config) {
 		cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			err := invoke(ctx, method, req, reply, cc, opts...)
 			txn, ok := req.(*etcdserverpb.TxnRequest)
-			if err == nil && ok && len(txn.Compare) > 0 && len(txn.Success) > 0 {
+			response, _ := reply.(*etcdserverpb.TxnResponse)
+			if err == nil && ok && response.GetSucceeded() && len(txn.Compare) > 0 && len(txn.Success) > 0 {
 				if put := txn.Success[0].GetRequestPut(); put != nil && string(put.Key) == keypath.TxnSafePointPath(1) && loseReply.CompareAndSwap(true, false) {
 					return errors.New("lost migration commit response")
 				}
@@ -277,17 +282,43 @@ func TestStarterGCMigrationFullBatchAmbiguousCommit(t *testing.T) {
 			return err
 		}))
 	})
+	core, logs := observer.New(zap.ErrorLevel)
+	restore := log.ReplaceGlobals(zap.New(core), nil)
+	defer restore()
+
+	attempts := 0
+	const hook = "github.com/tikv/pd/pkg/gc/starterGCMigrationSourceLoaded"
+	require.NoError(t, failpoint.EnableCall(hook, func(firstID uint32) {
+		if firstID != 1 {
+			return
+		}
+		attempts++
+		if attempts < 3 {
+			// Force the first two comparisons to fail without advancing T.
+			setStarterKeyspaceConfig(t, dest, 1, keyspace.MetaServiceGroupIDKey, "group1")
+		}
+	}))
+	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+
 	loseReply.Store(true)
 	ids := make([]uint32, count)
 	for i := range ids {
 		ids[i] = uint32(i + 1)
 	}
-	ctx := t.Context()
 	result, err := manager.loadGCStateBatch(ctx, manager.activeGeneration.Load(), gcStateLoadCandidates(ids...))
 	require.NoError(t, err)
 	require.Empty(t, result.failed)
 	require.ElementsMatch(t, ids, result.completed)
+	require.Equal(t, 3, attempts)
 	require.False(t, loseReply.Load())
+	require.Empty(t, logs.FilterMessage("Starter GC migration conflict").All())
+	conflicts := logs.FilterMessage("Starter GC migration conflict with uncertain commit outcome").All()
+	require.Len(t, conflicts, 1)
+	require.Subset(t, conflicts[0].ContextMap(), map[string]any{
+		"keyspace-id": uint32(1), "meta-service-group-id": "group1",
+		"local-txn-safe-point": uint64(120), "frozen-txn-safe-point": uint64(101),
+	})
+
 	// All 60 writes landed in the same transaction, and none was repeated after the lost reply.
 	var revision int64
 	for _, id := range ids {
@@ -295,13 +326,63 @@ func TestStarterGCMigrationFullBatchAmbiguousCommit(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, resp.Kvs, 1)
 		row := resp.Kvs[0]
-		require.Equal(t, strconv.FormatUint(uint64(100+id), 10), string(row.Value))
-		require.EqualValues(t, 2, row.Version)
+		if id == 1 {
+			require.Equal(t, "120", string(row.Value))
+			require.EqualValues(t, 3, row.Version)
+		} else {
+			require.Equal(t, strconv.FormatUint(uint64(100+id), 10), string(row.Value))
+			require.EqualValues(t, 2, row.Version)
+		}
 		if revision == 0 {
 			revision = row.ModRevision
 			require.Greater(t, revision, cutoff)
 		}
 		require.Equal(t, revision, row.ModRevision)
+	}
+}
+
+func TestStarterGCMigrationRetriesRemainingBatch(t *testing.T) {
+	const count = endpoint.MaxGCSafePointBatchSize
+	ctx := t.Context()
+	manager, _, _, cutoff := newStarterGCAPIFixture(t, count)
+	generation := manager.activeGeneration.Load()
+
+	var competed bool
+	var winnerRevision int64
+	const hook = "github.com/tikv/pd/pkg/gc/starterGCMigrationSourceLoaded"
+	require.NoError(t, failpoint.EnableCall(hook, func(firstID uint32) {
+		if firstID == 1 && !competed {
+			// The single-keyspace migration fires the same hook.
+			competed = true
+			require.NoError(t, manager.ensureMigratedTxnSafePoint(ctx, generation, 1))
+			_, winnerRevision = readStarterSafePoint(t, manager, 1)
+		}
+	}))
+	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+
+	ids := make([]uint32, count)
+	for i := range ids {
+		ids[i] = uint32(i + 1)
+	}
+	result, err := manager.loadGCStateBatch(ctx, generation, gcStateLoadCandidates(ids...))
+	require.NoError(t, err)
+	require.Empty(t, result.failed)
+	require.ElementsMatch(t, ids, result.completed)
+	require.Greater(t, winnerRevision, cutoff)
+
+	pairs, err := manager.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
+	require.NoError(t, err)
+	require.Len(t, pairs, count)
+	require.Equal(t, winnerRevision, pairs[0].TxnSafePointRevision)
+	// The other 59 writes must share a single revision.
+	batchRevision := pairs[1].TxnSafePointRevision
+	require.Greater(t, batchRevision, winnerRevision)
+	for _, pair := range pairs {
+		require.NoError(t, pair.Err)
+		require.Equal(t, uint64(100+pair.KeyspaceID), pair.TxnSafePoint)
+	}
+	for _, pair := range pairs[1:] {
+		require.Equal(t, batchRevision, pair.TxnSafePointRevision)
 	}
 }
 
@@ -317,9 +398,11 @@ func TestStarterGCMigrationBatchWithChangingRoute(t *testing.T) {
 	restore := log.ReplaceGlobals(zap.New(core), nil)
 	defer restore()
 	const hook = "github.com/tikv/pd/pkg/gc/starterGCMigrationSourceLoaded"
+	routeChanges := 0
 	require.NoError(t, failpoint.EnableCall(hook, func(firstID uint32) {
-		if firstID == 1 {
-			// Change the route revision after every source read for keyspace 1.
+		if firstID == 1 && routeChanges < 3 {
+			routeChanges++
+			// Change the route revision after each source read until the batch gives up.
 			setStarterKeyspaceConfig(t, dest, 1, keyspace.MetaServiceGroupIDKey, "group1")
 		}
 	}))
@@ -327,31 +410,37 @@ func TestStarterGCMigrationBatchWithChangingRoute(t *testing.T) {
 
 	result, err := m.loadGCStateBatch(t.Context(), m.activeGeneration.Load(), gcStateLoadCandidates(1, 2))
 	require.NoError(t, err)
-	require.ErrorIs(t, result.failed[1], errs.ErrEtcdTxnConflict)
-	require.Equal(t, []uint32{2}, result.completed)
-	value, rev := readStarterSafePoint(t, m, 1)
-	require.EqualValues(t, 120, value)
-	require.LessOrEqual(t, rev, cutoff)
-	value, rev = readStarterSafePoint(t, m, 2)
-	require.EqualValues(t, 120, value)
-	require.Greater(t, rev, cutoff)
+	require.Equal(t, 3, routeChanges)
+	require.Empty(t, result.completed)
+	for _, id := range []uint32{1, 2} {
+		require.ErrorIs(t, result.failed[id], errs.ErrEtcdTxnConflict)
+		value, rev := readStarterSafePoint(t, m, id)
+		require.EqualValues(t, 120, value)
+		require.LessOrEqual(t, rev, cutoff)
+	}
+	require.Empty(t, logs.FilterMessage("Starter GC migration conflict").All())
+	require.Empty(t, logs.FilterMessage("Starter GC migration conflict with uncertain commit outcome").All())
 
-	// Only keyspace 2's fallback committed. Failed batch and individual CAS
-	// attempts for keyspace 1 must not report a stale conflict.
+	// Both fallbacks commit and report their values once the route stabilizes.
+	result, err = m.loadGCStateBatch(t.Context(), m.activeGeneration.Load(), gcStateLoadCandidates(1, 2))
+	require.NoError(t, err)
+	require.Empty(t, result.failed)
+	require.Equal(t, []uint32{1, 2}, result.completed)
 	conflicts := logs.FilterMessage("Starter GC migration conflict").All()
-	require.Len(t, conflicts, 1)
+	require.Len(t, conflicts, 2)
 	require.Equal(t, map[string]any{
 		"keyspace-id": uint32(2), "meta-service-group-id": "group1",
 		"local-txn-safe-point": uint64(120), "local-gc-safe-point": uint64(0),
 		"frozen-txn-safe-point": uint64(102), "chosen-txn-safe-point": uint64(120),
-	}, conflicts[0].ContextMap())
+	}, conflicts[1].ContextMap())
 }
 
 func TestStarterGCMigrationSameBackend(t *testing.T) {
 	ctx := t.Context()
-	manager, dest, _, cutoff := newStarterGCFixture(t, 2, func(dest, _ *clientv3.Client) {
-		// Keyspace 1 uses the default PD backend. Keyspace 2 uses an explicit group on the same etcd.
-		setStarterKeyspaceConfig(t, dest, 1, keyspace.MetaServiceGroupIDKey, "")
+	manager, dest, _, cutoff := newStarterGCFixture(t, 3, func(dest, _ *clientv3.Client) {
+		// Keyspaces 1 and 2 use the PD default. Keyspace 3 uses an explicit group on the same etcd.
+		deleteStarterKeyspaceConfig(t, dest, 1, keyspace.MetaServiceGroupIDKey)
+		setStarterKeyspaceConfig(t, dest, 2, keyspace.MetaServiceGroupIDKey, "")
 	}, nil)
 	groups := map[string]string{"group1": strings.Join(dest.Endpoints(), ",")}
 	cfg, err := json.Marshal(&config.Config{Keyspace: config.KeyspaceConfig{MetaServiceGroups: groups}})
@@ -370,12 +459,12 @@ func TestStarterGCMigrationSameBackend(t *testing.T) {
 		return revision
 	}
 	first := make(map[uint32]int64)
-	for _, id := range []uint32{1, 2} {
+	for _, id := range []uint32{1, 2, 3} {
 		first[id] = readRevision(id)
 		require.Greater(t, first[id], cutoff)
 	}
 
-	// The next leader must serve both values without contacting the group or writing T again.
+	// The next leader must serve the values without contacting the group or writing T again.
 	require.NoError(t, manager.metaServiceGroupManager.Close())
 	t.Cleanup(manager.OnNodeBecomesLeader())
 	for id, revision := range first {
@@ -471,17 +560,27 @@ func TestStarterGCMigrationStaleScope(t *testing.T) {
 
 func setStarterKeyspaceConfig(t *testing.T, dest *clientv3.Client, id uint32, field, value string) {
 	t.Helper()
+	updateStarterKeyspaceConfig(t, dest, id, func(keyspaceConfig map[string]string) {
+		keyspaceConfig[field] = value
+	})
+}
+
+func deleteStarterKeyspaceConfig(t *testing.T, dest *clientv3.Client, id uint32, field string) {
+	t.Helper()
+	updateStarterKeyspaceConfig(t, dest, id, func(keyspaceConfig map[string]string) {
+		delete(keyspaceConfig, field)
+	})
+}
+
+func updateStarterKeyspaceConfig(t *testing.T, dest *clientv3.Client, id uint32, update func(map[string]string)) {
+	t.Helper()
 	key := keypath.KeyspaceMetaPath(id)
 	resp, err := dest.Get(t.Context(), key)
 	require.NoError(t, err)
 	require.Len(t, resp.Kvs, 1)
 	var meta keyspacepb.KeyspaceMeta
 	require.NoError(t, proto.Unmarshal(resp.Kvs[0].Value, &meta))
-	if value == "" {
-		delete(meta.Config, field)
-	} else {
-		meta.Config[field] = value
-	}
+	update(meta.Config)
 	data, err := proto.Marshal(&meta)
 	require.NoError(t, err)
 	_, err = dest.Put(t.Context(), key, string(data))
@@ -567,7 +666,7 @@ func TestStarterGCMigrationMixedLoadBatch(t *testing.T) {
 		// Keyspaces 1 and 2 use the second group. Keyspace 7 uses the PD default.
 		setStarterKeyspaceConfig(t, dest, 1, keyspace.MetaServiceGroupIDKey, "group2")
 		setStarterKeyspaceConfig(t, dest, 2, keyspace.MetaServiceGroupIDKey, "group2")
-		setStarterKeyspaceConfig(t, dest, 7, keyspace.MetaServiceGroupIDKey, "")
+		deleteStarterKeyspaceConfig(t, dest, 7, keyspace.MetaServiceGroupIDKey)
 		_, err := source.Put(ctx, keypath.TxnSafePointPath(5), "invalid")
 		require.NoError(t, err)
 	}, func(cfg *clientv3.Config) {
