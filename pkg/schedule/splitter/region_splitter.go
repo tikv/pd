@@ -84,7 +84,7 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 			break
 		}
 		unprocessedKeys = r.splitRegionsByKeys(ctx, unprocessedKeys, newRegions)
-		if len(unprocessedKeys) < 1 || i == retryLimit || ctx.Err() != nil {
+		if len(unprocessedKeys) < 1 || i == retryLimit {
 			break
 		}
 		// sleep for a while between each retry
@@ -99,7 +99,7 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 	for regionID := range newRegions {
 		returned = append(returned, regionID)
 	}
-	return 100 - len(unprocessedKeys)*100/len(splitKeys), returned
+	return (len(splitKeys) - len(unprocessedKeys)) * 100 / len(splitKeys), returned
 }
 
 func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
