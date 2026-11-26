@@ -559,12 +559,17 @@ func isHigherPriorityOperator(new, old *Operator) bool {
 
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
+	kind := op.SchedulerKind()
 
+	// Increment before publishing so any concurrent removal after publish
+	// cannot decrement before inc and leave oc.counts unbalanced.
+	oc.counts.inc(kind)
 	old, loaded := oc.operators.LoadOrStore(regionID, op)
 	if loaded {
 		// If there is an old operator and it has lower priority, replace it
 		oldOp := old.(*Operator)
 		if !isHigherPriorityOperator(op, oldOp) {
+			oc.counts.dec(kind)
 			log.Debug("operator already exists with higher or equal priority",
 				zap.Uint64("region-id", regionID),
 				zap.Reflect("old", oldOp),
@@ -576,6 +581,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		}
 		// replace old operator
 		if !oc.operators.CompareAndSwap(regionID, oldOp, op) {
+			oc.counts.dec(kind)
 			_ = op.Cancel()
 			oc.buryOperator(op)
 			log.Debug("operator changed during replace, skip this add",
@@ -589,16 +595,21 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		if oldOp.HasRelatedMergeRegion() {
 			oc.removeRelatedMergeOperator(oldOp)
 		}
-		_ = oldOp.Replace()
+		if !oldOp.Replace() {
+			_ = oldOp.Cancel(AlreadyExist)
+		}
 		oc.buryOperator(oldOp)
 	}
 
 	failpoint.InjectCall("afterPublishOperator")
 
-	oc.counts.inc(op.SchedulerKind())
 	// Now start the operator after successfully adding it to the map
 	if !op.Start() {
-		_ = oc.removeOperatorWithoutBury(op)
+		// If a concurrent remover already deleted op after publish, it already
+		// balanced oc.counts and buried op.
+		if !oc.removeOperatorWithoutBury(op) {
+			return false
+		}
 		_ = op.Cancel(StartFailed)
 		oc.buryOperator(op)
 		log.Warn("adding operator with unexpected status",

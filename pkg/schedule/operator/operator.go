@@ -149,7 +149,11 @@ func (o *Operator) LimitTimeout(limit time.Duration) {
 	o.timeout = min(o.timeout, limit)
 }
 
-// Sync some attribute with the given timeout.
+// Sync copies other's timeout to o and establishes the shared merge-pair
+// identity and mutual RelatedMergeRegion metadata required by Controller
+// admission and cleanup. Callers must call Sync before submitting either
+// operator to Controller and must not modify the pairing while either operator
+// is in use.
 func (o *Operator) Sync(other *Operator) {
 	o.timeout = other.timeout
 	pair := &mergePairToken{}

@@ -20,10 +20,12 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -1642,5 +1644,139 @@ func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOp
 		re.Nil(controller.GetOperator(source.GetID()))
 		re.Nil(controller.GetOperator(target.GetID()))
 		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+	})
+
+	suite.Run("replacing partner after publishing second merge operator before start keeps counts balanced", func() {
+		re := suite.Require()
+		unexpectedFP := "github.com/tikv/pd/pkg/schedule/operator/unexpectedOperator"
+		prevStatus, statusErr := failpoint.Status(unexpectedFP)
+		re.NoError(failpoint.Enable(unexpectedFP, "return(true)"))
+		defer func() {
+			if statusErr != nil {
+				re.NoError(failpoint.Disable(unexpectedFP))
+			} else {
+				re.NoError(failpoint.Enable(unexpectedFP, prevStatus))
+			}
+		}()
+
+		cluster, controller, source, target := newSetup()
+		mergeOps, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+		re.NoError(err)
+		opA, opB := mergeOps[0], mergeOps[1]
+		replacement := NewOperator("admin-transfer", "test", source.GetID(), source.GetRegionEpoch(), OpAdmin, 10, TransferLeader{FromStore: 1, ToStore: 2})
+
+		cancelBefore := promtestutil.ToFloat64(operatorCounter.WithLabelValues(opB.Desc(), "cancel"))
+		unexpectedBefore := promtestutil.ToFloat64(operatorCounter.WithLabelValues(opB.Desc(), "unexpected"))
+
+		var publishCount atomic.Int32
+		var replaceOK bool
+		publishFP := "github.com/tikv/pd/pkg/schedule/operator/afterPublishOperator"
+		re.NoError(failpoint.EnableCall(publishFP, func() {
+			if publishCount.Add(1) != 2 {
+				return
+			}
+			re.Equal(CREATED, opB.Status())
+			re.Same(opB, controller.GetOperator(target.GetID()))
+			var wg sync.WaitGroup
+			wg.Go(func() {
+				replaceOK = controller.AddOperator(replacement)
+			})
+			wg.Wait()
+		}))
+		defer func() {
+			re.NoError(failpoint.Disable(publishFP))
+		}()
+
+		re.Equal(2, controller.AddWaitingOperator(mergeOps...))
+		re.True(replaceOK)
+		re.Same(replacement, controller.GetOperator(source.GetID()))
+		re.Nil(controller.GetOperator(target.GetID()))
+		re.Equal(STARTED, replacement.Status())
+		re.Equal(REPLACED, opA.Status())
+		re.Equal(CANCELED, opB.Status())
+		reason, ok := opB.GetAdditionalInfo(cancelReason)
+		re.True(ok)
+		re.Equal(string(RelatedMergeRegion), reason)
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		re.Equal(uint64(1), controller.OperatorCount(OpAdmin))
+		re.Equal(cancelBefore+1, promtestutil.ToFloat64(operatorCounter.WithLabelValues(opB.Desc(), "cancel")))
+		re.Equal(unexpectedBefore, promtestutil.ToFloat64(operatorCounter.WithLabelValues(opB.Desc(), "unexpected")))
+	})
+
+	suite.Run("replacing created second merge operator directly after publish cancels and balances counts", func() {
+		re := suite.Require()
+		unexpectedFP := "github.com/tikv/pd/pkg/schedule/operator/unexpectedOperator"
+		prevStatus, statusErr := failpoint.Status(unexpectedFP)
+		re.NoError(failpoint.Enable(unexpectedFP, "return(true)"))
+		defer func() {
+			if statusErr != nil {
+				re.NoError(failpoint.Disable(unexpectedFP))
+			} else {
+				re.NoError(failpoint.Enable(unexpectedFP, prevStatus))
+			}
+		}()
+
+		cluster, controller, source, target := newSetup()
+		mergeOps, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+		re.NoError(err)
+		opA, opB := mergeOps[0], mergeOps[1]
+		replacement := NewOperator("admin-transfer", "test", target.GetID(), target.GetRegionEpoch(), OpAdmin, 10, TransferLeader{FromStore: 1, ToStore: 2})
+
+		cancelBefore := promtestutil.ToFloat64(operatorCounter.WithLabelValues(opB.Desc(), "cancel"))
+		unexpectedBefore := promtestutil.ToFloat64(operatorCounter.WithLabelValues(opB.Desc(), "unexpected"))
+
+		var publishCount atomic.Int32
+		var replaceOK bool
+		publishFP := "github.com/tikv/pd/pkg/schedule/operator/afterPublishOperator"
+		re.NoError(failpoint.EnableCall(publishFP, func() {
+			if publishCount.Add(1) != 2 {
+				return
+			}
+			re.Equal(CREATED, opB.Status())
+			re.Same(opB, controller.GetOperator(target.GetID()))
+			var wg sync.WaitGroup
+			wg.Go(func() {
+				replaceOK = controller.AddOperator(replacement)
+			})
+			wg.Wait()
+		}))
+		defer func() {
+			re.NoError(failpoint.Disable(publishFP))
+		}()
+
+		re.Equal(2, controller.AddWaitingOperator(mergeOps...))
+		re.True(replaceOK)
+		re.Nil(controller.GetOperator(source.GetID()))
+		re.Same(replacement, controller.GetOperator(target.GetID()))
+		re.Equal(STARTED, replacement.Status())
+		re.Equal(CANCELED, opA.Status())
+		re.Equal(CANCELED, opB.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		re.Equal(uint64(1), controller.OperatorCount(OpAdmin))
+		re.Equal(cancelBefore+2, promtestutil.ToFloat64(operatorCounter.WithLabelValues(opB.Desc(), "cancel")))
+		re.Equal(unexpectedBefore, promtestutil.ToFloat64(operatorCounter.WithLabelValues(opB.Desc(), "unexpected")))
+	})
+
+	suite.Run("addOperatorInner still reports unexpected status when operator was pre-canceled", func() {
+		re := suite.Require()
+		unexpectedFP := "github.com/tikv/pd/pkg/schedule/operator/unexpectedOperator"
+		prevStatus, statusErr := failpoint.Status(unexpectedFP)
+		if statusErr == nil {
+			re.NoError(failpoint.Disable(unexpectedFP))
+			defer func() {
+				re.NoError(failpoint.Enable(unexpectedFP, prevStatus))
+			}()
+		}
+
+		_, controller, source, _ := newSetup()
+		op := NewOperator("pre-canceled", "test", source.GetID(), source.GetRegionEpoch(), OpLeader, 10, TransferLeader{FromStore: 1, ToStore: 2})
+		re.True(op.Cancel(AdminStop))
+
+		unexpectedBefore := promtestutil.ToFloat64(operatorCounter.WithLabelValues(op.Desc(), "unexpected"))
+		re.False(controller.addOperatorInner(op))
+		re.Nil(controller.GetOperator(source.GetID()))
+		re.Equal(uint64(0), controller.OperatorCount(OpLeader))
+		re.NotNil(controller.records.Get(source.GetID()))
+		re.Equal(unexpectedBefore+1, promtestutil.ToFloat64(operatorCounter.WithLabelValues(op.Desc(), "unexpected")))
 	})
 }
