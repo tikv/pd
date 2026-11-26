@@ -593,31 +593,35 @@ func TestHelperFakeServer(_ *testing.T) {
 }
 
 func TestClusterIsolationWithIdenticalTagDifferentTiUPHome(t *testing.T) {
-	re := require.New(t)
+	runCase := func(t *testing.T, spacedPaths bool, procReader func() ([]procInfo, error), startTimeReader func(int) uint64) {
+		re := require.New(t)
 
-	repoDir := t.TempDir()
-	re.NoError(os.MkdirAll(filepath.Join(repoDir, "bin"), 0750))
-	re.NoError(os.MkdirAll(filepath.Join(repoDir, "third_bin"), 0750))
-	for _, rel := range []string{"bin/pd-server", "third_bin/tikv-server"} {
-		re.NoError(os.WriteFile(filepath.Join(repoDir, rel), []byte("#!/bin/sh\n"), 0600))
-	}
+		repoDir := t.TempDir()
+		re.NoError(os.MkdirAll(filepath.Join(repoDir, "bin"), 0750))
+		re.NoError(os.MkdirAll(filepath.Join(repoDir, "third_bin"), 0750))
+		for _, rel := range []string{"bin/pd-server", "third_bin/tikv-server"} {
+			re.NoError(os.WriteFile(filepath.Join(repoDir, rel), []byte("#!/bin/sh\n"), 0600))
+		}
 
-	// Deliberately force an identical tag across two clusters with different TIUP_HOME,
-	// including a TIUP_HOME path containing spaces.
-	sharedTag := fmt.Sprintf("pd_real_cluster_test_iso_%d_%d", os.Getpid(), time.Now().UnixNano())
-	tiupHome1 := filepath.Join(t.TempDir(), "tiup home one")
-	tiupHome2 := filepath.Join(t.TempDir(), "tiup home two")
-	dataDir1 := filepath.Join(tiupHome1, "data", sharedTag)
-	dataDir2 := filepath.Join(tiupHome2, "data", sharedTag)
-	re.NoError(os.MkdirAll(filepath.Join(dataDir1, "pd-0"), 0750))
-	re.NoError(os.MkdirAll(filepath.Join(dataDir2, "pd-0"), 0750))
-	pdLog1 := filepath.Join(dataDir1, "pd-0", "pd.log")
-	re.NoError(os.WriteFile(pdLog1, []byte("pd log line\n"), 0600))
+		// Deliberately force an identical tag across two clusters with different TIUP_HOME.
+		sharedTag := fmt.Sprintf("pd_real_cluster_test_iso_%d_%d", os.Getpid(), time.Now().UnixNano())
+		dir1Name, dir2Name := "tiup-home-one", "tiup-home-two"
+		if spacedPaths {
+			dir1Name, dir2Name = "tiup home one", "tiup home two"
+		}
+		tiupHome1 := filepath.Join(t.TempDir(), dir1Name)
+		tiupHome2 := filepath.Join(t.TempDir(), dir2Name)
+		dataDir1 := filepath.Join(tiupHome1, "data", sharedTag)
+		dataDir2 := filepath.Join(tiupHome2, "data", sharedTag)
+		re.NoError(os.MkdirAll(filepath.Join(dataDir1, "pd-0"), 0750))
+		re.NoError(os.MkdirAll(filepath.Join(dataDir2, "pd-0"), 0750))
+		pdLog1 := filepath.Join(dataDir1, "pd-0", "pd.log")
+		re.NoError(os.WriteFile(pdLog1, []byte("pd log line\n"), 0600))
 
-	makeFakeTiUP := func(home, pidFile string) string {
-		binPath := filepath.Join(home, "bin", "tiup")
-		re.NoError(os.MkdirAll(filepath.Dir(binPath), 0750))
-		script := fmt.Sprintf(`#!/bin/sh
+		makeFakeTiUP := func(home, pidFile string) string {
+			binPath := filepath.Join(home, "bin", "tiup")
+			re.NoError(os.MkdirAll(filepath.Dir(binPath), 0750))
+			script := fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   echo "$TIUP_HOME/components/playground/v1.17.1/tiup-playground"
   exit 0
@@ -636,130 +640,170 @@ if [ "$1" = "playground" ] && [ "$2" = "display" ]; then
 fi
 exit 1
 `, pidFile)
-		re.NoError(os.WriteFile(binPath, []byte(script), 0600))
-		re.NoError(os.Chmod(binPath, 0700)) //nolint:gosec
-		return binPath
-	}
-
-	startFakeServer := func(binaryName string, extraArgs ...string) int {
-		args := append([]string{filepath.Join(repoDir, "bin", binaryName), "-test.run=^TestHelperFakeServer$", "--"}, extraArgs...)
-		cmd := &exec.Cmd{
-			Path:        os.Args[0],
-			Args:        args,
-			Env:         append(os.Environ(), "PD_TEST_HELPER_FAKE_SERVER=1"),
-			SysProcAttr: &syscall.SysProcAttr{Setpgid: true},
+			re.NoError(os.WriteFile(binPath, []byte(script), 0600))
+			re.NoError(os.Chmod(binPath, 0700)) //nolint:gosec
+			return binPath
 		}
-		re.NoError(cmd.Start())
+
+		startFakeServer := func(binaryName string, extraArgs ...string) int {
+			args := append([]string{filepath.Join(repoDir, "bin", binaryName), "-test.run=^TestHelperFakeServer$", "--"}, extraArgs...)
+			cmd := &exec.Cmd{
+				Path:        os.Args[0],
+				Args:        args,
+				Env:         append(os.Environ(), "PD_TEST_HELPER_FAKE_SERVER=1"),
+				SysProcAttr: &syscall.SysProcAttr{Setpgid: true},
+			}
+			re.NoError(cmd.Start())
+			go func() {
+				_ = cmd.Wait()
+			}()
+			t.Cleanup(func() {
+				if isProcessRunning(cmd.Process.Pid) {
+					_ = syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)
+				}
+			})
+			return cmd.Process.Pid
+		}
+
+		origRepo, origBin, origLogDir := realClusterRepoRoot, tiupBin, playgroundLogDir
+		origTimeout, origPoll := clusterWaitTimeout, clusterPollPeriod
+		origList := listProcessesFn
+		origStartTime := readProcStartTimeFn
+		t.Cleanup(func() {
+			realClusterRepoRoot, tiupBin, playgroundLogDir = origRepo, origBin, origLogDir
+			clusterWaitTimeout, clusterPollPeriod = origTimeout, origPoll
+			listProcessesFn = origList
+			readProcStartTimeFn = origStartTime
+		})
+		realClusterRepoRoot = repoDir
+		playgroundLogDir = t.TempDir()
+		clusterWaitTimeout = 2 * time.Second
+		clusterPollPeriod = 40 * time.Millisecond
+		listProcessesFn = procReader
+		readProcStartTimeFn = startTimeReader
+
+		pidFile1 := filepath.Join(t.TempDir(), "c1.pid")
+		pidFile2 := filepath.Join(t.TempDir(), "c2.pid")
+		fakeTiUP1 := makeFakeTiUP(tiupHome1, pidFile1)
+		fakeTiUP2 := makeFakeTiUP(tiupHome2, pidFile2)
+
+		tiupBin = fakeTiUP1
+		t.Setenv("TIUP_HOME", tiupHome1)
+		c1 := newCluster(re, sharedTag, dataDir1, "tikv-slim", map[string]int{"pd": 1, "kv": 1})
+		defer c1.stop()
+		c1.start()
+
+		tiupBin = fakeTiUP2
+		t.Setenv("TIUP_HOME", tiupHome2)
+		c2 := newCluster(re, sharedTag, dataDir2, "tikv-slim", map[string]int{"pd": 1, "kv": 1})
+		defer c2.stop()
+		c2.start()
+
+		// Spawn escaped (independent PGID & PPID) fake pd-server and tikv-server for both clusters.
+		// Cluster 2's tikv-server also borrows Cluster 1's --config while keeping its own --data-dir.
+		pd1PID := startFakeServer("pd-server", "--data-dir="+filepath.Join(dataDir1, "pd-0", "data"))
+		kv1PID := startFakeServer("tikv-server", "--pd-endpoints=http://127.0.0.1:23791", "--data-dir="+filepath.Join(dataDir1, "tikv-0", "data"))
+		pd2PID := startFakeServer("pd-server", "--data-dir="+filepath.Join(dataDir2, "pd-0", "data"))
+		kv2PID := startFakeServer(
+			"tikv-server",
+			"--pd-endpoints=http://127.0.0.1:23792",
+			"--config="+filepath.Join(dataDir1, "tikv-0", "tikv.toml"),
+			"--data-dir="+filepath.Join(dataDir2, "tikv-0", "data"),
+		)
+
+		// Spawn an independent read-only "tiup playground display --tag <sharedTag>" in its own PGID.
+		displayPID := startFakeServer("tiup", "playground", "display", "--tag", sharedTag)
+
+		// Spawn an independent read-only log viewer referencing Cluster 1's dataDir.
+		viewerCmd := exec.Command("tail", "-f", pdLog1) //nolint:gosec
+		re.NoError(viewerCmd.Start())
+		viewerPID := viewerCmd.Process.Pid
 		go func() {
-			_ = cmd.Wait()
+			_ = viewerCmd.Wait()
 		}()
 		t.Cleanup(func() {
-			if isProcessRunning(cmd.Process.Pid) {
-				_ = syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)
+			if isProcessRunning(viewerPID) {
+				_ = syscall.Kill(viewerPID, syscall.SIGKILL)
 			}
 		})
-		return cmd.Process.Pid
-	}
 
-	origRepo, origBin, origLogDir := realClusterRepoRoot, tiupBin, playgroundLogDir
-	origTimeout, origPoll := clusterWaitTimeout, clusterPollPeriod
-	t.Cleanup(func() {
-		realClusterRepoRoot, tiupBin, playgroundLogDir = origRepo, origBin, origLogDir
-		clusterWaitTimeout, clusterPollPeriod = origTimeout, origPoll
-	})
-	realClusterRepoRoot = repoDir
-	playgroundLogDir = t.TempDir()
-	clusterWaitTimeout = 2 * time.Second
-	clusterPollPeriod = 40 * time.Millisecond
-
-	pidFile1 := filepath.Join(t.TempDir(), "c1.pid")
-	pidFile2 := filepath.Join(t.TempDir(), "c2.pid")
-	fakeTiUP1 := makeFakeTiUP(tiupHome1, pidFile1)
-	fakeTiUP2 := makeFakeTiUP(tiupHome2, pidFile2)
-
-	tiupBin = fakeTiUP1
-	t.Setenv("TIUP_HOME", tiupHome1)
-	c1 := newCluster(re, sharedTag, dataDir1, "tikv-slim", map[string]int{"pd": 1, "kv": 1})
-	defer c1.stop()
-	c1.start()
-
-	tiupBin = fakeTiUP2
-	t.Setenv("TIUP_HOME", tiupHome2)
-	c2 := newCluster(re, sharedTag, dataDir2, "tikv-slim", map[string]int{"pd": 1, "kv": 1})
-	defer c2.stop()
-	c2.start()
-
-	// Spawn escaped (independent PGID & PPID) fake pd-server and tikv-server for both clusters.
-	// Cluster 2's tikv-server also borrows Cluster 1's --config while keeping its own --data-dir.
-	pd1PID := startFakeServer("pd-server", "--data-dir="+filepath.Join(dataDir1, "pd-0", "data"))
-	kv1PID := startFakeServer("tikv-server", "--pd-endpoints=http://127.0.0.1:23791", "--data-dir="+filepath.Join(dataDir1, "tikv-0", "data"))
-	pd2PID := startFakeServer("pd-server", "--data-dir="+filepath.Join(dataDir2, "pd-0", "data"))
-	kv2PID := startFakeServer(
-		"tikv-server",
-		"--pd-endpoints=http://127.0.0.1:23792",
-		"--config="+filepath.Join(dataDir1, "tikv-0", "tikv.toml"),
-		"--data-dir="+filepath.Join(dataDir2, "tikv-0", "data"),
-	)
-
-	// Spawn an independent read-only "tiup playground display --tag <sharedTag>" in its own PGID.
-	displayPID := startFakeServer("tiup", "playground", "display", "--tag", sharedTag)
-
-	// Spawn an independent read-only log viewer referencing Cluster 1's dataDir.
-	viewerCmd := exec.Command("tail", "-f", pdLog1) //nolint:gosec
-	re.NoError(viewerCmd.Start())
-	viewerPID := viewerCmd.Process.Pid
-	go func() {
-		_ = viewerCmd.Wait()
-	}()
-	t.Cleanup(func() {
-		if isProcessRunning(viewerPID) {
-			_ = syscall.Kill(viewerPID, syscall.SIGKILL)
+		readPID := func(path string) int {
+			var pid int
+			re.Eventually(func() bool {
+				b, err := os.ReadFile(path) //nolint:gosec
+				if err != nil {
+					return false
+				}
+				v, err := strconv.Atoi(strings.TrimSpace(string(b)))
+				if err != nil {
+					return false
+				}
+				pid = v
+				return true
+			}, time.Second, 20*time.Millisecond)
+			return pid
 		}
-	})
+		tiup1PID := readPID(pidFile1)
+		tiup2PID := readPID(pidFile2)
 
-	readPID := func(path string) int {
-		var pid int
+		// Endpoint discovery must isolate strictly by cluster dataDir even with identical tags.
+		re.Equal([]string{"http://127.0.0.1:23791"}, c1.pdEndpoints())
+		re.Equal([]string{"http://127.0.0.1:23792"}, c2.pdEndpoints())
+
+		// Stopping Cluster 1 must kill its own tiup and escaped pd-server/tikv-server,
+		// while sparing the independent tiup display, read-only log viewer, and all of Cluster 2's processes.
+		c1.stop()
 		re.Eventually(func() bool {
-			b, err := os.ReadFile(path) //nolint:gosec
-			if err != nil {
-				return false
-			}
-			v, err := strconv.Atoi(strings.TrimSpace(string(b)))
-			if err != nil {
-				return false
-			}
-			pid = v
-			return true
-		}, time.Second, 20*time.Millisecond)
-		return pid
+			return !isProcessRunning(tiup1PID) && !isProcessRunning(pd1PID) && !isProcessRunning(kv1PID)
+		}, 2*time.Second, 20*time.Millisecond)
+		re.True(isProcessRunning(displayPID))
+		re.True(isProcessRunning(viewerPID))
+		re.True(isProcessRunning(tiup2PID))
+		re.True(isProcessRunning(pd2PID))
+		re.True(isProcessRunning(kv2PID))
+		re.Equal([]string{"http://127.0.0.1:23792"}, c2.pdEndpoints())
+
+		// Stopping Cluster 2 must kill all of Cluster 2's processes and still spare display and log viewer.
+		c2.stop()
+		re.Eventually(func() bool {
+			return !isProcessRunning(tiup2PID) && !isProcessRunning(pd2PID) && !isProcessRunning(kv2PID)
+		}, 2*time.Second, 20*time.Millisecond)
+		re.True(isProcessRunning(displayPID))
+		re.True(isProcessRunning(viewerPID))
 	}
-	tiup1PID := readPID(pidFile1)
-	tiup2PID := readPID(pidFile2)
 
-	// Endpoint discovery must isolate strictly by cluster dataDir even with identical tags and spaced TIUP_HOME.
-	re.Equal([]string{"http://127.0.0.1:23791"}, c1.pdEndpoints())
-	re.Equal([]string{"http://127.0.0.1:23792"}, c2.pdEndpoints())
+	noProcStartTime := func(int) uint64 { return 0 }
+	t.Run("default/plain_paths", func(t *testing.T) {
+		runCase(t, false, listProcesses, readProcStartTime)
+	})
+	t.Run("default/spaced_paths", func(t *testing.T) {
+		runCase(t, true, listProcesses, readProcStartTime)
+	})
+	t.Run("ps_fallback/plain_paths", func(t *testing.T) {
+		runCase(t, false, listProcessesFromPS, noProcStartTime)
+	})
+	t.Run("ps_fallback/spaced_paths", func(t *testing.T) {
+		runCase(t, true, listProcessesFromPS, noProcStartTime)
+	})
+}
 
-	// Stopping Cluster 1 must kill its own tiup and escaped pd-server/tikv-server,
-	// while sparing the independent tiup display, read-only log viewer, and all of Cluster 2's processes.
-	c1.stop()
-	re.Eventually(func() bool {
-		return !isProcessRunning(tiup1PID) && !isProcessRunning(pd1PID) && !isProcessRunning(kv1PID)
-	}, 2*time.Second, 20*time.Millisecond)
-	re.True(isProcessRunning(displayPID))
-	re.True(isProcessRunning(viewerPID))
-	re.True(isProcessRunning(tiup2PID))
-	re.True(isProcessRunning(pd2PID))
-	re.True(isProcessRunning(kv2PID))
-	re.Equal([]string{"http://127.0.0.1:23792"}, c2.pdEndpoints())
+func TestParsePSOutputWithSpaces(t *testing.T) {
+	re := require.New(t)
 
-	// Stopping Cluster 2 must kill all of Cluster 2's processes and still spare display and log viewer.
-	c2.stop()
-	re.Eventually(func() bool {
-		return !isProcessRunning(tiup2PID) && !isProcessRunning(pd2PID) && !isProcessRunning(kv2PID)
-	}, 2*time.Second, 20*time.Millisecond)
-	re.True(isProcessRunning(displayPID))
-	re.True(isProcessRunning(viewerPID))
+	out := strings.Join([]string{
+		"1001 1 1001 Ssl /tmp/tiup home/bin/tikv-server --pd-endpoints=http://127.0.0.1:23791 --data-dir=/tmp/tiup home/data/tag1/tikv-0/data",
+		"1002 1 1002 S /tmp/tiup home/bin/tikv-server --pd-endpoints http://127.0.0.1:23792 --data-dir /tmp/tiup home/data/tag2/tikv-0/data",
+		"1003 1 1003 S sh /tmp/tiup home/bin/pd-server --data-dir=/tmp/tiup home/data/tag1/pd-0/data",
+		"1004 1 1004 S /tmp/repo/bin/tikv-server -test.run=^TestHelperFakeServer$ -- --pd-endpoints=http://127.0.0.1:23793 --data-dir=/tmp/tiup home/data/tag3/tikv-0/data",
+	}, "\n")
+
+	procs := parsePSOutput(out)
+	re.Len(procs, 4)
+
+	re.Equal([]string{"http://127.0.0.1:23791"}, selectPDEndpoints(procs, "/tmp/tiup home/data/tag1", 0, 0, os.Getpid()))
+	re.Equal([]string{"http://127.0.0.1:23792"}, selectPDEndpoints(procs, "/tmp/tiup home/data/tag2", 0, 0, os.Getpid()))
+	re.Equal([]string{"http://127.0.0.1:23793"}, selectPDEndpoints(procs, "/tmp/tiup home/data/tag3", 0, 0, os.Getpid()))
+	re.Equal([]int{1001, 1003}, selectOwnedPIDs(procs, "/tmp/tiup home/data/tag1", 0, 0, os.Getpid()))
 }
 
 func TestClusterWithSpacesInTiUPHome(t *testing.T) {
@@ -1468,6 +1512,92 @@ exit 1
 		recorded := append([]signalCall(nil), calls...)
 		mu.Unlock()
 		re.Empty(recorded, "must not signal an unrelated process group that reused PGID")
+	})
+
+	t.Run("keeps tracking owned child reparented to PID 1 during shutdown", func(t *testing.T) {
+		re := require.New(t)
+		origKill := killProcess
+		origList := listProcessesFn
+		origGrace := clusterStopGraceTimeout
+		t.Cleanup(func() {
+			killProcess = origKill
+			listProcessesFn = origList
+			clusterStopGraceTimeout = origGrace
+		})
+		clusterStopGraceTimeout = 100 * time.Millisecond
+
+		var mu sync.Mutex
+		var calls []signalCall
+		var childKilled bool
+		killProcess = func(pid int, sig syscall.Signal) error {
+			mu.Lock()
+			calls = append(calls, signalCall{pid: pid, sig: sig})
+			if pid == 66666 && sig == syscall.SIGKILL {
+				childKilled = true
+			}
+			mu.Unlock()
+			return nil
+		}
+
+		var scanCount int
+		listProcessesFn = func() ([]procInfo, error) {
+			mu.Lock()
+			scanCount++
+			n := scanCount
+			killed := childKilled
+			mu.Unlock()
+			if n == 1 {
+				// Scan 1: launcher 42001 is alive and owns helper child 66666 in its own PGID.
+				return []procInfo{
+					{
+						pid: 42001, ppid: os.Getpid(), pgid: 42001, startTime: 1000, state: 'S',
+						args: []string{"tiup", "playground", "nightly", "--tag", "reparent_test"},
+					},
+					{
+						pid: 66666, ppid: 42001, pgid: 66666, startTime: 1050, state: 'S',
+						args: []string{"/usr/bin/helper-worker"},
+					},
+				}, nil
+			}
+			// Subsequent scans: launcher exited (zombie), helper 66666 was reparented to PID 1
+			// with the same PID and startTime, ignoring SIGTERM until SIGKILL arrives.
+			procs := []procInfo{
+				{
+					pid: 42001, ppid: os.Getpid(), pgid: 42001, startTime: 1000, state: 'Z',
+				},
+			}
+			if !killed {
+				procs = append(procs, procInfo{
+					pid: 66666, ppid: 1, pgid: 66666, startTime: 1050, state: 'S',
+					args: []string{"/usr/bin/helper-worker"},
+				})
+			}
+			return procs, nil
+		}
+
+		c := &cluster{
+			tag:               "reparent_test",
+			datadir:           "/tmp/tiup-reparent-test/data/reparent_test",
+			pgid:              42001,
+			launcherStartTime: 1000,
+		}
+		c.stop()
+
+		mu.Lock()
+		recorded := append([]signalCall(nil), calls...)
+		mu.Unlock()
+
+		var sawChildTerm, sawChildKill bool
+		for _, call := range recorded {
+			if call.pid == 66666 && call.sig == syscall.SIGTERM {
+				sawChildTerm = true
+			}
+			if call.pid == 66666 && call.sig == syscall.SIGKILL {
+				sawChildKill = true
+			}
+		}
+		re.True(sawChildTerm, "expected initial SIGTERM for owned helper child")
+		re.True(sawChildKill, "expected SIGKILL for reparented helper child with unchanged identity")
 	})
 }
 

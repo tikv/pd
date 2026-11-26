@@ -125,6 +125,7 @@ var (
 	tiupInstallTimeout      = 3 * time.Minute
 	killProcess             = syscall.Kill
 	listProcessesFn         = listProcesses
+	readProcStartTimeFn     = readProcStartTime
 )
 
 func resolveTiUPBin() string {
@@ -221,7 +222,8 @@ func (c *cluster) stop() {
 	if err != nil {
 		log.Warn("failed to collect pids", zap.String("tag", c.tag), zap.Error(err))
 	}
-	owned := selectOwnedProcs(procs, c.datadir, pgid, launcherStartTime, selfPID)
+	tracked := make(map[int]procInfo)
+	owned := mergeOwnedProcs(tracked, procs, selectOwnedProcs(procs, c.datadir, pgid, launcherStartTime, selfPID))
 	hasGroupMembers := hasLivePGIDMembers(procs, pgid, launcherStartTime, selfPID)
 
 	if pgid > 0 && (hasGroupMembers || (err != nil && cmd != nil)) {
@@ -237,22 +239,24 @@ func (c *cluster) stop() {
 		deadline := time.Now().Add(clusterStopGraceTimeout)
 		for time.Now().Before(deadline) {
 			scanProcs, scanErr := listProcessesFn()
-			if scanErr == nil &&
-				len(selectOwnedProcs(scanProcs, c.datadir, pgid, launcherStartTime, selfPID)) == 0 &&
-				!hasLivePGIDMembers(scanProcs, pgid, launcherStartTime, selfPID) {
-				break
+			if scanErr == nil {
+				active := mergeOwnedProcs(tracked, scanProcs, selectOwnedProcs(scanProcs, c.datadir, pgid, launcherStartTime, selfPID))
+				if len(active) == 0 && !hasLivePGIDMembers(scanProcs, pgid, launcherStartTime, selfPID) {
+					break
+				}
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
 
 	// Re-scan before force-killing to catch any component spawned while shutting down
-	// and re-verify both PGID ownership and per-PID identity.
+	// and re-verify both PGID ownership and previously tracked process identities
+	// (including children reparented to PID 1 after the launcher exited).
 	procs, err = listProcessesFn()
 	if err != nil {
 		log.Warn("failed to refresh pids", zap.String("tag", c.tag), zap.Error(err))
 	}
-	survivors := selectOwnedProcs(procs, c.datadir, pgid, launcherStartTime, selfPID)
+	survivors := mergeOwnedProcs(tracked, procs, selectOwnedProcs(procs, c.datadir, pgid, launcherStartTime, selfPID))
 	hasGroupMembers = hasLivePGIDMembers(procs, pgid, launcherStartTime, selfPID)
 
 	if pgid > 0 && (hasGroupMembers || (err != nil && cmd != nil)) {
@@ -359,7 +363,7 @@ func (c *cluster) deploy() {
 	// cannot be reused by an unrelated process or process group before cleanup finishes.
 	c.pgid = cmd.Process.Pid
 	c.cmd = cmd
-	c.launcherStartTime = readProcStartTime(cmd.Process.Pid)
+	c.launcherStartTime = readProcStartTimeFn(cmd.Process.Pid)
 }
 
 func ensurePlaygroundInstalled(re *require.Assertions, bin string) {

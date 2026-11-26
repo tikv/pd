@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -222,7 +223,7 @@ func listProcesses() ([]procInfo, error) {
 }
 
 func listProcessesFromPS() ([]procInfo, error) {
-	output, err := runExecWithOutputContext(context.Background(), "", "ps", "-eo", "pid=,ppid=,pgid=,stat=,args=")
+	output, err := runExecWithOutputContext(context.Background(), "", "ps", "-ww", "-eo", "pid=,ppid=,pgid=,stat=,args=")
 	if err != nil {
 		return nil, err
 	}
@@ -232,31 +233,122 @@ func listProcessesFromPS() ([]procInfo, error) {
 func parsePSOutput(output string) []procInfo {
 	var procs []procInfo
 	for line := range strings.SplitSeq(output, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 || len(fields[3]) == 0 {
+		pidStr, ppidStr, pgidStr, statStr, rawArgs, ok := splitPSColumns(line)
+		if !ok || len(statStr) == 0 {
 			continue
 		}
-		pid, err := strconv.Atoi(fields[0])
+		pid, err := strconv.Atoi(pidStr)
 		if err != nil || pid <= 0 {
 			continue
 		}
-		ppid, err := strconv.Atoi(fields[1])
+		ppid, err := strconv.Atoi(ppidStr)
 		if err != nil {
 			continue
 		}
-		pgid, err := strconv.Atoi(fields[2])
+		pgid, err := strconv.Atoi(pgidStr)
 		if err != nil {
+			continue
+		}
+		args := parsePSArgs(rawArgs)
+		if len(args) == 0 {
 			continue
 		}
 		procs = append(procs, procInfo{
 			pid:   pid,
 			ppid:  ppid,
 			pgid:  pgid,
-			state: fields[3][0],
-			args:  fields[4:],
+			state: statStr[0],
+			args:  args,
 		})
 	}
 	return procs
+}
+
+func splitPSColumns(line string) (pid, ppid, pgid, stat, rawArgs string, ok bool) {
+	s := strings.TrimSpace(line)
+	if s == "" {
+		return "", "", "", "", "", false
+	}
+	var cols [4]string
+	for i := range cols {
+		end := strings.IndexAny(s, " \t")
+		if end <= 0 {
+			return "", "", "", "", "", false
+		}
+		cols[i] = s[:end]
+		s = strings.TrimLeft(s[end:], " \t")
+	}
+	if s == "" {
+		return "", "", "", "", "", false
+	}
+	return cols[0], cols[1], cols[2], cols[3], s, true
+}
+
+// parsePSArgs reconstructs argv from the flattened `ps` `args=` column while preserving
+// spaces inside executable paths and option values (such as `--data-dir=/path with space/...`).
+func parsePSArgs(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var chunks []string
+	start := 0
+	for i := 1; i < len(raw); i++ {
+		if (raw[i-1] == ' ' || raw[i-1] == '\t') && raw[i] == '-' && isPSOptionStart(raw[i:]) {
+			if chunk := strings.TrimSpace(raw[start:i]); chunk != "" {
+				chunks = append(chunks, chunk)
+			}
+			start = i
+		}
+	}
+	if chunk := strings.TrimSpace(raw[start:]); chunk != "" {
+		chunks = append(chunks, chunk)
+	}
+	if len(chunks) == 0 {
+		return nil
+	}
+
+	args := make([]string, 0, len(chunks)+2)
+	// First chunk is the executable path (possibly prefixed by a shell like `sh /path/to/bin`).
+	first := chunks[0]
+	if sp := strings.IndexAny(first, " \t"); sp > 0 {
+		head := first[:sp]
+		tail := strings.TrimSpace(first[sp:])
+		switch filepath.Base(head) {
+		case "sh", "bash", "dash":
+			if tail != "" {
+				args = append(args, head, tail)
+			} else {
+				args = append(args, head)
+			}
+		default:
+			args = append(args, first)
+		}
+	} else {
+		args = append(args, first)
+	}
+
+	for _, chunk := range chunks[1:] {
+		sp := strings.IndexAny(chunk, " \t")
+		eq := strings.IndexByte(chunk, '=')
+		if sp > 0 && (eq < 0 || eq > sp) {
+			// Option with space-separated value: keep everything after the first space intact.
+			args = append(args, chunk[:sp], strings.TrimSpace(chunk[sp:]))
+			continue
+		}
+		args = append(args, chunk)
+	}
+	return args
+}
+
+func isPSOptionStart(s string) bool {
+	if len(s) < 2 || s[0] != '-' {
+		return false
+	}
+	if s[1] == '-' {
+		return true
+	}
+	return (s[1] >= 'a' && s[1] <= 'z') || (s[1] >= 'A' && s[1] <= 'Z')
 }
 
 func readProcessesFromProc(procRoot string) ([]procInfo, error) {
@@ -388,6 +480,48 @@ func collectOwnedTreePIDs(procs []procInfo, targetPGID int, launcherStartTime ui
 	return owned
 }
 
+func sameProcIdentity(prev, cur procInfo) bool {
+	if prev.pid != cur.pid || cur.state == 'Z' || cur.state == 'X' {
+		return false
+	}
+	if prev.startTime > 0 && cur.startTime > 0 {
+		return prev.startTime == cur.startTime
+	}
+	if prev.startTime > 0 || cur.startTime > 0 {
+		return false
+	}
+	return slices.Equal(prev.args, cur.args)
+}
+
+func mergeOwnedProcs(tracked map[int]procInfo, currentProcs, freshOwned []procInfo) []procInfo {
+	for _, p := range freshOwned {
+		tracked[p.pid] = p
+	}
+	freshSet := make(map[int]struct{}, len(freshOwned))
+	for _, p := range freshOwned {
+		freshSet[p.pid] = struct{}{}
+	}
+	merged := make([]procInfo, 0, len(freshOwned))
+	seen := make(map[int]struct{}, len(freshOwned))
+	for _, p := range currentProcs {
+		if p.pid <= 0 || p.state == 'Z' || p.state == 'X' {
+			continue
+		}
+		if _, isFresh := freshSet[p.pid]; !isFresh {
+			prev, wasTracked := tracked[p.pid]
+			if !wasTracked || !sameProcIdentity(prev, p) {
+				continue
+			}
+			tracked[p.pid] = p
+		}
+		if _, ok := seen[p.pid]; !ok {
+			seen[p.pid] = struct{}{}
+			merged = append(merged, p)
+		}
+	}
+	return merged
+}
+
 func hasLiveMatchingProcs(procs, targets []procInfo) bool {
 	if len(targets) == 0 {
 		return false
@@ -404,7 +538,7 @@ func hasLiveMatchingProcs(procs, targets []procInfo) bool {
 		if !ok {
 			continue
 		}
-		if target.startTime > 0 && cur.startTime != target.startTime {
+		if !sameProcIdentity(target, cur) {
 			continue
 		}
 		return true
