@@ -71,7 +71,7 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 
 // LoadRange loads a range of keys [key, endKey) from etcd.
 func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
-	resp, err := kv.getRangeResponse(key, endKey, limit)
+	resp, err := kv.getRangeResponse(kv.client.Ctx(), key, endKey, limit)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -79,7 +79,7 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []s
 	return keys, values, nil
 }
 
-func (kv *etcdKVBase) getRangeResponse(key, endKey string, limit int) (*clientv3.GetResponse, error) {
+func (kv *etcdKVBase) getRangeResponse(ctx context.Context, key, endKey string, limit int) (*clientv3.GetResponse, error) {
 	var OpOption []clientv3.OpOption
 	// If endKey is "\x00", it means to scan with prefix.
 	// If the key is empty and endKey is "\x00", it means to scan all keys.
@@ -90,7 +90,7 @@ func (kv *etcdKVBase) getRangeResponse(key, endKey string, limit int) (*clientv3
 	}
 
 	OpOption = append(OpOption, clientv3.WithLimit(int64(limit)))
-	return etcdutil.EtcdKVGet(kv.client, key, OpOption...)
+	return etcdutil.EtcdKVGetWithContext(ctx, kv.client, key, OpOption...)
 }
 
 func rangeKeyValues(resp *clientv3.GetResponse) (keys, values []string) {
@@ -330,7 +330,7 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 // LoadRangeWithRevision guards each returned key by its mod revision, keeping
 // the values out of the commit request.
 func (txn *etcdTxn) LoadRangeWithRevision(key, endKey string, limit int) (keys, values []string, err error) {
-	resp, err := txn.kv.getRangeResponse(key, endKey, limit)
+	resp, err := txn.kv.getRangeResponse(txn.ctx, key, endKey, limit)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -992,11 +992,21 @@ func (m *GroupManager) removeKeyspacesFromGroupWithConditions(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Reconciled deletions still return the original transaction error. Notify
+	// the invalidator before returning, after both group locks are released.
+	var reconciledIDs []uint32
+	defer func() {
+		for _, id := range reconciledIDs {
+			km.invalidateGCBarrierMetrics(id)
+		}
+	}()
 	if len(keyspaceIDs) <= maxKeyspaceRemovalGuaranteedSingleTxnSize {
 		m.membershipMutationLock.RLock()
 		defer m.membershipMutationLock.RUnlock()
-		return m.removeKeyspacesFromGroupSingleTxn(
+		kg, ids, err := m.removeKeyspacesFromGroupSingleTxn(
 			ctx, groupID, km, keyspaceIDs, leadershipConditions)
+		reconciledIDs = ids
+		return kg, err
 	}
 
 	remainingIDs := make(map[uint32]struct{}, len(keyspaceIDs))
@@ -1024,10 +1034,10 @@ func (m *GroupManager) removeKeyspacesFromGroupWithConditions(
 			err          error
 		)
 		if len(remainingIDs) <= maxKeyspaceRemovalBatchSize {
-			kg, processedIDs, hasMore, err = m.removeKeyspacesFromGroupSmallBatch(
+			kg, processedIDs, hasMore, reconciledIDs, err = m.removeKeyspacesFromGroupSmallBatch(
 				ctx, groupID, km, remainingIDs, leadershipConditions)
 		} else {
-			kg, processedIDs, hasMore, err = m.removeKeyspacesFromGroupBatch(
+			kg, processedIDs, hasMore, reconciledIDs, err = m.removeKeyspacesFromGroupBatch(
 				ctx, groupID, km, remainingIDs, leadershipConditions)
 		}
 		if err != nil {
@@ -1179,12 +1189,13 @@ func (m *GroupManager) refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID 
 // reconcileRemovalErrorLocked preserves the boundary until the epoch ends.
 // The removal transaction changes metadata and membership atomically, and
 // membership mutations are serialized by the caller's locks. If the existing
-// group refresh observes the staged membership, it confirms the delete.
+// group refresh observes the staged membership, it confirms the delete and
+// returns the deleted IDs for GC metrics invalidation after unlocking.
 func (m *GroupManager) reconcileRemovalErrorLocked(km *Manager, groupID uint32, kg *endpoint.KeyspaceGroup, epoch, generation uint64,
 	ids []uint32, boundaries []keyspaceBoundary, callbackSucceeded bool, err error,
-) {
+) []uint32 {
 	if len(ids) == 0 {
-		return
+		return nil
 	}
 	ambiguous := callbackSucceeded && commitResultIsAmbiguous(err)
 	if ambiguous {
@@ -1193,7 +1204,9 @@ func (m *GroupManager) reconcileRemovalErrorLocked(km *Manager, groupID uint32, 
 	refreshed := m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
 	if ambiguous && refreshed != nil && slices.Equal(refreshed.Keyspaces, kg.Keyspaces) {
 		km.publishKeyspaceRemoval(epoch, generation, ids)
+		return ids
 	}
+	return nil
 }
 
 // keyspaceRemovalTxnCapacityCheck returns nil while the worst-case next removal
@@ -1233,7 +1246,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 	km *Manager,
 	requestedIDs []uint32,
 	leadershipConditions []clientv3.Cmp,
-) (*endpoint.KeyspaceGroup, error) {
+) (*endpoint.KeyspaceGroup, []uint32, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -1300,8 +1313,8 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 	generation := km.cache.Generation()
 	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
 	if err != nil {
-		m.reconcileRemovalErrorLocked(km, groupID, kg, epoch, generation, removedIDs, removedBounds, callbackSucceeded, err)
-		return nil, err
+		ids := m.reconcileRemovalErrorLocked(km, groupID, kg, epoch, generation, removedIDs, removedBounds, callbackSucceeded, err)
+		return nil, ids, err
 	}
 	km.publishKeyspaceRemoval(epoch, generation, removedIDs)
 
@@ -1312,7 +1325,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 	}
 
 	m.putKeyspaceGroupToCacheLocked(kg)
-	return kg, nil
+	return kg, nil, nil
 }
 
 // removeKeyspacesFromGroupSmallBatch keeps the legacy-shaped filtering loop
@@ -1325,7 +1338,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 	km *Manager,
 	requestedIDs map[uint32]struct{},
 	leadershipConditions []clientv3.Cmp,
-) (*endpoint.KeyspaceGroup, []uint32, bool, error) {
+) (*endpoint.KeyspaceGroup, []uint32, bool, []uint32, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -1402,8 +1415,8 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 	generation := km.cache.Generation()
 	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
 	if err != nil {
-		m.reconcileRemovalErrorLocked(km, groupID, kg, epoch, generation, removedIDs, removedBounds, callbackSucceeded, err)
-		return nil, nil, false, err
+		ids := m.reconcileRemovalErrorLocked(km, groupID, kg, epoch, generation, removedIDs, removedBounds, callbackSucceeded, err)
+		return nil, nil, false, ids, err
 	}
 	km.publishKeyspaceRemoval(epoch, generation, removedIDs)
 
@@ -1412,7 +1425,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 	}
 
 	m.putKeyspaceGroupToCacheLocked(kg)
-	return kg, processedIDs, hasMore, nil
+	return kg, processedIDs, hasMore, nil, nil
 }
 
 func (m *GroupManager) removeKeyspacesFromGroupBatch(
@@ -1421,7 +1434,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	km *Manager,
 	requestedIDs map[uint32]struct{},
 	leadershipConditions []clientv3.Cmp,
-) (*endpoint.KeyspaceGroup, []uint32, bool, error) {
+) (*endpoint.KeyspaceGroup, []uint32, bool, []uint32, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -1508,8 +1521,8 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	generation := km.cache.Generation()
 	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runBatch)
 	if err != nil {
-		m.reconcileRemovalErrorLocked(km, groupID, kg, epoch, generation, removedIDs, removedBounds, callbackSucceeded, err)
-		return nil, nil, false, err
+		ids := m.reconcileRemovalErrorLocked(km, groupID, kg, epoch, generation, removedIDs, removedBounds, callbackSucceeded, err)
+		return nil, nil, false, ids, err
 	}
 	km.publishKeyspaceRemoval(epoch, generation, removedIDs)
 
@@ -1522,7 +1535,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	// Update the cache
 	m.putKeyspaceGroupToCacheLocked(kg)
 
-	return kg, processedIDs, hasMore, nil
+	return kg, processedIDs, hasMore, nil, nil
 }
 
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
