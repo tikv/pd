@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -437,6 +438,40 @@ func TestAffinitySplitBeforeMoveAttemptLimit(t *testing.T) {
 	}
 }
 
+func TestAffinitySplitAttemptReadmission(t *testing.T) {
+	requireClassicAffinitySplit(t)
+	for _, change := range []string{"rejected", "version", "target voters"} {
+		t.Run(change, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cluster, controller, _ := newAffinitySplitTest(t)
+				checker := controller.GetAffinityChecker()
+				checker.maxSplitAttempts = 1
+				regions := putOversizedAffinityRegions(cluster)
+				first, waiter := regions[0], regions[1]
+				split := requireAffinitySplit(t, checker.Check(first))
+				require.Empty(t, checker.Check(waiter))
+
+				switch change {
+				case "rejected":
+					require.True(t, split.Cancel())
+					require.Zero(t, split.GetStartTime())
+				case "version":
+					first = first.Clone(core.WithIncVersion())
+					cluster.PutRegion(first)
+				case "target voters":
+					_, err := cluster.GetAffinityManager().UpdateAffinityGroupPeers("split", 1, []uint64{1, 2, 5})
+					require.NoError(t, err)
+				}
+
+				require.Empty(t, checker.Check(first), "the queued Region gets the slot first")
+				require.NotContains(t, checker.splitAttempts, first.GetID())
+				require.Contains(t, checker.splitWaitIndex, first.GetID())
+				requireAffinitySplit(t, checker.Check(waiter))
+			})
+		})
+	}
+}
+
 func TestAffinitySplitWaitQueueCapacity(t *testing.T) {
 	requireClassicAffinitySplit(t)
 	synctest.Test(t, func(t *testing.T) {
@@ -584,16 +619,21 @@ func TestAffinitySplitBeforeLearnerMove(t *testing.T) {
 		name        string
 		stores      []string
 		joint       bool
+		version4    bool
 		copyToStore uint64
 	}{
 		{name: "copy to another store", stores: []string{"4", "5"}, joint: true, copyToStore: 5},
 		{name: "swap roles with joint consensus", joint: true},
 		{name: "swap roles without joint consensus", copyToStore: 3},
+		{name: "swap roles with joint consensus enabled on 4.0", joint: true, version4: true, copyToStore: 3},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			controller, cluster, _ := newLearnerConflictController(t)
 			setAffinitySplitStoreConfig(cluster)
 			cluster.SetEnableUseJointConsensus(test.joint)
+			if test.version4 {
+				cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+			}
 			require.NoError(t, cluster.GetRuleManager().SetRule(newLearnerRule(test.stores...)))
 			region := putLearners(cluster, 1, 4).Clone(withAffinitySplitTestRange("a", "b"),
 				core.SetApproximateSize(64), core.SetSource(core.Heartbeat))
@@ -683,7 +723,8 @@ func TestAffinitySplitBeforeMoveStaleSize(t *testing.T) {
 			require.Equal(t, operator.TIMEOUT, split.Status())
 			require.Empty(t, checker.Check(large.Clone(staleVersion)))
 			require.Equal(t, attempt, checker.splitAttempts[1])
-			requireAffinityMove(t, checker.Check(small))
+			move := requireAffinityMove(t, checker.Check(small))
+			require.Equal(t, large.GetApproximateSize(), move.ApproximateSize)
 			requireAffinityMove(t, controller.CheckRegion(large))
 		})
 	})

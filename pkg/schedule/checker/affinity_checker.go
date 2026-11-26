@@ -252,6 +252,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 // createAffinityOperator creates an operator to adjust region replicas according to affinity group constraints.
 // It creates a "combo" operator that directly specifies the final leader and voter positions,
 // moving the region to match the expected configuration in one operation.
+// Pre-move split protection applies to affinity-move-region and may return a
+// standalone SCAN split operator first.
 //
 // This function preserves:
 // - Existing learner peers (e.g., TiFlash peers); moveConflictingLearners moves one off a target voter store
@@ -280,17 +282,18 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		return nil, false
 	}
 
-	if op, ready := c.prepareAffinityPeerMove(region, group, roles); !ready {
-		return op, false
+	split, latest, ready := c.prepareAffinityPeerMove(region, group, roles)
+	if !ready {
+		return split, false
 	}
 
 	// Determine operator kind based on whether leader needs to change
 	kind := operator.OpAffinity
-	if currentLeaderStoreID != group.LeaderStoreID {
+	if latest.GetLeader().GetStoreId() != group.LeaderStoreID {
 		kind |= operator.OpLeader
 	}
 
-	op, err := operator.CreateMoveRegionOperator("affinity-move-region", c.cluster, region, kind, roles)
+	op, err := operator.CreateMoveRegionOperator("affinity-move-region", c.cluster, latest, kind, roles)
 	if err != nil {
 		log.Warn("create affinity move region operator failed",
 			zap.Uint64("region-id", region.GetID()),

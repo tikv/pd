@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -45,7 +46,7 @@ const (
 	affinitySplitGrantTTL = 5 * time.Minute
 )
 
-var affinityUnknownSizeWait = defaultAffinityUnknownSizeWait
+const affinityUnknownSizeWait = defaultAffinityUnknownSizeWait
 
 // affinitySplitWaitKind identifies what started the wait before a peer move.
 type affinitySplitWaitKind uint8
@@ -165,11 +166,7 @@ func (c *AffinityChecker) admitSplitAttempt(regionID uint64, now time.Time) bool
 		c.removeSplitWaiter(regionID)
 		return true
 	}
-	queueCapacity := c.maxSplitWaitQueue
-	if queueCapacity <= 0 {
-		queueCapacity = affinitySplitMaxAttempts
-	}
-	if c.splitWaitIndex[regionID] == nil && c.splitWaitQueue.Len() < queueCapacity {
+	if c.splitWaitIndex[regionID] == nil && c.splitWaitQueue.Len() < c.maxSplitWaitQueue {
 		c.splitWaitIndex[regionID] = c.splitWaitQueue.PushBack(regionID)
 	}
 	return false
@@ -208,9 +205,9 @@ func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 // Attempts are scoped to a Region version and target voters. When capacity
 // is full, Regions can wait for a slot in the bounded FIFO queue.
 func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState,
-	roles map[uint64]placement.PeerRoleType) (*operator.Operator, bool) {
+	roles map[uint64]placement.PeerRoleType) (*operator.Operator, *core.RegionInfo, bool) {
 	if kerneltype.IsNextGen() {
-		return nil, true
+		return nil, region, true
 	}
 
 	c.splitMu.Lock()
@@ -219,23 +216,24 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	regionID := region.GetID()
 	latest := c.cluster.GetRegion(regionID)
 	if latest == nil {
-		return nil, false
+		return nil, nil, false
 	}
 	epoch, latestEpoch := region.GetRegionEpoch(), latest.GetRegionEpoch()
 	if latestEpoch.GetVersion() != epoch.GetVersion() || latestEpoch.GetConfVer() != epoch.GetConfVer() {
-		return nil, false
+		return nil, nil, false
 	}
 	// Heartbeats can update the size and key count without changing the epoch.
 	region = latest
 	currentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(region)
 	if currentGroup == nil || !currentGroup.AffinitySchedulingAllowed || isAffinity || !currentGroup.MatchesTarget(group) {
-		return nil, false
+		return nil, nil, false
 	}
 
+	useJointConsensus := versioninfo.IsFeatureSupported(c.conf.GetClusterVersion(), versioninfo.ConfChangeV2) && c.conf.IsUseJointConsensus()
 	addsPeer := false
 	for storeID, role := range roles {
 		peer := region.GetStorePeer(storeID)
-		if peer == nil || (!c.conf.IsUseJointConsensus() && role == placement.Learner && !core.IsLearner(peer)) {
+		if peer == nil || (!useJointConsensus && role == placement.Learner && !core.IsLearner(peer)) {
 			addsPeer = true
 			break
 		}
@@ -245,14 +243,14 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		if c.splitWaitQueue.Len() > 0 {
 			c.promoteSplitWaiters(time.Now())
 		}
-		return nil, true
+		return nil, region, true
 	}
 
-	wait := func(reason string) (*operator.Operator, bool) {
+	wait := func(reason string) (*operator.Operator, *core.RegionInfo, bool) {
 		checkerCounter.WithLabelValues(affinityChecker, "wait-"+reason).Inc()
 		log.Debug("wait before affinity peer move", zap.Uint64("region-id", regionID),
 			zap.String("group-id", group.ID), zap.String("reason", reason))
-		return nil, false
+		return nil, nil, false
 	}
 	sizeUnknown := region.GetApproximateSize() <= 0
 	version := region.GetRegionEpoch().GetVersion()
@@ -273,23 +271,20 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 				delete(c.splitAttempts, regionID)
 				tracked = false
 			} else if version < previous.version {
-				return nil, false
+				return nil, nil, false
 			} else if version == previous.version && slices.Equal(previous.voterStoreIDs, attempt.voterStoreIDs) {
 				attempt = previous
+			} else {
+				delete(c.splitAttempts, regionID)
+				tracked = false
 			}
 		}
-		if !tracked && !c.admitSplitAttempt(regionID, now) {
-			return wait("split-attempt-limit")
-		}
-		// A split that the controller rejects or cancels before it starts, for
-		// example because the waiting queue is full, sends no request, so the
-		// wait does not start and the next patrol requests the split again.
 		var splitRunning bool
 		if split := attempt.split; split != nil {
 			// Keep a split that can still start between preparation and admission.
 			// Expire unsubmitted operators so they cannot block later patrols.
 			if split.Status() == operator.CREATED && !split.CheckExpired() {
-				return nil, false
+				return nil, nil, false
 			}
 			splitRunning = !split.IsEnd()
 			if attempt.waitKind == affinitySplitWaitNone {
@@ -297,9 +292,15 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 					attempt.waitKind = affinitySplitWaitScan
 					attempt.startedAt = startedAt
 				} else if !splitRunning {
+					// No request was sent. Release the slot before retrying through the FIFO queue.
+					delete(c.splitAttempts, regionID)
+					tracked = false
 					attempt.split = nil
 				}
 			}
+		}
+		if !tracked && !c.admitSplitAttempt(regionID, now) {
+			return wait("split-attempt-limit")
 		}
 		switch attempt.waitKind {
 		case affinitySplitWaitNone:
@@ -330,7 +331,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		}
 		if splitRunning {
 			c.splitAttempts[regionID] = attempt
-			return nil, false
+			return nil, nil, false
 		}
 		if !timedOut {
 			if sizeUnknown {
@@ -343,12 +344,12 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 				affinityCheckerCreateOpFailedCounter.Inc()
 				log.Debug("create affinity split region operator failed", zap.Uint64("region-id", regionID),
 					zap.String("group-id", group.ID), errs.ZapError(err))
-				return nil, false
+				return nil, nil, false
 			}
 			op.LimitTimeout(affinitySplitTimeout - splitWait)
 			attempt.split = op
 			c.splitAttempts[regionID] = attempt
-			return op, false
+			return op, nil, false
 		}
 	} else {
 		c.removeSplitWaiter(regionID)
@@ -380,5 +381,5 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if coolingDown {
 		return wait("recent-merge-or-startup")
 	}
-	return nil, true
+	return nil, region, true
 }
