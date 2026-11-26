@@ -462,6 +462,39 @@ func TestAffinitySplitPrunesDeletedGroup(t *testing.T) {
 	require.NotContains(t, checker.splitAttempts, region.GetID())
 }
 
+func TestAffinitySplitPrunesExpiredGroup(t *testing.T) {
+	requireClassicAffinitySplit(t)
+	cluster, controller, _ := newAffinitySplitTest(t)
+	checker := controller.GetAffinityChecker()
+	region := cluster.GetRegion(1).Clone(core.SetApproximateSize(0))
+	cluster.PutRegion(region)
+	require.Empty(t, checker.Check(region))
+	require.Contains(t, checker.splitAttempts, region.GetID())
+
+	manager := cluster.GetAffinityManager()
+	manager.DegradeAffinityGroup("split")
+	checker.pruneSplitAttempts(time.Now())
+	require.Contains(t, checker.splitAttempts, region.GetID())
+
+	manager.ExpireAffinityGroup("split")
+	checker.pruneSplitAttempts(time.Now())
+	require.NotContains(t, checker.splitAttempts, region.GetID())
+}
+
+func TestAffinitySplitReleasesAttemptForLeaderTransfer(t *testing.T) {
+	requireClassicAffinitySplit(t)
+	cluster, controller, _ := newAffinitySplitTest(t)
+	checker := controller.GetAffinityChecker()
+	region := cluster.GetRegion(1)
+	requireAffinitySplit(t, checker.Check(region))
+
+	_, err := cluster.GetAffinityManager().UpdateAffinityGroupPeers("split", 2, []uint64{1, 2, 4})
+	require.NoError(t, err)
+	move := requireAffinityMove(t, checker.Check(region))
+	require.Zero(t, move.Kind()&operator.OpRegion)
+	require.NotContains(t, checker.splitAttempts, region.GetID())
+}
+
 func TestAffinitySplitLeavesExpiryToController(t *testing.T) {
 	requireClassicAffinitySplit(t)
 	synctest.Test(t, func(t *testing.T) {
@@ -641,9 +674,9 @@ func TestAffinitySplitFallbackExpiresDespiteStoreLimit(t *testing.T) {
 	})
 }
 
-func TestAffinitySplitReclaimsUnclaimedReservation(t *testing.T) {
+func TestAffinitySplitReservationExpiry(t *testing.T) {
 	requireClassicAffinitySplit(t)
-	for _, reason := range []string{"expired", "merged"} {
+	for _, reason := range []string{"expired", "merged", "claimed after expiry"} {
 		t.Run(reason, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				cluster, controller, _ := newAffinitySplitTest(t)
@@ -660,9 +693,16 @@ func TestAffinitySplitReclaimsUnclaimedReservation(t *testing.T) {
 				require.Contains(t, checker.splitGranted, first.GetID(), "the first waiter gets the only slot")
 				require.Empty(t, checker.Check(next), "the later waiter cannot claim the first waiter's slot")
 
-				if reason == "expired" {
+				switch reason {
+				case "claimed after expiry":
 					advanceAffinitySplitTime(cluster, affinitySplitGrantTTL)
-				} else {
+					requireAffinitySplit(t, checker.Check(first))
+					require.Empty(t, checker.splitGranted)
+					require.Contains(t, checker.splitWaitIndex, next.GetID())
+					return
+				case "expired":
+					advanceAffinitySplitTime(cluster, affinitySplitGrantTTL)
+				case "merged":
 					next = next.Clone(withAffinitySplitTestRange("g", "z"), core.WithIncVersion())
 					cluster.PutRegion(next)
 					require.Nil(t, cluster.GetRegion(first.GetID()))
@@ -754,7 +794,7 @@ func (cluster *affinitySplitTestCluster) GetRegion(regionID uint64) *core.Region
 
 func TestAffinitySplitBeforeMoveStaleHealth(t *testing.T) {
 	requireClassicAffinitySplit(t)
-	for _, name := range []string{"down peer", "pending peer", "no leader"} {
+	for _, name := range []string{"down peer", "pending peer", "no leader", "leader changed"} {
 		t.Run(name, func(t *testing.T) {
 			cluster, controller, _ := newAffinitySplitTest(t)
 			checker := controller.GetAffinityChecker()
@@ -770,6 +810,8 @@ func TestAffinitySplitBeforeMoveStaleHealth(t *testing.T) {
 				latest = patrol.Clone(core.WithPendingPeers([]*metapb.Peer{patrol.GetStorePeer(4)}))
 			case "no leader":
 				latest = patrol.Clone(core.WithLeader(nil))
+			case "leader changed":
+				latest = patrol.Clone(core.WithLeader(patrol.GetStorePeer(2)))
 			}
 			cluster.PutRegion(latest)
 			require.Same(t, latest, cluster.GetRegion(patrol.GetID()))

@@ -155,11 +155,9 @@ func (c *AffinityChecker) promoteSplitWaiters(now time.Time) {
 // are in use and the wait queue has room. Older waiters get released slots first.
 // The caller holds splitMu.
 func (c *AffinityChecker) admitSplitAttempt(regionID uint64, now time.Time) bool {
-	if expiresAt, granted := c.splitGranted[regionID]; granted {
+	if _, granted := c.splitGranted[regionID]; granted {
 		delete(c.splitGranted, regionID)
-		if now.Before(expiresAt) {
-			return true
-		}
+		return true
 	}
 
 	c.promoteSplitWaiters(now)
@@ -202,7 +200,7 @@ func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 			continue
 		}
 		group, aligned := c.affinityManager.GetRegionAffinityGroupState(latest)
-		if group == nil || aligned || !slices.Equal(attempt.voterStoreIDs, group.VoterStoreIDs) ||
+		if group == nil || aligned || group.RegularSchedulingAllowed || !slices.Equal(attempt.voterStoreIDs, group.VoterStoreIDs) ||
 			(attempt.split == nil && !c.needsSplitAttempt(latest)) {
 			delete(c.splitAttempts, id)
 		}
@@ -240,7 +238,8 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if latestEpoch.GetVersion() != epoch.GetVersion() || latestEpoch.GetConfVer() != epoch.GetConfVer() {
 		return nil, nil, false
 	}
-	if latest.GetLeader() == nil || !filter.IsRegionHealthy(latest) {
+	if latest.GetLeader() == nil || latest.GetLeader().GetStoreId() != region.GetLeader().GetStoreId() ||
+		!filter.IsRegionHealthy(latest) {
 		return nil, nil, false
 	}
 	// Heartbeats can update Region statistics without changing the epoch.
@@ -260,6 +259,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		}
 	}
 	if !addsPeer {
+		delete(c.splitAttempts, regionID)
 		c.removeSplitWaiter(regionID)
 		if c.splitWaitQueue.Len() > 0 {
 			c.promoteSplitWaiters(time.Now())
