@@ -873,15 +873,50 @@ func TestParsePSOutputExcludesDebuggerAndUnconfirmedExecutables(t *testing.T) {
 	re.Contains(byPID, 2005)
 	re.Equal([]string{"sh", wrapperScript}, byPID[2005].args[:2])
 
-	// Unconfirmed and ambiguous spaced records must be excluded.
-	re.NotContains(byPID, 2003)
-	re.NotContains(byPID, 2004)
-	re.NotContains(byPID, 2006)
-	re.NotContains(byPID, 2007)
+	// Unconfirmed and ambiguous spaced records retain numeric columns for tree
+	// traversal, but must have empty args so they never match by command line.
+	for _, pid := range []int{2003, 2004, 2006, 2007} {
+		re.Contains(byPID, pid)
+		re.Empty(byPID[pid].args)
+	}
 
 	// Only the real tikv-server (PID 2000) may be selected as a cleanup target or endpoint source.
 	re.Equal([]int{2000}, selectOwnedPIDs(procs, dataDir, 0, 0, os.Getpid()))
 	re.Equal([]string{"http://127.0.0.1:23790"}, selectPDEndpoints(procs, dataDir, 0, 0, os.Getpid()))
+}
+
+func TestParsePSOutputPreservesRelativePathIntermediateTree(t *testing.T) {
+	re := require.New(t)
+
+	// Three processes in distinct PGIDs linked via PPID, where the middle helper
+	// was launched with a relative path from its own working directory (unresolvable
+	// from the test process's cwd) and positional args.
+	dataDir := "/tmp/tiup-home/data/tag_rel_tree"
+	out := strings.Join([]string{
+		"3000 1 3000 S /usr/local/bin/tiup-playground --tag tag_rel_tree",
+		"3001 3000 3001 S ./helper worker --mode=child",
+		fmt.Sprintf("3002 3001 3002 S /usr/local/bin/tikv-server --data-dir=%s/tikv-0/data --pd-endpoints=http://127.0.0.1:23799", dataDir),
+		// Unrelated relative-path process outside the launcher tree must not be selected.
+		fmt.Sprintf("3003 1 3003 S ./other-helper worker --data-dir=%s/tikv-0/data --pd-endpoints=http://127.0.0.1:23800", dataDir),
+	}, "\n")
+
+	procs := parsePSOutput(out)
+	byPID := make(map[int]procInfo, len(procs))
+	for _, p := range procs {
+		byPID[p.pid] = p
+	}
+	re.Contains(byPID, 3001)
+	re.Equal(3000, byPID[3001].ppid)
+	re.Equal(3001, byPID[3001].pgid)
+	re.Empty(byPID[3001].args)
+	re.Contains(byPID, 3003)
+	re.Empty(byPID[3003].args)
+
+	// Tree traversal from launcher PGID 3000 must still reach 3001 and grandchild 3002,
+	// while excluding unrelated relative-path process 3003.
+	re.Equal([]int{3000, 3001, 3002}, selectOwnedPIDs(procs, dataDir, 3000, 0, os.Getpid()))
+	// Endpoint discovery still requires confirmed args, so only 3002 contributes an endpoint.
+	re.Equal([]string{"http://127.0.0.1:23799"}, selectPDEndpoints(procs, dataDir, 3000, 0, os.Getpid()))
 }
 
 func TestClusterWithSpacesInTiUPHome(t *testing.T) {

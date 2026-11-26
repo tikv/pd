@@ -249,16 +249,16 @@ func parsePSOutput(output string) []procInfo {
 		if err != nil {
 			continue
 		}
-		args := parsePSArgs(rawArgs)
-		if len(args) == 0 && statStr[0] != 'Z' && statStr[0] != 'X' {
-			continue
-		}
+		// Retain numeric process-tree columns (pid, ppid, pgid, state) even when
+		// args cannot be confirmed so parent-child traversal in collectOwnedTreePIDs
+		// is not severed by intermediate relative-path helpers. Command-line
+		// component and endpoint matching still requires non-empty args.
 		procs = append(procs, procInfo{
 			pid:   pid,
 			ppid:  ppid,
 			pgid:  pgid,
 			state: statStr[0],
-			args:  args,
+			args:  parsePSArgs(rawArgs),
 		})
 	}
 	return procs
