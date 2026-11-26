@@ -51,7 +51,7 @@ func (s *schedulerSuite) TestTransferLeader() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", s.cluster.pdEndpoints())
 	defer pdHTTPCli.Close()
 	resp, err := pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
@@ -114,7 +114,7 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", s.cluster.pdEndpoints())
 	defer pdHTTPCli.Close()
 	regions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)
@@ -226,7 +226,7 @@ func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", s.cluster.pdEndpoints())
 	defer pdHTTPCli.Close()
 	regions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)

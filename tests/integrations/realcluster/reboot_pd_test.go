@@ -39,7 +39,7 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	re := s.Require()
 	ctx := context.Background()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", s.cluster.pdEndpoints())
 	defer pdHTTPCli.Close()
 	resp, err := pdHTTPCli.GetStores(ctx)
 	re.NoError(err)
@@ -70,7 +70,7 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	defer func() {
 		// The restarted client is closed before this cleanup runs because defers
 		// run in LIFO order, so use a fresh client to restore the store labels.
-		cleanupCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+		cleanupCli := http.NewClient("pd-real-cluster-test", s.cluster.pdEndpoints())
 		defer cleanupCli.Close()
 		if hasOriginalZone {
 			re.NoError(cleanupCli.SetStoreLabels(ctx, firstStore.Store.ID, map[string]string{
@@ -98,7 +98,7 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	checkLabelsAreEqual()
 	// Restart to reload the label
 	s.cluster.restart()
-	pdHTTPCli = http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	pdHTTPCli = http.NewClient("pd-real-cluster-test", s.cluster.pdEndpoints())
 	defer pdHTTPCli.Close()
 	checkLabelsAreEqual()
 }

@@ -34,13 +34,31 @@ check: tiup test
 
 tiup:
 	@echo "==> Checking tiup installation"
-	@if ! which tiup > /dev/null 2>&1; then \
-		echo "Installing tiup..."; \
-		curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh; \
+	@TIUP_DIR="$${TIUP_HOME:-$(HOME)/.tiup}"; \
+	if [ -x "$$TIUP_DIR/bin/tiup" ]; then \
+		TIUP_BIN="$$TIUP_DIR/bin/tiup"; \
+	elif [ -x "$(HOME)/.tiup/bin/tiup" ]; then \
+		TIUP_BIN="$(HOME)/.tiup/bin/tiup"; \
 	else \
+		TIUP_BIN="$$TIUP_DIR/bin/tiup"; \
+	fi; \
+	if [ -x "$$TIUP_BIN" ] && "$$TIUP_BIN" --binary playground > /dev/null 2>&1; then \
 		echo "tiup already installed"; \
+		echo "tiup version: $$("$$TIUP_BIN" --version)"; \
+	else \
+		if [ ! -x "$$TIUP_BIN" ] || [ ! -f "$$TIUP_DIR/bin/root.json" ]; then \
+			echo "Installing tiup..."; \
+			curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh; \
+			TIUP_BIN="$$TIUP_DIR/bin/tiup"; \
+		else \
+			echo "tiup already installed"; \
+		fi; \
+		echo "tiup version: $$("$$TIUP_BIN" --version)"; \
+		if ! "$$TIUP_BIN" --binary playground > /dev/null 2>&1; then \
+			echo "Installing tiup playground..."; \
+			"$$TIUP_BIN" install playground; \
+		fi; \
 	fi
-	@echo "tiup version: $$(tiup --version)"
 
 deploy: kill_cluster deploy_only
 

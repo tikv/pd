@@ -15,11 +15,15 @@
 package realcluster
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -31,6 +35,8 @@ import (
 
 	pd "github.com/tikv/pd/client"
 )
+
+var clusterTagSeq atomic.Uint64
 
 type clusterSuite struct {
 	suite.Suite
@@ -45,18 +51,19 @@ type clusterSuite struct {
 func (s *clusterSuite) SetupSuite() {
 	re := s.Require()
 
-	dataDir := s.dataDir()
+	tag := s.tag()
+	dataDir := dataDirForTag(tag)
 	matches, err := filepath.Glob(dataDir)
 	re.NoError(err)
 
 	for _, match := range matches {
-		_, err := runCommandWithOutput(fmt.Sprintf("rm -rf %s", match))
-		re.NoError(err)
+		re.NoError(os.RemoveAll(match))
 	}
 
-	s.cluster = newCluster(re, s.tag(), dataDir, s.mode)
+	s.cluster = newCluster(re, tag, dataDir, s.mode)
+	s.T().Cleanup(s.cluster.stop)
 	s.cluster.start()
-	s.cli = newPDClient(re)
+	s.cli = newPDClient(re, s.cluster.pdEndpoints())
 }
 
 // TearDownSuite will run after all the tests in the suite have been run.
@@ -64,30 +71,49 @@ func (s *clusterSuite) TearDownSuite() {
 	if s.cli != nil {
 		s.cli.Close()
 	}
-	// Even if the cluster deployment fails, we still need to destroy the cluster.
-	// If the cluster does not fail to deploy, the cluster will be destroyed in
-	// the cleanup function. And these code will not work.
-	s.cluster.stop()
 }
 
 func (s *clusterSuite) tag() string {
+	pid := os.Getpid()
+	now := time.Now().UnixNano()
+	seq := clusterTagSeq.Add(1)
 	if s.mode == "ms" {
-		return fmt.Sprintf("pd_real_cluster_test_ms_%s_%d", s.suiteName, time.Now().Unix())
+		return fmt.Sprintf("pd_real_cluster_test_ms_%s_%d_%d_%d", s.suiteName, pid, now, seq)
 	}
-	return fmt.Sprintf("pd_real_cluster_test_%s_%d", s.suiteName, time.Now().Unix())
+	return fmt.Sprintf("pd_real_cluster_test_%s_%d_%d_%d", s.suiteName, pid, now, seq)
 }
 
-func (s *clusterSuite) dataDir() string {
-	if s.mode == "ms" {
-		return filepath.Join(os.Getenv("HOME"), ".tiup", "data", fmt.Sprintf("pd_real_cluster_test_ms_%s_%d", s.suiteName, time.Now().Unix()))
+func tiupHome() string {
+	if home := os.Getenv("TIUP_HOME"); home != "" {
+		return home
 	}
-	return filepath.Join(os.Getenv("HOME"), ".tiup", "data", fmt.Sprintf("pd_real_cluster_test_%s_%d", s.suiteName, time.Now().Unix()))
+	return filepath.Join(os.Getenv("HOME"), ".tiup")
+}
+
+func dataDirForTag(tag string) string {
+	return filepath.Join(tiupHome(), "data", tag)
 }
 
 var (
-	playgroundLogDir = "/tmp/real_cluster/playground"
-	tiupBin          = os.Getenv("HOME") + "/.tiup/bin/tiup"
+	playgroundLogDir    = "/tmp/real_cluster/playground"
+	tiupBin             = ""
+	realClusterRepoRoot = ""
+	clusterWaitTimeout  = 100 * time.Second
+	clusterPollPeriod   = time.Second
 )
+
+func resolveTiUPBin() string {
+	if tiupBin != "" {
+		return tiupBin
+	}
+	if home := os.Getenv("TIUP_HOME"); home != "" {
+		candidate := filepath.Join(home, "bin", "tiup")
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return filepath.Join(os.Getenv("HOME"), ".tiup", "bin", "tiup")
+}
 
 const (
 	defaultTiKVCount    = 3
@@ -97,12 +123,15 @@ const (
 )
 
 type cluster struct {
-	re        *require.Assertions
-	tag       string
-	datadir   string
-	mode      string
-	instances map[string]int
-	pids      []int
+	re         *require.Assertions
+	tag        string
+	datadir    string
+	mode       string
+	portOffset int
+	instances  map[string]int
+	pgid       int
+	waitDone   chan struct{}
+	pids       []int
 }
 
 func newCluster(re *require.Assertions, tag, datadir, mode string, ins ...map[string]int) *cluster {
@@ -135,32 +164,94 @@ func (c *cluster) restart() {
 }
 
 func (c *cluster) stop() {
-	if err := c.collectPids(); err != nil {
-		log.Warn("failed to collect pids", zap.Error(err))
+	if c.pgid == 0 && c.waitDone == nil {
 		return
 	}
 
+	pgid := c.pgid
+	waitDone := c.waitDone
+	if err := c.collectPids(); err != nil {
+		log.Warn("failed to collect pids", zap.String("tag", c.tag), zap.Error(err))
+	}
+
+	if pgid > 0 {
+		_ = syscall.Kill(-pgid, syscall.SIGTERM)
+	}
 	for _, pid := range c.pids {
 		// First try SIGTERM
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 	}
 
-	// Wait and force kill if necessary
-	time.Sleep(3 * time.Second)
+	// Wait up to 3s for graceful exit, then force kill survivors.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		waitFinished := waitDone == nil
+		if !waitFinished {
+			select {
+			case <-waitDone:
+				waitFinished = true
+			default:
+			}
+		}
+		if waitFinished && !slices.ContainsFunc(c.pids, isProcessRunning) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if pgid > 0 {
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	}
+	// Re-scan once before force-killing to catch any component spawned while shutting down.
+	if err := c.collectPids(); err != nil {
+		log.Warn("failed to refresh pids", zap.String("tag", c.tag), zap.Error(err))
+	}
+	var killed []int
 	for _, pid := range c.pids {
 		if isProcessRunning(pid) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
+			killed = append(killed, pid)
 		}
 	}
+	if len(killed) > 0 {
+		killDeadline := time.Now().Add(time.Second)
+		for time.Now().Before(killDeadline) && slices.ContainsFunc(killed, isProcessRunning) {
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if waitDone != nil {
+		select {
+		case <-waitDone:
+		case <-time.After(time.Second):
+		}
+	}
+	c.pgid = 0
+	c.waitDone = nil
+	c.pids = nil
 	log.Info("cluster stopped", zap.String("tag", c.tag))
+}
+
+func (c *cluster) pdEndpoints() []string {
+	procs, err := listProcesses()
+	c.re.NoError(err)
+	return selectPDEndpoints(procs, c.datadir, c.pgid, os.Getpid())
 }
 
 func (c *cluster) deploy() {
 	re := c.re
-	repoRoot, err := filepath.Abs("../../..")
-	re.NoError(err)
+	repoRoot := realClusterRepoRoot
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = filepath.Abs("../../..")
+		re.NoError(err)
+	}
 
-	if !fileExists(filepath.Join(repoRoot, "third_bin/tikv-server")) || !fileExists(filepath.Join(repoRoot, "third_bin/tidb-server")) || !fileExists(filepath.Join(repoRoot, "third_bin/tiflash")) {
+	needThirdBin := !fileExists(filepath.Join(repoRoot, "third_bin/tikv-server"))
+	if c.mode != "tikv-slim" {
+		needThirdBin = needThirdBin ||
+			!fileExists(filepath.Join(repoRoot, "third_bin/tidb-server")) ||
+			!fileExists(filepath.Join(repoRoot, "third_bin/tiflash"))
+	}
+	if needThirdBin {
 		log.Info("downloading binaries...")
 		log.Info("this may take a few minutes, you can also download them manually and put them in the bin directory.")
 		_, err := runCommandWithOutputInDir("./tests/integrations/realcluster/download_integration_test_binaries.sh", repoRoot)
@@ -173,106 +264,234 @@ func (c *cluster) deploy() {
 	}
 
 	if !fileExists(playgroundLogDir) {
-		re.NoError(os.MkdirAll(playgroundLogDir, 0755))
+		re.NoError(os.MkdirAll(playgroundLogDir, 0750))
 	}
 
-	kvCount, exist := c.instances["kv"]
+	bin := resolveTiUPBin()
+	ensurePlaygroundInstalled(re, bin)
+
+	logPath := filepath.Join(playgroundLogDir, c.tag+".log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec
+	re.NoError(err)
+
+	playgroundArgs := buildPlaygroundArgs(c.mode, c.tag, c.portOffset, c.instances)
+	cmd := exec.Command(bin, playgroundArgs...) //nolint:gosec
+	cmd.Dir = repoRoot
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	log.Info(cmd.String())
+	err = cmd.Start()
+	_ = logFile.Close()
+	re.NoError(err)
+
+	c.pgid = cmd.Process.Pid
+	waitDone := make(chan struct{})
+	c.waitDone = waitDone
+	go func() {
+		_ = cmd.Wait()
+		close(waitDone)
+	}()
+}
+
+func ensurePlaygroundInstalled(re *require.Assertions, bin string) {
+	if isPlaygroundInstalled(bin) {
+		return
+	}
+	log.Info("installing tiup playground component before starting cluster")
+	output, err := runExecWithOutputContext(context.Background(), "", bin, "install", "playground")
+	if output != "" {
+		log.Info(output)
+	}
+	re.NoError(err)
+}
+
+func isPlaygroundInstalled(bin string) bool {
+	output, err := runExecWithOutputContext(context.Background(), "", bin, "--binary", "playground")
+	return err == nil && strings.TrimSpace(output) != ""
+}
+
+func buildPlaygroundArgs(mode, tag string, portOffset int, instances map[string]int) []string {
+	kvCount, exist := instances["kv"]
 	if !exist {
 		kvCount = defaultTiKVCount
 	}
-	dbCount, exist := c.instances["db"]
+	dbCount, exist := instances["db"]
 	if !exist {
 		dbCount = defaultTiDBCount
 	}
-	pdCount, exist := c.instances["pd"]
+	pdCount, exist := instances["pd"]
 	if !exist {
 		pdCount = defaultPDCount
 	}
-	tiflashCount, exist := c.instances["tiflash"]
+	tiflashCount, exist := instances["tiflash"]
 	if !exist {
 		tiflashCount = defaultTiFlashCount
 	}
 
-	playgroundOpts := []string{
-		fmt.Sprintf("--kv %d", kvCount),
-		fmt.Sprintf("--tiflash %d", tiflashCount),
-		fmt.Sprintf("--db %d", dbCount),
-		fmt.Sprintf("--pd %d", pdCount),
-		"--without-monitor",
-		fmt.Sprintf("--tag %s", c.tag),
+	var playgroundOpts []string
+	if mode == "tikv-slim" {
+		playgroundOpts = []string{
+			"playground",
+			"nightly",
+			"--mode", "tikv-slim",
+			"--kv", strconv.Itoa(kvCount),
+			"--pd", strconv.Itoa(pdCount),
+			"--without-monitor",
+			"--tag", tag,
+		}
+	} else {
+		playgroundOpts = []string{
+			"playground",
+			"nightly",
+			"--kv", strconv.Itoa(kvCount),
+			"--tiflash", strconv.Itoa(tiflashCount),
+			"--db", strconv.Itoa(dbCount),
+			"--pd", strconv.Itoa(pdCount),
+			"--without-monitor",
+			"--tag", tag,
+		}
 	}
 
-	if c.mode == "ms" {
+	if portOffset > 0 {
+		playgroundOpts = append(playgroundOpts, "--port-offset", strconv.Itoa(portOffset))
+	}
+
+	if mode == "ms" {
 		playgroundOpts = append(playgroundOpts,
-			"--pd.mode ms",
-			"--tso 1",
-			"--scheduling 1",
+			"--pd.mode", "ms",
+			"--tso", "1",
+			"--scheduling", "1",
 		)
 	}
 
-	cmd := fmt.Sprintf(`%s playground nightly %s %s > %s 2>&1 & `,
-		tiupBin,
-		strings.Join(playgroundOpts, " "),
-		buildBinPathsOpts(c.mode == "ms"),
-		filepath.Join(playgroundLogDir, c.tag+".log"),
-	)
-	_, err = runCommandWithOutputInDir(cmd, repoRoot)
-	re.NoError(err)
+	playgroundOpts = append(playgroundOpts, buildBinPathsOpts(mode)...)
+	return playgroundOpts
 }
 
-// collectPids will collect the pids of the processes.
+// collectPids collects PIDs owned by this cluster's process tree or cluster data directory.
 func (c *cluster) collectPids() error {
-	output, err := runCommandWithOutput(fmt.Sprintf("pgrep -f %s", c.tag))
+	procs, err := listProcesses()
 	if err != nil {
-		return fmt.Errorf("failed to collect pids: %v", err)
+		return fmt.Errorf("failed to collect pids: %w", err)
 	}
-
-	for pidStr := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
-		if pid, err := strconv.Atoi(pidStr); err == nil {
+	for _, pid := range selectOwnedPIDs(procs, c.datadir, c.pgid, os.Getpid()) {
+		if !slices.Contains(c.pids, pid) {
 			c.pids = append(c.pids, pid)
 		}
 	}
 	return nil
 }
 
+func selectOwnedPIDs(procs []procInfo, dataDir string, targetPGID, selfPID int) []int {
+	ownedTree := collectOwnedTreePIDs(procs, targetPGID, selfPID)
+	var cleanDataDir string
+	if dataDir != "" {
+		cleanDataDir = filepath.Clean(dataDir)
+	}
+
+	var pids []int
+	seen := make(map[int]struct{})
+	for _, p := range procs {
+		if p.pid <= 0 || p.pid == selfPID || p.state == 'Z' || p.state == 'X' {
+			continue
+		}
+		_, inTree := ownedTree[p.pid]
+		if !inTree && !matchesEscapedClusterProcess(p, cleanDataDir) {
+			continue
+		}
+		if _, ok := seen[p.pid]; !ok {
+			seen[p.pid] = struct{}{}
+			pids = append(pids, p.pid)
+		}
+	}
+	return pids
+}
+
+func matchesEscapedClusterProcess(p procInfo, cleanDataDir string) bool {
+	if cleanDataDir == "" {
+		return false
+	}
+	binName, procArgs := procBinaryAndArgs(p.args)
+	if !isClusterServerBinary(binName) {
+		return false
+	}
+	return matchesClusterServerDataDir(binName, procArgs, cleanDataDir)
+}
+
 func (c *cluster) waitReady() {
 	re := c.re
 	log.Info("start to wait TiUP ready", zap.String("tag", c.tag))
-	ticker := time.NewTicker(time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), clusterWaitTimeout)
+	defer cancel()
+
+	bin := resolveTiUPBin()
+	err := waitForClusterReady(ctx, clusterPollPeriod, func(checkCtx context.Context) (string, error) {
+		log.Info("check TiUP ready", zap.String("tag", c.tag))
+		return runExecWithOutputContext(checkCtx, "", bin, "playground", "display", "--tag", c.tag)
+	})
+	if err != nil {
+		if logBytes, readErr := os.ReadFile(filepath.Join(playgroundLogDir, c.tag+".log")); readErr == nil && len(logBytes) > 0 {
+			log.Warn("TiUP playground log on timeout", zap.String("tag", c.tag), zap.ByteString("log", logBytes))
+		}
+		re.FailNowf("TiUP is not ready after timeout", "tag: %s, err: %v", c.tag, err)
+	}
+	log.Info("TiUP is ready", zap.String("tag", c.tag))
+}
+
+func waitForClusterReady(ctx context.Context, pollInterval time.Duration, check func(context.Context) (string, error)) error {
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
+	var lastErr error
 	for {
 		select {
-		case <-time.After(100 * time.Second):
-			re.FailNowf("TiUP is not ready after timeout, tag: %s", c.tag)
-		case <-ticker.C:
-			log.Info("check TiUP ready", zap.String("tag", c.tag))
-			cmd := fmt.Sprintf(`%s playground display --tag %s`, tiupBin, c.tag)
-			output, err := runCommandWithOutput(cmd)
-			if err == nil {
-				log.Info("TiUP is ready", zap.String("tag", c.tag))
-				return
+		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("%w (last check error: %w)", ctx.Err(), lastErr)
 			}
-			log.Info(output)
-			log.Info("TiUP is not ready, will retry", zap.String("tag", c.tag), zap.Error(err))
+			return ctx.Err()
+		case <-ticker.C:
+			if ctx.Err() != nil {
+				if lastErr != nil {
+					return fmt.Errorf("%w (last check error: %w)", ctx.Err(), lastErr)
+				}
+				return ctx.Err()
+			}
+			output, err := check(ctx)
+			if err == nil {
+				return nil
+			}
+			lastErr = err
+			if output != "" {
+				log.Info(output)
+			}
+			log.Info("TiUP is not ready, will retry", zap.Error(err))
 		}
 	}
 }
 
-func buildBinPathsOpts(ms bool) string {
-	opts := []string{
-		"--pd.binpath ./bin/pd-server",
-		"--kv.binpath ./third_bin/tikv-server",
-		"--db.binpath ./third_bin/tidb-server",
-		"--tiflash.binpath ./third_bin/tiflash",
+func buildBinPathsOpts(mode string) []string {
+	if mode == "tikv-slim" {
+		return []string{
+			"--pd.binpath", "./bin/pd-server",
+			"--kv.binpath", "./third_bin/tikv-server",
+		}
 	}
 
-	if ms {
+	opts := []string{
+		"--pd.binpath", "./bin/pd-server",
+		"--kv.binpath", "./third_bin/tikv-server",
+		"--db.binpath", "./third_bin/tidb-server",
+		"--tiflash.binpath", "./third_bin/tiflash",
+	}
+
+	if mode == "ms" {
 		opts = append(opts,
-			"--tso.binpath ./bin/pd-server",
-			"--scheduling.binpath ./bin/pd-server",
+			"--tso.binpath", "./bin/pd-server",
+			"--scheduling.binpath", "./bin/pd-server",
 		)
 	}
 
-	return strings.Join(opts, " ")
+	return opts
 }

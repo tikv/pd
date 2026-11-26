@@ -110,7 +110,7 @@ func (s *etcdKeySuite) TestEtcdKey() {
 	//  call `UpdateGCSafePoint` to create the key `/pd//gc/safe_point`.
 	_, err := s.cli.UpdateGCSafePoint(context.Background(), 1) //nolint:staticcheck
 	re.NoError(err)
-	endpoints := getPDEndpoints(re)
+	endpoints := s.cluster.pdEndpoints()
 
 	testutil.Eventually(re, func() bool {
 		keys, err := getEtcdKey(endpoints[0], "/pd")
