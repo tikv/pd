@@ -174,15 +174,15 @@ func (suite *metaTestSuite) TestMetadataBoundaryScheduling() {
 	txnMeta := meta(txnID, map[string]string{keyspace.RegionBoundType: "txn"})
 	// Older Classic PD encoded DEFAULT without a keyspace ID field (proto3 zero).
 	legacyDefault := &keyspacepb.KeyspaceMeta{Name: keyspaceconstant.DefaultKeyspaceName}
-	// A failed ByID create can leave metadata outside the schedulable ID range.
-	outOfRange := meta(keyspaceconstant.MaxValidKeyspaceID+1, nil)
+	// Out-of-range IDs must be ignored even when their metadata cannot be decoded.
+	outOfRange := keypath.KeyspaceMetaPath(keyspaceconstant.MaxValidKeyspaceID + 1)
 	re.NoError(store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		for _, m := range []*keyspacepb.KeyspaceMeta{legacyDefault, rawMeta, txnMeta, meta(legacyID, nil), outOfRange} {
+		for _, m := range []*keyspacepb.KeyspaceMeta{legacyDefault, rawMeta, txnMeta, meta(legacyID, nil)} {
 			if err := store.SaveKeyspaceMeta(txn, m); err != nil {
 				return err
 			}
 		}
-		return nil
+		return txn.Save(outOfRange, "\xff")
 	}))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
@@ -243,7 +243,7 @@ func (suite *metaTestSuite) TestMetadataBoundaryScheduling() {
 
 	rawMeta.Config[keyspace.RegionBoundType] = "txn"
 	re.NoError(store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		if err := store.SaveKeyspaceMeta(txn, outOfRange); err != nil {
+		if err := txn.Save(outOfRange, "\xfe"); err != nil {
 			return err
 		}
 		return store.SaveKeyspaceMeta(txn, rawMeta)
@@ -252,8 +252,8 @@ func (suite *metaTestSuite) TestMetadataBoundaryScheduling() {
 
 	txnMeta.State = keyspacepb.KeyspaceState_TOMBSTONE
 	re.NoError(store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		for _, id := range []uint32{rawID, outOfRange.GetId()} {
-			if err := txn.Remove(keypath.KeyspaceMetaPath(id)); err != nil {
+		for _, path := range []string{keypath.KeyspaceMetaPath(rawID), outOfRange} {
+			if err := txn.Remove(path); err != nil {
 				return err
 			}
 		}

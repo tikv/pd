@@ -297,7 +297,7 @@ func TestMetadataSplitBounds(t *testing.T) {
 		{"partial prefix across modes", raw(4)[:4], txn(8), 10, [][]byte{raw(4), raw(5), raw(6), raw(7), txn(7)}},
 		{"exclude the end fence before limiting", raw(1), raw(4), 1, [][]byte{raw(3)}},
 		{"largest ID with infinite end", txnMax.TxnLeftBound, nil, 10, [][]byte{txnMax.TxnRightBound}},
-		{"no overlap with a mode block", []byte("s"), []byte("w"), 10, nil},
+		{"no overlap with a mode block", []byte("t"), []byte("w"), 10, nil},
 		{"limit per mode", nil, nil, 1, [][]byte{raw(6), raw(7), txnMax.TxnLeftBound, txnMax.TxnRightBound}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

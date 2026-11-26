@@ -129,23 +129,16 @@ func (suite *keyspaceTestSuite) TestMetadataModeOnCreate() {
 				loaded, err := suite.manager.LoadKeyspaceByID(meta.GetId())
 				re.NoError(err)
 				re.Equal(mode, loaded.GetConfig()[keyspace.RegionBoundType])
+				if byID && mode == "raw" {
+					suite.checkEmbeddedLabelBoundaries(loaded.GetId())
+				}
 			})
 		}
 	}
 }
 
-func (suite *keyspaceTestSuite) TestEmbeddedIgnoresMetadataOnlyBoundaries() {
+func (suite *keyspaceTestSuite) checkEmbeddedLabelBoundaries(id uint32) {
 	re := suite.Require()
-	opts := suite.server.GetPersistOptions()
-	original := opts.GetPDServerConfig()
-	defer opts.SetPDServerConfig(original)
-	cfg := original.Clone()
-	cfg.KeyType = "raw"
-	opts.SetPDServerConfig(cfg)
-	id := uint32(7011)
-	_, err := suite.manager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{ID: &id, Name: "metadata-only"})
-	re.NoError(err)
-
 	cluster := suite.server.GetRaftCluster()
 	start := keyspace.MakeRegionBound(id - 1).RawLeftBound
 	at := keyspace.MakeRegionBound(id).RawLeftBound
