@@ -161,6 +161,20 @@ func TestUpdateAffinityGroupTargetsBusyLeader(t *testing.T) {
 	test.Equal(&change.Expected, test.stored("changed"))
 }
 
+func TestFirstGroupRejectsRemovingStoreBeforeScan(t *testing.T) {
+	test := newTargetTest(t)
+	stores := test.storeSetInformer.(*core.StoresInfo)
+	stores.PutStore(stores.GetStore(2).Clone(core.SetNodeState(metapb.NodeState_Removing)))
+	test.checkGroupsAvailability()
+	test.NoError(test.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+	test.False(test.storeConditionsKnown)
+
+	_, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2})
+	test.ErrorContains(err, "store 2 is removing")
+	test.write([]string{}, test.target("g", 1, 1, 2))
+	test.Zero(test.stored("g").LeaderStoreID)
+}
+
 func TestUpdateAffinityGroupTargetsReplayPreservesConcurrentExpiration(t *testing.T) {
 	test := newTargetTest(t, "g")
 	test.checkGroupsAvailability()
@@ -525,6 +539,67 @@ func TestObserveAvailableRegionRejectsStaleRevision(t *testing.T) {
 		test.Len(test.calls, 1)
 		test.Equal(current.modRevision, test.calls[0].ExpectedModRevision)
 		test.True(test.GetAffinityGroupState("g").HasUnpersistedTarget())
+	})
+}
+
+func TestFirstWinQueuedRelearnPrecedesLocalRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pd := newTargetTest(t, "g", "h")
+		pd.write([]string{"g"}, pd.target("g", 1, 1, 2))
+		test := newTargetTestWithStorage(t, t.Context(), pd.store)
+		test.checkGroupsAvailability()
+		release := make(chan struct{})
+		defer close(release)
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+			if targets[0].Expected.ID == "h" {
+				<-release
+			}
+			return pd.UpdateAffinityGroupTargets(ctx, targets)
+		})
+
+		blocking := test.target("h", 1, 1, 2)
+		relearn := test.target("g", 2, 2, 3)
+		test.observe("h", 1, 2)
+		test.ExpireAffinityGroup("g")
+		test.observe("g", 2, 3)
+		test.observe("g", 1, 2)
+		test.False(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+		test.Equal([]GroupTarget{blocking}, test.calls)
+		release <- struct{}{}
+		synctest.Wait()
+
+		test.Equal([]GroupTarget{blocking, relearn}, test.calls)
+		test.Equal(relearn.result(), pd.stored("g"))
+	})
+}
+
+func TestFirstWinSkipsNewlyUnavailableQueuedTarget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pd := newTargetTest(t, "g", "h")
+		test := newTargetTestWithStorage(t, t.Context(), pd.store)
+		test.checkGroupsAvailability()
+		release := make(chan struct{})
+		defer close(release)
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+			if targets[0].Expected.ID == "h" {
+				<-release
+			}
+			return pd.UpdateAffinityGroupTargets(ctx, targets)
+		})
+
+		blocking := test.target("h", 2, 2, 3)
+		healthy := test.target("g", 2, 2, 3)
+		test.observe("h", 2, 3)
+		test.observe("g", 1, 1, 2)
+		test.observe("g", 2, 3)
+		version := test.GetAffinityGroupState("g").affinityVer
+		test.applyStoreConditions(map[uint64]storeCondition{1: storeDown})
+		test.Equal(version, test.GetAffinityGroupState("g").affinityVer)
+		release <- struct{}{}
+		synctest.Wait()
+
+		test.Equal([]GroupTarget{blocking, healthy}, test.calls)
+		test.Equal(healthy.result(), pd.stored("g"))
 	})
 }
 

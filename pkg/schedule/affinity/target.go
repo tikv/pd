@@ -177,18 +177,14 @@ func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bo
 	if stored != nil {
 		m.Lock()
 		if group, ok := m.groups[stored.ID]; ok {
-			wasUnpersisted := group.persistedGroup != nil
 			// A retry can restore a healthy persisted target. Sync handles
 			// confirmation of local targets.
 			changed := m.syncGroupTargetLocked(group, stored)
-			if written && !changed && !wasUnpersisted && m.storeConditionsKnown &&
+			if written && !changed && !group.IsAvailable() && m.storeConditionsKnown &&
 				group == initialGroup && group.AffinityVer == initialVer &&
 				calcGroupAvailability(m.unavailableStores, group.LeaderStoreID, group.VoterStoreIDs) == groupAvailable {
-				availability, deadline := group.GetAvailability(), group.degradedExpiredAt
 				m.setTargetAvailabilityLocked(group)
-				if availability != group.GetAvailability() || deadline != group.degradedExpiredAt {
-					m.resetCountLocked(group)
-				}
+				m.resetCountLocked(group)
 			}
 		}
 		m.Unlock()

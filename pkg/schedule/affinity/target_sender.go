@@ -53,6 +53,29 @@ func (obs *observedTarget) sameCandidate(other observedTarget) bool {
 		slices.Equal(obs.target.VoterStoreIDs, other.target.VoterStoreIDs)
 }
 
+// recoverLocalObservedTarget lets an earlier async attempt take precedence over
+// synchronous recovery of the previous target. Caller holds metaMutex.
+func (m *Manager) recoverLocalObservedTarget(obs *observedTarget) bool {
+	m.targetWriteMutex.Lock()
+	defer m.targetWriteMutex.Unlock()
+
+	id := obs.target.Expected.ID
+	queued := m.pendingTargets[id]
+	sending, inFlight := m.sendingTargets[id]
+	now := time.Now()
+	m.RLock()
+	group := m.groups[id]
+	active := (len(queued) > 0 && queued[0].matches(group)) || (inFlight && sending.matches(group)) ||
+		(now.Before(m.targetWriteRetryAt) && !m.targetEndpointUnsupported) ||
+		(group != nil && group.lastSentTarget != nil && now.Before(group.targetSendAfter) && group.lastSentTarget.matches(group))
+	m.RUnlock()
+	if active {
+		return false
+	}
+	m.applyLocalObservedTarget(obs)
+	return true
+}
+
 // sendObservedTarget queues distinct current candidates in observation order.
 // A full queue keeps its existing candidates.
 // A 404 pauses HTTP attempts but lets groups use observations locally.
@@ -132,8 +155,22 @@ func (m *Manager) popObservedTargets(now time.Time) ([]observedTarget, time.Time
 			delete(m.pendingTargets, id)
 			continue
 		}
+		skip := 0
+		for skip < len(queued) {
+			target := &queued[skip].target
+			if m.checkHasUnavailableStoreLocked(target.LeaderStoreID, target.VoterStoreIDs) == nil {
+				break
+			}
+			skip++
+		}
+		queued = slices.Delete(queued, 0, skip)
+		if len(queued) == 0 {
+			delete(m.pendingTargets, id)
+			continue
+		}
 		obs := queued[0]
 		if sendAfter := obs.groupInfoPtr.targetSendAfter; now.Before(sendAfter) {
+			m.pendingTargets[id] = queued
 			m.pendingTargetIDs = append(m.pendingTargetIDs, id)
 			if retryAt.IsZero() || sendAfter.Before(retryAt) {
 				retryAt = sendAfter
@@ -297,7 +334,7 @@ func (m *Manager) applyLocalObservedTarget(obs *observedTarget) {
 		return
 	}
 	// Store conditions can change during the request without affecting an unset group.
-	if calcGroupAvailability(m.unavailableStores, target.LeaderStoreID, target.VoterStoreIDs) != groupAvailable {
+	if m.checkHasUnavailableStoreLocked(target.LeaderStoreID, target.VoterStoreIDs) != nil {
 		return
 	}
 	groupInfo.LeaderStoreID = target.LeaderStoreID

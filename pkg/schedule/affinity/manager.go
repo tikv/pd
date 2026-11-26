@@ -680,11 +680,6 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		m.groups[group.ID].rangeConflict = groupInfo.rangeConflict
 		return true
 	}
-	// A reload of the last stored target leaves a local replacement in place.
-	if groupInfo.persistedGroup != nil && sameStoredGroup(groupInfo.persistedGroup, group) {
-		return false
-	}
-
 	// A duplicate or a healthy local confirmation preserves runtime state
 	// if the voter order also matches.
 	if (groupInfo.persistedGroup == nil || groupInfo.IsAvailable()) &&

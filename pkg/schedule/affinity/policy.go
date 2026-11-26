@@ -187,31 +187,36 @@ func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 	stores := m.storeSetInformer.GetStores()
 	lowSpaceRatio := m.conf.GetLowSpaceRatio()
 	for _, store := range stores {
-		switch {
-		// First the conditions that will mark the group as expired
-		case store.IsRemoved() || store.IsPhysicallyDestroyed():
-			unavailableStores[store.GetID()] = storeRemoved
-		case store.IsRemoving():
-			unavailableStores[store.GetID()] = storeRemoving
-		case store.IsUnhealthy():
-			unavailableStores[store.GetID()] = storeDown
-
-		// Check replica-wide conditions before conditions that only affect leaders.
-		case store.IsLowSpace(lowSpaceRatio):
-			unavailableStores[store.GetID()] = storeLowSpace
-		case store.IsDisconnected():
-			unavailableStores[store.GetID()] = storeDisconnected
-		case store.IsBusy():
-			unavailableStores[store.GetID()] = storeBusy
-		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) ||
-			store.EvictedAsSlowStore() || store.EvictedAsStoppingStore() || store.IsEvictedAsSlowTrend():
-			unavailableStores[store.GetID()] = storeLeaderEvicted
+		if condition := m.checkStoreCondition(store, lowSpaceRatio); condition != storeAvailable {
+			unavailableStores[store.GetID()] = condition
 		}
-		// Note: We intentionally do NOT check:
-		// - IsSlow(): Performance issue, not availability issue
-		// - IsPreparing(): New stores need to receive replicas before becoming Serving.
 	}
 	return unavailableStores
+}
+
+func (m *Manager) checkStoreCondition(store *core.StoreInfo, lowSpaceRatio float64) storeCondition {
+	switch {
+	// First the conditions that will mark the group as expired.
+	case store == nil || store.IsRemoved() || store.IsPhysicallyDestroyed():
+		return storeRemoved
+	case store.IsRemoving():
+		return storeRemoving
+	case store.IsUnhealthy():
+		return storeDown
+
+	// Check replica-wide conditions before conditions that only affect leaders.
+	case store.IsLowSpace(lowSpaceRatio):
+		return storeLowSpace
+	case store.IsDisconnected():
+		return storeDisconnected
+	case store.IsBusy():
+		return storeBusy
+	case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) ||
+		store.EvictedAsSlowStore() || store.EvictedAsStoppingStore() || store.IsEvictedAsSlowTrend():
+		return storeLeaderEvicted
+	}
+	// IsSlow and IsPreparing do not make a store unavailable.
+	return storeAvailable
 }
 
 func (m *Manager) applyStoreScan(unavailableStores map[uint64]storeCondition, generation uint64) bool {
@@ -266,9 +271,21 @@ func (m *Manager) applyStoreScan(unavailableStores map[uint64]storeCondition, ge
 func (m *Manager) checkHasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) error {
 	m.RLock()
 	defer m.RUnlock()
+	return m.checkHasUnavailableStoreLocked(leaderStoreID, voterStoreIDs)
+}
+
+// Caller holds at least the read lock of RWMutex.
+func (m *Manager) checkHasUnavailableStoreLocked(leaderStoreID uint64, voterStoreIDs []uint64) error {
+	var lowSpaceRatio float64
+	if !m.storeConditionsKnown {
+		lowSpaceRatio = m.conf.GetLowSpaceRatio()
+	}
 	for _, storeID := range voterStoreIDs {
-		condition, ok := m.unavailableStores[storeID]
-		if ok && (!condition.affectsLeaderOnly() || storeID == leaderStoreID) {
+		condition := m.unavailableStores[storeID]
+		if !m.storeConditionsKnown {
+			condition = m.checkStoreCondition(m.storeSetInformer.GetStore(storeID), lowSpaceRatio)
+		}
+		if condition != storeAvailable && (!condition.affectsLeaderOnly() || storeID == leaderStoreID) {
 			return errs.ErrAffinityGroupContent.GenWithStackByArgs(fmt.Sprintf("store %d is %s", storeID, condition.String()))
 		}
 	}

@@ -330,7 +330,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store1)
 	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2"})
-	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()), core.SetNodeState(metapb.NodeState_Removing))
+	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store2)
 
 	conf := mockconfig.NewTestOptions()
@@ -350,9 +350,8 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	re.NotNil(state)
 	re.True(state.AffinitySchedulingAllowed)
 
-	// Simulate store 2 unavailable.
-	unavailable := map[uint64]storeCondition{2: storeRemoved}
-	re.True(manager.applyStoreConditions(unavailable))
+	storeInfos.PutStore(store2.Clone(core.SetNodeState(metapb.NodeState_Removing)))
+	manager.checkGroupsAvailability()
 
 	state2 := manager.GetAffinityGroupState("avail")
 	re.NotNil(state2)
@@ -380,8 +379,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store2)
 
-	// Store 3 is a disconnected follower that is also evicted as a stopping store.
-	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2*time.Minute)), core.StoppingStoreEvicted())
+	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now()), core.StoppingStoreEvicted())
 	storeInfos.PutStore(store3)
 
 	conf := mockconfig.NewTestOptions()
@@ -405,7 +403,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers(group1.ID, group1.LeaderStoreID, group1.VoterStoreIDs)
 	re.NoError(err)
 
-	// Create a test affinity group with unhealthy store
+	// Create a test affinity group with store 3 as a follower.
 	group2 := &Group{
 		ID:            "group2",
 		LeaderStoreID: 2,
@@ -422,7 +420,8 @@ func TestStoreHealthCheck(t *testing.T) {
 	groupInfo2 := manager.groups["group2"]
 	re.True(groupInfo2.IsAffinitySchedulingAllowed())
 
-	// Manually call checkStoreHealth to test
+	// Disconnect store 3 after assigning it to the group.
+	storeInfos.PutStore(store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute))))
 	manager.checkGroupsAvailability()
 
 	// After health check, group1 should still be in effect (all stores healthy)

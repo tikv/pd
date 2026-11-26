@@ -183,7 +183,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for i := 1; i < 7; i++ {
-		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}))
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}, core.SetLastHeartbeatTS(time.Now())))
 	}
 
 	conf := mockconfig.NewTestOptions()
@@ -446,7 +446,7 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for i := 1; i <= 3; i++ {
-		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}))
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}, core.SetLastHeartbeatTS(time.Now())))
 	}
 
 	conf := mockconfig.NewTestOptions()
@@ -724,7 +724,7 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for i := 1; i <= 3; i++ {
-		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}))
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}, core.SetLastHeartbeatTS(time.Now())))
 	}
 
 	conf := mockconfig.NewTestOptions()

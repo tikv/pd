@@ -1948,9 +1948,6 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	tc.AddRegionStore(3, 10)
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
-	// Make store 2 unavailable for leader (evict-leader).
-	tc.SetStoreEvictLeader(2, true)
-
 	affinityManager := tc.GetAffinityManager()
 	checker := newTestAffinityChecker(ctx, tc, opt)
 
@@ -1961,6 +1958,8 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
+
+	tc.SetStoreEvictLeader(2, true)
 
 	// Wait for availability checker to mark the group as not schedulable.
 	var groupState *affinity.GroupState
@@ -2031,13 +2030,10 @@ func TestAffinityCheckerTargetStoreEvictLeader(t *testing.T) {
 	tc.AddRegionStore(3, 10)
 	tc.AddLeaderRegion(1, 1, 2, 3) // Leader on store 1
 
-	// Set store 2 to evict leader
-	tc.SetStoreEvictLeader(2, true)
-
 	affinityManager := tc.GetAffinityManager()
 	checker := newTestAffinityChecker(ctx, tc, opt)
 
-	// Create affinity group with leader on store 2 (which has evict-leader)
+	// Create affinity group with leader on store 2
 	group := &affinity.Group{
 		ID:            "test_group",
 		LeaderStoreID: 2,
@@ -2045,6 +2041,8 @@ func TestAffinityCheckerTargetStoreEvictLeader(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
+
+	tc.SetStoreEvictLeader(2, true)
 
 	// Check should return nil because target store doesn't allow leader transfer in
 	ops := checker.Check(tc.GetRegion(1))
@@ -2063,14 +2061,10 @@ func TestAffinityCheckerTargetStoreRejectLeader(t *testing.T) {
 	tc.AddRegionStore(3, 10)
 	tc.AddLeaderRegion(1, 1, 2, 3) // Leader on store 1
 
-	// Set reject-leader label property for store 2
-	tc.SetLabelProperty("reject-leader", "reject", "leader")
-	tc.AddLabelsStore(2, 10, map[string]string{"reject": "leader"})
-
 	affinityManager := tc.GetAffinityManager()
 	checker := newTestAffinityChecker(ctx, tc, opt)
 
-	// Create affinity group with leader on store 2 (which has reject-leader label)
+	// Create affinity group with leader on store 2
 	group := &affinity.Group{
 		ID:            "test_group",
 		LeaderStoreID: 2,
@@ -2078,6 +2072,9 @@ func TestAffinityCheckerTargetStoreRejectLeader(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
+
+	tc.SetLabelProperty("reject-leader", "reject", "leader")
+	tc.AddLabelsStore(2, 10, map[string]string{"reject": "leader"})
 
 	// Check should return nil because target store has reject-leader label
 	ops := checker.Check(tc.GetRegion(1))
