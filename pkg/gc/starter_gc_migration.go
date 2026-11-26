@@ -296,6 +296,9 @@ func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcS
 		gcSafePoint uint64
 	}
 	var conflicts []migrationConflict
+	// The source T stays frozen during migration. If this generation retires
+	// before etcd commits, a successful CAS still installs a valid migration
+	// result. A competing write to T changes its revision and rejects this CAS.
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		if groupID != "" {
 			if err := wb.ExpectConfigRevision(configRevision); err != nil {
