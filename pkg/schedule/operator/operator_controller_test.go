@@ -1691,23 +1691,52 @@ func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOp
 		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
 		re.Equal(uint64(0), controller.OperatorCount(OpAdmin))
 
+		// Concurrent split AddOperator(opA) and AddOperator(opB) without Sync must share one token
+		// so removing either half always cancels its partner.
+		for iter := range 50 {
+			concA, concB := newUnsyncedPair(OpMerge)
+			ready := make(chan struct{})
+			wg := new(sync.WaitGroup)
+			var okA, okB bool
+			wg.Go(func() {
+				<-ready
+				okA = controller.AddOperator(concA)
+			})
+			wg.Go(func() {
+				<-ready
+				okB = controller.AddOperator(concB)
+			})
+			close(ready)
+			wg.Wait()
+			re.True(okA)
+			re.True(okB)
+			re.True(concA.isPairedMergeOperator(concB))
+			if iter%2 == 0 {
+				re.True(controller.RemoveOperator(concA))
+				re.Equal(CANCELED, concB.Status())
+			} else {
+				re.True(controller.RemoveOperator(concB))
+				re.Equal(CANCELED, concA.Status())
+			}
+			re.Nil(controller.GetOperator(source.GetID()))
+			re.Nil(controller.GetOperator(target.GetID()))
+			re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+		}
+
 		// Concurrent reuse of the same unsynced source across both entry points must not race.
 		sharedA, partner1 := newUnsyncedPair(OpMerge)
 		partner2 := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, TransferLeader{FromStore: 1, ToStore: 2})
 		partner2.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
 		start := make(chan struct{})
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
+		wg := new(sync.WaitGroup)
+		wg.Go(func() {
 			<-start
 			controller.AddOperator(sharedA, partner1)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			<-start
 			controller.AddWaitingOperator(sharedA, partner2)
-		}()
+		})
 		close(start)
 		wg.Wait()
 		controller.RemoveOperators(AdminStop)
@@ -1774,7 +1803,7 @@ func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOp
 			}
 			re.Equal(CREATED, opB.Status())
 			re.Same(opB, controller.GetOperator(target.GetID()))
-			var wg sync.WaitGroup
+			wg := new(sync.WaitGroup)
 			wg.Go(func() {
 				replaceOK = controller.AddOperator(replacement)
 			})
@@ -1831,7 +1860,7 @@ func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOp
 			}
 			re.Equal(CREATED, opB.Status())
 			re.Same(opB, controller.GetOperator(target.GetID()))
-			var wg sync.WaitGroup
+			wg := new(sync.WaitGroup)
 			wg.Go(func() {
 				replaceOK = controller.AddOperator(replacement)
 			})

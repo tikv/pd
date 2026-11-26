@@ -100,10 +100,11 @@ type Controller struct {
 	successCallbacks []func(op *Operator)
 
 	// states
-	records   *records // safe for concurrent
-	wop       WaitingOperator
-	wopStatus *waitingOperatorStatus
-	counts    *opCounter
+	records          *records // safe for concurrent
+	wop              WaitingOperator
+	wopStatus        *waitingOperatorStatus
+	counts           *opCounter
+	splitMergePairMu syncutil.Mutex // serializes lazy pair-token assignment with publication for split unsynced merge ops
 }
 
 // NewController creates a Controller.
@@ -605,6 +606,11 @@ func releaseSplitMergePair(op *Operator, claimedPair *mergePairToken) {
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
 	kind := op.SchedulerKind()
+
+	needSplitPairLock := op.HasRelatedMergeRegion() && !op.hasMergePair()
+	if needSplitPairLock {
+		oc.splitMergePairMu.Lock()
+	}
 	claimedPair := oc.ensureSingleMergePair(op)
 
 	// Increment before publishing so any concurrent removal after publish
@@ -617,6 +623,9 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		if !isHigherPriorityOperator(op, oldOp) {
 			oc.counts.dec(kind)
 			releaseSplitMergePair(op, claimedPair)
+			if needSplitPairLock {
+				oc.splitMergePairMu.Unlock()
+			}
 			log.Debug("operator already exists with higher or equal priority",
 				zap.Uint64("region-id", regionID),
 				zap.Reflect("old", oldOp),
@@ -630,6 +639,9 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		if !oc.operators.CompareAndSwap(regionID, oldOp, op) {
 			oc.counts.dec(kind)
 			releaseSplitMergePair(op, claimedPair)
+			if needSplitPairLock {
+				oc.splitMergePairMu.Unlock()
+			}
 			_ = op.Cancel()
 			oc.buryOperator(op)
 			log.Debug("operator changed during replace, skip this add",
@@ -637,6 +649,9 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 				zap.Reflect("old", oldOp),
 				zap.Reflect("new", op))
 			return false
+		}
+		if needSplitPairLock {
+			oc.splitMergePairMu.Unlock()
 		}
 		oc.counts.dec(oldOp.SchedulerKind())
 		oc.ack(oldOp)
@@ -647,6 +662,8 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 			_ = oldOp.Cancel(AlreadyExist)
 		}
 		oc.buryOperator(oldOp)
+	} else if needSplitPairLock {
+		oc.splitMergePairMu.Unlock()
 	}
 
 	failpoint.InjectCall("afterPublishOperator")
