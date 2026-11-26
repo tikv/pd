@@ -250,7 +250,7 @@ func parsePSOutput(output string) []procInfo {
 			continue
 		}
 		args := parsePSArgs(rawArgs)
-		if len(args) == 0 {
+		if len(args) == 0 && statStr[0] != 'Z' && statStr[0] != 'X' {
 			continue
 		}
 		procs = append(procs, procInfo{
@@ -286,6 +286,9 @@ func splitPSColumns(line string) (pid, ppid, pgid, stat, rawArgs string, ok bool
 
 // parsePSArgs reconstructs argv from the flattened `ps` `args=` column while preserving
 // spaces inside executable paths and option values (such as `--data-dir=/path with space/...`).
+// When the pre-option prefix contains whitespace, the executable (and any shell script
+// argument) must be independently and uniquely confirmed on disk; otherwise nil is
+// returned so ambiguous or unconfirmed records are excluded.
 func parsePSArgs(raw string) []string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -308,25 +311,12 @@ func parsePSArgs(raw string) []string {
 		return nil
 	}
 
-	args := make([]string, 0, len(chunks)+2)
-	// First chunk is the executable path (possibly prefixed by a shell like `sh /path/to/bin`).
-	first := chunks[0]
-	if sp := strings.IndexAny(first, " \t"); sp > 0 {
-		head := first[:sp]
-		tail := strings.TrimSpace(first[sp:])
-		switch filepath.Base(head) {
-		case "sh", "bash", "dash":
-			if tail != "" {
-				args = append(args, head, tail)
-			} else {
-				args = append(args, head)
-			}
-		default:
-			args = append(args, first)
-		}
-	} else {
-		args = append(args, first)
+	firstArgs, ok := resolvePSFirstChunk(chunks[0])
+	if !ok {
+		return nil
 	}
+	args := make([]string, 0, len(firstArgs)+len(chunks))
+	args = append(args, firstArgs...)
 
 	for _, chunk := range chunks[1:] {
 		sp := strings.IndexAny(chunk, " \t")
@@ -339,6 +329,85 @@ func parsePSArgs(raw string) []string {
 		args = append(args, chunk)
 	}
 	return args
+}
+
+func resolvePSFirstChunk(first string) ([]string, bool) {
+	if first == "" {
+		return nil, false
+	}
+	if !strings.ContainsAny(first, " \t") {
+		return []string{first}, true
+	}
+
+	exe, rest, ok := resolveUniquePathPrefix(first, isPSExecutable)
+	if !ok {
+		return nil, false
+	}
+	if rest == "" {
+		return []string{exe}, true
+	}
+
+	switch filepath.Base(exe) {
+	case "sh", "bash", "dash":
+		if !strings.ContainsAny(rest, " \t") {
+			return []string{exe, rest}, true
+		}
+		script, scriptRest, scriptOK := resolveUniquePathPrefix(rest, isPSRegularFile)
+		if !scriptOK {
+			return nil, false
+		}
+		res := []string{exe, script}
+		if scriptRest != "" {
+			res = append(res, strings.Fields(scriptRest)...)
+		}
+		return res, true
+	default:
+		res := []string{exe}
+		res = append(res, strings.Fields(rest)...)
+		return res, true
+	}
+}
+
+func resolveUniquePathPrefix(s string, check func(string) bool) (matched, rest string, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", "", false
+	}
+	var matchCount int
+	for i := 0; i <= len(s); i++ {
+		if i < len(s) && s[i] != ' ' && s[i] != '\t' {
+			continue
+		}
+		if i == 0 || s[i-1] == ' ' || s[i-1] == '\t' {
+			continue
+		}
+		candidate := s[:i]
+		if check(candidate) {
+			matchCount++
+			if matchCount > 1 {
+				return "", "", false
+			}
+			matched = candidate
+			rest = strings.TrimSpace(s[i:])
+		}
+	}
+	return matched, rest, matchCount == 1
+}
+
+func isPSExecutable(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := exec.LookPath(path)
+	return err == nil
+}
+
+func isPSRegularFile(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path) //nolint:gosec
+	return err == nil && info.Mode().IsRegular()
 }
 
 func isPSOptionStart(s string) bool {
@@ -480,6 +549,13 @@ func collectOwnedTreePIDs(procs []procInfo, targetPGID int, launcherStartTime ui
 	return owned
 }
 
+func hasConfirmedProcIdentity(prev, cur procInfo) bool {
+	return prev.pid == cur.pid &&
+		cur.state != 'Z' && cur.state != 'X' &&
+		prev.startTime > 0 && cur.startTime > 0 &&
+		prev.startTime == cur.startTime
+}
+
 func sameProcIdentity(prev, cur procInfo) bool {
 	if prev.pid != cur.pid || cur.state == 'Z' || cur.state == 'X' {
 		return false
@@ -490,16 +566,16 @@ func sameProcIdentity(prev, cur procInfo) bool {
 	if prev.startTime > 0 || cur.startTime > 0 {
 		return false
 	}
-	return slices.Equal(prev.args, cur.args)
+	return prev.pgid == cur.pgid && slices.Equal(prev.args, cur.args)
 }
 
 func mergeOwnedProcs(tracked map[int]procInfo, currentProcs, freshOwned []procInfo) []procInfo {
-	for _, p := range freshOwned {
-		tracked[p.pid] = p
-	}
 	freshSet := make(map[int]struct{}, len(freshOwned))
 	for _, p := range freshOwned {
 		freshSet[p.pid] = struct{}{}
+		if p.startTime > 0 {
+			tracked[p.pid] = p
+		}
 	}
 	merged := make([]procInfo, 0, len(freshOwned))
 	seen := make(map[int]struct{}, len(freshOwned))
@@ -509,7 +585,7 @@ func mergeOwnedProcs(tracked map[int]procInfo, currentProcs, freshOwned []procIn
 		}
 		if _, isFresh := freshSet[p.pid]; !isFresh {
 			prev, wasTracked := tracked[p.pid]
-			if !wasTracked || !sameProcIdentity(prev, p) {
+			if !wasTracked || !hasConfirmedProcIdentity(prev, p) {
 				continue
 			}
 			tracked[p.pid] = p

@@ -790,10 +790,19 @@ exit 1
 func TestParsePSOutputWithSpaces(t *testing.T) {
 	re := require.New(t)
 
+	spacedBinDir := filepath.Join(t.TempDir(), "tiup home", "bin")
+	re.NoError(os.MkdirAll(spacedBinDir, 0750))
+	spacedTiKV := filepath.Join(spacedBinDir, "tikv-server")
+	spacedPD := filepath.Join(spacedBinDir, "pd-server")
+	for _, bin := range []string{spacedTiKV, spacedPD} {
+		re.NoError(os.WriteFile(bin, []byte("#!/bin/sh\n"), 0600))
+		re.NoError(os.Chmod(bin, 0700)) //nolint:gosec
+	}
+
 	out := strings.Join([]string{
-		"1001 1 1001 Ssl /tmp/tiup home/bin/tikv-server --pd-endpoints=http://127.0.0.1:23791 --data-dir=/tmp/tiup home/data/tag1/tikv-0/data",
-		"1002 1 1002 S /tmp/tiup home/bin/tikv-server --pd-endpoints http://127.0.0.1:23792 --data-dir /tmp/tiup home/data/tag2/tikv-0/data",
-		"1003 1 1003 S sh /tmp/tiup home/bin/pd-server --data-dir=/tmp/tiup home/data/tag1/pd-0/data",
+		fmt.Sprintf("1001 1 1001 Ssl %s --pd-endpoints=http://127.0.0.1:23791 --data-dir=/tmp/tiup home/data/tag1/tikv-0/data", spacedTiKV),
+		fmt.Sprintf("1002 1 1002 S %s --pd-endpoints http://127.0.0.1:23792 --data-dir /tmp/tiup home/data/tag2/tikv-0/data", spacedTiKV),
+		fmt.Sprintf("1003 1 1003 S sh %s --data-dir=/tmp/tiup home/data/tag1/pd-0/data", spacedPD),
 		"1004 1 1004 S /tmp/repo/bin/tikv-server -test.run=^TestHelperFakeServer$ -- --pd-endpoints=http://127.0.0.1:23793 --data-dir=/tmp/tiup home/data/tag3/tikv-0/data",
 	}, "\n")
 
@@ -804,6 +813,75 @@ func TestParsePSOutputWithSpaces(t *testing.T) {
 	re.Equal([]string{"http://127.0.0.1:23792"}, selectPDEndpoints(procs, "/tmp/tiup home/data/tag2", 0, 0, os.Getpid()))
 	re.Equal([]string{"http://127.0.0.1:23793"}, selectPDEndpoints(procs, "/tmp/tiup home/data/tag3", 0, 0, os.Getpid()))
 	re.Equal([]int{1001, 1003}, selectOwnedPIDs(procs, "/tmp/tiup home/data/tag1", 0, 0, os.Getpid()))
+}
+
+func TestParsePSOutputExcludesDebuggerAndUnconfirmedExecutables(t *testing.T) {
+	re := require.New(t)
+
+	tmpDir := t.TempDir()
+	debuggerDir := filepath.Join(tmpDir, "bin")
+	spacedDebuggerDir := filepath.Join(tmpDir, "debug tools")
+	spacedBinDir := filepath.Join(tmpDir, "tiup home", "bin")
+	for _, dir := range []string{debuggerDir, spacedDebuggerDir, spacedBinDir} {
+		re.NoError(os.MkdirAll(dir, 0750))
+	}
+
+	gdbBin := filepath.Join(debuggerDir, "gdb")
+	lldbBin := filepath.Join(spacedDebuggerDir, "lldb")
+	spacedTiKV := filepath.Join(spacedBinDir, "tikv-server")
+	wrapperScript := filepath.Join(tmpDir, "wrapper.sh")
+	ambigShort := filepath.Join(tmpDir, "tool")
+	ambigLong := filepath.Join(tmpDir, "tool extra")
+	for _, bin := range []string{gdbBin, lldbBin, spacedTiKV, ambigShort, ambigLong} {
+		re.NoError(os.WriteFile(bin, []byte("#!/bin/sh\n"), 0600))
+		re.NoError(os.Chmod(bin, 0700)) //nolint:gosec
+	}
+	re.NoError(os.WriteFile(wrapperScript, []byte("#!/bin/sh\n"), 0600))
+
+	dataDir := "/tmp/tiup home/data/tag_dbg"
+	out := strings.Join([]string{
+		// Confirmed real cluster server.
+		fmt.Sprintf("2000 1 2000 S %s --pd-endpoints=http://127.0.0.1:23790 --data-dir=%s/tikv-0/data", spacedTiKV, dataDir),
+		// Debugger with confirmed executable and TiKV path argument.
+		fmt.Sprintf("2001 1 2001 S %s %s --pd-endpoints=http://127.0.0.1:23791 --data-dir=%s/tikv-0/data", gdbBin, spacedTiKV, dataDir),
+		// Debugger inside a spaced directory with TiKV path argument.
+		fmt.Sprintf("2002 1 2002 S %s %s --pd-endpoints=http://127.0.0.1:23792 --data-dir=%s/tikv-0/data", lldbBin, spacedTiKV, dataDir),
+		// Unconfirmed debugger executables (not present on disk / PATH) must be excluded.
+		fmt.Sprintf("2003 1 2003 S /nonexistent/gdb /repo/third_bin/tikv-server --pd-endpoints=http://127.0.0.1:23793 --data-dir=%s/tikv-0/data", dataDir),
+		fmt.Sprintf("2004 1 2004 S nonexistent-debugger /repo/third_bin/tikv-server --pd-endpoints=http://127.0.0.1:23794 --data-dir=%s/tikv-0/data", dataDir),
+		// Shell running a wrapper script with TiKV path argument.
+		fmt.Sprintf("2005 1 2005 S sh %s %s --pd-endpoints=http://127.0.0.1:23795 --data-dir=%s/tikv-0/data", wrapperScript, spacedTiKV, dataDir),
+		// Unconfirmed spaced TiKV path that does not exist on disk must be excluded.
+		fmt.Sprintf("2006 1 2006 S /nonexistent/tiup home/bin/tikv-server --pd-endpoints=http://127.0.0.1:23796 --data-dir=%s/tikv-0/data", dataDir),
+		// Ambiguous prefix where two executables match on disk must be excluded.
+		fmt.Sprintf("2007 1 2007 S %s --data-dir=%s/tikv-0/data", ambigLong, dataDir),
+	}, "\n")
+
+	procs := parsePSOutput(out)
+	byPID := make(map[int]procInfo, len(procs))
+	for _, p := range procs {
+		byPID[p.pid] = p
+	}
+
+	re.Contains(byPID, 2000)
+	re.Equal(spacedTiKV, byPID[2000].args[0])
+
+	re.Contains(byPID, 2001)
+	re.Equal(gdbBin, byPID[2001].args[0])
+	re.Contains(byPID, 2002)
+	re.Equal(lldbBin, byPID[2002].args[0])
+	re.Contains(byPID, 2005)
+	re.Equal([]string{"sh", wrapperScript}, byPID[2005].args[:2])
+
+	// Unconfirmed and ambiguous spaced records must be excluded.
+	re.NotContains(byPID, 2003)
+	re.NotContains(byPID, 2004)
+	re.NotContains(byPID, 2006)
+	re.NotContains(byPID, 2007)
+
+	// Only the real tikv-server (PID 2000) may be selected as a cleanup target or endpoint source.
+	re.Equal([]int{2000}, selectOwnedPIDs(procs, dataDir, 0, 0, os.Getpid()))
+	re.Equal([]string{"http://127.0.0.1:23790"}, selectPDEndpoints(procs, dataDir, 0, 0, os.Getpid()))
 }
 
 func TestClusterWithSpacesInTiUPHome(t *testing.T) {
@@ -1598,6 +1676,109 @@ exit 1
 		}
 		re.True(sawChildTerm, "expected initial SIGTERM for owned helper child")
 		re.True(sawChildKill, "expected SIGKILL for reparented helper child with unchanged identity")
+	})
+
+	t.Run("does not SIGKILL reused PID with same args in different PGID on ps fallback", func(t *testing.T) {
+		re := require.New(t)
+		origKill := killProcess
+		origList := listProcessesFn
+		origGrace := clusterStopGraceTimeout
+		t.Cleanup(func() {
+			killProcess = origKill
+			listProcessesFn = origList
+			clusterStopGraceTimeout = origGrace
+		})
+		clusterStopGraceTimeout = 60 * time.Millisecond
+
+		const (
+			launcherPID = 42001
+			reusedPID   = 66667
+		)
+		sharedArgs := []string{"/usr/bin/helper-worker", "--mode=run"}
+
+		// Direct pure process-table check on mergeOwnedProcs when startTime is unavailable (ps fallback).
+		tracked := make(map[int]procInfo)
+		oldMember := procInfo{
+			pid: reusedPID, ppid: launcherPID, pgid: launcherPID, state: 'S',
+			args: sharedArgs,
+		}
+		reusedInOtherPGID := procInfo{
+			pid: reusedPID, ppid: 99999, pgid: 99999, state: 'S',
+			args: sharedArgs,
+		}
+		re.Equal([]procInfo{oldMember}, mergeOwnedProcs(tracked, []procInfo{oldMember}, []procInfo{oldMember}))
+		re.Empty(mergeOwnedProcs(tracked, []procInfo{reusedInOtherPGID}, nil))
+		re.False(hasLiveMatchingProcs([]procInfo{reusedInOtherPGID}, []procInfo{oldMember}))
+		re.True(hasLiveMatchingProcs([]procInfo{oldMember}, []procInfo{oldMember}))
+
+		var mu sync.Mutex
+		var calls []signalCall
+		var scanCount int
+		var launcherKilled bool
+		killProcess = func(pid int, sig syscall.Signal) error {
+			mu.Lock()
+			calls = append(calls, signalCall{pid: pid, sig: sig})
+			if sig == syscall.SIGKILL && (pid == launcherPID || pid == -launcherPID) {
+				launcherKilled = true
+			}
+			mu.Unlock()
+			return nil
+		}
+		listProcessesFn = func() ([]procInfo, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			scanCount++
+			if scanCount == 1 {
+				// Scan 1 (ps fallback: startTime == 0): launcher and tracked child in target PGID.
+				return []procInfo{
+					{
+						pid: launcherPID, ppid: os.Getpid(), pgid: launcherPID, state: 'S',
+						args: []string{"/bin/tiup", "playground", "nightly", "--tag", "ps_reuse_test"},
+					},
+					oldMember,
+				}, nil
+			}
+			// Subsequent scans: old child exited and an unrelated process reused the same
+			// PID and command line in a different PGID while launcher survives until SIGKILL.
+			if launcherKilled {
+				return []procInfo{reusedInOtherPGID}, nil
+			}
+			return []procInfo{
+				{
+					pid: launcherPID, ppid: os.Getpid(), pgid: launcherPID, state: 'S',
+					args: []string{"/bin/tiup", "playground", "nightly", "--tag", "ps_reuse_test"},
+				},
+				reusedInOtherPGID,
+			}, nil
+		}
+
+		c := &cluster{
+			tag:               "ps_reuse_test",
+			datadir:           "/tmp/tiup-ps-reuse-test/data/ps_reuse_test",
+			pgid:              launcherPID,
+			launcherStartTime: 0,
+		}
+		c.stop()
+
+		mu.Lock()
+		recorded := append([]signalCall(nil), calls...)
+		mu.Unlock()
+
+		var sawReusedTerm, sawReusedKill, sawLauncherKill bool
+		for _, call := range recorded {
+			if call.pid == reusedPID && call.sig == syscall.SIGTERM {
+				sawReusedTerm = true
+			}
+			if call.pid == reusedPID && call.sig == syscall.SIGKILL {
+				sawReusedKill = true
+			}
+			if call.pid == launcherPID && call.sig == syscall.SIGKILL {
+				sawLauncherKill = true
+			}
+		}
+		re.True(sawReusedTerm, "expected initial SIGTERM for owned child before it exited")
+		re.True(sawLauncherKill, "expected SIGKILL for surviving launcher")
+		re.False(sawReusedKill, "must not SIGKILL reused PID with same args in a different PGID when startTime is unavailable")
 	})
 }
 
