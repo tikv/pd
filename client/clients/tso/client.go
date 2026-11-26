@@ -395,7 +395,11 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 	timer := time.NewTimer(constants.RetryInterval)
 	defer timer.Stop()
 	// Retry several times before falling back to the follower when the network problem happens
-	for range constants.MaxRetryTimes {
+retryLoop:
+	for attempts := 0; attempts < constants.MaxRetryTimes; {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		// The next attempt starts one interval after this one starts, or earlier if the leader
 		// switches, so a slow attempt does not add a full interval on top of itself.
 		timer.Reset(constants.RetryInterval)
@@ -408,19 +412,20 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		}
 		if cc != nil {
 			cctx, cancel := context.WithCancel(ctx)
-			if c.trackStreamBuild(cctx, cancel, url) {
-				stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
-				if !c.finishStreamBuild(cctx) {
-					cancel()
-					stream = nil
-					// Keep the builder's gRPC status so connection timeouts still
-					// count as network errors when deciding whether to forward.
-					if err == nil {
-						err = context.Canceled
-					}
+			if !c.trackStreamBuild(cctx, cancel, url) {
+				cancel()
+				// No build was attempted for this obsolete lookup. Preserve the retry budget.
+				continue
+			}
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
+			if !c.finishStreamBuild(cctx) {
+				cancel()
+				stream = nil
+				// Keep the builder's gRPC status so connection timeouts still
+				// count as network errors when deciding whether to forward.
+				if err == nil {
+					err = context.Canceled
 				}
-			} else {
-				err = context.Canceled
 			}
 			failpoint.Inject("unreachableNetwork", func() {
 				stream = nil
@@ -448,17 +453,33 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 			}
 			cancel()
 		} else {
+			if c.getLeaderURL() != url {
+				continue
+			}
 			networkErrNum++
 		}
+		attempts++
+		// Subscribe before rechecking availability so a concurrent successful build
+		// can wake this retry even while the dispatcher is waiting inside this call.
+		updated := c.conCtxMgr.Updated()
 		// A usable stream needs no additional discovery. Refresh failed attempts
 		// before waiting so a leader change can interrupt the retry interval.
 		c.svcDiscovery.ScheduleCheckMemberChanged()
-		select {
-		case <-ctx.Done():
-			return err
-		case <-timer.C:
-		case <-leaderSwitched:
-			// Retry with the new leader without waiting for the interval.
+		for {
+			if c.conCtxMgr.Exist(c.getLeaderURL()) {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return err
+			case <-timer.C:
+				continue retryLoop
+			case <-leaderSwitched:
+				// Retry with the new leader without waiting for the interval.
+				continue retryLoop
+			case <-updated:
+				updated = c.conCtxMgr.Updated()
+			}
 		}
 	}
 

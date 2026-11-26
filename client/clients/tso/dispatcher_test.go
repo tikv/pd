@@ -16,6 +16,7 @@ package tso
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -233,6 +234,7 @@ type countingServiceDiscovery struct {
 	conns         map[string]*grpc.ClientConn
 	backupURLs    []string
 	onSchedule    func()
+	onGetConn     func(string)
 	servingURL    string
 }
 
@@ -251,6 +253,9 @@ func (*countingServiceDiscovery) GetServiceClient() sd.ServiceClient            
 func (*countingServiceDiscovery) GetServiceClientByKind(sd.APIKind) sd.ServiceClient { return nil }
 func (*countingServiceDiscovery) GetAllServiceClients() []sd.ServiceClient           { return nil }
 func (s *countingServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	if s.onGetConn != nil {
+		s.onGetConn(url)
+	}
 	if s.conns != nil {
 		return s.conns[url], nil
 	}
@@ -368,61 +373,87 @@ func TestTSOReconnectFailureRefreshesBeforeBackoff(t *testing.T) {
 }
 
 func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
-	const leaderURL, backupURL = "leader", "backup"
-	newHealthConn := func(url string, servingStatus healthpb.HealthCheckResponse_ServingStatus) *grpc.ClientConn {
-		conn, err := grpc.NewClient(url,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithUnaryInterceptor(func(_ context.Context, _ string, _, reply any,
-				_ *grpc.ClientConn, _ grpc.UnaryInvoker, _ ...grpc.CallOption,
-			) error {
-				reply.(*healthpb.HealthCheckResponse).Status = servingStatus
-				return nil
-			}))
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, conn.Close()) })
-		return conn
-	}
-	svc := &countingServiceDiscovery{
-		servingURL: leaderURL,
-		backupURLs: []string{backupURL},
-		conns: map[string]*grpc.ClientConn{
-			leaderURL: newHealthConn(leaderURL, healthpb.HealthCheckResponse_NOT_SERVING),
-			backupURL: newHealthConn(backupURL, healthpb.HealthCheckResponse_SERVING),
-		},
-	}
-	var directBuilds int
-	builder := reconnectTestBuilder(func(ctx context.Context, cancel context.CancelFunc, _ time.Duration) (*tsoStream, error) {
-		if forwardedHost := grpcutil.GetForwardedHost(ctx, metadata.FromOutgoingContext); forwardedHost != "" {
-			require.Equal(t, leaderURL, forwardedHost)
-			return newTSOStream(ctx, backupURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
-		}
-		directBuilds++
-		// Trigger the production build timeout immediately, then return the same
-		// gRPC cancellation error as a connection that remains unavailable.
-		done := make(chan struct{})
-		go checkStreamTimeout(ctx, cancel, done, 0)
-		<-ctx.Done()
-		done <- struct{}{}
-		return nil, status.FromContextError(ctx.Err()).Err()
-	})
-	option := opt.NewOption()
-	option.EnableForwarding = true
-	client := NewClient(t.Context(), option, svc, builder)
-	client.leaderURL.Store(leaderURL)
-	t.Cleanup(func() {
-		client.cancel()
-		client.wg.Wait()
-		client.conCtxMgr.ReleaseAll()
-	})
+	for _, tt := range []struct {
+		name           string
+		obsoleteLookup bool
+		lookupFailed   bool
+	}{
+		{name: "build-timeout"},
+		{name: "obsolete-lookup-before-build-timeouts", obsoleteLookup: true},
+		{name: "obsolete-failed-lookup-before-build-timeouts", obsoleteLookup: true, lookupFailed: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			const leaderURL, backupURL = "leader", "backup"
+			newHealthConn := func(url string, servingStatus healthpb.HealthCheckResponse_ServingStatus) *grpc.ClientConn {
+				conn, err := grpc.NewClient(url,
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithUnaryInterceptor(func(_ context.Context, _ string, _, reply any,
+						_ *grpc.ClientConn, _ grpc.UnaryInvoker, _ ...grpc.CallOption,
+					) error {
+						reply.(*healthpb.HealthCheckResponse).Status = servingStatus
+						return nil
+					}))
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, conn.Close()) })
+				return conn
+			}
+			svc := &countingServiceDiscovery{
+				servingURL: leaderURL,
+				backupURLs: []string{backupURL},
+				conns: map[string]*grpc.ClientConn{
+					leaderURL: newHealthConn(leaderURL, healthpb.HealthCheckResponse_NOT_SERVING),
+					backupURL: newHealthConn(backupURL, healthpb.HealthCheckResponse_SERVING),
+				},
+			}
+			var directBuilds int
+			builder := reconnectTestBuilder(func(ctx context.Context, cancel context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+				if forwardedHost := grpcutil.GetForwardedHost(ctx, metadata.FromOutgoingContext); forwardedHost != "" {
+					require.Equal(t, leaderURL, forwardedHost)
+					return newTSOStream(ctx, backupURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+				}
+				directBuilds++
+				// Trigger the production build timeout immediately, then return the same
+				// gRPC cancellation error as a connection that remains unavailable.
+				done := make(chan struct{})
+				go checkStreamTimeout(ctx, cancel, done, 0)
+				<-ctx.Done()
+				done <- struct{}{}
+				return nil, status.FromContextError(ctx.Err()).Err()
+			})
+			option := opt.NewOption()
+			option.EnableForwarding = true
+			client := NewClient(t.Context(), option, svc, builder)
+			client.leaderURL.Store(leaderURL)
+			if tt.obsoleteLookup {
+				const oldLeader = "old-leader"
+				if !tt.lookupFailed {
+					svc.conns[oldLeader] = svc.conns[leaderURL]
+				}
+				client.leaderURL.Store(oldLeader)
+				svc.onGetConn = func(url string) {
+					if url == oldLeader {
+						// Switch after the lookup reads its URL, before it registers a build.
+						client.leaderURL.Store(leaderURL)
+						client.notifyLeaderSwitched()
+					}
+				}
+			}
+			t.Cleanup(func() {
+				client.cancel()
+				client.wg.Wait()
+				client.conCtxMgr.ReleaseAll()
+			})
 
-	require.NoError(t, client.tryConnectToTSO(client.ctx))
-	require.Equal(t, constants.MaxRetryTimes, directBuilds)
-	require.False(t, client.conCtxMgr.Exist(leaderURL))
-	require.True(t, client.conCtxMgr.Exist(backupURL))
-	_, req := startRecoveryDispatcher(t, client)
-	physical, _, err := req.waitTimeout(time.Second)
-	require.NoError(t, err)
-	require.Positive(t, physical)
+			require.NoError(t, client.tryConnectToTSO(client.ctx))
+			require.Equal(t, constants.MaxRetryTimes, directBuilds)
+			require.False(t, client.conCtxMgr.Exist(leaderURL))
+			require.True(t, client.conCtxMgr.Exist(backupURL))
+			_, req := startRecoveryDispatcher(t, client)
+			physical, _, err := req.waitTimeout(time.Second)
+			require.NoError(t, err)
+			require.Positive(t, physical)
+		})
+	}
 }
 
 func TestTSORecoveryRefreshesOnRequestErrors(t *testing.T) {
@@ -855,6 +886,59 @@ func TestDispatcherUsesBackgroundStream(t *testing.T) {
 			physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
 			require.NoError(t, err)
 			require.Positive(t, physical)
+		})
+	}
+}
+
+func TestDispatcherUsesBackgroundStreamDuringReconnect(t *testing.T) {
+	for _, beforeWait := range []bool{true, false} {
+		name := "during-retry-wait"
+		if beforeWait {
+			name = "before-retry-wait"
+		}
+		t.Run(name, func(t *testing.T) {
+			var builds atomic.Int32
+			scheduled := make(chan struct{})
+			published := make(chan error, 1)
+			var once sync.Once
+			var client *Cli
+			svc := &countingServiceDiscovery{conn: new(grpc.ClientConn), servingURL: "leader"}
+			svc.onSchedule = func() {
+				once.Do(func() {
+					if beforeWait {
+						// Publish before the failed foreground attempt reaches its wait.
+						published <- client.tryConnectToTSO(client.ctx)
+					}
+					close(scheduled)
+				})
+			}
+			builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+				if builds.Add(1) == 1 {
+					return nil, errors.New("temporary stream creation failure")
+				}
+				return newTSOStream(ctx, "leader", newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+			})
+			client = NewClient(t.Context(), opt.NewOption(), svc, builder)
+			client.leaderURL.Store("leader")
+			t.Cleanup(func() {
+				client.cancel()
+				client.conCtxMgr.ReleaseAll()
+			})
+			_, req := startRecoveryDispatcher(t, client)
+			select {
+			case <-scheduled:
+			case <-time.After(time.Second):
+				t.Fatal("foreground stream attempt did not fail")
+			}
+			if beforeWait {
+				require.NoError(t, <-published)
+			} else {
+				require.NoError(t, client.tryConnectToTSO(client.ctx))
+			}
+			physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
+			require.NoError(t, err, "a ready background stream must interrupt the foreground retry wait")
+			require.Positive(t, physical)
+			require.Equal(t, int32(2), builds.Load())
 		})
 	}
 }
