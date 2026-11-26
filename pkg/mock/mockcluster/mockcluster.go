@@ -17,6 +17,7 @@ package mockcluster
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -65,6 +67,7 @@ type Cluster struct {
 	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage
+	existingKeyspaces map[uint32]struct{}
 }
 
 // NewCluster creates a new Cluster
@@ -80,6 +83,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		KeyRangeManager:         keyrange.NewManager(),
 		pendingProcessedRegions: map[uint64]struct{}{},
 		Storage:                 storage.NewStorageWithMemoryBackend(),
+		existingKeyspaces:       map[uint32]struct{}{},
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
@@ -119,6 +123,43 @@ func (mc *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider {
 // GetSharedConfig returns the shared config.
 func (mc *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return mc.PersistOptions
+}
+
+// AddKeyspace registers legacy keyspace IDs for boundary checks. No keyspace
+// exists by default.
+func (mc *Cluster) AddKeyspace(ids ...uint32) {
+	for _, id := range ids {
+		mc.existingKeyspaces[id] = struct{}{}
+	}
+}
+
+// GetKeyspaceBoundaryIDs returns the registered legacy IDs in the current mode.
+func (mc *Cluster) GetKeyspaceBoundaryIDs(raw, txn *sche.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	isRaw := mc.GetKeyType() == constant.Raw
+	r := txn
+	if isRaw {
+		r = raw
+	}
+	if r == nil {
+		return nil, nil, nil
+	}
+	ret := make([]uint32, 0, max(limit, 0))
+	// Wide region ranges can cover the entire 24-bit ID space. Iterate only
+	// registered IDs and match the real cache's descending range semantics.
+	for id := range mc.existingKeyspaces {
+		if id >= r.Start && id <= r.End {
+			ret = append(ret, id)
+		}
+	}
+	slices.Sort(ret)
+	slices.Reverse(ret)
+	if limit > 0 && len(ret) > limit {
+		ret = ret[:limit]
+	}
+	if isRaw {
+		return ret, nil, nil
+	}
+	return nil, ret, nil
 }
 
 // GetStorage returns the storage.

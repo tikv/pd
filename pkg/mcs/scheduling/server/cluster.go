@@ -50,6 +50,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
@@ -222,6 +223,11 @@ func (c *Cluster) GetBasicCluster() *core.BasicCluster {
 // GetSharedConfig returns the shared config.
 func (c *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return c.persistConfig
+}
+
+// GetKeyspaceBoundaryIDs returns the raw and txn boundary IDs in the given ranges.
+func (c *Cluster) GetKeyspaceBoundaryIDs(raw, txn *sche.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	return c.keyspaceCache.GetKeyspaceBoundaryIDs(raw, txn, limit, c.persistConfig.GetKeyspaceFallbackKeyType())
 }
 
 // GetRuleManager returns the rule manager.

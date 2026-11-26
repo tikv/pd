@@ -16,9 +16,8 @@ package keyspace
 
 import (
 	"context"
-	"encoding/hex"
-	"fmt"
-	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,8 +30,6 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/schedule/labeler"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -79,53 +76,78 @@ func (suite *keyspaceTestSuite) TearDownTest() {
 	suite.cluster.Destroy()
 }
 
-func (suite *keyspaceTestSuite) TestRegionLabeler() {
-	re := suite.Require()
-	regionLabeler := suite.server.GetRaftCluster().GetRegionLabeler()
+func TestKeyspaceCacheEpochAfterLeaderReturns(t *testing.T) {
+	re := require.New(t)
+	tc, err := tests.NewTestCluster(t.Context(), 2, func(cfg *config.Config, _ string) {
+		cfg.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	t.Cleanup(tc.Destroy)
+	re.NoError(tc.RunInitialServers())
+	oldLeader := tc.WaitLeader()
+	re.NotEmpty(oldLeader)
+	oldServer := tc.GetLeaderServer()
+	re.NoError(oldServer.BootstrapCluster())
+	manager := oldServer.GetKeyspaceManager()
+	id := uint32(101)
+	_, err = manager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{ID: &id, Name: "epoch-test", CreateTime: time.Now().Unix()})
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
 
-	// Create test keyspaces.
-	count := 20
-	now := time.Now().Unix()
-	keyspaces := make([]*keyspacepb.KeyspaceMeta, count)
-	manager := suite.manager
-	var err error
-	for i := range count {
-		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name:       fmt.Sprintf("test_keyspace_%d", i),
-			CreateTime: now,
-		})
-		re.NoError(err)
+	reached, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var paused atomic.Bool
+	var releaseOnce sync.Once
+	fp := "github.com/tikv/pd/pkg/keyspace/updateKeyspaceStateByIDBeforeCacheWrite"
+	re.NoError(failpoint.EnableCall(fp, func() {
+		// Only pause the old leader's request, not updates on its successor.
+		if paused.CompareAndSwap(false, true) {
+			close(reached)
+			<-release
+		}
+	}))
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("old-leader request did not finish after releasing the pause")
+		}
+		re.NoError(failpoint.Disable(fp))
+	})
+	var writeErr error
+	go func() {
+		defer close(done)
+		_, writeErr = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+	}()
+	select {
+	case <-reached:
+	case <-done:
+		t.Fatalf("old-leader request finished without reaching the cache publication pause: %v", writeErr)
+	case <-time.After(10 * time.Second):
+		t.Fatal("old-leader request did not reach the cache publication pause")
 	}
-	// Check for region labels.
-	for _, meta := range keyspaces {
-		checkLabelRule(re, meta.GetId(), regionLabeler)
-	}
-}
-
-func checkLabelRule(re *require.Assertions, id uint32, regionLabeler *labeler.RegionLabeler) {
-	labelID := "keyspaces/" + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
-	loadedLabel := regionLabeler.GetLabelRule(labelID)
-	re.NotNil(loadedLabel)
-
-	rangeRule, ok := loadedLabel.Data.([]*labeler.KeyRangeRule)
-	re.True(ok)
-	re.Len(rangeRule, 1)
-
-	bound := keyspace.MakeRegionBound(id)
-	re.Equal(hex.EncodeToString(bound.TxnLeftBound), rangeRule[0].StartKeyHex)
-	re.Equal(hex.EncodeToString(bound.TxnRightBound), rangeRule[0].EndKeyHex)
-}
-
-func (suite *keyspaceTestSuite) TestPreAlloc() {
-	re := suite.Require()
-	regionLabeler := suite.server.GetRaftCluster().GetRegionLabeler()
-	for _, keyspaceName := range preAllocKeyspace {
-		// Check pre-allocated keyspaces are correctly allocated.
-		meta, err := suite.manager.LoadKeyspace(keyspaceName)
-		re.NoError(err)
-		// Check pre-allocated keyspaces also have the correct region label.
-		checkLabelRule(re, meta.GetId(), regionLabeler)
-	}
+	re.NoError(oldServer.ResignLeader())
+	newLeader := tc.WaitLeaderChange(oldLeader)
+	re.NotEmpty(newLeader)
+	newServer := tc.GetLeaderServer()
+	_, err = newServer.GetKeyspaceManager().UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	re.NoError(newServer.ResignLeader())
+	re.Equal(oldLeader, tc.WaitLeaderChange(newLeader))
+	// Wait until the real Start hook has activated the new epoch and backfilled
+	// its cache before allowing the old request to resume.
+	testutil.Eventually(re, func() bool {
+		ids, err := manager.GetKeyspaceIDInRange(id, id, 1)
+		return err == nil && len(ids) == 0
+	})
+	releaseOnce.Do(func() { close(release) })
+	<-done
+	re.NoError(writeErr)
+	re.False(manager.KeyspaceExist(id), "the old request must not resurrect the tombstoned keyspace")
+	ids, err := manager.GetKeyspaceIDInRange(id, id, 1)
+	re.NoError(err)
+	re.Empty(ids)
 }
 
 func makeMutations() []*keyspace.Mutation {
@@ -212,4 +234,86 @@ func TestProtectedKeyspace(t *testing.T) {
 			re.NoError(err)
 		})
 	}
+}
+
+// TestKeyspaceRegionSplit tests the full flow of keyspace boundary detection.
+func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
+	re := suite.Require()
+	manager := suite.manager
+
+	// Test ExtractKeyspaceID function
+	testCases := []struct {
+		name     string
+		key      []byte
+		expected uint32
+		wantOK   bool
+		wantMode string
+	}{
+		{"keyspace 1 txn", keyspace.MakeRegionBound(1).TxnLeftBound, 1, true, "txn"},
+		{"keyspace 2 txn", keyspace.MakeRegionBound(2).TxnLeftBound, 2, true, "txn"},
+		{"keyspace 100 txn", keyspace.MakeRegionBound(100).TxnLeftBound, 100, true, "txn"},
+		{"empty key", []byte{}, constant.MaxValidKeyspaceID, true, "txn"},
+		{"short key", []byte{'t', 0}, 0, false, ""},
+	}
+
+	for _, tc := range testCases {
+		id, bound, ok := keyspace.ExtractKeyspaceID(tc.key)
+		re.Equal(tc.wantOK, ok, "test case: %s", tc.name)
+		if ok {
+			re.Equal(tc.expected, id, "test case: %s", tc.name)
+			re.Equal(tc.wantMode, bound.String(), "test case: %s", tc.name)
+		}
+	}
+
+	// Test RegionSpansMultipleKeyspaces function
+	// Bootstrap pre-allocation is asynchronous. Wait for every required ID and
+	// a complete metadata lookup before asserting deterministic boundaries.
+	testutil.Eventually(re, func() bool {
+		ids, err := manager.GetKeyspaceIDInRange(1, 3, 3)
+		return err == nil && len(ids) == 3
+	})
+	spanTestCases := []struct {
+		name       string
+		startKey   []byte
+		endKey     []byte
+		shouldSpan bool
+	}{
+		{
+			"same keyspace",
+			keyspace.MakeRegionBound(1).TxnLeftBound,
+			keyspace.MakeRegionBound(1).TxnRightBound,
+			false,
+		},
+		{
+			"at boundary (should not span)",
+			keyspace.MakeRegionBound(1).TxnLeftBound,
+			keyspace.MakeRegionBound(2).TxnLeftBound, // Exactly at the right bound
+			false,
+		},
+		{
+			"spans two keyspaces",
+			keyspace.MakeRegionBound(1).TxnLeftBound,
+			keyspace.MakeRegionBound(2).TxnRightBound,
+			true,
+		},
+		{
+			"spans multiple keyspaces",
+			keyspace.MakeRegionBound(1).TxnLeftBound,
+			keyspace.MakeRegionBound(5).TxnRightBound,
+			true,
+		},
+	}
+
+	for _, tc := range spanTestCases {
+		spans, err := keyspace.RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, manager)
+		re.NoError(err)
+		re.Equal(tc.shouldSpan, spans, "test case: %s", tc.name)
+	}
+
+	// Only the boundaries of keyspaces 2 and 3 are strictly inside the region.
+	startKey := keyspace.MakeRegionBound(1).TxnLeftBound
+	endKey := keyspace.MakeRegionBound(3).TxnRightBound
+	splitKeys, err := keyspace.GetKeyspaceSplitKeys(startKey, endKey, manager)
+	re.NoError(err)
+	re.Equal([][]byte{keyspace.MakeRegionBound(2).TxnLeftBound, keyspace.MakeRegionBound(3).TxnLeftBound}, splitKeys)
 }

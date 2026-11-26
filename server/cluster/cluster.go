@@ -60,6 +60,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
@@ -198,6 +199,7 @@ type RaftCluster struct {
 	progressManager          *progress.Manager
 	regionSyncer             *syncer.RegionSyncer
 	changedRegions           chan *core.RegionInfo
+	keyspaceManager          *keyspace.Manager
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
@@ -348,14 +350,16 @@ func (c *RaftCluster) InitCluster(
 	id id.Allocator,
 	opt sc.ConfProvider,
 	hbstreams *hbstream.HeartbeatStreams,
+	keyspaceManager *keyspace.Manager,
 	keyspaceGroupManager *keyspace.GroupManager) error {
-	return c.initClusterWithStorage(id, opt, hbstreams, keyspaceGroupManager, c.storage)
+	return c.initClusterWithStorage(id, opt, hbstreams, keyspaceManager, keyspaceGroupManager, c.storage)
 }
 
 func (c *RaftCluster) initClusterWithStorage(
 	id id.Allocator,
 	opt sc.ConfProvider,
 	hbstreams *hbstream.HeartbeatStreams,
+	keyspaceManager *keyspace.Manager,
 	keyspaceGroupManager *keyspace.GroupManager,
 	metadataStorage leaderMetadataStorage,
 ) error {
@@ -366,6 +370,7 @@ func (c *RaftCluster) initClusterWithStorage(
 		c.changedRegions = make(chan *core.RegionInfo, 100)
 	})
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
+	c.keyspaceManager = keyspaceManager
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, metadataStorage, c, c.GetOpts())
@@ -403,7 +408,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
 	initClusterStart := time.Now()
-	err = c.initClusterWithStorage(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager(), metadataStorage)
+	err = c.initClusterWithStorage(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceManager(), s.GetKeyspaceGroupManager(), metadataStorage)
 	if err != nil {
 		log.Warn("failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
 		return err
@@ -413,6 +418,14 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return errs.ErrNotLeader
 	}
 	log.Info("initialize cluster completed", zap.Duration("cost", initClusterDuration))
+	if c.keyspaceManager != nil {
+		c.keyspaceManager.StartCacheEpoch()
+		defer func() {
+			if !c.running {
+				c.keyspaceManager.StopCacheEpoch()
+			}
+		}()
+	}
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836
@@ -1104,6 +1117,11 @@ func (c *RaftCluster) Stop() {
 	}
 	c.Unlock()
 
+	if c.keyspaceManager != nil {
+		// API requests are not drained by c.wg. Fence their cache publication
+		// before waiting for the leader-owned background jobs to finish.
+		c.keyspaceManager.StopCacheEpoch()
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -1182,6 +1200,21 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 // GetKeyRangeManager returns the key range manager reference
 func (c *RaftCluster) GetKeyRangeManager() *keyrange.Manager {
 	return c.keyRangeManager
+}
+
+// GetKeyspaceManager returns the keyspace manager reference.
+func (c *RaftCluster) GetKeyspaceManager() *keyspace.Manager {
+	return c.keyspaceManager
+}
+
+// GetKeyspaceBoundaryIDs returns the raw and txn boundary IDs in the given ranges.
+func (c *RaftCluster) GetKeyspaceBoundaryIDs(raw, txn *sche.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	return c.keyspaceManager.GetKeyspaceBoundaryIDs(raw, txn, limit)
+}
+
+// GetKeyspaceMergeBoundaryIDs includes uncertain removals in merge checks.
+func (c *RaftCluster) GetKeyspaceMergeBoundaryIDs(raw, txn *sche.KeyspaceIDRange, limit int) (rawIDs, txnIDs []uint32, err error) {
+	return c.keyspaceManager.GetKeyspaceMergeBoundaryIDs(raw, txn, limit)
 }
 
 // GetRegionLabeler returns the region labeler.
@@ -3195,24 +3228,24 @@ func (c *RaftCluster) collectStorageSize(
 	regionLabeler *labeler.RegionLabeler,
 	keyspaceManager *keyspace.Manager,
 ) []*storageSizeInfo {
-	regionBoundsMap := make(map[string]*keyspace.RegionBound)
 	start := time.Now()
-	// Iterate the region labeler to get all keyspaces and their corresponding region ranges.
+	// Keep metadata reads outside the labeler's read lock.
+	var keyspaceIDs []uint32
 	regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
-		// Try to parse the keyspace ID from the label rule.
-		keyspaceID, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule)
-		if !ok {
-			return true
+		if id, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule); ok {
+			keyspaceIDs = append(keyspaceIDs, id)
 		}
-		keyspaceName, err := keyspaceManager.GetEnabledKeyspaceNameByID(keyspaceID)
-		if err != nil {
-			// TODO: improve the observability of this error.
-			return true
-		}
-		// Make the region bounds.
-		regionBoundsMap[keyspaceName] = keyspace.MakeRegionBound(keyspaceID)
 		return true
 	})
+	regionBoundsMap := make(map[string]*keyspace.RegionBound, len(keyspaceIDs))
+	for _, id := range keyspaceIDs {
+		name, err := keyspaceManager.GetEnabledKeyspaceNameByID(id)
+		if err != nil {
+			// TODO: improve the observability of this error.
+			continue
+		}
+		regionBoundsMap[name] = keyspace.MakeRegionBound(id)
+	}
 	log.Info("iterated the region bounds of all keyspaces",
 		zap.Duration("cost", time.Since(start)),
 		zap.Int("count", len(regionBoundsMap)))

@@ -14,7 +14,11 @@
 
 package syncutil
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/pingcap/failpoint"
+)
 
 type lockEntry struct {
 	mu       *Mutex
@@ -77,6 +81,7 @@ func (g *LockGroup) Lock(id uint32) {
 	}
 	e.refCount++
 	g.groupLock.Unlock()
+	failpoint.InjectCall("beforeLockGroupEntryLock", id, e.mu)
 	e.mu.Lock()
 }
 

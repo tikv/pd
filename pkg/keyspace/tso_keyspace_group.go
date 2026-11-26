@@ -992,11 +992,21 @@ func (m *GroupManager) removeKeyspacesFromGroupWithConditions(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Reconciled deletions still return the original transaction error. Notify
+	// the invalidator before returning, after both group locks are released.
+	var reconciledIDs []uint32
+	defer func() {
+		for _, id := range reconciledIDs {
+			km.invalidateGCBarrierMetrics(id)
+		}
+	}()
 	if len(keyspaceIDs) <= maxKeyspaceRemovalGuaranteedSingleTxnSize {
 		m.membershipMutationLock.RLock()
 		defer m.membershipMutationLock.RUnlock()
-		return m.removeKeyspacesFromGroupSingleTxn(
+		kg, ids, err := m.removeKeyspacesFromGroupSingleTxn(
 			ctx, groupID, km, keyspaceIDs, leadershipConditions)
+		reconciledIDs = ids
+		return kg, err
 	}
 
 	remainingIDs := make(map[uint32]struct{}, len(keyspaceIDs))
@@ -1024,10 +1034,10 @@ func (m *GroupManager) removeKeyspacesFromGroupWithConditions(
 			err          error
 		)
 		if len(remainingIDs) <= maxKeyspaceRemovalBatchSize {
-			kg, processedIDs, hasMore, err = m.removeKeyspacesFromGroupSmallBatch(
+			kg, processedIDs, hasMore, reconciledIDs, err = m.removeKeyspacesFromGroupSmallBatch(
 				ctx, groupID, km, remainingIDs, leadershipConditions)
 		} else {
-			kg, processedIDs, hasMore, err = m.removeKeyspacesFromGroupBatch(
+			kg, processedIDs, hasMore, reconciledIDs, err = m.removeKeyspacesFromGroupBatch(
 				ctx, groupID, km, remainingIDs, leadershipConditions)
 		}
 		if err != nil {
@@ -1078,11 +1088,84 @@ func (m *GroupManager) runKeyspaceGroupTxn(
 	return conditionalStore.RunInTxnWithConditions(ctx, leadershipConditions, runTxn)
 }
 
+// runKeyspaceGroupRemovalTxn runs runTxn inside a (possibly conditional)
+// transaction and reports, alongside the result, whether runTxn itself ran to
+// completion without error (callbackSucceeded). The underlying kv.Txn only
+// sends anything to etcd in its own commit step, after runTxn has already
+// returned nil - so an error from runTxn itself always means nothing was even
+// attempted on the wire, while an error surfacing after callbackSucceeded is
+// true can only have come from that commit step. Callers must use
+// callbackSucceeded to gate commitResultIsAmbiguous: it is only meaningful,
+// and only safe to call, when callbackSucceeded is true.
+func (m *GroupManager) runKeyspaceGroupRemovalTxn(
+	ctx context.Context,
+	leadershipConditions []clientv3.Cmp,
+	runTxn func(kv.Txn) error,
+) (callbackSucceeded bool, err error) {
+	err = m.runKeyspaceGroupTxn(ctx, leadershipConditions, func(txn kv.Txn) error {
+		if err := runTxn(txn); err != nil {
+			return err
+		}
+		callbackSucceeded = true
+		return nil
+	})
+	return callbackSucceeded, err
+}
+
+// commitResultIsAmbiguous reports whether err means the caller genuinely
+// cannot tell if runKeyspaceGroupRemovalTxn's transaction committed - the
+// client gave up waiting, was canceled, or lost its connection to etcd
+// before learning the outcome - as opposed to a definite rejection where the
+// transaction is known not to have committed (e.g. a precondition failure,
+// or an explicit auth/throttling rejection that etcd answers without ever
+// attempting the transaction). A definite failure must leave the keyspace
+// cache untouched, since nothing was actually removed.
+//
+// This function only classifies the shape of err; it says nothing about
+// *where* err came from. A transport-shaped error (e.g. codes.Unavailable)
+// can just as easily come from a read inside runTxn's own callback body
+// (e.g. decrementMetaServiceGroupAssignmentsTxn's read-modify-write of a
+// group's assignment count) as from the final commit. Only the latter is a
+// genuine commit-result ambiguity: runKeyspaceGroupRemovalTxn's callback
+// accumulates all its writes in memory and etcd is never contacted for the
+// actual commit until the callback has already returned nil, so an error
+// from inside the callback always means nothing was sent to etcd at all -
+// zero ambiguity, regardless of how transport-error-shaped it looks. Callers
+// must therefore only treat this function's result as meaningful when
+// runKeyspaceGroupRemovalTxn's callbackSucceeded is true.
+//
+// A context error alone is not enough: m.store.RunInTxn ultimately calls
+// etcd's own client, whose errors surface as grpc/etcd status codes, not as
+// the bare context sentinels. PermissionDenied and Unauthenticated are definite
+// admission rejections. ResourceExhausted alone does not determine the outcome:
+// etcd can return ErrNoSpace after applying a transaction, so classify that
+// error separately without treating every ResourceExhausted error as ambiguous.
+func commitResultIsAmbiguous(err error) bool {
+	if goerrors.Is(err, rpctypes.ErrNoSpace) || goerrors.Is(err, rpctypes.ErrGRPCNoSpace) {
+		return true
+	}
+	if goerrors.Is(err, context.DeadlineExceeded) || goerrors.Is(err, context.Canceled) {
+		return true
+	}
+	if etcdErr, ok := goerrors.AsType[rpctypes.EtcdError](err); ok {
+		switch etcdErr.Code() {
+		case codes.Canceled, codes.DeadlineExceeded, codes.Unavailable, codes.DataLoss, codes.Internal:
+			return true
+		}
+		return false
+	}
+	switch status.Code(err) {
+	case codes.Canceled, codes.DeadlineExceeded, codes.Unavailable, codes.DataLoss, codes.Internal:
+		return true
+	}
+	return false
+}
+
 // refreshKeyspaceGroupCacheAfterRemovalErrorLocked reloads the authoritative
 // group after a transaction result that may be ambiguous. The caller holds m's
 // write lock. If storage is unavailable, retain the previous cache so routing
 // remains usable until a later removal retry can reconcile it.
-func (m *GroupManager) refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID uint32) {
+func (m *GroupManager) refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID uint32) *endpoint.KeyspaceGroup {
 	var kg *endpoint.KeyspaceGroup
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		var err error
@@ -1093,13 +1176,37 @@ func (m *GroupManager) refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID 
 		log.Warn("failed to refresh keyspace group cache after removal error",
 			zap.Uint32("keyspace-group-id", groupID),
 			zap.Error(err))
-		return
+		return nil
 	}
 	if kg == nil {
 		m.removeKeyspaceGroupFromCacheLocked(groupID)
-		return
+		return nil
 	}
 	m.putKeyspaceGroupToCacheLocked(kg)
+	return kg
+}
+
+// reconcileRemovalErrorLocked preserves the boundary until the epoch ends.
+// The removal transaction changes metadata and membership atomically, and
+// membership mutations are serialized by the caller's locks. If the existing
+// group refresh observes the staged membership, it confirms the delete and
+// returns the deleted IDs for GC metrics invalidation after unlocking.
+func (m *GroupManager) reconcileRemovalErrorLocked(km *Manager, groupID uint32, kg *endpoint.KeyspaceGroup, epoch, generation uint64,
+	ids []uint32, boundaries []keyspaceBoundary, callbackSucceeded bool, err error,
+) []uint32 {
+	if len(ids) == 0 {
+		return nil
+	}
+	ambiguous := callbackSucceeded && commitResultIsAmbiguous(err)
+	if ambiguous {
+		km.retainBoundaries(epoch, &km.uncertainRemovals, boundaries)
+	}
+	refreshed := m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
+	if ambiguous && refreshed != nil && slices.Equal(refreshed.Keyspaces, kg.Keyspaces) {
+		km.publishKeyspaceRemoval(epoch, generation, ids)
+		return ids
+	}
+	return nil
 }
 
 // keyspaceRemovalTxnCapacityCheck returns nil while the worst-case next removal
@@ -1139,13 +1246,14 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 	km *Manager,
 	requestedIDs []uint32,
 	leadershipConditions []clientv3.Cmp,
-) (*endpoint.KeyspaceGroup, error) {
+) (*endpoint.KeyspaceGroup, []uint32, error) {
 	m.Lock()
 	defer m.Unlock()
 
 	var (
 		kg               *endpoint.KeyspaceGroup
 		removedIDs       = make([]uint32, 0, len(requestedIDs))
+		removedBounds    = make([]keyspaceBoundary, 0, len(requestedIDs))
 		assignmentCounts map[string]int
 		err              error
 	)
@@ -1166,16 +1274,17 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 			if !slices.Contains(kg.Keyspaces, keyspaceID) {
 				continue
 			}
-			metaServiceGroupID, removed, _, err := km.tryRemoveKeyspaceMetadata(txn, keyspaceID, nil)
+			meta, _, err := km.removeKeyspaceMetadata(txn, keyspaceID, true, nil)
 			if err != nil {
 				return err
 			}
-			if !removed {
+			if meta == nil {
 				continue
 			}
 			toRemove[keyspaceID] = struct{}{}
 			removedIDs = append(removedIDs, keyspaceID)
-			if metaServiceGroupID != "" {
+			removedBounds = append(removedBounds, boundaryFromMeta(meta))
+			if metaServiceGroupID := meta.GetConfig()[MetaServiceGroupIDKey]; metaServiceGroupID != "" {
 				if assignmentCounts == nil {
 					assignmentCounts = make(map[string]int)
 				}
@@ -1199,18 +1308,15 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
 
-	err = m.runKeyspaceGroupTxn(ctx, leadershipConditions, runTxn)
-	// The commit result can be ambiguous (for example, a client-side timeout
-	// after etcd has committed), so conservatively invalidate every cache entry
-	// whose deletion was staged. If the transaction did not commit, the next
-	// lookup simply reloads the still-existing metadata from storage.
-	km.evictKeyspacesFromCache(removedIDs)
+	var callbackSucceeded bool
+	epoch := km.currentCacheEpoch()
+	generation := km.cache.Generation()
+	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
 	if err != nil {
-		if len(removedIDs) > 0 {
-			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
-		}
-		return nil, err
+		ids := m.reconcileRemovalErrorLocked(km, groupID, kg, epoch, generation, removedIDs, removedBounds, callbackSucceeded, err)
+		return nil, ids, err
 	}
+	km.publishKeyspaceRemoval(epoch, generation, removedIDs)
 
 	// Notify the GC barrier metrics after a confirmed commit, outside the group
 	// lock, matching the legacy RemoveKeyspacesFromGroup ordering.
@@ -1219,7 +1325,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSingleTxn(
 	}
 
 	m.putKeyspaceGroupToCacheLocked(kg)
-	return kg, nil
+	return kg, nil, nil
 }
 
 // removeKeyspacesFromGroupSmallBatch keeps the legacy-shaped filtering loop
@@ -1232,7 +1338,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 	km *Manager,
 	requestedIDs map[uint32]struct{},
 	leadershipConditions []clientv3.Cmp,
-) (*endpoint.KeyspaceGroup, []uint32, bool, error) {
+) (*endpoint.KeyspaceGroup, []uint32, bool, []uint32, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -1240,6 +1346,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 		kg               *endpoint.KeyspaceGroup
 		processedIDs     = make([]uint32, 0, len(requestedIDs))
 		removedIDs       = make([]uint32, 0, len(requestedIDs))
+		removedBounds    = make([]keyspaceBoundary, 0, len(requestedIDs))
 		assignmentCounts map[string]int
 		hasMore          bool
 		err              error
@@ -1263,7 +1370,7 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 			}
 
 			canRemove := keyspaceRemovalTxnCapacityCheck(len(removedIDs), assignmentCounts)
-			metaServiceGroupID, removed, deferred, err := km.tryRemoveKeyspaceMetadata(txn, keyspaceID, canRemove)
+			meta, deferred, err := km.removeKeyspaceMetadata(txn, keyspaceID, true, canRemove)
 			if err != nil {
 				return err
 			}
@@ -1273,12 +1380,13 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 				continue
 			}
 			processedIDs = append(processedIDs, keyspaceID)
-			if !removed {
+			if meta == nil {
 				continue
 			}
 			toRemove[keyspaceID] = struct{}{}
 			removedIDs = append(removedIDs, keyspaceID)
-			if metaServiceGroupID != "" {
+			removedBounds = append(removedBounds, boundaryFromMeta(meta))
+			if metaServiceGroupID := meta.GetConfig()[MetaServiceGroupIDKey]; metaServiceGroupID != "" {
 				if assignmentCounts == nil {
 					assignmentCounts = make(map[string]int)
 				}
@@ -1302,22 +1410,22 @@ func (m *GroupManager) removeKeyspacesFromGroupSmallBatch(
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
 
-	err = m.runKeyspaceGroupTxn(ctx, leadershipConditions, runTxn)
-	// Invalidate staged removals even when the commit result is ambiguous.
-	km.evictKeyspacesFromCache(removedIDs)
+	var callbackSucceeded bool
+	epoch := km.currentCacheEpoch()
+	generation := km.cache.Generation()
+	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runTxn)
 	if err != nil {
-		if len(removedIDs) > 0 {
-			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
-		}
-		return nil, nil, false, err
+		ids := m.reconcileRemovalErrorLocked(km, groupID, kg, epoch, generation, removedIDs, removedBounds, callbackSucceeded, err)
+		return nil, nil, false, ids, err
 	}
+	km.publishKeyspaceRemoval(epoch, generation, removedIDs)
 
 	for _, id := range removedIDs {
 		km.invalidateGCBarrierMetrics(id)
 	}
 
 	m.putKeyspaceGroupToCacheLocked(kg)
-	return kg, processedIDs, hasMore, nil
+	return kg, processedIDs, hasMore, nil, nil
 }
 
 func (m *GroupManager) removeKeyspacesFromGroupBatch(
@@ -1326,7 +1434,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	km *Manager,
 	requestedIDs map[uint32]struct{},
 	leadershipConditions []clientv3.Cmp,
-) (*endpoint.KeyspaceGroup, []uint32, bool, error) {
+) (*endpoint.KeyspaceGroup, []uint32, bool, []uint32, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -1336,6 +1444,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 		processedIDs     = make([]uint32, 0, batchCapacity)
 		processedIDSet   = make(map[uint32]struct{}, batchCapacity)
 		removedIDs       = make([]uint32, 0, batchCapacity)
+		removedBounds    = make([]keyspaceBoundary, 0, batchCapacity)
 		removedIDSet     = make(map[uint32]struct{}, batchCapacity)
 		assignmentCounts map[string]int
 		hasMore          bool
@@ -1371,7 +1480,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 			}
 
 			canRemove := keyspaceRemovalTxnCapacityCheck(len(removedIDs), assignmentCounts)
-			metaServiceGroupID, removed, deferred, err := km.tryRemoveKeyspaceMetadata(txn, ks, canRemove)
+			meta, deferred, err := km.removeKeyspaceMetadata(txn, ks, true, canRemove)
 			if err != nil {
 				return err
 			}
@@ -1383,13 +1492,14 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 			}
 			processedIDs = append(processedIDs, ks)
 			processedIDSet[ks] = struct{}{}
-			if !removed {
+			if meta == nil {
 				newKeyspaces = append(newKeyspaces, ks)
 				continue
 			}
 			removedIDs = append(removedIDs, ks)
+			removedBounds = append(removedBounds, boundaryFromMeta(meta))
 			removedIDSet[ks] = struct{}{}
-			if metaServiceGroupID != "" {
+			if metaServiceGroupID := meta.GetConfig()[MetaServiceGroupIDKey]; metaServiceGroupID != "" {
 				if assignmentCounts == nil {
 					assignmentCounts = make(map[string]int)
 				}
@@ -1406,15 +1516,15 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}
-	err = m.runKeyspaceGroupTxn(ctx, leadershipConditions, runBatch)
-	// Invalidate staged removals even when the commit result is ambiguous.
-	km.evictKeyspacesFromCache(removedIDs)
+	var callbackSucceeded bool
+	epoch := km.currentCacheEpoch()
+	generation := km.cache.Generation()
+	callbackSucceeded, err = m.runKeyspaceGroupRemovalTxn(ctx, leadershipConditions, runBatch)
 	if err != nil {
-		if len(removedIDs) > 0 {
-			m.refreshKeyspaceGroupCacheAfterRemovalErrorLocked(groupID)
-		}
-		return nil, nil, false, err
+		ids := m.reconcileRemovalErrorLocked(km, groupID, kg, epoch, generation, removedIDs, removedBounds, callbackSucceeded, err)
+		return nil, nil, false, ids, err
 	}
+	km.publishKeyspaceRemoval(epoch, generation, removedIDs)
 
 	// Notify the GC barrier metrics outside the group lock; the caller's defer
 	// releases m before this callback runs for the error path.
@@ -1425,7 +1535,7 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	// Update the cache
 	m.putKeyspaceGroupToCacheLocked(kg)
 
-	return kg, processedIDs, hasMore, nil
+	return kg, processedIDs, hasMore, nil, nil
 }
 
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.

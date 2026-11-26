@@ -57,6 +57,11 @@ func TestEtcd(t *testing.T) {
 		_, err := txn.Load("canceled-key")
 		return err
 	}), context.Canceled)
+	re.ErrorIs(kv.RunInTxn(ctx, func(txn Txn) error {
+		_, _, err := txn.(rangeRevisionTxn).LoadRangeWithRevision("canceled-key", "canceled-keyz", 1)
+		re.ErrorIs(err, context.Canceled, "the range read itself must observe cancellation")
+		return err
+	}), context.Canceled)
 }
 
 func TestLevelDB(t *testing.T) {

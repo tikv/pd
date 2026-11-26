@@ -30,6 +30,8 @@ import (
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -124,6 +126,23 @@ func (s *ambiguousCommitKeyspaceGroupStorage) RunInTxn(ctx context.Context, f fu
 func (s *errorKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
 	if s.failOnSaveID != 0 && kg.ID == s.failOnSaveID {
 		return errSaveKeyspaceGroup
+	}
+	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
+}
+
+// unavailableOnSaveKeyspaceGroupStorage fails SaveKeyspaceGroup with a
+// transport-shaped grpc error (codes.Unavailable) instead of a plain
+// sentinel, to prove that a callback-phase error is never treated as an
+// ambiguous commit result just because its error code happens to overlap
+// with a genuine commit-phase transport error.
+type unavailableOnSaveKeyspaceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	failOnSaveID uint32
+}
+
+func (s *unavailableOnSaveKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
+	if s.failOnSaveID != 0 && kg.ID == s.failOnSaveID {
+		return status.Error(codes.Unavailable, "injected SaveKeyspaceGroup unavailable error")
 	}
 	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
 }
@@ -1014,6 +1033,17 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRefreshesCaches
 	ambiguousStore.failNextRun.Store(true)
 	suite.kgm.store = ambiguousStore
 
+	var invalidated []uint32
+	checkLocks := true
+	suite.kg.SetGCBarrierInvalidator(func(id uint32) {
+		if checkLocks {
+			re.True(suite.kgm.TryLock(), "group lock held during reconciled invalidation")
+			suite.kgm.Unlock()
+			re.True(suite.kgm.membershipMutationLock.TryLock(), "membership lock held during reconciled invalidation")
+			suite.kgm.membershipMutationLock.Unlock()
+		}
+		invalidated = append(invalidated, id)
+	})
 	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
 		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
 	re.ErrorIs(err, context.DeadlineExceeded)
@@ -1027,6 +1057,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRefreshesCaches
 		re.NoError(err)
 	}
 	re.Len(removedIDs, maxKeyspaceRemovalBatchSize)
+	re.ElementsMatch(removedIDs, invalidated)
 	for _, keyspaceID := range removedIDs {
 		_, err = suite.kgm.GetGroupByKeyspaceID(keyspaceID)
 		re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
@@ -1037,6 +1068,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRefreshesCaches
 
 	// A retry cannot rediscover the already-removed IDs from group membership,
 	// so the first ambiguous batch must have invalidated their warmed caches.
+	checkLocks = false
 	_, err = suite.kgm.removeKeyspacesFromGroupWithConditions(
 		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, keyspaceIDs, nil)
 	re.NoError(err)
@@ -1044,6 +1076,30 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRefreshesCaches
 		name, err := suite.kg.GetKeyspaceNameByID(keyspaceID)
 		re.Empty(name)
 		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	}
+	re.ElementsMatch(keyspaceIDs, invalidated, "retry must not notify again for confirmed IDs")
+
+	// Also exercise the guaranteed single transaction and the small-batch path.
+	checkLocks = true
+	for _, count := range []int{1, maxKeyspaceRemovalGuaranteedSingleTxnSize + 1} {
+		suite.kgm.store = store
+		ids := suite.createArchivedKeyspaces(count)
+		invalidated = nil
+		ambiguousStore.failNextRun.Store(true)
+		suite.kgm.store = ambiguousStore
+		_, err = suite.kgm.removeKeyspacesFromGroupWithConditions(suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, ids, nil)
+		re.ErrorIs(err, context.DeadlineExceeded)
+		var deleted []uint32
+		for _, id := range ids {
+			_, err = suite.kg.LoadKeyspaceByID(id)
+			if errors.Is(err, errs.ErrKeyspaceNotFound) {
+				deleted = append(deleted, id)
+				continue
+			}
+			re.NoError(err)
+		}
+		re.NotEmpty(deleted, "request size %d", count)
+		re.ElementsMatch(deleted, invalidated, "request size %d", count)
 	}
 }
 
@@ -1058,9 +1114,12 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRetainsCacheWhe
 	ambiguousStore.failNextRefresh.Store(true)
 	suite.kgm.store = ambiguousStore
 
+	var invalidated []uint32
+	suite.kg.SetGCBarrierInvalidator(func(id uint32) { invalidated = append(invalidated, id) })
 	_, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
 		suite.ctx, constant.DefaultKeyspaceGroupID, suite.kg, []uint32{keyspaceID}, nil)
 	re.ErrorIs(err, context.DeadlineExceeded)
+	re.Empty(invalidated, "a failed refresh did not confirm removal in this request")
 
 	// The authoritative refresh also failed, so keep the previous cache usable
 	// until a later retry can reconcile it from storage.

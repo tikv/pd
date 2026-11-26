@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -244,6 +245,13 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 				return false
 			}
 		}
+	}
+
+	// Check if merging these regions would span multiple keyspaces
+	// This ensures one region corresponds to one keyspace
+	spans, err := keyspace.RegionSpansMultipleKeyspaces(start, end, cluster)
+	if err != nil || spans {
+		return false
 	}
 
 	// The interface probe is used here to get the rule manager and region

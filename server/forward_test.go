@@ -42,7 +42,7 @@ func TestForwardSchedulingHeartbeatChangeSplit(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
 			rc := cluster.NewRaftCluster(t.Context(), nil, core.NewBasicCluster(), storage.NewStorageWithMemoryBackend(), nil, nil, nil, nil)
-			re.NoError(rc.InitCluster(nil, config.NewPersistOptions(config.NewConfig()), nil, nil))
+			re.NoError(rc.InitCluster(nil, config.NewPersistOptions(config.NewConfig()), nil, nil, nil))
 			response := &schedulingpb.RegionHeartbeatResponse{
 				Header:      &schedulingpb.ResponseHeader{ClusterId: 1},
 				RegionId:    2,
