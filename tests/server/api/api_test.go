@@ -1398,23 +1398,33 @@ func (suite *forwardTestSuite) checkGetRequest(_ *tests.TestCluster) {
 	}
 }
 
-func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
+func (suite *forwardTestSuite) checkConfig(cluster *tests.TestCluster) {
 	re := suite.Require()
-	followerURL := suite.follower.GetAddr() + "/pd/api/v1/config"
-	followerName := suite.follower.GetConfig().Name
+	leader := cluster.GetLeaderServer().GetServer()
+	var follower *server.Server
+	for _, svr := range cluster.GetServers() {
+		if svr.GetAddr() != leader.GetAddr() {
+			follower = svr.GetServer()
+			break
+		}
+	}
+	re.NotNil(follower)
+
+	followerURL := follower.GetAddr() + "/pd/api/v1/config"
+	followerName := follower.GetConfig().Name
 	// Test local config
 	var followerCfg config.Config
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, followerURL, &followerCfg,
 		testutil.StatusOK(re))
 	re.NoError(err)
-	re.Equal(suite.follower.GetConfig().ClientUrls, followerCfg.ClientUrls)
-	re.NotEqual(suite.leader.GetConfig().ClientUrls, followerCfg.ClientUrls)
-	re.Equal(suite.follower.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
-	re.NotEqual(suite.leader.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
-	re.Equal(suite.follower.GetConfig().Name, followerCfg.Name)
-	re.NotEqual(suite.leader.GetConfig().Name, followerCfg.Name)
-	re.Equal(suite.follower.GetConfig().PeerUrls, followerCfg.PeerUrls)
-	re.NotEqual(suite.leader.GetConfig().PeerUrls, followerCfg.PeerUrls)
+	re.Equal(follower.GetConfig().ClientUrls, followerCfg.ClientUrls)
+	re.NotEqual(leader.GetConfig().ClientUrls, followerCfg.ClientUrls)
+	re.Equal(follower.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
+	re.NotEqual(leader.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
+	re.Equal(follower.GetConfig().Name, followerCfg.Name)
+	re.NotEqual(leader.GetConfig().Name, followerCfg.Name)
+	re.Equal(follower.GetConfig().PeerUrls, followerCfg.PeerUrls)
+	re.NotEqual(leader.GetConfig().PeerUrls, followerCfg.PeerUrls)
 	assertRedactedTOS := func(name string, got, live *mconfig.MeteringTOSConfig) {
 		const redactedValue = "***REDACTED***"
 		re.NotNil(got)
@@ -1427,16 +1437,16 @@ func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
 		re.Equal("test-sk-"+name, live.SecretAccessKey)
 		re.Equal("test-token-"+name, live.SessionToken)
 	}
-	assertRedactedTOS(followerName, followerCfg.Metering.TOS, suite.follower.GetConfig().Metering.TOS)
+	assertRedactedTOS(followerName, followerCfg.Metering.TOS, follower.GetConfig().Metering.TOS)
 
 	// Test leader config GET redaction
-	leaderURL := suite.leader.GetAddr() + "/pd/api/v1/config"
-	leaderName := suite.leader.GetConfig().Name
+	leaderURL := leader.GetAddr() + "/pd/api/v1/config"
+	leaderName := leader.GetConfig().Name
 	var leaderCfg config.Config
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, leaderURL, &leaderCfg,
 		testutil.StatusOK(re))
 	re.NoError(err)
-	assertRedactedTOS(leaderName, leaderCfg.Metering.TOS, suite.leader.GetConfig().Metering.TOS)
+	assertRedactedTOS(leaderName, leaderCfg.Metering.TOS, leader.GetConfig().Metering.TOS)
 
 	// Test sync config
 	reqData, err := json.Marshal(map[string]any{
