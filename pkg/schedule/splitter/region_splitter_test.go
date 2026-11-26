@@ -221,6 +221,24 @@ func (suite *regionSplitterTestSuite) TestExistingBoundaries() {
 			lookups:    map[string]int{"eee": 1, "aaa": 2},
 		},
 		{
+			name:       "partial completion rounds down",
+			keys:       [][]byte{[]byte("eee"), []byte("hhh"), []byte("aaa")},
+			percentage: 66,
+			lookups:    map[string]int{"eee": 1, "hhh": 1, "aaa": 2},
+		},
+		{
+			name:       "large partial batch stays below 100 percent",
+			keys:       append(slices.Repeat([][]byte{[]byte("eee")}, 100), []byte("aaa")),
+			percentage: 99,
+			lookups:    map[string]int{"eee": 100, "aaa": 2},
+		},
+		{
+			name:       "large completed batch",
+			keys:       slices.Repeat([][]byte{[]byte("eee")}, 101),
+			percentage: 100,
+			lookups:    map[string]int{"eee": 101},
+		},
+		{
 			name:    "missing region",
 			keys:    [][]byte{[]byte("aaa")},
 			lookups: map[string]int{"aaa": 2},
