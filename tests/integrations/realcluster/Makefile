@@ -35,13 +35,21 @@ check: tiup test
 tiup:
 	@echo "==> Checking tiup installation"
 	@TIUP_DIR="$${TIUP_HOME:-$(HOME)/.tiup}"; \
-	if [ -x "$$TIUP_DIR/bin/tiup" ]; then \
-		TIUP_BIN="$$TIUP_DIR/bin/tiup"; \
-	elif [ -x "$(HOME)/.tiup/bin/tiup" ]; then \
-		TIUP_BIN="$(HOME)/.tiup/bin/tiup"; \
-	else \
-		TIUP_BIN="$$TIUP_DIR/bin/tiup"; \
+	mkdir -p "$$TIUP_DIR"; \
+	TIUP_DIR="$$(cd "$$TIUP_DIR" && pwd -P)"; \
+	if [ -n "$${TIUP_HOME:-}" ]; then \
+		export TIUP_HOME="$$TIUP_DIR"; \
 	fi; \
+	resolve_tiup_bin() { \
+		if [ -x "$$TIUP_DIR/bin/tiup" ]; then \
+			printf '%s\n' "$$TIUP_DIR/bin/tiup"; \
+		elif [ -x "$$HOME/.tiup/bin/tiup" ]; then \
+			printf '%s\n' "$$HOME/.tiup/bin/tiup"; \
+		else \
+			printf '%s\n' "$$TIUP_DIR/bin/tiup"; \
+		fi; \
+	}; \
+	TIUP_BIN="$$(resolve_tiup_bin)"; \
 	PG_BIN=""; \
 	if [ -x "$$TIUP_BIN" ]; then \
 		PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
@@ -50,32 +58,46 @@ tiup:
 		echo "tiup already installed"; \
 		echo "tiup version: $$("$$TIUP_BIN" --version)"; \
 	else \
-		if [ ! -x "$$TIUP_BIN" ] || [ ! -f "$$TIUP_DIR/bin/root.json" ]; then \
-			echo "Installing tiup..."; \
-			curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh; \
-			TIUP_BIN="$$TIUP_DIR/bin/tiup"; \
-		else \
-			echo "tiup already installed"; \
-		fi; \
-		echo "tiup version: $$("$$TIUP_BIN" --version)"; \
-		PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
-		if [ -z "$$PG_BIN" ] || [ ! -x "$$PG_BIN" ]; then \
-			if [ -n "$$PG_BIN" ]; then \
-				PG_VER_DIR="$$(dirname "$$PG_BIN")"; \
-				PG_PARENT="$$(cd "$$(dirname "$$PG_VER_DIR")" 2>/dev/null && pwd -P || true)"; \
-				PG_ROOT="$$(cd "$$TIUP_DIR/components/playground" 2>/dev/null && pwd -P || true)"; \
-				if [ -n "$$PG_PARENT" ] && [ "$$PG_PARENT" = "$$PG_ROOT" ] && [ "$$(basename "$$PG_VER_DIR")" != "." ] && [ "$$(basename "$$PG_VER_DIR")" != ".." ]; then \
-					echo "Removing incomplete tiup playground directory $$PG_VER_DIR..."; \
-					rm -rf "$$PG_VER_DIR"; \
-				fi; \
+		LOCK_FILE="$$TIUP_DIR/.realcluster-playground-install.lock"; \
+		run_install() { \
+			TIUP_BIN="$$(resolve_tiup_bin)"; \
+			if [ ! -x "$$TIUP_BIN" ] || [ ! -f "$$TIUP_DIR/bin/root.json" ]; then \
+				echo "Installing tiup..."; \
+				curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh; \
+				TIUP_BIN="$$(resolve_tiup_bin)"; \
+			else \
+				echo "tiup already installed"; \
 			fi; \
-			echo "Installing tiup playground..."; \
-			"$$TIUP_BIN" install playground; \
+			echo "tiup version: $$("$$TIUP_BIN" --version)"; \
 			PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
 			if [ -z "$$PG_BIN" ] || [ ! -x "$$PG_BIN" ]; then \
-				echo "tiup playground binary is missing or not executable after install: $$PG_BIN" >&2; \
-				exit 1; \
+				if [ -n "$$PG_BIN" ]; then \
+					PG_VER_DIR="$$(dirname "$$PG_BIN")"; \
+					PG_PARENT="$$(cd "$$(dirname "$$PG_VER_DIR")" 2>/dev/null && pwd -P || true)"; \
+					PG_ROOT="$$(cd "$$TIUP_DIR/components/playground" 2>/dev/null && pwd -P || true)"; \
+					if [ -n "$$PG_PARENT" ] && [ "$$PG_PARENT" = "$$PG_ROOT" ] && [ "$$(basename "$$PG_VER_DIR")" != "." ] && [ "$$(basename "$$PG_VER_DIR")" != ".." ]; then \
+						echo "Removing incomplete tiup playground directory $$PG_VER_DIR..."; \
+						rm -rf "$$PG_VER_DIR"; \
+					fi; \
+				fi; \
+				echo "Installing tiup playground..."; \
+				"$$TIUP_BIN" install playground; \
+				PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
+				if [ -z "$$PG_BIN" ] || [ ! -x "$$PG_BIN" ]; then \
+					echo "tiup playground binary is missing or not executable after install: $$PG_BIN" >&2; \
+					exit 1; \
+				fi; \
 			fi; \
+		}; \
+		if command -v flock >/dev/null 2>&1; then \
+			(exec 9>>"$$LOCK_FILE"; flock -x 9; run_install); \
+		elif command -v perl >/dev/null 2>&1; then \
+			export -f resolve_tiup_bin run_install; \
+			export TIUP_DIR; \
+			perl -MFcntl=:flock -e 'open my $$fh, ">>", shift @ARGV or die $$!; flock($$fh, LOCK_EX) or die $$!; my $$rc = system(@ARGV); exit($$rc == -1 ? 127 : ($$rc & 127 ? 128 + ($$rc & 127) : $$rc >> 8))' "$$LOCK_FILE" bash -c 'run_install'; \
+		else \
+			echo "Neither flock nor perl is available to lock $$LOCK_FILE" >&2; \
+			exit 1; \
 		fi; \
 	fi
 

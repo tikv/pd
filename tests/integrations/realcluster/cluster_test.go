@@ -2045,17 +2045,23 @@ func TestEnsurePlaygroundInstalledConcurrentSerialization(t *testing.T) {
 		playgroundBin = filepath.Join(verDir, "tiup-playground")
 		re.NoError(os.MkdirAll(verDir, 0750))
 		re.NoError(os.WriteFile(filepath.Join(verDir, "download-in-progress"), []byte("partial"), 0600))
+		re.NoError(os.MkdirAll(filepath.Join(tiupHome, "bin"), 0750))
+		re.NoError(os.WriteFile(filepath.Join(tiupHome, "bin", "root.json"), []byte("{}\n"), 0600))
 
 		barrierDir := filepath.Join(t.TempDir(), "barrier")
 		re.NoError(os.MkdirAll(barrierDir, 0750))
 		installLog = filepath.Join(t.TempDir(), "install.log")
 
-		fakeTiUP = filepath.Join(t.TempDir(), "fake-tiup")
+		fakeTiUP = filepath.Join(tiupHome, "bin", "tiup")
 		script := fmt.Sprintf(`#!/bin/sh
 ver_dir=%q
 bin_path=%q
 barrier_dir=%q
 install_log=%q
+if [ "$1" = "--version" ]; then
+  echo "1.16.0 tiup"
+  exit 0
+fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   if [ ! -x "$bin_path" ]; then
     : > "$barrier_dir/probe-$$-$(date +%%s%%N 2>/dev/null || echo 0)"
@@ -2083,16 +2089,20 @@ exit 1
 		return tiupHome, fakeTiUP, playgroundBin, installLog
 	}
 
-	t.Run("cross-process concurrent startups install once and preserve binary", func(t *testing.T) {
+	t.Run("cross-process concurrent startups install once across distinct TMPDIR", func(t *testing.T) {
 		re := require.New(t)
 		tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t)
 		execPath, err := os.Executable()
 		re.NoError(err)
 
-		startHelper := func(homeArg string) (*exec.Cmd, *strings.Builder) {
+		linkHome := filepath.Join(t.TempDir(), "tiup-home-link")
+		re.NoError(os.Symlink(tiupHome, linkHome))
+
+		startHelper := func(homeArg, tmpDir string) (*exec.Cmd, *strings.Builder) {
 			var out strings.Builder
 			cmd := exec.Command(execPath, "-test.run=^TestHelperEnsurePlaygroundInstalled$") //nolint:gosec
 			cmd.Env = append(os.Environ(),
+				"TMPDIR="+tmpDir,
 				"PD_TEST_HELPER_ENSURE_PLAYGROUND=1",
 				"PD_TEST_HELPER_TIUP_BIN="+fakeTiUP,
 				"PD_TEST_HELPER_TIUP_HOME="+homeArg,
@@ -2102,9 +2112,10 @@ exit 1
 			return cmd, &out
 		}
 
-		// Pass one home with trailing slashes to verify both processes share one lock.
-		cmd1, out1 := startHelper(tiupHome)
-		cmd2, out2 := startHelper(tiupHome + string(os.PathSeparator) + string(os.PathSeparator))
+		// Use distinct TMPDIRs, a symlinked path, and trailing slashes to verify
+		// the lock is anchored to the canonical TiUP home rather than os.TempDir().
+		cmd1, out1 := startHelper(tiupHome, t.TempDir())
+		cmd2, out2 := startHelper(linkHome+string(os.PathSeparator)+string(os.PathSeparator), t.TempDir())
 		re.NoError(cmd1.Start())
 		re.NoError(cmd2.Start())
 		err1 := cmd1.Wait()
@@ -2113,10 +2124,63 @@ exit 1
 		re.NoError(err2, "helper 2 output:\n%s", out2.String())
 
 		re.True(isExecutable(playgroundBin))
+		re.True(fileExists(filepath.Join(tiupHome, playgroundInstallLockFileName)))
 		logBytes, err := os.ReadFile(installLog) //nolint:gosec
 		re.NoError(err)
 		lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
 		re.Len(lines, 1, "expected exactly one tiup install, got: %q", string(logBytes))
+	})
+
+	t.Run("make tiup and Go startup share lock in both start orders", func(t *testing.T) {
+		re := require.New(t)
+		if _, err := exec.LookPath("make"); err != nil {
+			t.Skip("make not found in PATH")
+		}
+		execPath, err := os.Executable()
+		re.NoError(err)
+		makefileDir := filepath.Dir(realClusterTestSourceFile())
+		re.True(fileExists(filepath.Join(makefileDir, "Makefile")))
+
+		for _, makeFirst := range []bool{false, true} {
+			tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t)
+
+			var goOut, makeOut strings.Builder
+			goCmd := exec.Command(execPath, "-test.run=^TestHelperEnsurePlaygroundInstalled$") //nolint:gosec
+			goCmd.Env = append(os.Environ(),
+				"TMPDIR="+t.TempDir(),
+				"PD_TEST_HELPER_ENSURE_PLAYGROUND=1",
+				"PD_TEST_HELPER_TIUP_BIN="+fakeTiUP,
+				"PD_TEST_HELPER_TIUP_HOME="+tiupHome,
+			)
+			goCmd.Stdout = &goOut
+			goCmd.Stderr = &goOut
+
+			makeCmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+			makeCmd.Env = append(os.Environ(),
+				"TMPDIR="+t.TempDir(),
+				"TIUP_HOME="+tiupHome+string(os.PathSeparator),
+			)
+			makeCmd.Stdout = &makeOut
+			makeCmd.Stderr = &makeOut
+
+			if makeFirst {
+				re.NoError(makeCmd.Start())
+				re.NoError(goCmd.Start())
+			} else {
+				re.NoError(goCmd.Start())
+				re.NoError(makeCmd.Start())
+			}
+			goErr := goCmd.Wait()
+			makeErr := makeCmd.Wait()
+			re.NoError(goErr, "makeFirst=%v go helper output:\n%s", makeFirst, goOut.String())
+			re.NoError(makeErr, "makeFirst=%v make tiup output:\n%s", makeFirst, makeOut.String())
+
+			re.True(isExecutable(playgroundBin))
+			logBytes, err := os.ReadFile(installLog) //nolint:gosec
+			re.NoError(err)
+			lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+			re.Len(lines, 1, "makeFirst=%v expected exactly one tiup install, got: %q", makeFirst, string(logBytes))
+		}
 	})
 
 	t.Run("in-process concurrent startups install once and preserve binary", func(t *testing.T) {
@@ -2146,4 +2210,9 @@ exit 1
 		lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
 		re.Len(lines, 1, "expected exactly one tiup install, got: %q", string(logBytes))
 	})
+}
+
+func realClusterTestSourceFile() string {
+	_, file, _, _ := runtime.Caller(0)
+	return file
 }

@@ -16,8 +16,6 @@ package realcluster
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -404,20 +402,21 @@ func ensurePlaygroundInstalledWithTiUPHome(re *require.Assertions, bin, absTiUPH
 	re.Truef(isExecutable(installedPath), "tiup playground binary %q is not executable after install", installedPath)
 }
 
+const playgroundInstallLockFileName = ".realcluster-playground-install.lock"
+
 func lockPlaygroundInstall(re *require.Assertions, absTiUPHome string) func() {
 	lockKey := "default"
+	lockPath := filepath.Join(os.TempDir(), fmt.Sprintf("pd-realcluster-tiup-playground-%d.lock", os.Geteuid()))
 	if tiupHome := effectiveTiUPHome(absTiUPHome); tiupHome != "" {
-		lockKey = canonicalPathForLock(tiupHome)
+		re.NoError(os.MkdirAll(tiupHome, 0750)) //nolint:gosec // tiupHome is the configured TIUP_HOME or $HOME/.tiup directory
+		canonicalHome := canonicalPathForLock(tiupHome)
+		lockKey = canonicalHome
+		lockPath = filepath.Join(canonicalHome, playgroundInstallLockFileName)
 	}
 	muVal, _ := playgroundInstallLocks.LoadOrStore(lockKey, &sync.Mutex{})
 	mu := muVal.(*sync.Mutex)
 	mu.Lock()
 
-	sum := sha256.Sum256([]byte(lockKey))
-	lockPath := filepath.Join(
-		os.TempDir(),
-		fmt.Sprintf("pd-realcluster-tiup-playground-%d-%s.lock", os.Geteuid(), hex.EncodeToString(sum[:16])),
-	)
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec
 	if err != nil {
 		mu.Unlock()
