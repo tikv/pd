@@ -43,6 +43,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
@@ -1229,10 +1230,11 @@ func TestCreateKeyspaceEvictsCacheAfterSplitTimeout(t *testing.T) {
 // deterministically fail SetLabelRule's storage write.
 type failingRuleStorage struct {
 	*endpoint.StorageEndpoint
+	saveErr error
 }
 
-func (*failingRuleStorage) SaveRegionRule(kv.Txn, string, any) error {
-	return errors.New("injected SaveRegionRule failure")
+func (s *failingRuleStorage) SaveRegionRule(kv.Txn, string, any) error {
+	return s.saveErr
 }
 
 // TestCreateKeyspaceByIDFailsWhenCompatibilityLabelWriteFails verifies that a
@@ -1257,8 +1259,11 @@ func TestCreateKeyspaceByIDFailsWhenCompatibilityLabelWriteFails(t *testing.T) {
 	re.NoError(manager.Bootstrap())
 
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
-	failingLabeler, err := labeler.NewRegionLabeler(
-		ctx, &failingRuleStorage{endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)}, time.Hour)
+	saveErr := errors.New("injected SaveRegionRule failure")
+	failingLabeler, err := labeler.NewRegionLabeler(ctx, &failingRuleStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+		saveErr:         saveErr,
+	}, time.Hour)
 	re.NoError(err)
 	cluster.RegionLabeler = failingLabeler
 	manager.cluster = cluster
@@ -1269,7 +1274,7 @@ func TestCreateKeyspaceByIDFailsWhenCompatibilityLabelWriteFails(t *testing.T) {
 		Name:       "ks70",
 		CreateTime: time.Now().Unix(),
 	})
-	re.Error(err, "a failed compatibility label write must fail creation outright")
+	re.ErrorIs(err, saveErr, "a failed compatibility label write must fail creation outright")
 
 	re.False(manager.KeyspaceExist(id), "the rolled-back keyspace must not still appear to exist via cache")
 	ids, err := manager.GetKeyspaceIDInRange(id, id, 1)
@@ -1469,6 +1474,82 @@ func TestLoadKeyspaceConcurrentWithUpdateDoesNotRaceCache(t *testing.T) {
 		"the concurrent update's value must survive; LoadKeyspace never writes to the cache at all")
 }
 
+func requireKeyspaceWriterContention(t *testing.T, id uint32, pause string, first, second func() error) {
+	t.Helper()
+	re := require.New(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	paused, release := make(chan struct{}), make(chan struct{})
+	resume := sync.OnceFunc(func() { close(release) })
+	pause = "github.com/tikv/pd/pkg/keyspace/" + pause
+	re.NoError(failpoint.EnableCall(pause, func() {
+		close(paused)
+		<-release
+	}))
+	defer func() { re.NoError(failpoint.Disable(pause)) }()
+	defer resume()
+
+	firstDone := make(chan struct{})
+	var firstErr error
+	go func() {
+		defer close(firstDone)
+		firstErr = first()
+	}()
+	select {
+	case <-paused:
+	case <-firstDone:
+		t.Fatalf("first writer finished before reaching the cache publication pause: %v", firstErr)
+	case <-ctx.Done():
+		t.Fatal("first writer did not reach the cache publication pause")
+	}
+
+	// Probe the actual entry on writer B's lock path while A is still paused.
+	// A goroutine-start signal alone cannot show that A still holds the lock.
+	const probe = "github.com/tikv/pd/pkg/utils/syncutil/beforeLockGroupEntryLock"
+	contended := make(chan bool, 1)
+	re.NoError(failpoint.EnableCall(probe, func(lockID uint32, mu *syncutil.Mutex) {
+		if lockID != id {
+			return
+		}
+		acquired := mu.TryLock()
+		if acquired {
+			mu.Unlock()
+		}
+		contended <- !acquired
+	}))
+	defer func() { re.NoError(failpoint.Disable(probe)) }()
+	secondDone := make(chan struct{})
+	var secondErr error
+	go func() {
+		defer close(secondDone)
+		secondErr = second()
+	}()
+	var lockHeld bool
+	select {
+	case lockHeld = <-contended:
+	case <-secondDone:
+		select {
+		case lockHeld = <-contended:
+		default:
+			t.Fatalf("second writer finished before reaching metaLock: %v", secondErr)
+		}
+	case <-ctx.Done():
+		t.Fatal("second writer did not reach metaLock")
+	}
+	resume()
+	for _, done := range []<-chan struct{}{firstDone, secondDone} {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			t.Fatal("writers did not finish after releasing the cache publication pause")
+		}
+	}
+	re.True(lockHeld, "second writer acquired metaLock before the first writer published its cache entry")
+	re.NoError(firstErr)
+	re.NoError(secondErr)
+}
+
 // TestUpdateKeyspaceStateByIDDoesNotClobberConcurrentUpdate verifies that two
 // concurrent, authoritative updates to the same keyspace (UpdateKeyspaceStateByID
 // and its by-name sibling UpdateKeyspaceState) cannot interleave their commits
@@ -1495,43 +1576,14 @@ func TestUpdateKeyspaceStateByIDDoesNotClobberConcurrentUpdate(t *testing.T) {
 	}
 	re.NoError(manager.saveNewKeyspace(meta))
 
-	reachedFailpoint := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/updateKeyspaceStateByIDBeforeCacheWrite", func() {
-		close(reachedFailpoint)
-		<-releaseFirst
-	}))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/updateKeyspaceStateByIDBeforeCacheWrite"))
-	}()
-
-	firstDone := make(chan struct{})
-	go func() {
-		defer close(firstDone)
-		// DISABLED -> ARCHIVED, pausing (with metaLock still held) just
-		// before its own cache write.
-		_, err := manager.UpdateKeyspaceStateByID(84, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
-		re.NoError(err)
-	}()
-	<-reachedFailpoint
-
-	// The second call needs the same per-id metaLock the first call is still
-	// holding, so it must run in its own goroutine too: it blocks until the
-	// first call's cache write releases the lock. Uses the by-name sibling so
-	// this second call does not hit the same failpoint as the first.
-	secondDone := make(chan struct{})
-	go func() {
-		defer close(secondDone)
-		_, err := manager.UpdateKeyspaceState("ks84", keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
-		re.NoError(err)
-	}()
-
-	// Releasing the first call lets it publish ARCHIVED and release the lock,
-	// unblocking the second call, which only then reads ARCHIVED from storage
-	// and commits/publishes TOMBSTONE on top of it.
-	close(releaseFirst)
-	<-firstDone
-	<-secondDone
+	requireKeyspaceWriterContention(t, 84, "updateKeyspaceStateByIDBeforeCacheWrite",
+		func() error {
+			_, err := manager.UpdateKeyspaceStateByID(84, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+			return err
+		}, func() error {
+			_, err := manager.UpdateKeyspaceState("ks84", keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+			return err
+		})
 
 	item, ok := manager.cache.getKeyspaceByID(84)
 	re.True(ok)
@@ -1561,36 +1613,14 @@ func TestUpdateKeyspaceStateDoesNotClobberConcurrentUpdate(t *testing.T) {
 	}
 	re.NoError(manager.saveNewKeyspace(meta))
 
-	reachedFailpoint := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/updateKeyspaceStateBeforeCacheWrite", func() {
-		close(reachedFailpoint)
-		<-releaseFirst
-	}))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/updateKeyspaceStateBeforeCacheWrite"))
-	}()
-
-	firstDone := make(chan struct{})
-	go func() {
-		defer close(firstDone)
-		// DISABLED -> ARCHIVED, pausing (with metaLock still held) just
-		// before its own cache write.
-		_, err := manager.UpdateKeyspaceState("ks85", keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
-		re.NoError(err)
-	}()
-	<-reachedFailpoint
-
-	secondDone := make(chan struct{})
-	go func() {
-		defer close(secondDone)
-		_, err := manager.UpdateKeyspaceStateByID(85, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
-		re.NoError(err)
-	}()
-
-	close(releaseFirst)
-	<-firstDone
-	<-secondDone
+	requireKeyspaceWriterContention(t, 85, "updateKeyspaceStateBeforeCacheWrite",
+		func() error {
+			_, err := manager.UpdateKeyspaceState("ks85", keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+			return err
+		}, func() error {
+			_, err := manager.UpdateKeyspaceStateByID(85, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+			return err
+		})
 
 	item, ok := manager.cache.getKeyspaceByID(85)
 	re.True(ok)
@@ -1623,39 +1653,15 @@ func TestUpdateKeyspaceConfigDoesNotClobberConcurrentUpdate(t *testing.T) {
 	}
 	re.NoError(manager.saveNewKeyspace(meta))
 
-	reachedFailpoint := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/updateKeyspaceConfigBeforeCacheWrite", func() {
-		close(reachedFailpoint)
-		<-releaseFirst
-	}))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/updateKeyspaceConfigBeforeCacheWrite"))
-	}()
-
-	firstDone := make(chan struct{})
-	go func() {
-		defer close(firstDone)
-		// Config-only change: the meta this call holds keeps State ENABLED,
-		// the value it read before the concurrent state transition below.
-		// Pauses (with metaLock still held) just before its own cache write.
-		_, err := manager.UpdateKeyspaceConfig("ks86", []*Mutation{
-			{Op: OpPut, Key: "some-key", Value: "some-value"},
+	requireKeyspaceWriterContention(t, 86, "updateKeyspaceConfigBeforeCacheWrite",
+		func() error {
+			// This config update reads ENABLED; the second writer changes the state.
+			_, err := manager.UpdateKeyspaceConfig("ks86", []*Mutation{{Op: OpPut, Key: "some-key", Value: "some-value"}})
+			return err
+		}, func() error {
+			_, err := manager.UpdateKeyspaceStateByID(86, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+			return err
 		})
-		re.NoError(err)
-	}()
-	<-reachedFailpoint
-
-	secondDone := make(chan struct{})
-	go func() {
-		defer close(secondDone)
-		_, err := manager.UpdateKeyspaceStateByID(86, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
-		re.NoError(err)
-	}()
-
-	close(releaseFirst)
-	<-firstDone
-	<-secondDone
 
 	item, ok := manager.cache.getKeyspaceByID(86)
 	re.True(ok)

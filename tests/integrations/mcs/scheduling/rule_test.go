@@ -283,19 +283,17 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		labelRules = regionLabeler.GetAllLabelRules()
-		return len(labelRules) == baseLabelRuleCount+1
-	})
-	sort.Slice(labelRules, func(i, j int) bool {
-		return labelRules[i].ID < labelRules[j].ID
-	})
-	re.Len(labelRules, baseLabelRuleCount+1)
-	gotLabelRule = nil
-	for _, lr := range labelRules {
-		if lr.ID == labelRule.ID {
-			gotLabelRule = lr
-			break
+		gotLabelRule = nil
+		for _, lr := range labelRules {
+			switch lr.ID {
+			case "rule1":
+				return false
+			case labelRule.ID:
+				gotLabelRule = lr
+			}
 		}
-	}
+		return gotLabelRule != nil && len(labelRules) == baseLabelRuleCount+1
+	})
 	re.NotNil(gotLabelRule)
 	re.Equal(labelRule.Labels, gotLabelRule.Labels)
 	re.Equal(labelRule.RuleType, gotLabelRule.RuleType)

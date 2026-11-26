@@ -108,7 +108,11 @@ func TestKeyspaceCacheEpochAfterLeaderReturns(t *testing.T) {
 	}))
 	t.Cleanup(func() {
 		releaseOnce.Do(func() { close(release) })
-		<-done
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("old-leader request did not finish after releasing the pause")
+		}
 		re.NoError(failpoint.Disable(fp))
 	})
 	var writeErr error
@@ -116,7 +120,13 @@ func TestKeyspaceCacheEpochAfterLeaderReturns(t *testing.T) {
 		defer close(done)
 		_, writeErr = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
 	}()
-	<-reached
+	select {
+	case <-reached:
+	case <-done:
+		t.Fatalf("old-leader request finished without reaching the cache publication pause: %v", writeErr)
+	case <-time.After(10 * time.Second):
+		t.Fatal("old-leader request did not reach the cache publication pause")
+	}
 	re.NoError(oldServer.ResignLeader())
 	newLeader := tc.WaitLeaderChange(oldLeader)
 	re.NotEmpty(newLeader)
@@ -300,27 +310,10 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 		re.Equal(tc.shouldSpan, spans, "test case: %s", tc.name)
 	}
 
-	// Test GetKeyspaceSplitKeys function
-	// For a region spanning keyspaces 1-3, it should generate split keys at boundaries 2 and 3
-	testutil.Eventually(re, func() bool {
-		ids, err := suite.server.GetKeyspaceManager().GetKeyspaceIDInRange(1, 3, 1)
-		return err == nil && len(ids) > 0
-	})
-
+	// Only the boundaries of keyspaces 2 and 3 are strictly inside the region.
 	startKey := keyspace.MakeRegionBound(1).TxnLeftBound
 	endKey := keyspace.MakeRegionBound(3).TxnRightBound
 	splitKeys, err := keyspace.GetKeyspaceSplitKeys(startKey, endKey, manager)
 	re.NoError(err)
-	re.NotNil(splitKeys)
-	re.GreaterOrEqual(len(splitKeys), 1, "Should generate at least one split key")
-
-	// Verify first split key is at keyspace 2 boundary
-	expectedBound2 := keyspace.MakeRegionBound(2)
-	re.Equal(expectedBound2.TxnLeftBound, splitKeys[0], "First split key should be at keyspace 2 boundary")
-
-	// If there are two split keys, the second should be at keyspace 3 boundary
-	if len(splitKeys) >= 2 {
-		expectedBound3 := keyspace.MakeRegionBound(3)
-		re.Equal(expectedBound3.TxnLeftBound, splitKeys[1], "Second split key should be at keyspace 3 boundary")
-	}
+	re.Equal([][]byte{keyspace.MakeRegionBound(2).TxnLeftBound, keyspace.MakeRegionBound(3).TxnLeftBound}, splitKeys)
 }

@@ -20,6 +20,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -52,8 +53,11 @@ func TestCreateKeyspaceWritesCompatibilityLabelRule(t *testing.T) {
 	})
 	re.NoError(err)
 
+	// A fresh reader only sees rules persisted to the shared storage.
+	storedLabeler, err := labeler.NewRegionLabeler(ctx, tc.storage, time.Second*5)
+	re.NoError(err)
 	want := keyspace.MakeTxnLabelRule(created.GetId())
-	got := tc.regionLabeler.GetLabelRule(want.ID)
+	got := storedLabeler.GetLabelRule(want.ID)
 	re.NotNil(got, "keyspace creation must still write the compatibility region label rule")
 	re.Equal(want.Labels, got.Labels)
 	re.Equal(want.RuleType, got.RuleType)
@@ -94,10 +98,13 @@ func TestCreateKeyspaceCleansUpCompatibilityLabelRuleOnFailure(t *testing.T) {
 		Name:       "compat-rollback-test",
 		CreateTime: time.Now().Unix(),
 	})
-	re.Error(err, "region split should time out since no matching region ever appears in this test's storage")
+	re.ErrorIs(err, errs.ErrRegionSplitTimeout, "creation must have reached the split wait before rolling back")
 
 	// The keyspace never existed as far as callers can tell (creation
 	// failed), so its compatibility label rule must not linger either.
 	labelID := keyspace.MakeTxnLabelRule(1).ID
 	re.Nil(tc.regionLabeler.GetLabelRule(labelID))
+	storedLabeler, err := labeler.NewRegionLabeler(ctx, tc.storage, time.Second*5)
+	re.NoError(err)
+	re.Nil(storedLabeler.GetLabelRule(labelID), "rollback must remove the rule from shared storage")
 }
