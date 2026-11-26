@@ -484,7 +484,9 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 		if leader == nextEtcdLeaderID {
 			return nil
 		}
-		if currentTerm != term || leader != m.ID() {
+		// The transferee's vote can clear the old leader before the election
+		// finishes. Keep waiting while no successor is known.
+		if leader != 0 && (currentTerm != term || leader != m.ID()) {
 			return errs.ErrNotLeader
 		}
 		select {
