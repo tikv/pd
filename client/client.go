@@ -80,6 +80,10 @@ type RPCClient interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	//
+	// For "native_br" over the V1 RPC, a successful update returns the stored barrier timestamp.
+	// If a positive safePoint is too low, PD preserves any existing barrier and returns the lowest
+	// timestamp it would have accepted for that request, with a nil error. A successful deletion returns zero.
+	//
 	// Deprecated: Callers that used the "native_br" service ID for cluster-wide protection
 	// should use SetGlobalGCBarrier and DeleteGlobalGCBarrier. To protect a single GC scope,
 	// use SetGCBarrier and DeleteGCBarrier.
@@ -1181,6 +1185,10 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 // returns the minimum safepoint across all services, this value is used to
 // determine the safepoint for multiple services, it does not trigger a GC
 // job. Use UpdateGCSafePoint to trigger the GC job if needed.
+//
+// For "native_br" over the V1 RPC, a successful update returns the stored barrier timestamp.
+// If a positive safePoint is too low, PD preserves any existing barrier and returns the lowest
+// timestamp it would have accepted for that request, with a nil error. A successful deletion returns zero.
 //
 // Deprecated: Callers that used the "native_br" service ID for cluster-wide protection
 // should use SetGlobalGCBarrier and DeleteGlobalGCBarrier. To protect a single GC scope,
