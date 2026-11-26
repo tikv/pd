@@ -18,12 +18,15 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -45,6 +48,15 @@ func TestAffinityCommands(t *testing.T) {
 	// Prepare stores for peer updates.
 	for id := uint64(1); id <= 2; id++ {
 		pdTests.MustPutStore(re, cluster, &metapb.Store{Id: id, State: metapb.StoreState_Up})
+		pdTests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+			Stats: &pdpb.StoreStats{
+				StoreId:   id,
+				Capacity:  10 * units.GiB,
+				UsedSize:  units.GiB,
+				Available: 9 * units.GiB,
+			},
+		})
 	}
 
 	manager, err := leaderServer.GetServer().GetAffinityManager()

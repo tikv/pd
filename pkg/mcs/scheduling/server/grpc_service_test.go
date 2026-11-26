@@ -352,7 +352,7 @@ func newTestSchedulingServiceForSplit(
 			Id:      i,
 			Address: fmt.Sprintf("mock://tikv-%d", i),
 			State:   metapb.StoreState_Up,
-		}))
+		}, core.SetLastHeartbeatTS(time.Now())))
 	}
 
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
