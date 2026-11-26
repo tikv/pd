@@ -72,8 +72,9 @@ type Client interface {
 }
 
 type pendingStreamBuild struct {
-	url    string
-	cancel context.CancelFunc
+	url        string
+	cancel     context.CancelFunc
+	superseded bool
 }
 
 // Cli is the implementation of the TSO client.
@@ -244,8 +245,10 @@ func (c *Cli) notifyLeaderSwitched() {
 	c.leaderSwitchedMu.Lock()
 	defer c.leaderSwitchedMu.Unlock()
 	leaderURL := c.getLeaderURL()
-	for _, build := range c.pendingStreamBuilds {
+	for ctx, build := range c.pendingStreamBuilds {
 		if build.url != leaderURL {
+			build.superseded = true
+			c.pendingStreamBuilds[ctx] = build
 			build.cancel()
 		}
 	}
@@ -266,12 +269,13 @@ func (c *Cli) trackStreamBuild(ctx context.Context, cancel context.CancelFunc, u
 	return true
 }
 
-func (c *Cli) finishStreamBuild(ctx context.Context) bool {
+func (c *Cli) finishStreamBuild(ctx context.Context) (valid, superseded bool) {
 	c.leaderSwitchedMu.Lock()
 	defer c.leaderSwitchedMu.Unlock()
 	build := c.pendingStreamBuilds[ctx]
 	delete(c.pendingStreamBuilds, ctx)
-	return ctx.Err() == nil && c.getLeaderURL() == build.url
+	superseded = build.superseded || c.getLeaderURL() != build.url
+	return ctx.Err() == nil && !superseded, superseded
 }
 
 // leaderSwitched returns a channel that is closed when the leader URL is updated next time.
@@ -396,7 +400,9 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 	defer timer.Stop()
 	// Retry several times before falling back to the follower when the network problem happens
 retryLoop:
-	for attempts := 0; attempts < constants.MaxRetryTimes; {
+	// Superseded work has its own bound so it preserves the network-failure budget
+	// while still yielding to the dispatcher's stream-creation timeout.
+	for attempts, supersededAttempts := 0, 0; attempts < constants.MaxRetryTimes && supersededAttempts < constants.MaxRetryTimes; {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -410,21 +416,35 @@ retryLoop:
 			c.conCtxMgr.GC(func(curURL string) bool { return curURL != url })
 			return nil
 		}
+		if c.hasUsableStream() {
+			return nil
+		}
 		if cc != nil {
 			cctx, cancel := context.WithCancel(ctx)
 			if !c.trackStreamBuild(cctx, cancel, url) {
 				cancel()
 				// No build was attempted for this obsolete lookup. Preserve the retry budget.
+				supersededAttempts++
+				err = context.Canceled
 				continue
 			}
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
-			if !c.finishStreamBuild(cctx) {
+			valid, superseded := c.finishStreamBuild(cctx)
+			if superseded {
+				cancel()
+				stream = nil
+				supersededAttempts++
+				err = context.Canceled
+				c.svcDiscovery.ScheduleCheckMemberChanged()
+				continue
+			}
+			if !valid {
 				cancel()
 				stream = nil
 				// Keep the builder's gRPC status so connection timeouts still
 				// count as network errors when deciding whether to forward.
 				if err == nil {
-					err = context.Canceled
+					err = status.FromContextError(cctx.Err()).Err()
 				}
 			}
 			failpoint.Inject("unreachableNetwork", func() {
@@ -454,6 +474,8 @@ retryLoop:
 			cancel()
 		} else {
 			if c.getLeaderURL() != url {
+				supersededAttempts++
+				err = context.Canceled
 				continue
 			}
 			networkErrNum++
@@ -466,7 +488,7 @@ retryLoop:
 		// before waiting so a leader change can interrupt the retry interval.
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		for {
-			if c.conCtxMgr.Exist(c.getLeaderURL()) {
+			if c.hasUsableStream() {
 				return nil
 			}
 			select {
@@ -514,6 +536,15 @@ retryLoop:
 		}
 	}
 	return err
+}
+
+func (c *Cli) hasUsableStream() bool {
+	leaderURL := c.getLeaderURL()
+	return c.conCtxMgr.Find(func(cc *cctx.ConnectionCtx[*tsoStream]) bool {
+		return cc.Ctx.Err() == nil && cc.Stream != nil &&
+			!cc.Stream.hasNewLeader(leaderURL) && cc.Stream.GetRecvError() == nil &&
+			cc.Stream.state.Load() != streamStateClosing
+	}) != nil
 }
 
 func (c *Cli) checkLeader(

@@ -374,11 +374,17 @@ func TestTSOReconnectFailureRefreshesBeforeBackoff(t *testing.T) {
 
 func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
 	for _, tt := range []struct {
-		name           string
-		obsoleteLookup bool
-		lookupFailed   bool
+		name              string
+		obsoleteLookup    bool
+		lookupFailed      bool
+		supersededBuild   bool
+		switchBack        bool
+		successfulTimeout bool
 	}{
 		{name: "build-timeout"},
+		{name: "successful-build-at-timeout", successfulTimeout: true},
+		{name: "leader-switch-away-and-back", supersededBuild: true, switchBack: true},
+		{name: "superseded-successful-build-before-timeouts", supersededBuild: true},
 		{name: "obsolete-lookup-before-build-timeouts", obsoleteLookup: true},
 		{name: "obsolete-failed-lookup-before-build-timeouts", obsoleteLookup: true, lookupFailed: true},
 	} {
@@ -406,10 +412,23 @@ func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
 				},
 			}
 			var directBuilds int
+			var client *Cli
+			var superseded bool
 			builder := reconnectTestBuilder(func(ctx context.Context, cancel context.CancelFunc, _ time.Duration) (*tsoStream, error) {
 				if forwardedHost := grpcutil.GetForwardedHost(ctx, metadata.FromOutgoingContext); forwardedHost != "" {
 					require.Equal(t, leaderURL, forwardedHost)
 					return newTSOStream(ctx, backupURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+				}
+				if tt.supersededBuild && !superseded {
+					superseded = true
+					stream := newTSOStream(ctx, client.getLeaderURL(), newMockTSOStreamImpl(ctx, resultModeGenerated))
+					if tt.switchBack {
+						client.leaderURL.Store("other-leader")
+						client.notifyLeaderSwitched()
+					}
+					client.leaderURL.Store(leaderURL)
+					client.notifyLeaderSwitched()
+					return stream, nil
 				}
 				directBuilds++
 				// Trigger the production build timeout immediately, then return the same
@@ -418,12 +437,19 @@ func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
 				go checkStreamTimeout(ctx, cancel, done, 0)
 				<-ctx.Done()
 				done <- struct{}{}
+				if tt.successfulTimeout {
+					return newTSOStream(ctx, leaderURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+				}
 				return nil, status.FromContextError(ctx.Err()).Err()
 			})
 			option := opt.NewOption()
 			option.EnableForwarding = true
-			client := NewClient(t.Context(), option, svc, builder)
+			client = NewClient(t.Context(), option, svc, builder)
 			client.leaderURL.Store(leaderURL)
+			if tt.supersededBuild && !tt.switchBack {
+				client.leaderURL.Store("old-leader")
+				svc.conns["old-leader"] = svc.conns[leaderURL]
+			}
 			if tt.obsoleteLookup {
 				const oldLeader = "old-leader"
 				if !tt.lookupFailed {
@@ -891,23 +917,41 @@ func TestDispatcherUsesBackgroundStream(t *testing.T) {
 }
 
 func TestDispatcherUsesBackgroundStreamDuringReconnect(t *testing.T) {
-	for _, beforeWait := range []bool{true, false} {
-		name := "during-retry-wait"
-		if beforeWait {
-			name = "before-retry-wait"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		beforeWait bool
+		forwarded  bool
+	}{
+		{name: "direct-before-retry-wait", beforeWait: true},
+		{name: "direct-during-retry-wait"},
+		{name: "forwarded-before-retry-wait", beforeWait: true, forwarded: true},
+		{name: "forwarded-during-retry-wait", forwarded: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
 			var builds atomic.Int32
 			scheduled := make(chan struct{})
 			published := make(chan error, 1)
 			var once sync.Once
 			var client *Cli
+			publish := func() error {
+				if !tt.forwarded {
+					return client.tryConnectToTSO(client.ctx)
+				}
+				ctx, cancel := context.WithCancel(client.ctx)
+				ctx = grpcutil.BuildForwardContext(ctx, "leader")
+				stream := newTSOStream(ctx, "follower", newMockTSOStreamImpl(ctx, resultModeGenerated))
+				if !client.conCtxMgr.CleanAllAndStore(ctx, cancel, "follower", stream) {
+					cancel()
+					return errors.New("forwarded stream was not stored")
+				}
+				return nil
+			}
 			svc := &countingServiceDiscovery{conn: new(grpc.ClientConn), servingURL: "leader"}
 			svc.onSchedule = func() {
 				once.Do(func() {
-					if beforeWait {
+					if tt.beforeWait {
 						// Publish before the failed foreground attempt reaches its wait.
-						published <- client.tryConnectToTSO(client.ctx)
+						published <- publish()
 					}
 					close(scheduled)
 				})
@@ -930,15 +974,23 @@ func TestDispatcherUsesBackgroundStreamDuringReconnect(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("foreground stream attempt did not fail")
 			}
-			if beforeWait {
+			if tt.beforeWait {
 				require.NoError(t, <-published)
 			} else {
-				require.NoError(t, client.tryConnectToTSO(client.ctx))
+				require.NoError(t, publish())
+			}
+			if tt.forwarded {
+				require.True(t, client.conCtxMgr.Exist("follower"))
+				require.False(t, client.conCtxMgr.Exist("leader"))
 			}
 			physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
 			require.NoError(t, err, "a ready background stream must interrupt the foreground retry wait")
 			require.Positive(t, physical)
-			require.Equal(t, int32(2), builds.Load())
+			expectedBuilds := int32(2)
+			if tt.forwarded {
+				expectedBuilds = 1
+			}
+			require.Equal(t, expectedBuilds, builds.Load())
 		})
 	}
 }
@@ -1013,15 +1065,55 @@ func TestDispatcherStreamRecoveryShutdown(t *testing.T) {
 }
 
 func TestDispatcherStreamRecoveryTimeout(t *testing.T) {
-	option := opt.NewOption()
-	option.Timeout = 50 * time.Millisecond
-	provider := &recoveringTSOServiceProvider{
-		mockTSOServiceProvider: newMockTSOServiceProvider(option, nil),
-		update:                 func(context.Context) bool { return false },
+	t.Run("unavailable", func(t *testing.T) {
+		option := opt.NewOption()
+		option.Timeout = 50 * time.Millisecond
+		provider := &recoveringTSOServiceProvider{
+			mockTSOServiceProvider: newMockTSOServiceProvider(option, nil),
+			update:                 func(context.Context) bool { return false },
+		}
+		td, req := startRecoveryDispatcher(t, provider)
+		_, _, err := req.waitTimeout(time.Second)
+		require.Error(t, err)
+		require.True(t, errs.ErrClientCreateTSOStream.Equal(err), "%v", err)
+		require.NoError(t, td.ctx.Err())
+	})
+	for _, nilConn := range []bool{false, true} {
+		name := "superseded-lookups"
+		if nilConn {
+			name = "superseded-nil-lookups"
+		}
+		t.Run(name, func(t *testing.T) {
+			option := opt.NewOption()
+			option.Timeout = 50 * time.Millisecond
+			svc := &countingServiceDiscovery{conn: new(grpc.ClientConn)}
+			if nilConn {
+				svc.conn = nil
+			}
+			var lookups atomic.Int32
+			var client *Cli
+			svc.onGetConn = func(url string) {
+				if lookups.Add(1) <= constants.MaxRetryTimes {
+					next := "leader-a"
+					if url == next {
+						next = "leader-b"
+					}
+					client.leaderURL.Store(next)
+					client.notifyLeaderSwitched()
+				}
+			}
+			builder := reconnectTestBuilder(func(context.Context, context.CancelFunc, time.Duration) (*tsoStream, error) {
+				return nil, status.FromContextError(context.Canceled).Err()
+			})
+			client = NewClient(t.Context(), option, svc, builder)
+			client.leaderURL.Store("leader-a")
+			t.Cleanup(client.cancel)
+			td, req := startRecoveryDispatcher(t, client)
+			_, _, err := req.waitTimeout(constants.RetryInterval / 2)
+			require.Error(t, err)
+			require.True(t, errs.ErrClientCreateTSOStream.Equal(err), "superseded lookups must yield to the stream timeout: %v", err)
+			require.GreaterOrEqual(t, lookups.Load(), int32(constants.MaxRetryTimes))
+			require.NoError(t, td.ctx.Err())
+		})
 	}
-	td, req := startRecoveryDispatcher(t, provider)
-	_, _, err := req.waitTimeout(time.Second)
-	require.Error(t, err)
-	require.True(t, errs.ErrClientCreateTSOStream.Equal(err), "%v", err)
-	require.NoError(t, td.ctx.Err())
 }
