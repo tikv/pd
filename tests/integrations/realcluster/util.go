@@ -61,8 +61,15 @@ func runCommandWithOutputContext(ctx context.Context, cmdStr, dir string) (strin
 }
 
 func runExecWithOutputContext(ctx context.Context, dir, name string, args ...string) (string, error) {
+	return runExecWithEnvOutputContext(ctx, dir, nil, name, args...)
+}
+
+func runExecWithEnvOutputContext(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec
 	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = env
+	}
 	if ctx.Done() != nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmd.Cancel = func() error {
@@ -87,8 +94,14 @@ func fileExists(path string) bool {
 }
 
 func isExecutable(path string) bool {
-	info, err := os.Stat(path) //nolint:gosec
-	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
+	if path == "" {
+		return false
+	}
+	if !filepath.IsAbs(path) && !strings.ContainsRune(path, os.PathSeparator) {
+		path = "." + string(os.PathSeparator) + path
+	}
+	_, err := exec.LookPath(path)
+	return err == nil
 }
 
 func isProcessRunning(pid int) bool {
@@ -109,36 +122,59 @@ func isProcessRunning(pid int) bool {
 }
 
 type procInfo struct {
-	pid   int
-	ppid  int
-	pgid  int
-	state byte
-	args  []string
+	pid       int
+	ppid      int
+	pgid      int
+	startTime uint64
+	state     byte
+	args      []string
 }
 
 func parseProcState(stat []byte) (byte, bool) {
-	state, _, _, ok := parseProcStat(stat)
+	state, _, _, _, ok := parseProcStat(stat)
 	return state, ok
 }
 
-func parseProcStat(stat []byte) (state byte, ppid, pgid int, ok bool) {
+func parseProcStat(stat []byte) (state byte, ppid, pgid int, startTime uint64, ok bool) {
 	idx := bytes.LastIndexByte(stat, ')')
 	if idx < 0 || idx+2 >= len(stat) {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	fields := strings.Fields(string(stat[idx+1:]))
 	if len(fields) < 3 || len(fields[0]) != 1 {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	ppid, err := strconv.Atoi(fields[1])
 	if err != nil {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	pgid, err = strconv.Atoi(fields[2])
 	if err != nil {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
-	return fields[0][0], ppid, pgid, true
+	// Field 22 of /proc/<pid>/stat (starttime) is fields[19] after the closing ')' of comm.
+	if len(fields) >= 20 {
+		startTime, err = strconv.ParseUint(fields[19], 10, 64)
+		if err != nil {
+			return 0, 0, 0, 0, false
+		}
+	}
+	return fields[0][0], ppid, pgid, startTime, true
+}
+
+func readProcStartTime(pid int) uint64 {
+	if pid <= 0 {
+		return 0
+	}
+	statBytes, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)) //nolint:gosec
+	if err != nil {
+		return 0
+	}
+	_, _, _, startTime, ok := parseProcStat(statBytes)
+	if !ok {
+		return 0
+	}
+	return startTime
 }
 
 func parseProcCmdline(raw []byte) []string {
@@ -242,31 +278,49 @@ func readProcessesFromProc(procRoot string) ([]procInfo, error) {
 		if err != nil {
 			continue
 		}
-		state, ppid, pgid, ok := parseProcStat(statBytes)
+		state, ppid, pgid, startTime, ok := parseProcStat(statBytes)
 		if !ok {
 			continue
 		}
+		var args []string
 		cmdlineBytes, err := os.ReadFile(filepath.Join(procDir, "cmdline")) //nolint:gosec
-		if err != nil {
+		if err == nil {
+			args = parseProcCmdline(cmdlineBytes)
+		} else if state != 'Z' && state != 'X' {
 			continue
 		}
-		args := parseProcCmdline(cmdlineBytes)
-		if len(args) == 0 {
+		if len(args) == 0 && state != 'Z' && state != 'X' {
 			continue
 		}
 		procs = append(procs, procInfo{
-			pid:   pid,
-			ppid:  ppid,
-			pgid:  pgid,
-			state: state,
-			args:  args,
+			pid:       pid,
+			ppid:      ppid,
+			pgid:      pgid,
+			startTime: startTime,
+			state:     state,
+			args:      args,
 		})
 	}
 	return procs, nil
 }
 
-func hasLivePGIDMembers(procs []procInfo, targetPGID, selfPID int) bool {
+func hasVerifiedLauncher(procs []procInfo, targetPGID int, launcherStartTime uint64) bool {
 	if targetPGID <= 0 {
+		return false
+	}
+	if launcherStartTime == 0 {
+		return true
+	}
+	for _, p := range procs {
+		if p.pid == targetPGID && p.pgid == targetPGID && p.startTime == launcherStartTime {
+			return true
+		}
+	}
+	return false
+}
+
+func hasLivePGIDMembers(procs []procInfo, targetPGID int, launcherStartTime uint64, selfPID int) bool {
+	if targetPGID <= 0 || !hasVerifiedLauncher(procs, targetPGID, launcherStartTime) {
 		return false
 	}
 	for _, p := range procs {
@@ -280,9 +334,9 @@ func hasLivePGIDMembers(procs []procInfo, targetPGID, selfPID int) bool {
 	return false
 }
 
-func collectOwnedTreePIDs(procs []procInfo, targetPGID, selfPID int) map[int]struct{} {
+func collectOwnedTreePIDs(procs []procInfo, targetPGID int, launcherStartTime uint64, selfPID int) map[int]struct{} {
 	owned := make(map[int]struct{})
-	if targetPGID <= 0 {
+	if targetPGID <= 0 || !hasVerifiedLauncher(procs, targetPGID, launcherStartTime) {
 		return owned
 	}
 	childrenByPPID := make(map[int][]int, len(procs))
@@ -332,6 +386,30 @@ func collectOwnedTreePIDs(procs []procInfo, targetPGID, selfPID int) map[int]str
 		}
 	}
 	return owned
+}
+
+func hasLiveMatchingProcs(procs, targets []procInfo) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	byPID := make(map[int]procInfo, len(procs))
+	for _, p := range procs {
+		if p.pid <= 0 || p.state == 'Z' || p.state == 'X' {
+			continue
+		}
+		byPID[p.pid] = p
+	}
+	for _, target := range targets {
+		cur, ok := byPID[target.pid]
+		if !ok {
+			continue
+		}
+		if target.startTime > 0 && cur.startTime != target.startTime {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func matchesClusterServerDataDir(binName string, args []string, cleanDataDir string) bool {
@@ -404,7 +482,7 @@ func newPDClient(re *require.Assertions, pdEndpoints []string) pd.Client {
 	return cli
 }
 
-func selectPDEndpoints(procs []procInfo, dataDir string, targetPGID, selfPID int) []string {
+func selectPDEndpoints(procs []procInfo, dataDir string, targetPGID int, launcherStartTime uint64, selfPID int) []string {
 	var cleanDataDir string
 	if dataDir != "" {
 		cleanDataDir = filepath.Clean(dataDir)
@@ -412,7 +490,7 @@ func selectPDEndpoints(procs []procInfo, dataDir string, targetPGID, selfPID int
 	scoped := cleanDataDir != "" || targetPGID > 0
 	var ownedTree map[int]struct{}
 	if targetPGID > 0 {
-		ownedTree = collectOwnedTreePIDs(procs, targetPGID, selfPID)
+		ownedTree = collectOwnedTreePIDs(procs, targetPGID, launcherStartTime, selfPID)
 	}
 
 	var pdAddrs []string

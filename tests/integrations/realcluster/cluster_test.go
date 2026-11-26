@@ -36,6 +36,7 @@ import (
 type triggerDeadlineCtx struct {
 	context.Context
 	done chan struct{}
+	once sync.Once
 }
 
 func newTriggerDeadlineCtx() *triggerDeadlineCtx {
@@ -59,7 +60,9 @@ func (c *triggerDeadlineCtx) Err() error {
 }
 
 func (c *triggerDeadlineCtx) trigger() {
-	close(c.done)
+	c.once.Do(func() {
+		close(c.done)
+	})
 }
 
 func TestWaitForClusterReady(t *testing.T) {
@@ -116,11 +119,20 @@ func TestWaitForClusterReady(t *testing.T) {
 
 		dctx := newTriggerDeadlineCtx()
 		errCh := make(chan error, 1)
+		done := make(chan struct{})
 		go func() {
+			defer close(done)
 			errCh <- waitForClusterReady(dctx, 10*time.Millisecond, func(checkCtx context.Context) (string, error) {
 				return runCommandWithOutputContext(checkCtx, cmdStr, "")
 			})
 		}()
+		t.Cleanup(func() {
+			dctx.trigger()
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+			}
+		})
 
 		var childPID int
 		re.Eventually(func() bool {
@@ -151,21 +163,34 @@ func TestWaitForClusterReady(t *testing.T) {
 func TestParseProcState(t *testing.T) {
 	re := require.New(t)
 
-	state, ppid, pgid, ok := parseProcStat([]byte("1234 (sleep) S 1 1234 1234 0 -1"))
+	state, ppid, pgid, startTime, ok := parseProcStat([]byte("1234 (sleep) S 1 1234 1234 0 -1"))
 	re.True(ok)
 	re.Equal(byte('S'), state)
 	re.Equal(1, ppid)
 	re.Equal(1234, pgid)
+	re.Zero(startTime)
+
+	// Full 22+ field /proc/<pid>/stat entry (including spaces and parentheses in comm).
+	state, ppid, pgid, startTime, ok = parseProcStat([]byte("42001 (tiup (nightly)) S 500 42001 42001 0 -1 4194304 100 0 0 0 10 5 0 0 20 0 1 0 987654321 1024000 200"))
+	re.True(ok)
+	re.Equal(byte('S'), state)
+	re.Equal(500, ppid)
+	re.Equal(42001, pgid)
+	re.Equal(uint64(987654321), startTime)
+
+	_, _, _, _, ok = parseProcStat([]byte("42001 (badstart) S 500 42001 42001 0 -1 4194304 100 0 0 0 10 5 0 0 20 0 1 0 notanumber 1024000 200"))
+	re.False(ok)
 
 	state, ok = parseProcState([]byte("1234 (cmd (with) parens) Z 42 999 1234 0 -1"))
 	re.True(ok)
 	re.Equal(byte('Z'), state)
 
-	state, ppid, pgid, ok = parseProcStat([]byte("1234 (dead) X 10 20 1234 0 -1"))
+	state, ppid, pgid, startTime, ok = parseProcStat([]byte("1234 (dead) X 10 20 1234 0 -1"))
 	re.True(ok)
 	re.Equal(byte('X'), state)
 	re.Equal(10, ppid)
 	re.Equal(20, pgid)
+	re.Zero(startTime)
 
 	_, ok = parseProcState([]byte("invalid"))
 	re.False(ok)
@@ -290,20 +315,29 @@ func TestSelectPDEndpoints(t *testing.T) {
 
 	re.Equal(
 		[]string{"http://127.0.0.1:2379", "http://127.0.0.1:2380", "http://127.0.0.1:2381"},
-		selectPDEndpoints(procs, "/tmp/tiup home 1/data/tag1", 101, 500),
+		selectPDEndpoints(procs, "/tmp/tiup home 1/data/tag1", 101, 0, 500),
 	)
 	re.Equal(
 		[]string{"http://127.0.0.1:39681", "http://127.0.0.1:39682"},
-		selectPDEndpoints(procs, "/tmp/tiup home 2/data/tag1", 0, 500),
+		selectPDEndpoints(procs, "/tmp/tiup home 2/data/tag1", 0, 0, 500),
 	)
 	re.Equal(
 		[]string{"http://127.0.0.1:49681"},
-		selectPDEndpoints(procs, "/tmp/tiup home 1/data/tag10", 0, 500),
+		selectPDEndpoints(procs, "/tmp/tiup home 1/data/tag10", 0, 0, 500),
 	)
 	re.Equal(
 		[]string{"http://127.0.0.1:2379", "http://127.0.0.1:2380", "http://127.0.0.1:2381", "http://127.0.0.1:39681", "http://127.0.0.1:39682", "http://127.0.0.1:49681"},
-		selectPDEndpoints(procs, "", 0, 500),
+		selectPDEndpoints(procs, "", 0, 0, 500),
 	)
+}
+
+func selectOwnedPIDs(procs []procInfo, dataDir string, targetPGID int, launcherStartTime uint64, selfPID int) []int {
+	owned := selectOwnedProcs(procs, dataDir, targetPGID, launcherStartTime, selfPID)
+	pids := make([]int, 0, len(owned))
+	for _, p := range owned {
+		pids = append(pids, p.pid)
+	}
+	return pids
 }
 
 func TestSelectOwnedPIDs(t *testing.T) {
@@ -387,47 +421,118 @@ func TestSelectOwnedPIDs(t *testing.T) {
 		},
 	}
 
-	re.Equal([]int{101, 102, 103, 104}, selectOwnedPIDs(procs, dataDir1, 101, 500))
-	re.Equal([]int{201, 202, 203}, selectOwnedPIDs(procs, dataDir2, 201, 500))
-	re.Equal([]int{301, 302}, selectOwnedPIDs(procs, dataDir10, 301, 500))
+	re.Equal([]int{101, 102, 103, 104}, selectOwnedPIDs(procs, dataDir1, 101, 0, 500))
+	re.Equal([]int{201, 202, 203}, selectOwnedPIDs(procs, dataDir2, 201, 0, 500))
+	re.Equal([]int{301, 302}, selectOwnedPIDs(procs, dataDir10, 301, 0, 500))
 
 	// Reused launcher PID in a different PGID and its descendants must NOT be selected.
 	reusedProcs := []procInfo{
 		{
-			pid: 42001, ppid: 41000, pgid: 41000, state: 'S',
+			pid: 42001, ppid: 41000, pgid: 41000, startTime: 9000, state: 'S',
 			args: []string{"/usr/bin/unrelated"},
 		},
 		{
-			pid: 42002, ppid: 42001, pgid: 41000, state: 'S',
+			pid: 42002, ppid: 42001, pgid: 41000, startTime: 9001, state: 'S',
 			args: []string{"/usr/bin/unrelated-child"},
 		},
 	}
-	re.Empty(selectOwnedPIDs(reusedProcs, "", 42001, 500))
-	re.False(hasLivePGIDMembers(reusedProcs, 42001, 500))
+	re.Empty(selectOwnedPIDs(reusedProcs, "", 42001, 1000, 500))
+	re.False(hasLivePGIDMembers(reusedProcs, 42001, 1000, 500))
 
-	// If another live process still belongs to target PGID 42001 while PID 42001
-	// was reused in PGID 41000, only the true PGID 42001 member is selected.
+	// When the old process group completely exited and an unrelated group reused the
+	// exact same PGID (different startTime), none of the reused PGID's members may be selected.
+	// Only an escaped cluster server matching dataDir1 is selected.
+	reusedPGIDProcs := []procInfo{
+		{
+			pid: 42001, ppid: 1, pgid: 42001, startTime: 9000, state: 'S',
+			args: []string{"/usr/bin/unrelated-leader"},
+		},
+		{
+			pid: 42002, ppid: 42001, pgid: 42001, startTime: 9001, state: 'S',
+			args: []string{"/usr/bin/unrelated-worker"},
+		},
+		{
+			pid: 42009, ppid: 1, pgid: 42009, startTime: 1050, state: 'S',
+			args: []string{"/repo/third_bin/tikv-server", "--data-dir=" + dataDir1 + "/tikv-0/data"},
+		},
+	}
+	re.Empty(selectOwnedPIDs(reusedPGIDProcs, "", 42001, 1000, 500))
+	re.False(hasLivePGIDMembers(reusedPGIDProcs, 42001, 1000, 500))
+	re.Equal([]int{42009}, selectOwnedPIDs(reusedPGIDProcs, dataDir1, 42001, 1000, 500))
+
+	// When launcherStartTime is unavailable (0, non-/proc fallback) and another live
+	// process still belongs to target PGID 42001 while PID 42001 was reused in PGID 41000,
+	// only the true PGID 42001 member is selected.
 	mixedProcs := append(reusedProcs, procInfo{
 		pid: 42003, ppid: 1, pgid: 42001, state: 'S',
 		args: []string{"/bin/tiup-playground", "nightly"},
 	})
-	re.Equal([]int{42003}, selectOwnedPIDs(mixedProcs, "", 42001, 500))
-	re.True(hasLivePGIDMembers(mixedProcs, 42001, 500))
+	re.Equal([]int{42003}, selectOwnedPIDs(mixedProcs, "", 42001, 0, 500))
+	re.True(hasLivePGIDMembers(mixedProcs, 42001, 0, 500))
 
-	// An un-reaped zombie still in targetPGID must not be selected itself,
-	// while its live escaped descendant is still traversed.
+	// An un-reaped zombie still in targetPGID with matching startTime must not be
+	// selected itself, while its live escaped descendant is still traversed.
 	zombieParentProcs := []procInfo{
 		{
-			pid: 43001, ppid: 500, pgid: 43001, state: 'Z',
-			args: []string{"/bin/tiup", "playground", "nightly"},
+			pid: 43001, ppid: 500, pgid: 43001, startTime: 1000, state: 'Z',
+			args: nil,
 		},
 		{
-			pid: 43002, ppid: 43001, pgid: 43002, state: 'S',
+			pid: 43002, ppid: 43001, pgid: 43002, startTime: 1005, state: 'S',
 			args: []string{"/bin/helper"},
 		},
 	}
-	re.Equal([]int{43002}, selectOwnedPIDs(zombieParentProcs, "", 43001, 500))
-	re.False(hasLivePGIDMembers(zombieParentProcs, 43001, 500))
+	re.Equal([]int{43002}, selectOwnedPIDs(zombieParentProcs, "", 43001, 1000, 500))
+	re.False(hasLivePGIDMembers(zombieParentProcs, 43001, 1000, 500))
+	// Mismatched launcherStartTime rejects the zombie and its subtree.
+	re.Empty(selectOwnedPIDs(zombieParentProcs, "", 43001, 2000, 500))
+}
+
+func TestReadProcessesFromProcPreservesZombie(t *testing.T) {
+	re := require.New(t)
+	procRoot := t.TempDir()
+
+	// Un-reaped zombie launcher with empty cmdline (Linux clears /proc/<pid>/cmdline for zombies).
+	zombieDir := filepath.Join(procRoot, "42001")
+	re.NoError(os.MkdirAll(zombieDir, 0750))
+	zombieStat := "42001 (tiup) Z 999 42001 42001 0 -1 4194304 10 0 0 0 1 1 0 0 20 0 1 0 1000 0 0"
+	re.NoError(os.WriteFile(filepath.Join(zombieDir, "stat"), []byte(zombieStat), 0600))
+	re.NoError(os.WriteFile(filepath.Join(zombieDir, "cmdline"), nil, 0600))
+
+	// Live child still in targetPGID 42001.
+	childDir := filepath.Join(procRoot, "42002")
+	re.NoError(os.MkdirAll(childDir, 0750))
+	childStat := "42002 (tiup-playground) S 42001 42001 42001 0 -1 4194304 10 0 0 0 1 1 0 0 20 0 1 0 1005 0 0"
+	re.NoError(os.WriteFile(filepath.Join(childDir, "stat"), []byte(childStat), 0600))
+	re.NoError(os.WriteFile(filepath.Join(childDir, "cmdline"), []byte("/bin/tiup-playground\x00nightly\x00"), 0600))
+
+	// Live kernel-like thread with empty cmdline must still be skipped.
+	kthreadDir := filepath.Join(procRoot, "2")
+	re.NoError(os.MkdirAll(kthreadDir, 0750))
+	kthreadStat := "2 (kthreadd) S 0 0 0 0 -1 2129984 0 0 0 0 0 0 0 0 20 0 1 0 1 0 0"
+	re.NoError(os.WriteFile(filepath.Join(kthreadDir, "stat"), []byte(kthreadStat), 0600))
+	re.NoError(os.WriteFile(filepath.Join(kthreadDir, "cmdline"), nil, 0600))
+
+	procs, err := readProcessesFromProc(procRoot)
+	re.NoError(err)
+	re.Len(procs, 2)
+
+	var foundZombie bool
+	for _, p := range procs {
+		if p.pid == 42001 {
+			foundZombie = true
+			re.Equal(byte('Z'), p.state)
+			re.Equal(42001, p.pgid)
+			re.Equal(uint64(1000), p.startTime)
+		}
+	}
+	re.True(foundZombie, "zombie launcher with empty cmdline must be preserved")
+	re.True(hasLivePGIDMembers(procs, 42001, 1000, 999))
+	re.Equal([]int{42002}, selectOwnedPIDs(procs, "", 42001, 1000, 999))
+
+	// With a mismatched launcherStartTime, neither PGID check nor tree selection matches.
+	re.False(hasLivePGIDMembers(procs, 42001, 9999, 999))
+	re.Empty(selectOwnedPIDs(procs, "", 42001, 9999, 999))
 }
 
 func TestTagUniqueAcrossProcesses(t *testing.T) {
@@ -1154,10 +1259,10 @@ exit 1
 			}
 		}
 		re.True(sawGroupTerm, "expected initial group SIGTERM")
-		re.False(sawGroupKill, "must not send final group SIGKILL after launcher is reaped with no live PGID members")
+		re.False(sawGroupKill, "must not send final group SIGKILL after launcher exits cleanly with no live PGID members")
 	})
 
-	t.Run("sends final group SIGKILL when group member survives reaped launcher", func(t *testing.T) {
+	t.Run("sends final group SIGKILL when group member survives exited launcher", func(t *testing.T) {
 		re := require.New(t)
 		childPIDFile := filepath.Join(t.TempDir(), "survivor.pid")
 		tmpPIDFile := childPIDFile + ".tmp"
@@ -1223,12 +1328,157 @@ exit 1
 		}
 		re.True(sawGroupKill, "expected final group SIGKILL when a member in PGID survives SIGTERM")
 	})
+
+	t.Run("does not SIGKILL reused PID after original owned process exits", func(t *testing.T) {
+		re := require.New(t)
+		origKill := killProcess
+		origList := listProcessesFn
+		origGrace := clusterStopGraceTimeout
+		t.Cleanup(func() {
+			killProcess = origKill
+			listProcessesFn = origList
+			clusterStopGraceTimeout = origGrace
+		})
+		clusterStopGraceTimeout = 60 * time.Millisecond
+
+		const (
+			launcherPID = 42001
+			reusedPID   = 55555
+			dataDir     = "/tmp/tiup-reuse-test/data/tag1"
+		)
+		var mu sync.Mutex
+		var calls []signalCall
+		var scanCount int
+		var launcherKilled bool
+
+		killProcess = func(pid int, sig syscall.Signal) error {
+			mu.Lock()
+			calls = append(calls, signalCall{pid: pid, sig: sig})
+			if sig == syscall.SIGKILL && (pid == launcherPID || pid == -launcherPID) {
+				launcherKilled = true
+			}
+			mu.Unlock()
+			return nil
+		}
+		listProcessesFn = func() ([]procInfo, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			scanCount++
+			if scanCount == 1 {
+				return []procInfo{
+					{
+						pid: launcherPID, ppid: os.Getpid(), pgid: launcherPID, startTime: 1000, state: 'S',
+						args: []string{"/bin/tiup", "playground", "nightly", "--tag", "tag1"},
+					},
+					{
+						pid: reusedPID, ppid: 1, pgid: reusedPID, startTime: 1000, state: 'S',
+						args: []string{"/repo/third_bin/tikv-server", "--data-dir=" + dataDir + "/tikv-0/data"},
+					},
+				}, nil
+			}
+			// After scan 1, the owned tikv-server at PID 55555 exited and an unrelated
+			// process reused PID 55555 with a new PGID and startTime.
+			unrelated := procInfo{
+				pid: reusedPID, ppid: 1, pgid: 99999, startTime: 2000, state: 'S',
+				args: []string{"/usr/bin/unrelated"},
+			}
+			if launcherKilled {
+				return []procInfo{unrelated}, nil
+			}
+			// Keep launcher alive through the grace period so stop() enters the SIGKILL phase.
+			return []procInfo{
+				{
+					pid: launcherPID, ppid: os.Getpid(), pgid: launcherPID, startTime: 1000, state: 'S',
+					args: []string{"/bin/tiup", "playground", "nightly", "--tag", "tag1"},
+				},
+				unrelated,
+			}, nil
+		}
+
+		c := &cluster{
+			tag:               "tag1",
+			datadir:           dataDir,
+			pgid:              launcherPID,
+			launcherStartTime: 1000,
+		}
+		c.stop()
+
+		mu.Lock()
+		recorded := append([]signalCall(nil), calls...)
+		mu.Unlock()
+		var sawReusedTerm, sawReusedKill, sawLauncherKill bool
+		for _, call := range recorded {
+			if call.pid == reusedPID && call.sig == syscall.SIGTERM {
+				sawReusedTerm = true
+			}
+			if call.pid == reusedPID && call.sig == syscall.SIGKILL {
+				sawReusedKill = true
+			}
+			if call.pid == launcherPID && call.sig == syscall.SIGKILL {
+				sawLauncherKill = true
+			}
+		}
+		re.True(sawReusedTerm, "expected initial SIGTERM for owned tikv-server before it exited")
+		re.True(sawLauncherKill, "expected SIGKILL for surviving launcher")
+		re.False(sawReusedKill, "must never send SIGKILL to reused PID with new identity")
+	})
+
+	t.Run("skips all signals when PGID is reused by unrelated group", func(t *testing.T) {
+		re := require.New(t)
+		origKill := killProcess
+		origList := listProcessesFn
+		origGrace := clusterStopGraceTimeout
+		t.Cleanup(func() {
+			killProcess = origKill
+			listProcessesFn = origList
+			clusterStopGraceTimeout = origGrace
+		})
+		clusterStopGraceTimeout = 40 * time.Millisecond
+
+		var mu sync.Mutex
+		var calls []signalCall
+		killProcess = func(pid int, sig syscall.Signal) error {
+			mu.Lock()
+			calls = append(calls, signalCall{pid: pid, sig: sig})
+			mu.Unlock()
+			return nil
+		}
+		listProcessesFn = func() ([]procInfo, error) {
+			return []procInfo{
+				{
+					pid: 42001, ppid: 1, pgid: 42001, startTime: 9000, state: 'S',
+					args: []string{"/usr/bin/unrelated-leader"},
+				},
+				{
+					pid: 42002, ppid: 42001, pgid: 42001, startTime: 9001, state: 'S',
+					args: []string{"/usr/bin/unrelated-worker"},
+				},
+			}, nil
+		}
+
+		c := &cluster{
+			tag:               "reused_pgid",
+			datadir:           "/tmp/tiup-reuse-test/data/reused_pgid",
+			pgid:              42001,
+			launcherStartTime: 1000,
+		}
+		c.stop()
+
+		mu.Lock()
+		recorded := append([]signalCall(nil), calls...)
+		mu.Unlock()
+		re.Empty(recorded, "must not signal an unrelated process group that reused PGID")
+	})
 }
 
 func TestResolveTiUPBinAndRelativeTiUPHome(t *testing.T) {
 	re := require.New(t)
-	origBin := tiupBin
-	t.Cleanup(func() { tiupBin = origBin })
+	origRepo, origBin, origLogDir := realClusterRepoRoot, tiupBin, playgroundLogDir
+	origTimeout, origPoll := clusterWaitTimeout, clusterPollPeriod
+	t.Cleanup(func() {
+		realClusterRepoRoot, tiupBin, playgroundLogDir = origRepo, origBin, origLogDir
+		clusterWaitTimeout, clusterPollPeriod = origTimeout, origPoll
+	})
 	tiupBin = ""
 
 	defaultHome := t.TempDir()
@@ -1247,10 +1497,94 @@ func TestResolveTiUPBinAndRelativeTiUPHome(t *testing.T) {
 	re.NoError(os.MkdirAll(filepath.Dir(customBin), 0750))
 	re.NoError(os.WriteFile(customBin, []byte("#!/bin/sh\n"), 0600))
 	// Non-executable custom binary must fall back to default $HOME/.tiup/bin/tiup.
+	re.False(isExecutable(customBin))
 	re.Equal(filepath.Join(defaultHome, ".tiup", "bin", "tiup"), resolveTiUPBin())
 
+	// Mode 0601 owned by current user has only the other-execute bit set; current user
+	// cannot execute it, so resolveTiUPBin must still fall back to default $HOME/.tiup/bin/tiup.
+	re.NoError(os.Chmod(customBin, 0601)) //nolint:gosec
+	if os.Geteuid() != 0 {
+		re.False(isExecutable(customBin))
+		re.Equal(filepath.Join(defaultHome, ".tiup", "bin", "tiup"), resolveTiUPBin())
+	}
+
 	re.NoError(os.Chmod(customBin, 0700)) //nolint:gosec
+	re.True(isExecutable(customBin))
 	re.Equal(customBin, resolveTiUPBin())
+
+	// All four TiUP invocations (probe, install, deploy, display) must receive the same
+	// resolved absolute TIUP_HOME even when TIUP_HOME in the environment is relative.
+	repoDir := t.TempDir()
+	re.NoError(os.MkdirAll(filepath.Join(repoDir, "bin"), 0750))
+	re.NoError(os.MkdirAll(filepath.Join(repoDir, "third_bin"), 0750))
+	for _, rel := range []string{"bin/pd-server", "third_bin/tikv-server"} {
+		re.NoError(os.WriteFile(filepath.Join(repoDir, rel), []byte("#!/bin/sh\n"), 0600))
+	}
+	invocationsLog := filepath.Join(t.TempDir(), "tiup_invocations.log")
+	installedMarker := filepath.Join(t.TempDir(), "playground.installed")
+	deployReady := filepath.Join(t.TempDir(), "deploy.ready")
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
+  printf 'probe|%%s\n' "$TIUP_HOME" >> %q
+  if [ -f %q ]; then
+    echo "$TIUP_HOME/components/playground/v1.17.1/tiup-playground"
+    exit 0
+  fi
+  exit 1
+fi
+if [ "$1" = "install" ] && [ "$2" = "playground" ]; then
+  printf 'install|%%s\n' "$TIUP_HOME" >> %q
+  touch %q
+  exit 0
+fi
+if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
+  printf 'deploy|%%s\n' "$TIUP_HOME" >> %q
+  touch %q
+  trap 'kill "$child" 2>/dev/null; exit 0' TERM
+  sleep 30 &
+  child=$!
+  wait "$child"
+  exit 0
+fi
+if [ "$1" = "playground" ] && [ "$2" = "display" ]; then
+  printf 'display|%%s\n' "$TIUP_HOME" >> %q
+  if [ -f %q ]; then
+    echo "Pid Role Uptime"
+    exit 0
+  fi
+  exit 1
+fi
+exit 1
+`, invocationsLog, installedMarker, invocationsLog, installedMarker, invocationsLog, deployReady, invocationsLog, deployReady)
+	re.NoError(os.WriteFile(customBin, []byte(script), 0600))
+	re.NoError(os.Chmod(customBin, 0700)) //nolint:gosec
+
+	realClusterRepoRoot = repoDir
+	playgroundLogDir = t.TempDir()
+	clusterWaitTimeout = 2 * time.Second
+	clusterPollPeriod = 40 * time.Millisecond
+
+	tag := fmt.Sprintf("pd_real_cluster_test_relhome_%d", time.Now().UnixNano())
+	c := newCluster(re, tag, dataDirForTag(tag), "tikv-slim", map[string]int{"pd": 1, "kv": 1})
+	defer c.stop()
+	c.start()
+
+	logBytes, err := os.ReadFile(invocationsLog) //nolint:gosec
+	re.NoError(err)
+	seen := make(map[string]int)
+	for line := range strings.SplitSeq(strings.TrimSpace(string(logBytes)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 2)
+		re.Len(parts, 2, "unexpected invocation line: %q", line)
+		seen[parts[0]]++
+		re.Equal(absExpectedHome, parts[1], "subcommand %q received non-absolute or mismatched TIUP_HOME", parts[0])
+	}
+	re.Positive(seen["probe"])
+	re.Positive(seen["install"])
+	re.Positive(seen["deploy"])
+	re.Positive(seen["display"])
 
 	// Literal TIUP_HOME containing glob metacharacters works with os.RemoveAll.
 	globHome := filepath.Join(t.TempDir(), "ci[dev")
