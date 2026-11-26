@@ -276,8 +276,9 @@ func (m *Manager) drainObservedTargets() {
 
 // applyLocalObservedTarget applies a healthy observation without a write when it
 // matches the current or stored target, or PD does not implement the target
-// endpoint. It updates the observation's version if it changes local state so
-// the caller can still queue the target for persistence. Caller holds metaMutex.
+// endpoint. When it changes local state, it updates the observation so the
+// caller can queue it for persistence and roll it back if PD skips it.
+// Caller holds metaMutex.
 func (m *Manager) applyLocalObservedTarget(obs *observedTarget) {
 	target := &obs.target
 	m.Lock()
@@ -310,4 +311,5 @@ func (m *Manager) applyLocalObservedTarget(obs *observedTarget) {
 	groupInfo.SetAvailability(groupAvailable)
 	m.resetCountLocked(groupInfo)
 	obs.affinityVer = groupInfo.AffinityVer
+	obs.persistOnly = groupInfo.persistedGroup != nil
 }

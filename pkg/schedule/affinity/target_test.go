@@ -824,6 +824,51 @@ func TestFirstWinReplacesRejectedLocalTarget(t *testing.T) {
 	})
 }
 
+func TestFirstWinReplacesRejectedReactivatedTarget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pd := newTargetTest(t, "g")
+		test := newTargetTestWithStorage(t, t.Context(), pd.store)
+		test.checkGroupsAvailability()
+		state := func() *GroupState { return test.GetAffinityGroupState("g") }
+		var reactivated *GroupState
+		test.useWriter(func(ctx context.Context, targets []GroupTarget) ([]string, error) {
+			switch len(test.calls) {
+			case 1:
+				return nil, ErrTargetWriterUnsupported
+			case 2:
+				reactivated = state()
+			}
+			return pd.UpdateAffinityGroupTargets(ctx, targets)
+		})
+
+		initial := pd.stored("g")
+		test.observe("g", 1, 2)
+		local := state()
+		test.True(local.HasUnpersistedTarget())
+		test.True(local.AffinitySchedulingAllowed)
+		test.ExpireAffinityGroup("g")
+		test.Equal(groupExpired, test.groups["g"].GetAvailability())
+		test.True(state().HasUnpersistedTarget())
+
+		pd.applyStoreConditions(map[uint64]storeCondition{1: storeBusy})
+		time.Sleep(time.Second)
+		test.observe("g", 1, 2)
+		test.Len(test.calls, 2)
+		test.Equal(local.Group, reactivated.Group)
+		test.True(reactivated.AffinitySchedulingAllowed)
+		test.True(reactivated.HasUnpersistedTarget())
+		test.Equal(initial, pd.stored("g"))
+		test.False(state().HasUnpersistedTarget())
+		test.Equal(*initial, state().Group)
+
+		time.Sleep(time.Second)
+		test.observe("g", 2, 3)
+		test.Len(test.calls, 3)
+		test.Equal(test.calls[2].result(), pd.stored("g"))
+		test.Equal(uint64(2), pd.stored("g").LeaderStoreID)
+	})
+}
+
 type targetTxnStorage struct {
 	endpoint.AffinityStorage
 	run func(context.Context, func(kv.Txn) error) error
