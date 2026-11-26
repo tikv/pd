@@ -343,8 +343,21 @@ func TestAffinitySplitBeforeMoveUnknownSize(t *testing.T) {
 		requireAffinityMove(t, controller.CheckRegion(region))
 		require.Equal(t, fallbacks+1, promtestutil.ToFloat64(affinityCheckerSplitTimeoutCounter))
 		cluster.PutRegion(large)
-		requireAffinitySplit(t, controller.CheckRegion(large))
-		require.True(t, checker.splitAttempts[1].startedAt.IsZero())
+		split := requireAffinitySplit(t, controller.CheckRegion(large))
+		require.Equal(t, affinitySplitWaitNone, checker.splitAttempts[1].waitKind)
+		require.True(t, ops.AddOperator(split))
+
+		// An unknown size after admission uses the longer timeout, measured
+		// from the SCAN start rather than from the first unknown-size check.
+		cluster.PutRegion(region)
+		advanceAffinitySplitTime(cluster, affinitySplitTimeout)
+		ops.Dispatch(region, operator.DispatchFromHeartBeat, func(uint64) {})
+		require.Equal(t, operator.TIMEOUT, split.Status())
+		require.Empty(t, checker.Check(region))
+		advanceAffinitySplitTime(cluster, defaultAffinityUnknownSizeWait-affinitySplitTimeout-time.Second)
+		require.Empty(t, checker.Check(region))
+		advanceAffinitySplitTime(cluster, time.Second)
+		requireAffinityMove(t, checker.Check(region))
 	})
 }
 
@@ -422,6 +435,32 @@ func TestAffinitySplitBeforeMoveAttemptLimit(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestAffinitySplitWaitQueueCapacity(t *testing.T) {
+	requireClassicAffinitySplit(t)
+	synctest.Test(t, func(t *testing.T) {
+		cluster, controller, _ := newAffinitySplitTest(t)
+		checker := controller.GetAffinityChecker()
+		checker.maxSplitAttempts = 1
+		checker.maxSplitWaitQueue = 1
+		regions := putOversizedAffinityRegions(cluster)
+		owner, first, next := regions[0], regions[1], regions[2]
+
+		split := requireAffinitySplit(t, checker.Check(owner))
+		require.Empty(t, checker.Check(first))
+		require.Empty(t, checker.Check(next))
+		require.Len(t, checker.splitWaitIndex, 1)
+		require.Contains(t, checker.splitWaitIndex, first.GetID())
+
+		require.True(t, split.Cancel())
+		time.Sleep(affinitySplitPruneInterval)
+		require.Empty(t, checker.Check(next))
+		require.Contains(t, checker.splitGranted, first.GetID())
+		require.Len(t, checker.splitWaitIndex, 1)
+		require.Contains(t, checker.splitWaitIndex, next.GetID())
+		requireAffinitySplit(t, checker.Check(first))
+	})
 }
 
 func TestAffinitySplitFallbackExpiresDespiteStoreLimit(t *testing.T) {

@@ -47,15 +47,25 @@ const (
 
 var affinityUnknownSizeWait = defaultAffinityUnknownSizeWait
 
+// affinitySplitWaitKind identifies what started the wait before a peer move.
+type affinitySplitWaitKind uint8
+
+const (
+	affinitySplitWaitNone affinitySplitWaitKind = iota
+	affinitySplitWaitUnknownSize
+	affinitySplitWaitScan
+)
+
 type affinitySplitAttempt struct {
 	version       uint64
 	voterStoreIDs []uint64
-	startedAt     time.Time
 	expiresAt     time.Time
+	waitKind      affinitySplitWaitKind
+	// startedAt is the start of the passive wait or the first admitted SCAN,
+	// as indicated by waitKind. It is zero when there is no active clock.
+	startedAt time.Time
 	// split is the last split operator of the attempt. The operator controller
 	// starts an operator when it admits it, and then sends the split request.
-	// startedAt is the first split start time, or the time the checker starts
-	// waiting for a non-positive size. It is zero until either wait starts.
 	split            *operator.Operator
 	fallbackRecorded bool
 }
@@ -133,8 +143,8 @@ func (c *AffinityChecker) promoteSplitWaiters(now time.Time) {
 	}
 }
 
-// admitSplitAttempt claims a reservation or queues the Region when all slots
-// are in use. Older waiters get any newly released slots first.
+// admitSplitAttempt claims a reservation or queues the Region if all slots
+// are in use and the wait queue has room. Older waiters get released slots first.
 // The caller holds splitMu.
 func (c *AffinityChecker) admitSplitAttempt(regionID uint64, now time.Time) bool {
 	if expiresAt, granted := c.splitGranted[regionID]; granted {
@@ -155,7 +165,11 @@ func (c *AffinityChecker) admitSplitAttempt(regionID uint64, now time.Time) bool
 		c.removeSplitWaiter(regionID)
 		return true
 	}
-	if c.splitWaitIndex[regionID] == nil && c.splitWaitQueue.Len() < max(c.maxSplitAttempts, affinitySplitMaxAttempts) {
+	queueCapacity := c.maxSplitWaitQueue
+	if queueCapacity <= 0 {
+		queueCapacity = affinitySplitMaxAttempts
+	}
+	if c.splitWaitIndex[regionID] == nil && c.splitWaitQueue.Len() < queueCapacity {
 		c.splitWaitIndex[regionID] = c.splitWaitQueue.PushBack(regionID)
 	}
 	return false
@@ -170,7 +184,7 @@ func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 			delete(c.splitAttempts, id)
 			continue
 		}
-		if split := attempt.split; attempt.startedAt.IsZero() && split != nil {
+		if split := attempt.split; attempt.waitKind == affinitySplitWaitNone && split != nil {
 			status := split.Status()
 			// Even a finished split can have started between checker passes.
 			if (operator.IsEndStatus(status) || (status == operator.CREATED && split.CheckExpired())) && !split.HasStarted() {
@@ -192,7 +206,7 @@ func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 // removing and recreating it. Each child is checked after its heartbeat reports
 // it. A move can proceed after the wait times out and the cooldown has passed.
 // Attempts are scoped to a Region version and target voters. When capacity
-// is full, Regions wait in FIFO order for a slot.
+// is full, Regions can wait for a slot in the bounded FIFO queue.
 func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState,
 	roles map[uint64]placement.PeerRoleType) (*operator.Operator, bool) {
 	if kerneltype.IsNextGen() {
@@ -241,15 +255,12 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		return nil, false
 	}
 	sizeUnknown := region.GetApproximateSize() <= 0
-	waitTimeout := affinitySplitTimeout
-	if sizeUnknown {
-		waitTimeout = affinityUnknownSizeWait
-	}
 	version := region.GetRegionEpoch().GetVersion()
 	previous, tracked := c.splitAttempts[regionID]
 	var (
 		attempt   affinitySplitAttempt
 		splitWait time.Duration
+		timedOut  bool
 	)
 	if c.needsSplitAttempt(region) {
 		now := time.Now()
@@ -281,25 +292,39 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 				return nil, false
 			}
 			splitRunning = !split.IsEnd()
-			if attempt.startedAt.IsZero() {
-				attempt.startedAt = split.GetStartTime()
+			if attempt.waitKind == affinitySplitWaitNone {
+				if startedAt := split.GetStartTime(); !startedAt.IsZero() {
+					attempt.waitKind = affinitySplitWaitScan
+					attempt.startedAt = startedAt
+				} else if !splitRunning {
+					attempt.split = nil
+				}
 			}
-			if !splitRunning && attempt.startedAt.IsZero() {
-				attempt.split = nil
+		}
+		switch attempt.waitKind {
+		case affinitySplitWaitNone:
+			if sizeUnknown {
+				attempt.waitKind = affinitySplitWaitUnknownSize
+				attempt.startedAt = now
+			}
+		case affinitySplitWaitUnknownSize:
+			if !sizeUnknown {
+				// A SCAN starts its own clock when it is admitted.
+				attempt.waitKind = affinitySplitWaitNone
+				attempt.startedAt = time.Time{}
 			}
 		}
-		if !sizeUnknown && attempt.split == nil {
-			// Start fresh when a positive size arrives after a passive wait.
-			attempt.startedAt = time.Time{}
-		}
-		if sizeUnknown && attempt.startedAt.IsZero() {
-			attempt.startedAt = now
-		}
-		if !attempt.startedAt.IsZero() {
+		if attempt.waitKind != affinitySplitWaitNone {
 			splitWait = time.Since(attempt.startedAt)
 		}
+		waitTimeout := affinitySplitTimeout
+		if sizeUnknown {
+			// Unknown sizes use the longer limit even if a SCAN started the clock.
+			waitTimeout = affinityUnknownSizeWait
+		}
+		timedOut = splitWait >= waitTimeout
 		attempt.expiresAt = now.Add(affinitySplitAttemptTTL)
-		if splitWait >= waitTimeout {
+		if timedOut {
 			// Rejected fallback moves must not extend the attempt's lifetime.
 			attempt.expiresAt = attempt.startedAt.Add(waitTimeout + affinitySplitAttemptTTL)
 		}
@@ -307,7 +332,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 			c.splitAttempts[regionID] = attempt
 			return nil, false
 		}
-		if splitWait < waitTimeout {
+		if !timedOut {
 			if sizeUnknown {
 				c.splitAttempts[regionID] = attempt
 				return wait("unknown-size")
@@ -329,8 +354,8 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		c.removeSplitWaiter(regionID)
 		if tracked && version >= previous.version && (previous.split == nil || version > previous.version ||
 			!slices.Equal(previous.voterStoreIDs, group.VoterStoreIDs)) {
-			// Size can change without an epoch change. Keep the SCAN budget for the
-			// same version and target in case another large snapshot is checked.
+			// Size can change without an epoch change. Retain a pending or
+			// started SCAN for the same version and target in case the size grows again.
 			delete(c.splitAttempts, regionID)
 		}
 		if c.splitWaitQueue.Len() > 0 {
@@ -342,7 +367,7 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	coolingDown := time.Since(c.startTime) < recentMergeTTL || c.recentMergeCache.Exists(regionID)
 	// The engine may have no split key or no positive size, so a timed-out attempt
 	// moves without a preliminary split and accepts a potentially large snapshot.
-	if splitWait >= waitTimeout {
+	if timedOut {
 		if !coolingDown && !attempt.fallbackRecorded {
 			attempt.fallbackRecorded = true
 			log.Info("allow affinity peer move after split wait timeout", zap.Uint64("region-id", regionID),

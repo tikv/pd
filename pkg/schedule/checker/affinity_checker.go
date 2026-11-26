@@ -70,24 +70,27 @@ type AffinityChecker struct {
 	splitWaitQueue   *list.List           // Region IDs in admission order.
 	splitWaitIndex   map[uint64]*list.Element
 	maxSplitAttempts int
-	nextSplitPruneAt time.Time
-	startTime        time.Time
+	// maxSplitWaitQueue limits queued Regions independently of attempts and reservations.
+	maxSplitWaitQueue int
+	nextSplitPruneAt  time.Time
+	startTime         time.Time
 }
 
 // NewAffinityChecker create an affinity checker.
 func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *AffinityChecker {
 	return &AffinityChecker{
-		cluster:          cluster,
-		ruleManager:      cluster.GetRuleManager(),
-		affinityManager:  cluster.GetAffinityManager(),
-		conf:             conf,
-		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
-		splitAttempts:    make(map[uint64]affinitySplitAttempt),
-		splitGranted:     make(map[uint64]time.Time),
-		splitWaitQueue:   list.New(),
-		splitWaitIndex:   make(map[uint64]*list.Element),
-		maxSplitAttempts: affinitySplitMaxAttempts,
-		startTime:        time.Now(),
+		cluster:           cluster,
+		ruleManager:       cluster.GetRuleManager(),
+		affinityManager:   cluster.GetAffinityManager(),
+		conf:              conf,
+		recentMergeCache:  cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
+		splitAttempts:     make(map[uint64]affinitySplitAttempt),
+		splitGranted:      make(map[uint64]time.Time),
+		splitWaitQueue:    list.New(),
+		splitWaitIndex:    make(map[uint64]*list.Element),
+		maxSplitAttempts:  affinitySplitMaxAttempts,
+		maxSplitWaitQueue: affinitySplitMaxAttempts,
+		startTime:         time.Now(),
 	}
 }
 
