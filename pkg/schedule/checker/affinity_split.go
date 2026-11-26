@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -128,8 +129,14 @@ func (c *AffinityChecker) stillNeedsSplitAttempt(regionID uint64) bool {
 func (c *AffinityChecker) needsSplitAttempt(region *core.RegionInfo) bool {
 	storeConfig := c.cluster.GetStoreConfig()
 	size := region.GetApproximateSize()
-	return size <= 0 || uint64(size) > storeConfig.GetRegionSplitSize() ||
+	splitSize := storeConfig.GetRegionSplitSize()
+	return size <= 0 || (splitSize > 0 && uint64(size) > splitSize) ||
 		uint64(region.GetApproximateKeys()) > storeConfig.GetRegionSplitKeys()
+}
+
+// isSplitOpExpired checks expiry without changing the status before admission.
+func isSplitOpExpired(op *operator.Operator, now time.Time) bool {
+	return op.Status() == operator.CREATED && !now.Before(op.GetCreateTime().Add(operator.OperatorExpireTime))
 }
 
 // promoteSplitWaiters reserves free slots in FIFO order. Each queue entry is
@@ -172,7 +179,7 @@ func (c *AffinityChecker) admitSplitAttempt(regionID uint64, now time.Time) bool
 	return false
 }
 
-// pruneSplitAttempts reclaims idle attempts, operators that never started, and
+// pruneSplitAttempts reclaims idle or stale attempts, operators that never started, and
 // reservations that expired or are no longer needed.
 // The caller holds splitMu.
 func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
@@ -184,9 +191,20 @@ func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 		if split := attempt.split; attempt.waitKind == affinitySplitWaitNone && split != nil {
 			status := split.Status()
 			// Even a finished split can have started between checker passes.
-			if (operator.IsEndStatus(status) || (status == operator.CREATED && split.CheckExpired())) && !split.HasStarted() {
+			if (operator.IsEndStatus(status) || isSplitOpExpired(split, now)) && !split.HasStarted() {
 				delete(c.splitAttempts, id)
+				continue
 			}
+		}
+		latest := c.cluster.GetRegion(id)
+		if latest == nil || latest.GetRegionEpoch().GetVersion() != attempt.version {
+			delete(c.splitAttempts, id)
+			continue
+		}
+		group, aligned := c.affinityManager.GetRegionAffinityGroupState(latest)
+		if group == nil || aligned || !slices.Equal(attempt.voterStoreIDs, group.VoterStoreIDs) ||
+			(attempt.split == nil && !c.needsSplitAttempt(latest)) {
+			delete(c.splitAttempts, id)
 		}
 	}
 	for id, expiresAt := range c.splitGranted {
@@ -222,7 +240,10 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 	if latestEpoch.GetVersion() != epoch.GetVersion() || latestEpoch.GetConfVer() != epoch.GetConfVer() {
 		return nil, nil, false
 	}
-	// Heartbeats can update the size and key count without changing the epoch.
+	if latest.GetLeader() == nil || !filter.IsRegionHealthy(latest) {
+		return nil, nil, false
+	}
+	// Heartbeats can update Region statistics without changing the epoch.
 	region = latest
 	currentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(region)
 	if currentGroup == nil || !currentGroup.AffinitySchedulingAllowed || isAffinity || !currentGroup.MatchesTarget(group) {
@@ -282,11 +303,14 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		var splitRunning bool
 		if split := attempt.split; split != nil {
 			// Keep a split that can still start between preparation and admission.
-			// Expire unsubmitted operators so they cannot block later patrols.
-			if split.Status() == operator.CREATED && !split.CheckExpired() {
-				return nil, nil, false
+			status := split.Status()
+			if status == operator.CREATED {
+				if !isSplitOpExpired(split, now) {
+					return nil, nil, false
+				}
+			} else {
+				splitRunning = !operator.IsEndStatus(status)
 			}
-			splitRunning = !split.IsEnd()
 			if attempt.waitKind == affinitySplitWaitNone {
 				if startedAt := split.GetStartTime(); !startedAt.IsZero() {
 					attempt.waitKind = affinitySplitWaitScan

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -191,7 +192,7 @@ func TestAffinitySplitBeforeMoveFallback(t *testing.T) {
 				go func() { results <- checker.Check(region) }()
 				split := requireAffinitySplit(t, append(checker.Check(region), <-results...))
 				if !test.retry {
-					require.Equal(t, operator.EXPIRED, first.Status())
+					require.Equal(t, operator.CREATED, first.Status())
 				}
 				require.Equal(t, 1, ops.AddWaitingOperator(split))
 				require.Equal(t, uint64(1), ops.OperatorCount(operator.OpAffinity))
@@ -427,6 +428,9 @@ func TestAffinitySplitBeforeMoveAttemptLimit(t *testing.T) {
 				requireAffinitySplit(t, checker.Check(next))
 				require.NotContains(t, attempts, uint64(1))
 				require.Same(t, second, attempts[2].split)
+				if state == "expired" {
+					require.Equal(t, operator.CREATED, first.Status())
+				}
 
 				require.True(t, second.Cancel())
 				require.Empty(t, checker.Check(regions[0]), "a successful sweep also starts the cooldown")
@@ -434,6 +438,65 @@ func TestAffinitySplitBeforeMoveAttemptLimit(t *testing.T) {
 				requireAffinitySplit(t, checker.Check(regions[0]))
 				require.NotContains(t, attempts, uint64(2))
 			})
+		})
+	}
+}
+
+func TestAffinitySplitPrunesDeletedGroup(t *testing.T) {
+	requireClassicAffinitySplit(t)
+	cluster, controller, _ := newAffinitySplitTest(t)
+	checker := controller.GetAffinityChecker()
+	checker.maxSplitAttempts = 1
+	region := cluster.GetRegion(1)
+	requireAffinitySplit(t, checker.Check(region))
+	require.Len(t, checker.splitAttempts, 1)
+
+	manager := cluster.GetAffinityManager()
+	require.NoError(t, manager.DeleteAffinityGroups([]string{"split"}, true))
+	next := region.Clone(core.WithNewRegionID(2), withAffinitySplitTestRange("za", "zz"))
+	createAffinitySplitTestGroup(t, manager, &affinity.Group{
+		ID: "next", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
+	}, next)
+	cluster.PutRegion(next)
+	requireAffinitySplit(t, checker.Check(next))
+	require.NotContains(t, checker.splitAttempts, region.GetID())
+}
+
+func TestAffinitySplitLeavesExpiryToController(t *testing.T) {
+	requireClassicAffinitySplit(t)
+	synctest.Test(t, func(t *testing.T) {
+		cluster, controller, ops := newAffinitySplitTest(t)
+		checker := controller.GetAffinityChecker()
+		region := cluster.GetRegion(1)
+		first := requireAffinitySplit(t, checker.Check(region))
+		advanceAffinitySplitTime(cluster, operator.OperatorExpireTime)
+
+		requireAffinitySplit(t, checker.Check(region))
+		require.Equal(t, operator.CREATED, first.Status())
+		require.Zero(t, ops.AddWaitingOperator(first))
+		require.Equal(t, operator.EXPIRED, first.Status())
+		reason, ok := first.GetAdditionalInfo("cancel-reason")
+		require.True(t, ok)
+		require.Equal(t, string(operator.Expired), reason)
+	})
+}
+
+func TestAffinitySplitIgnoresZeroSizeThreshold(t *testing.T) {
+	requireClassicAffinitySplit(t)
+	for _, splitSize := range []string{"512KiB", "0B"} {
+		t.Run(splitSize, func(t *testing.T) {
+			cluster, controller, _ := newAffinitySplitTest(t)
+			checker := controller.GetAffinityChecker()
+			checker.startTime = time.Now().Add(-recentMergeTTL)
+			cfg := &config.StoreConfig{RegionSplitSize: splitSize}
+			cfg.Adjust()
+			require.Zero(t, cfg.GetRegionSplitSize())
+			cluster.SetStoreConfig(cfg)
+			region := cluster.GetRegion(1).Clone(core.SetApproximateSize(1), core.SetApproximateKeys(1))
+			cluster.PutRegion(region)
+
+			requireAffinityMove(t, checker.Check(region))
+			require.Empty(t, checker.splitAttempts)
 		})
 	}
 }
@@ -687,6 +750,35 @@ func (cluster *affinitySplitTestCluster) GetRegion(regionID uint64) *core.Region
 		}
 	}
 	return cluster.Cluster.GetRegion(regionID)
+}
+
+func TestAffinitySplitBeforeMoveStaleHealth(t *testing.T) {
+	requireClassicAffinitySplit(t)
+	for _, name := range []string{"down peer", "pending peer", "no leader"} {
+		t.Run(name, func(t *testing.T) {
+			cluster, controller, _ := newAffinitySplitTest(t)
+			checker := controller.GetAffinityChecker()
+			checker.startTime = time.Now().Add(-recentMergeTTL)
+			patrol := cluster.GetRegion(1)
+			var latest *core.RegionInfo
+			switch name {
+			case "down peer":
+				patrol = patrol.Clone(core.SetApproximateSize(1))
+				latest = patrol.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: patrol.GetStorePeer(4)}}))
+			case "pending peer":
+				patrol = patrol.Clone(core.SetApproximateSize(1))
+				latest = patrol.Clone(core.WithPendingPeers([]*metapb.Peer{patrol.GetStorePeer(4)}))
+			case "no leader":
+				latest = patrol.Clone(core.WithLeader(nil))
+			}
+			cluster.PutRegion(latest)
+			require.Same(t, latest, cluster.GetRegion(patrol.GetID()))
+			require.Equal(t, patrol.GetRegionEpoch(), latest.GetRegionEpoch())
+
+			require.Empty(t, checker.Check(patrol))
+			require.Empty(t, checker.splitAttempts)
+		})
+	}
 }
 
 func TestAffinitySplitBeforeMoveStaleSize(t *testing.T) {
