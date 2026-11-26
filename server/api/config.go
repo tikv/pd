@@ -79,7 +79,7 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		mergedCfg := localCfg
 		mergedCfg.Replication = leaderCfg.Replication
 		mergedCfg.Schedule = leaderCfg.Schedule
-		h.rd.JSON(w, http.StatusOK, mergedCfg)
+		h.rd.JSON(w, http.StatusOK, server.RedactedConfig(mergedCfg))
 		return
 	}
 	cfg := h.svr.GetConfig()
@@ -95,7 +95,7 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	} else {
 		cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
 	}
-	h.rd.JSON(w, http.StatusOK, cfg)
+	h.rd.JSON(w, http.StatusOK, server.RedactedConfig(cfg))
 }
 
 // GetDefaultConfig gets the default config.
