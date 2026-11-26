@@ -354,7 +354,7 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 			isMerge = true
 		}
 		pass, reason := oc.checkAddOperator(false, op)
-		if pass && isMerge && !op.isPairedMergeOperator(relatedOp) {
+		if pass && isMerge && !op.ensureMergePair(relatedOp) {
 			pass = false
 			reason = RelatedMergeRegion
 		}
@@ -412,12 +412,34 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 		}
 		return false
 	}
+	pairBatchMergeOperators(ops)
 	for _, op := range ops {
 		if !oc.addOperatorInner(op) {
 			return false
 		}
 	}
 	return true
+}
+
+// pairBatchMergeOperators assigns a shared mergePairToken to reciprocal
+// unsynced merge operators submitted in the same AddOperator batch so callers
+// constructing merge pairs with NewOperator + RelatedMergeRegion without Sync
+// remain compatible while preserving per-generation pair identity.
+func pairBatchMergeOperators(ops []*Operator) {
+	for i, op := range ops {
+		if op == nil || !op.HasRelatedMergeRegion() || op.hasMergePair() {
+			continue
+		}
+		for j := i + 1; j < len(ops); j++ {
+			other := ops[j]
+			if other == nil || !other.HasRelatedMergeRegion() || other.hasMergePair() {
+				continue
+			}
+			if op.ensureMergePair(other) {
+				break
+			}
+		}
+	}
 }
 
 // PromoteWaitingOperator promotes operators from waiting operators.
@@ -494,13 +516,6 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 			operatorCounter.WithLabelValues(op.Desc(), "already-have").Inc()
 			return false, AlreadyExist
 		}
-		if op.HasRelatedMergeRegion() && !op.hasMergePair() {
-			log.Warn("trying to add unpaired merge operator",
-				zap.Uint64("region-id", op.RegionID()),
-				zap.Reflect("operator", op))
-			operatorCounter.WithLabelValues(op.Desc(), "unpaired-merge").Inc()
-			return false, RelatedMergeRegion
-		}
 		if op.Status() != CREATED {
 			log.Error("trying to add operator with unexpected status",
 				zap.Uint64("region-id", op.RegionID()),
@@ -557,9 +572,40 @@ func isHigherPriorityOperator(new, old *Operator) bool {
 	return new.GetPriorityLevel() > old.GetPriorityLevel()
 }
 
+func (oc *Controller) ensureSingleMergePair(op *Operator) *mergePairToken {
+	if !op.HasRelatedMergeRegion() || op.hasMergePair() {
+		return nil
+	}
+	if relatedID := op.GetRelatedMergeRegion(); relatedID != 0 {
+		if relatedOpi, ok := oc.operators.Load(relatedID); ok {
+			if relatedOp := relatedOpi.(*Operator); relatedOp != nil &&
+				op.hasReciprocalMergeRegion(relatedOp) &&
+				op.GetPriorityLevel() == relatedOp.GetPriorityLevel() &&
+				!IsEndStatus(relatedOp.Status()) {
+				if pair := relatedOp.mergePair.Load(); pair != nil && pair.claimed.CompareAndSwap(false, true) {
+					if op.mergePair.CompareAndSwap(nil, pair) {
+						return pair
+					}
+					pair.claimed.Store(false)
+					return nil
+				}
+			}
+		}
+	}
+	op.mergePair.CompareAndSwap(nil, &mergePairToken{})
+	return nil
+}
+
+func releaseSplitMergePair(op *Operator, claimedPair *mergePairToken) {
+	if claimedPair != nil && op.mergePair.CompareAndSwap(claimedPair, nil) {
+		claimedPair.claimed.Store(false)
+	}
+}
+
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
 	kind := op.SchedulerKind()
+	claimedPair := oc.ensureSingleMergePair(op)
 
 	// Increment before publishing so any concurrent removal after publish
 	// cannot decrement before inc and leave oc.counts unbalanced.
@@ -570,6 +616,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		oldOp := old.(*Operator)
 		if !isHigherPriorityOperator(op, oldOp) {
 			oc.counts.dec(kind)
+			releaseSplitMergePair(op, claimedPair)
 			log.Debug("operator already exists with higher or equal priority",
 				zap.Uint64("region-id", regionID),
 				zap.Reflect("old", oldOp),
@@ -582,6 +629,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		// replace old operator
 		if !oc.operators.CompareAndSwap(regionID, oldOp, op) {
 			oc.counts.dec(kind)
+			releaseSplitMergePair(op, claimedPair)
 			_ = op.Cancel()
 			oc.buryOperator(op)
 			log.Debug("operator changed during replace, skip this add",
