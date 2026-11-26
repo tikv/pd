@@ -749,6 +749,15 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 	re.Equal(operator.OpAffinity, ops[0].SchedulerKind())
 	re.Equal(operator.OpAffinity, ops[1].Kind()&operator.OpAffinity)
 	re.Equal(operator.OpAffinity, ops[1].SchedulerKind())
+
+	// The source check can hold the old target while the neighbor has aligned to the new one.
+	_, err = affinityManager.UpdateAffinityGroupPeers(group.ID, 2, group.VoterStoreIDs)
+	re.NoError(err)
+	region2 = region2.Clone(core.WithLeader(region2.GetStorePeer(2)))
+	tc.PutRegion(region2)
+	_, aligned := affinityManager.GetRegionAffinityGroupState(region2)
+	re.True(aligned)
+	re.Empty(checker.mergeCheck(region1, groupState))
 }
 
 // TestAffinityCheckerMergePath ensures affinity merge path is triggered from Check when region is already in affinity.

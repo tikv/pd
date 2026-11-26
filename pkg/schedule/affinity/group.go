@@ -148,6 +148,13 @@ func (g *GroupState) HasUnpersistedTarget() bool {
 	return g != nil && g.targetUnpersisted
 }
 
+// MatchesTarget reports whether both states describe the same version and peer
+// placement of an affinity group.
+func (g *GroupState) MatchesTarget(other *GroupState) bool {
+	return g.ID == other.ID && g.groupInfoPtr == other.groupInfoPtr && g.affinityVer == other.affinityVer &&
+		g.LeaderStoreID == other.LeaderStoreID && slices.Equal(g.VoterStoreIDs, other.VoterStoreIDs)
+}
+
 // IsRegionAffinity checks whether the Region is in an affinity state.
 func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 	if region == nil || !g.AffinitySchedulingAllowed {

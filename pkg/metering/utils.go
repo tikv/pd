@@ -16,6 +16,7 @@ package metering
 
 import (
 	"github.com/pingcap/metering_sdk/common"
+	"github.com/pingcap/metering_sdk/config"
 )
 
 const (
@@ -46,4 +47,17 @@ func NewRUValue(value float64) common.MeteringValue {
 // NewBytesValue creates a new metering bytes value.
 func NewBytesValue(value uint64) common.MeteringValue {
 	return common.MeteringValue{Value: value, Unit: UnitBytes}
+}
+
+// RedactedConfig returns a copy of cfg with Volcengine TOS credentials masked.
+// The SDK Redacted helper replaces the access key, secret access key, and
+// session token while preserving the role identifier and non-credential fields.
+// Masking is applied whenever cfg.TOS is non-nil (regardless of cfg.Type), and
+// the original TOS config pointer is not modified.
+func RedactedConfig(cfg config.MeteringConfig) config.MeteringConfig {
+	if cfg.TOS != nil {
+		redacted := cfg.TOS.Redacted()
+		cfg.TOS = &redacted
+	}
+	return cfg
 }

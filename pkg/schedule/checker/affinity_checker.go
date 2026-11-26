@@ -16,6 +16,7 @@ package checker
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"math"
 	"slices"
@@ -38,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const recentMergeTTL = time.Minute
@@ -59,18 +61,36 @@ type AffinityChecker struct {
 	affinityManager  *affinity.Manager
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
-	startTime        time.Time
+
+	// splitMu protects split attempts, reservations, and the FIFO wait queue.
+	splitMu syncutil.Mutex
+	// Attempts and reservations share the same limit.
+	splitAttempts    map[uint64]affinitySplitAttempt
+	splitGranted     map[uint64]time.Time // Reservation deadlines by Region ID.
+	splitWaitQueue   *list.List           // Region IDs in admission order.
+	splitWaitIndex   map[uint64]*list.Element
+	maxSplitAttempts int
+	// maxSplitWaitQueue limits queued Regions independently of attempts and reservations.
+	maxSplitWaitQueue int
+	nextSplitPruneAt  time.Time
+	startTime         time.Time
 }
 
 // NewAffinityChecker create an affinity checker.
 func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *AffinityChecker {
 	return &AffinityChecker{
-		cluster:          cluster,
-		ruleManager:      cluster.GetRuleManager(),
-		affinityManager:  cluster.GetAffinityManager(),
-		conf:             conf,
-		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
-		startTime:        time.Now(),
+		cluster:           cluster,
+		ruleManager:       cluster.GetRuleManager(),
+		affinityManager:   cluster.GetAffinityManager(),
+		conf:              conf,
+		recentMergeCache:  cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
+		splitAttempts:     make(map[uint64]affinitySplitAttempt),
+		splitGranted:      make(map[uint64]time.Time),
+		splitWaitQueue:    list.New(),
+		splitWaitIndex:    make(map[uint64]*list.Element),
+		maxSplitAttempts:  affinitySplitMaxAttempts,
+		maxSplitWaitQueue: affinitySplitMaxAttempts,
+		startTime:         time.Now(),
 	}
 }
 
@@ -183,7 +203,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// A Region may no longer exist in the RegionTree due to a merge.
 	// In this case, clear the cache in affinity manager for that Region and skip processing it.
-	if c.cluster.GetRegion(region.GetID()) == nil {
+	current := c.cluster.GetRegion(region.GetID())
+	if current == nil {
 		c.affinityManager.InvalidCache(region.GetID())
 		return nil
 	}
@@ -200,6 +221,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
+		c.clearCompletedSplitAttempt(region, current)
 		return c.mergeCheck(region, group)
 	}
 
@@ -232,6 +254,8 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 // createAffinityOperator creates an operator to adjust region replicas according to affinity group constraints.
 // It creates a "combo" operator that directly specifies the final leader and voter positions,
 // moving the region to match the expected configuration in one operation.
+// Pre-move split protection applies to affinity-move-region and may return a
+// standalone SCAN split operator first.
 //
 // This function preserves:
 // - Existing learner peers (e.g., TiFlash peers); moveConflictingLearners moves one off a target voter store
@@ -260,13 +284,18 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		return nil, false
 	}
 
+	split, latest, ready := c.prepareAffinityPeerMove(region, group, roles)
+	if !ready {
+		return split, false
+	}
+
 	// Determine operator kind based on whether leader needs to change
 	kind := operator.OpAffinity
-	if currentLeaderStoreID != group.LeaderStoreID {
+	if latest.GetLeader().GetStoreId() != group.LeaderStoreID {
 		kind |= operator.OpLeader
 	}
 
-	op, err := operator.CreateMoveRegionOperator("affinity-move-region", c.cluster, region, kind, roles)
+	op, err := operator.CreateMoveRegionOperator("affinity-move-region", c.cluster, latest, kind, roles)
 	if err != nil {
 		log.Warn("create affinity move region operator failed",
 			zap.Uint64("region-id", region.GetID()),
@@ -375,10 +404,9 @@ func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.Region
 		return false
 	}
 
-	// Check if adjacent region belongs to the same affinity group
+	// Check if the adjacent region has the same affinity target.
 	adjacentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(adjacent)
-	if adjacentGroup == nil || adjacentGroup.ID != group.ID {
-		// Adjacent region is not in the same affinity group
+	if adjacentGroup == nil || !adjacentGroup.MatchesTarget(group) {
 		affinityMergeCheckerAdjDifferentGroupCounter.Inc()
 		return false
 	}
