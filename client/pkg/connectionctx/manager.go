@@ -208,19 +208,6 @@ func (c *Manager[T]) GetConnectionCtx(url string) *ConnectionCtx[T] {
 	return cc
 }
 
-// Find returns a connection context matching predicate, or nil if none matches.
-// The predicate runs under the read lock and must not call the manager's methods.
-func (c *Manager[T]) Find(predicate func(*ConnectionCtx[T]) bool) *ConnectionCtx[T] {
-	c.RLock()
-	defer c.RUnlock()
-	for _, cc := range c.connectionCtxs {
-		if predicate(cc) {
-			return cc
-		}
-	}
-	return nil
-}
-
 // Size is used to get the size of the connection context map.
 func (c *Manager[T]) Size() int {
 	c.RLock()
