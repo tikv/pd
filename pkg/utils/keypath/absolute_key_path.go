@@ -277,11 +277,6 @@ func TimestampPath(groupID uint32) string {
 	return fmt.Sprintf(tsoGroupPrefixFormat+groupWindowSuffix, ClusterID(), tsoGroupIDWidth, groupID)
 }
 
-// RetiredTSOWindowPath stores the largest window of deleted TSO groups.
-func RetiredTSOWindowPath() string {
-	return fmt.Sprintf("/pd/%d/gc/retired_tso_window", ClusterID())
-}
-
 // LegacyLocalTSOPrefix contains the default group's historical per-DC windows.
 func LegacyLocalTSOPrefix() string {
 	return fmt.Sprintf("/pd/%d/lta/", ClusterID())
