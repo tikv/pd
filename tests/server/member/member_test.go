@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -519,6 +520,83 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 				next := requestEarlyTSO(t, earlyTSOStream(t, client, ""), newLeader.GetClusterID())
 				re.Negative(tsoutil.CompareTimestamp(previous, next))
 			}
+		})
+	}
+}
+
+func TestResignEtcdLeaderDoesNotTransferSuccessor(t *testing.T) {
+	for _, microservice := range []bool{false, true} {
+		t.Run(fmt.Sprintf("microservice=%t", microservice), func(t *testing.T) {
+			re := require.New(t)
+			newCluster := tests.NewTestCluster
+			if microservice {
+				newCluster = tests.NewTestClusterWithKeyspaceGroup
+			}
+			cluster, err := newCluster(t.Context(), 3)
+			re.NoError(err)
+			t.Cleanup(cluster.Destroy)
+			re.NoError(cluster.RunInitialServers())
+			re.NotEmpty(cluster.WaitLeader())
+			oldLeader := cluster.GetLeaderServer()
+			re.NoError(oldLeader.BootstrapCluster())
+			oldMember := oldLeader.GetServer().GetMember()
+
+			// Pause after choosing a target so another peer can finish taking
+			// over before the old leader submits its pending resignation.
+			const transferHook = "github.com/tikv/pd/pkg/member/beforeResignEtcdLeader"
+			selected := make(chan uint64, 1)
+			release := make(chan struct{})
+			resume := sync.OnceFunc(func() { close(release) })
+			re.NoError(failpoint.EnableCall(transferHook, func(from, to uint64) {
+				if from == oldLeader.GetServerID() {
+					selected <- to
+					<-release
+				}
+			}))
+			t.Cleanup(func() {
+				resume()
+				re.NoError(failpoint.Disable(transferHook))
+			})
+			result := make(chan error, 1)
+			go func() {
+				result <- oldMember.ResignEtcdLeader(t.Context(), oldLeader.GetConfig().Name, "")
+			}()
+			var targetID uint64
+			select {
+			case targetID = <-selected:
+			case <-time.After(30 * time.Second):
+				t.Fatal("resignation did not select a target")
+			}
+			var successor *tests.TestServer
+			for _, server := range cluster.GetServers() {
+				if id := server.GetServerID(); id != oldLeader.GetServerID() && id != targetID {
+					successor = server
+				}
+			}
+			re.NotNil(successor)
+			re.NoError(oldLeader.MoveEtcdLeader(oldLeader.GetServerID(), successor.GetServerID()))
+			testutil.Eventually(re, successor.IsLeader)
+			testutil.Eventually(re, func() bool {
+				return oldMember.GetEtcdLeader() == successor.GetServerID()
+			})
+			lease := successor.GetServer().GetMember().GetLeadership().GetLease()
+			resume()
+			select {
+			case err := <-result:
+				re.ErrorIs(err, errs.ErrNotLeader)
+			case <-time.After(10 * time.Second):
+				t.Fatal("obsolete resignation did not return")
+			}
+			// Cover the transfer timeout, including asynchronous Raft processing.
+			re.Never(func() bool {
+				return !successor.IsLeader() || oldMember.GetEtcdLeader() != successor.GetServerID()
+			}, 5*time.Second, 10*time.Millisecond)
+			re.Same(lease, successor.GetServer().GetMember().GetLeadership().GetLease())
+			const staleLeaderHook = "github.com/tikv/pd/pkg/member/staleEtcdLeaderView"
+			re.NoError(failpoint.Enable(staleLeaderHook, fmt.Sprintf(`return("%s")`, oldLeader.GetConfig().Name)))
+			t.Cleanup(func() { re.NoError(failpoint.Disable(staleLeaderHook)) })
+			re.Equal(oldLeader.GetServerID(), oldMember.GetEtcdLeader())
+			re.ErrorIs(oldMember.ResignEtcdLeader(t.Context(), oldLeader.GetConfig().Name, ""), errs.ErrNotLeader)
 		})
 	}
 }

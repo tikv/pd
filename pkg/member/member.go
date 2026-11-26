@@ -25,8 +25,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.etcd.io/etcd/client/pkg/v3/types"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/raft/v3/raftpb"
 	"go.etcd.io/etcd/server/v3/embed"
+	"go.etcd.io/etcd/server/v3/etcdserver"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -425,6 +428,13 @@ func (m *Member) InitMemberInfo(advertiseClientUrls, advertisePeerUrls, name str
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
 // other pd-servers can campaign.
 func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLeader string) error {
+	// Read the applied term before the cached leader: etcd publishes a new
+	// leader before applying that leader's entries. A lagging term may reject
+	// a transfer, but must never turn it into a request for a successor's term.
+	term := m.etcd.Server.Term()
+	if term == 0 || m.etcd.Server.Lead() != m.ID() {
+		return errs.ErrNotLeader
+	}
 	log.Info("try to resign etcd leader to next pd-server", zap.String("from", from), zap.String("to", nextEtcdLeader))
 	// Determine next etcd leader candidates.
 	var etcdLeaderIDs []uint64
@@ -447,7 +457,42 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 		return errors.New("no valid pd to transfer etcd leader")
 	}
 	nextEtcdLeaderID := etcdLeaderIDs[rand.IntN(len(etcdLeaderIDs))]
-	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)
+	failpoint.InjectCall("beforeResignEtcdLeader", m.ID(), nextEtcdLeaderID)
+	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
+	defer cancel()
+	transferee := m.etcd.Server.Cluster().Member(types.ID(nextEtcdLeaderID))
+	if transferee == nil || transferee.IsLearner {
+		return errs.ErrEtcdMoveLeader.Wrap(etcdserver.ErrBadLeaderTransferee).GenWithStackByCause()
+	}
+	// MoveLeader submits a term-zero message, which a follower can forward to
+	// its new leader. Bind this resignation to the observed term so Raft drops
+	// it if leadership changes before the message is processed.
+	err = m.etcd.Server.Process(moveCtx, raftpb.Message{
+		Type: raftpb.MsgTransferLeader,
+		From: nextEtcdLeaderID,
+		To:   m.ID(),
+		Term: term,
+	})
+	if err != nil {
+		return errs.ErrEtcdMoveLeader.Wrap(err).GenWithStackByCause()
+	}
+	ticker := time.NewTicker(time.Duration(m.etcd.Config().TickMs) * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		currentTerm := m.etcd.Server.Term()
+		leader := m.etcd.Server.Lead()
+		if leader == nextEtcdLeaderID {
+			return nil
+		}
+		if currentTerm != term || leader != m.ID() {
+			return errs.ErrNotLeader
+		}
+		select {
+		case <-moveCtx.Done():
+			return errs.ErrEtcdMoveLeader.Wrap(moveCtx.Err()).GenWithStackByCause()
+		case <-ticker.C:
+		}
+	}
 }
 
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
