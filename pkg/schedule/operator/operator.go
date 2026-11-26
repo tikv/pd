@@ -138,6 +138,11 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 	}
 }
 
+// LimitTimeout caps the execution timeout before the operator is submitted.
+func (o *Operator) LimitTimeout(limit time.Duration) {
+	o.timeout = min(o.timeout, limit)
+}
+
 // Sync some attribute with the given timeout.
 func (o *Operator) Sync(other *Operator) {
 	o.timeout = other.timeout
