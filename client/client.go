@@ -1157,6 +1157,8 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 				// respForErr only triggers member refresh on gRPC errors.
 				c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 			}
+			err = status.FromContextError(ctx.Err()).Err()
+			resp = nil
 			break
 		}
 
@@ -1173,6 +1175,8 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 		case <-timer.C:
 		}
 		if ctx.Err() != nil {
+			err = status.FromContextError(ctx.Err()).Err()
+			resp = nil
 			break
 		}
 		backoff = min(backoff*2, getAllStoresRetryMaxInterval)
@@ -1204,11 +1208,15 @@ func (c *client) getAllStoresOnce(
 		resp, err = pdpb.NewPDClient(conn).GetAllStores(cctx, req)
 	}
 	if ctx.Err() == nil && serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
-		protoClient, cctx := c.getClientAndContext(ctx)
-		if protoClient == nil {
+		leaderClient := c.inner.serviceDiscovery.GetServiceClient()
+		if leaderClient == nil {
 			return nil, errs.ErrClientGetProtoClient
 		}
-		resp, err = protoClient.GetAllStores(cctx, req)
+		leaderConn := leaderClient.GetClientConn()
+		if leaderConn == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = pdpb.NewPDClient(leaderConn).GetAllStores(leaderClient.BuildGRPCTargetContext(ctx, true), req)
 	}
 	return resp, err
 }

@@ -758,9 +758,159 @@ func TestGetAllStoresContextTimeoutAndCancellation(t *testing.T) {
 
 		re.Nil(stores)
 		re.Error(err)
+		re.Equal(codes.Canceled, status.Code(err))
 		re.Equal(int32(1), calls.Load())
 		re.Less(elapsed, 500*time.Millisecond)
 		re.Equal(cmdBefore+1, histogramSampleCount(t, metrics.CmdDurationGetAllStores))
 		re.Equal(failedBefore+1, histogramSampleCount(t, metrics.CmdFailedDurationGetAllStores))
 	})
+
+	t.Run("request timeout during backoff after Unavailable returns DeadlineExceeded", func(t *testing.T) {
+		re := require.New(t)
+		var calls atomic.Int32
+		conn := startGetAllStoresBufconnServer(t, func(s *grpc.Server) {
+			pdpb.RegisterPDServer(s, &getAllStoresTestPDServer{
+				handler: func(context.Context, *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+					calls.Add(1)
+					return nil, status.Error(codes.Unavailable, errs.NotLeaderErr)
+				},
+			})
+		})
+		discovery := &getAllStoresServiceDiscovery{
+			testServiceDiscovery: newTestServiceDiscovery("http://leader", conn),
+			serviceClient:        &getAllStoresServiceClient{conn: conn, isLeader: true},
+		}
+		option := opt.NewOption()
+		option.Timeout = 120 * time.Millisecond
+		c := &client{inner: &innerClient{serviceDiscovery: discovery, option: option}}
+
+		cmdBefore := histogramSampleCount(t, metrics.CmdDurationGetAllStores)
+		failedBefore := histogramSampleCount(t, metrics.CmdFailedDurationGetAllStores)
+
+		stores, err := c.GetAllStores(t.Context())
+		re.Nil(stores)
+		re.Error(err)
+		re.Equal(codes.DeadlineExceeded, status.Code(err))
+		re.GreaterOrEqual(calls.Load(), int32(1))
+		re.Equal(cmdBefore+1, histogramSampleCount(t, metrics.CmdDurationGetAllStores))
+		re.Equal(failedBefore+1, histogramSampleCount(t, metrics.CmdFailedDurationGetAllStores))
+	})
+
+	t.Run("router fallback reads leader connection once without calling NewPDClient(nil)", func(t *testing.T) {
+		re := require.New(t)
+		var leaderConnCalls atomic.Int32
+		routerConn := startGetAllStoresBufconnServer(t, func(s *grpc.Server) {
+			routerpb.RegisterRouterServer(s, &getAllStoresTestRouterServer{
+				handler: func(context.Context, *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+					return nil, status.Error(codes.Unavailable, "router unavailable")
+				},
+			})
+		})
+		leaderConn := startGetAllStoresBufconnServer(t, func(s *grpc.Server) {
+			pdpb.RegisterPDServer(s, &getAllStoresTestPDServer{
+				handler: func(context.Context, *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+					return &pdpb.GetAllStoresResponse{
+						Header: &pdpb.ResponseHeader{ClusterId: 1},
+						Stores: []*metapb.Store{{Id: 42}},
+					}, nil
+				},
+			})
+		})
+		flakyLeaderClient := &getAllStoresFlakyConnServiceClient{
+			getConn: func() *grpc.ClientConn {
+				if leaderConnCalls.Add(1) == 1 {
+					return leaderConn
+				}
+				return nil
+			},
+		}
+		flakyLeaderClient.isLeader = true
+		discovery := &getAllStoresServiceDiscovery{
+			testServiceDiscovery: newTestServiceDiscovery("http://leader", leaderConn),
+			serviceClient:        flakyLeaderClient,
+		}
+		routerDiscovery := &getAllStoresServiceDiscovery{
+			testServiceDiscovery: newTestServiceDiscovery("http://router", routerConn),
+			serviceClient:        &getAllStoresServiceClient{conn: routerConn, isLeader: false},
+		}
+		option := opt.NewOption()
+		option.Timeout = 2 * time.Second
+		c := &client{
+			inner: &innerClient{
+				serviceDiscovery: discovery,
+				option:           option,
+			},
+		}
+		c.inner.msDiscovery = routerDiscovery
+
+		stores, err := c.GetAllStores(t.Context(), opt.WithAllowRouterServiceHandleStoreRequest())
+		re.NoError(err)
+		re.Len(stores, 1)
+		re.Equal(uint64(42), stores[0].GetId())
+		re.Equal(int32(1), leaderConnCalls.Load())
+	})
+
+	t.Run("router fallback retries cleanly when leader connection is transiently nil", func(t *testing.T) {
+		re := require.New(t)
+		var leaderConnCalls atomic.Int32
+		routerConn := startGetAllStoresBufconnServer(t, func(s *grpc.Server) {
+			routerpb.RegisterRouterServer(s, &getAllStoresTestRouterServer{
+				handler: func(context.Context, *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+					return nil, status.Error(codes.Unavailable, "router unavailable")
+				},
+			})
+		})
+		leaderConn := startGetAllStoresBufconnServer(t, func(s *grpc.Server) {
+			pdpb.RegisterPDServer(s, &getAllStoresTestPDServer{
+				handler: func(context.Context, *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+					return &pdpb.GetAllStoresResponse{
+						Header: &pdpb.ResponseHeader{ClusterId: 1},
+						Stores: []*metapb.Store{{Id: 43}},
+					}, nil
+				},
+			})
+		})
+		flakyLeaderClient := &getAllStoresFlakyConnServiceClient{
+			getConn: func() *grpc.ClientConn {
+				if leaderConnCalls.Add(1) == 1 {
+					return nil
+				}
+				return leaderConn
+			},
+		}
+		flakyLeaderClient.isLeader = true
+		discovery := &getAllStoresServiceDiscovery{
+			testServiceDiscovery: newTestServiceDiscovery("http://leader", leaderConn),
+			serviceClient:        flakyLeaderClient,
+		}
+		routerDiscovery := &getAllStoresServiceDiscovery{
+			testServiceDiscovery: newTestServiceDiscovery("http://router", routerConn),
+			serviceClient:        &getAllStoresServiceClient{conn: routerConn, isLeader: false},
+		}
+		option := opt.NewOption()
+		option.Timeout = 2 * time.Second
+		c := &client{
+			inner: &innerClient{
+				serviceDiscovery: discovery,
+				option:           option,
+			},
+		}
+		c.inner.msDiscovery = routerDiscovery
+
+		stores, err := c.GetAllStores(t.Context(), opt.WithAllowRouterServiceHandleStoreRequest())
+		re.NoError(err)
+		re.Len(stores, 1)
+		re.Equal(uint64(43), stores[0].GetId())
+		re.Equal(int32(2), leaderConnCalls.Load())
+		re.Equal(int32(1), discovery.checks.Load())
+	})
+}
+
+type getAllStoresFlakyConnServiceClient struct {
+	getAllStoresServiceClient
+	getConn func() *grpc.ClientConn
+}
+
+func (c *getAllStoresFlakyConnServiceClient) GetClientConn() *grpc.ClientConn {
+	return c.getConn()
 }
