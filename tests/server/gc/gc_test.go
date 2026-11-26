@@ -446,7 +446,7 @@ func TestLegacyServiceSafePointBarrierTTL(t *testing.T) {
 	}
 }
 
-//nolint:staticcheck // Exercises the deprecated native_br service safe point RPC.
+//nolint:staticcheck // Exercises the deprecated native_br service safe point RPCs.
 func TestLegacyNativeBRGlobalBarrier(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -473,6 +473,14 @@ func TestLegacyNativeBRGlobalBarrier(t *testing.T) {
 	re.NoError(err)
 	re.Nil(renewed.GetHeader().GetError())
 	re.Equal(ts, renewed.GetMinSafePoint())
+
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, constant.ValidKeyspaceIDMask + 1} {
+		_, err := client.UpdateServiceSafePointV2(ctx, &pdpb.UpdateServiceSafePointV2Request{
+			Header: header, Keyspace: &pdpb.UpdateServiceSafePointV2Request_KeyspaceId{KeyspaceId: keyspaceID},
+			ServiceId: []byte(id), Ttl: 0,
+		})
+		re.ErrorContainsf(err, "UpdateServiceSafePointV2", "keyspace %d", keyspaceID)
+	}
 
 	state, err := client.GetGCState(ctx, &pdpb.GetGCStateRequest{
 		Header: header, KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID), IncludeGlobalGcBarriers: true,

@@ -1146,6 +1146,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleGCSafePointUpdateConcurrently() 
 
 func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeyspace() {
 	keyspaceID := constant.NullKeyspaceID
+	ctx := s.T().Context()
 	as := assert.New(s.T())
 	re := s.Require()
 	gcWorkerServiceID := "gc_worker"
@@ -1197,7 +1198,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 	// Updating native_br registers a global barrier alongside the scoped service safe points.
 	go func() {
 		defer wg.Done()
-		minimum, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, nativeBRServiceID, nativeBRSafePoint, math.MaxInt64, time.Now())
+		minimum, updated, err := s.manager.UpdateServiceSafePointV1(ctx, nativeBRServiceID, nativeBRSafePoint, math.MaxInt64, time.Now())
 		if as.NoError(err) && as.True(updated) && as.NotNil(minimum) {
 			as.Equal(nativeBRSafePoint, minimum.SafePoint)
 		}
@@ -1781,11 +1782,12 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierRechecksFloorOnRevisionConf
 
 func (s *gcStateManagerTestSuite) TestLegacyNativeBRReturnsFloorAfterRevisionConflict() {
 	re := s.Require()
+	ctx := s.T().Context()
 	now := time.Now()
-	s.prepareGlobalGCBarrierRevisionConflict(s.T().Context(), now)
+	s.prepareGlobalGCBarrierRevisionConflict(ctx, now)
 
 	// The rejection at the old floor conflicts with the removal of the last active barrier.
-	minimum, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, keypath.NativeBRServiceSafePointID, gcTestTS(1)-1, 60, now)
+	minimum, updated, err := s.manager.UpdateServiceSafePointV1(ctx, keypath.NativeBRServiceSafePointID, gcTestTS(1)-1, 60, now)
 	re.NoError(err)
 	re.False(updated)
 	re.Equal(gcTestTS(2), minimum.SafePoint)
@@ -2160,10 +2162,11 @@ func (s *gcStateManagerTestSuite) TestLegacyGCWorkerBarrierExpiry() {
 func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNativeBR() {
 	re := s.Require()
 	const id = keypath.NativeBRServiceSafePointID
+	ctx := s.T().Context()
 	now := time.Now().Truncate(time.Second)
 	update := func(ts uint64, ttl int64) (uint64, bool) {
 		s.T().Helper()
-		minimum, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, id, ts, ttl, now)
+		minimum, updated, err := s.manager.UpdateServiceSafePointV1(ctx, id, ts, ttl, now)
 		re.NoError(err)
 		re.Equal(keypath.GCWorkerServiceSafePointID, minimum.ServiceID)
 		return minimum.SafePoint, updated
@@ -2173,6 +2176,14 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNativeBR
 	re.True(updated)
 	re.Equal(floor, minimum)
 	original := endpoint.NewGlobalGCBarrier(id, floor, new(now.Add(time.Minute)))
+	re.Equal(original, s.getGlobalGCBarrier(id))
+
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	result, updated, err := s.manager.UpdateServiceSafePointV1(canceledCtx, id, floor, 3600, now)
+	re.ErrorIs(err, context.Canceled)
+	re.Nil(result)
+	re.False(updated)
 	re.Equal(original, s.getGlobalGCBarrier(id))
 
 	setTestTSOWindow(s.T(), s.storage, 2)
@@ -2196,10 +2207,26 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNativeBR
 	}
 
 	re.NoError(s.storage.Remove(keypath.TimestampPath(constant.DefaultKeyspaceGroupID)))
-	result, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, id, 0, 60, now)
+	result, updated, err = s.manager.UpdateServiceSafePointV1(ctx, id, 0, 60, now)
 	re.ErrorContains(err, "no persisted TSO window")
 	re.Nil(result)
 	re.False(updated)
+}
+
+func (s *gcStateManagerTestSuite) TestServiceSafePointV2RejectsGlobalNativeBR() {
+	re := s.Require()
+	const id = keypath.NativeBRServiceSafePointID
+	now := time.Now().Truncate(time.Second)
+	original, err := s.manager.SetGlobalGCBarrier(s.T().Context(), id, 0, time.Minute, now)
+	re.NoError(err)
+
+	for _, keyspaceID := range slices.Concat(s.keyspacePresets.nullSynonyms, s.keyspacePresets.unmanageable) {
+		for _, ttl := range []int64{3600, 0} {
+			_, _, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, id, original.BarrierTS+1, ttl, now)
+			re.ErrorContainsf(err, "UpdateServiceSafePointV2", "keyspace %d, ttl %d", keyspaceID, ttl)
+			re.Equal(original, s.getGlobalGCBarrier(id))
+		}
+	}
 }
 
 func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForScopedNativeBR() {

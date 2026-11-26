@@ -155,9 +155,10 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 	}, nil
 }
 
-// UpdateServiceGCSafePoint update the safepoint for specific service
+// UpdateServiceGCSafePoint updates the safe point for a service.
 //
-// Deprecated: Use SetGCBarrier instead.
+// Deprecated: Use SetGlobalGCBarrier and DeleteGlobalGCBarrier for cluster-wide "native_br" protection.
+// Use SetGCBarrier and DeleteGCBarrier for protection within a single GC scope.
 //
 //nolint:staticcheck
 func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (resp *pdpb.UpdateServiceGCSafePointResponse, errRet error) {
@@ -204,7 +205,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 		return &pdpb.UpdateServiceGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 	serviceID := string(request.ServiceId)
-	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTTL(), time.Time{})
+	min, updated, err := s.gcStateManager.UpdateServiceSafePointV1(ctx, serviceID, request.GetSafePoint(), request.GetTTL(), time.Time{})
 	if err != nil {
 		return nil, err
 	}
