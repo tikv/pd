@@ -136,6 +136,9 @@ type Options struct {
 	// WorkBudget limits candidate scans, voter-to-rule assignment attempts,
 	// and load entries processed by reversions and leader transfers, including
 	// entries restored after a rejected reversion.
+	// A rule-search node or leader-transfer round may finish after the budget
+	// is reached. If the final round completes without another budget check,
+	// Plan can still return StopGreedy.
 	WorkBudget int64
 	Seed       uint64
 	// Cancel is checked before every group visit, reversion trial and round

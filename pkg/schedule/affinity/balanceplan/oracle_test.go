@@ -114,6 +114,7 @@ func legalTargets(in *Input, gi int) []oracleTarget {
 				cands = append(cands, s)
 			}
 		}
+		cands = slices.DeleteFunc(cands, func(s int) bool { return slices.Contains(g.Exclude, s) })
 		slices.Sort(cands)
 		best := -1.0
 		combinations(cands, r.Count, func(c []int) {
@@ -210,6 +211,11 @@ func randomCase(rng *rand.Rand, sh shape) (*Input, bool) {
 		}
 		t := all[rng.IntN(len(all))]
 		in.Groups[gi].Voters, in.Groups[gi].RuleOf, in.Groups[gi].Leader = t.voters, t.rules, t.leader
+		for s := range n {
+			if !slices.Contains(t.voters, s) && rng.Float64() < 0.2 {
+				in.Groups[gi].Exclude = append(in.Groups[gi].Exclude, s)
+			}
+		}
 		if rng.Float64() < 0.2 {
 			in.Groups[gi].Forced = []int{t.voters[rng.IntN(len(t.voters))]}
 		}
