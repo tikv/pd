@@ -408,13 +408,32 @@ func probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome string) string {
 	return strings.TrimSpace(output)
 }
 
+func effectiveTiUPHome(absTiUPHome string) string {
+	if absTiUPHome != "" {
+		return filepath.Clean(absTiUPHome)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Clean(filepath.Join(home, ".tiup"))
+}
+
 func cleanupIncompletePlaygroundDir(binPath, absTiUPHome string) {
-	if binPath == "" || absTiUPHome == "" {
+	tiupHome := effectiveTiUPHome(absTiUPHome)
+	if binPath == "" || tiupHome == "" {
 		return
 	}
 	verDir := filepath.Dir(filepath.Clean(binPath))
-	playgroundRoot := filepath.Clean(filepath.Join(absTiUPHome, "components", "playground"))
-	if filepath.Clean(filepath.Dir(verDir)) != playgroundRoot || verDir == playgroundRoot {
+	playgroundRoot := filepath.Clean(filepath.Join(tiupHome, "components", "playground"))
+	parentDir := filepath.Clean(filepath.Dir(verDir))
+	if evalParent, err := filepath.EvalSymlinks(parentDir); err == nil {
+		parentDir = filepath.Clean(evalParent)
+	}
+	if evalRoot, err := filepath.EvalSymlinks(playgroundRoot); err == nil {
+		playgroundRoot = filepath.Clean(evalRoot)
+	}
+	if parentDir != playgroundRoot || filepath.Clean(verDir) == playgroundRoot {
 		return
 	}
 	log.Warn("removing incomplete tiup playground version directory before reinstall",

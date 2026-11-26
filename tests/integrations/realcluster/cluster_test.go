@@ -1333,16 +1333,16 @@ exit 1
 }
 
 func TestEnsurePlaygroundInstalledRecoversIncompleteInstall(t *testing.T) {
-	re := require.New(t)
-	tiupHome := t.TempDir()
-	incompleteDir := filepath.Join(tiupHome, "components", "playground", "v1.16.4")
-	re.NoError(os.MkdirAll(filepath.Join(incompleteDir, "download-in-progress"), 0750))
-	expectedBin := filepath.Join(incompleteDir, "tiup-playground")
+	runCase := func(t *testing.T, tiupHome string, invoke func(re *require.Assertions, fakeTiUP string) (before, after bool)) {
+		re := require.New(t)
+		incompleteDir := filepath.Join(tiupHome, "components", "playground", "v1.16.4")
+		re.NoError(os.MkdirAll(filepath.Join(incompleteDir, "download-in-progress"), 0750))
+		expectedBin := filepath.Join(incompleteDir, "tiup-playground")
 
-	installLog := filepath.Join(t.TempDir(), "install.log")
-	fakeTiUP := filepath.Join(tiupHome, "bin", "tiup")
-	re.NoError(os.MkdirAll(filepath.Dir(fakeTiUP), 0750))
-	script := fmt.Sprintf(`#!/bin/sh
+		installLog := filepath.Join(t.TempDir(), "install.log")
+		fakeTiUP := filepath.Join(tiupHome, "bin", "tiup")
+		re.NoError(os.MkdirAll(filepath.Dir(fakeTiUP), 0750))
+		script := fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   if [ -d %q ]; then
     echo %q
@@ -1363,15 +1363,37 @@ if [ "$1" = "install" ] && [ "$2" = "playground" ]; then
 fi
 exit 1
 `, incompleteDir, expectedBin, incompleteDir, installLog, incompleteDir, expectedBin, expectedBin, installLog)
-	re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
-	re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
+		re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
+		re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
 
-	re.False(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
-	ensurePlaygroundInstalledWithTiUPHome(re, fakeTiUP, tiupHome)
-	re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
-	logData, err := os.ReadFile(installLog) //nolint:gosec
-	re.NoError(err)
-	re.Equal("installed", strings.TrimSpace(string(logData)))
+		before, after := invoke(re, fakeTiUP)
+		re.False(before)
+		re.True(after)
+		logData, err := os.ReadFile(installLog) //nolint:gosec
+		re.NoError(err)
+		re.Equal("installed", strings.TrimSpace(string(logData)))
+	}
+
+	t.Run("explicit TIUP_HOME", func(t *testing.T) {
+		tiupHome := t.TempDir()
+		runCase(t, tiupHome, func(re *require.Assertions, fakeTiUP string) (bool, bool) {
+			before := isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome)
+			ensurePlaygroundInstalledWithTiUPHome(re, fakeTiUP, tiupHome)
+			return before, isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome)
+		})
+	})
+
+	t.Run("unset TIUP_HOME defaults to HOME/.tiup", func(t *testing.T) {
+		fakeHome := t.TempDir()
+		t.Setenv("HOME", fakeHome)
+		t.Setenv("TIUP_HOME", "")
+		tiupHome := filepath.Join(fakeHome, ".tiup")
+		runCase(t, tiupHome, func(re *require.Assertions, fakeTiUP string) (bool, bool) {
+			before := isPlaygroundInstalled(fakeTiUP)
+			ensurePlaygroundInstalled(re, fakeTiUP)
+			return before, isPlaygroundInstalled(fakeTiUP)
+		})
+	})
 }
 
 func TestClusterStopPGIDSignalGuard(t *testing.T) {

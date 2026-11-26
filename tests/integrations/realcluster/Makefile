@@ -62,7 +62,9 @@ tiup:
 		if [ -z "$$PG_BIN" ] || [ ! -x "$$PG_BIN" ]; then \
 			if [ -n "$$PG_BIN" ]; then \
 				PG_VER_DIR="$$(dirname "$$PG_BIN")"; \
-				if [ "$$(dirname "$$PG_VER_DIR")" = "$$TIUP_DIR/components/playground" ]; then \
+				PG_PARENT="$$(cd "$$(dirname "$$PG_VER_DIR")" 2>/dev/null && pwd -P || true)"; \
+				PG_ROOT="$$(cd "$$TIUP_DIR/components/playground" 2>/dev/null && pwd -P || true)"; \
+				if [ -n "$$PG_PARENT" ] && [ "$$PG_PARENT" = "$$PG_ROOT" ] && [ "$$(basename "$$PG_VER_DIR")" != "." ] && [ "$$(basename "$$PG_VER_DIR")" != ".." ]; then \
 					echo "Removing incomplete tiup playground directory $$PG_VER_DIR..."; \
 					rm -rf "$$PG_VER_DIR"; \
 				fi; \
