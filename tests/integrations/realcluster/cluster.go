@@ -16,12 +16,17 @@ package realcluster
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -35,7 +40,10 @@ import (
 	pd "github.com/tikv/pd/client"
 )
 
-var clusterTagSeq atomic.Uint64
+var (
+	clusterTagSeq          atomic.Uint64
+	playgroundInstallLocks sync.Map // canonical TiUP home key -> *sync.Mutex
+)
 
 type clusterSuite struct {
 	suite.Suite
@@ -371,6 +379,12 @@ func ensurePlaygroundInstalled(re *require.Assertions, bin string) {
 }
 
 func ensurePlaygroundInstalledWithTiUPHome(re *require.Assertions, bin, absTiUPHome string) {
+	if isExecutable(probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)) {
+		return
+	}
+	unlock := lockPlaygroundInstall(re, absTiUPHome)
+	defer unlock()
+
 	binPath := probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
 	if isExecutable(binPath) {
 		return
@@ -388,6 +402,70 @@ func ensurePlaygroundInstalledWithTiUPHome(re *require.Assertions, bin, absTiUPH
 	re.NoError(err)
 	installedPath := probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
 	re.Truef(isExecutable(installedPath), "tiup playground binary %q is not executable after install", installedPath)
+}
+
+func lockPlaygroundInstall(re *require.Assertions, absTiUPHome string) func() {
+	lockKey := "default"
+	if tiupHome := effectiveTiUPHome(absTiUPHome); tiupHome != "" {
+		lockKey = canonicalPathForLock(tiupHome)
+	}
+	muVal, _ := playgroundInstallLocks.LoadOrStore(lockKey, &sync.Mutex{})
+	mu := muVal.(*sync.Mutex)
+	mu.Lock()
+
+	sum := sha256.Sum256([]byte(lockKey))
+	lockPath := filepath.Join(
+		os.TempDir(),
+		fmt.Sprintf("pd-realcluster-tiup-playground-%d-%s.lock", os.Geteuid(), hex.EncodeToString(sum[:16])),
+	)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec
+	if err != nil {
+		mu.Unlock()
+		re.NoError(err)
+	}
+	if err := lockFileExclusive(int(lockFile.Fd())); err != nil {
+		_ = lockFile.Close()
+		mu.Unlock()
+		re.NoError(err)
+	}
+	return func() {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		_ = lockFile.Close()
+		mu.Unlock()
+	}
+}
+
+func lockFileExclusive(fd int) error {
+	for {
+		err := syscall.Flock(fd, syscall.LOCK_EX)
+		if !errors.Is(err, syscall.EINTR) {
+			return err
+		}
+	}
+}
+
+func canonicalPathForLock(path string) string {
+	clean := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		return filepath.Clean(resolved)
+	}
+	var tail []string
+	cur := clean
+	for {
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return clean
+		}
+		tail = append(tail, filepath.Base(cur))
+		cur = parent
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			slices.Reverse(tail)
+			parts := make([]string, 0, len(tail)+1)
+			parts = append(parts, filepath.Clean(resolved))
+			parts = append(parts, tail...)
+			return filepath.Join(parts...)
+		}
+	}
 }
 
 func isPlaygroundInstalled(bin string) bool {
@@ -438,7 +516,7 @@ func cleanupIncompletePlaygroundDir(binPath, absTiUPHome string) {
 	}
 	log.Warn("removing incomplete tiup playground version directory before reinstall",
 		zap.String("dir", verDir), zap.String("binary", binPath))
-	_ = os.RemoveAll(verDir)
+	_ = os.RemoveAll(verDir) //nolint:gosec // verDir is verified above to be a direct child of playgroundRoot
 }
 
 func buildPlaygroundArgs(mode, tag string, portOffset int, instances map[string]int) []string {

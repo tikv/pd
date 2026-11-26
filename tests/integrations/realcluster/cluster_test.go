@@ -2007,3 +2007,143 @@ exit 1
 	re.NoError(os.RemoveAll(dataDir))
 	re.False(fileExists(dataDir))
 }
+
+func TestHelperEnsurePlaygroundInstalled(t *testing.T) {
+	if os.Getenv("PD_TEST_HELPER_ENSURE_PLAYGROUND") != "1" {
+		return
+	}
+	re := require.New(t)
+	bin := os.Getenv("PD_TEST_HELPER_TIUP_BIN")
+	tiupHome := os.Getenv("PD_TEST_HELPER_TIUP_HOME")
+	re.NotEmpty(bin)
+	re.NotEmpty(tiupHome)
+	ensurePlaygroundInstalledWithTiUPHome(re, bin, tiupHome)
+}
+
+type recordingTestingT struct {
+	mu  sync.Mutex
+	err string
+}
+
+func (r *recordingTestingT) Errorf(format string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err == "" {
+		r.err = fmt.Sprintf(format, args...)
+	}
+}
+
+func (r *recordingTestingT) FailNow() {
+	panic(r)
+}
+
+func TestEnsurePlaygroundInstalledConcurrentSerialization(t *testing.T) {
+	setupIncompletePlayground := func(t *testing.T) (tiupHome, fakeTiUP, playgroundBin, installLog string) {
+		re := require.New(t)
+		tiupHome = filepath.Join(t.TempDir(), "tiup-home")
+		verDir := filepath.Join(tiupHome, "components", "playground", "v1.16.0")
+		playgroundBin = filepath.Join(verDir, "tiup-playground")
+		re.NoError(os.MkdirAll(verDir, 0750))
+		re.NoError(os.WriteFile(filepath.Join(verDir, "download-in-progress"), []byte("partial"), 0600))
+
+		barrierDir := filepath.Join(t.TempDir(), "barrier")
+		re.NoError(os.MkdirAll(barrierDir, 0750))
+		installLog = filepath.Join(t.TempDir(), "install.log")
+
+		fakeTiUP = filepath.Join(t.TempDir(), "fake-tiup")
+		script := fmt.Sprintf(`#!/bin/sh
+ver_dir=%q
+bin_path=%q
+barrier_dir=%q
+install_log=%q
+if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
+  if [ ! -x "$bin_path" ]; then
+    : > "$barrier_dir/probe-$$-$(date +%%s%%N 2>/dev/null || echo 0)"
+    i=0
+    while [ "$(ls -1 "$barrier_dir" | wc -l)" -lt 2 ] && [ "$i" -lt 100 ]; do
+      sleep 0.02
+      i=$((i + 1))
+    done
+  fi
+  echo "$bin_path"
+  exit 0
+fi
+if [ "$1" = "install" ] && [ "$2" = "playground" ]; then
+  printf 'install|%%s\n' "$$" >> "$install_log"
+  sleep 0.15
+  mkdir -p "$ver_dir"
+  printf '#!/bin/sh\necho %%s\n' "$$" > "$bin_path"
+  chmod 0700 "$bin_path"
+  exit 0
+fi
+exit 1
+`, verDir, playgroundBin, barrierDir, installLog)
+		re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
+		re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
+		return tiupHome, fakeTiUP, playgroundBin, installLog
+	}
+
+	t.Run("cross-process concurrent startups install once and preserve binary", func(t *testing.T) {
+		re := require.New(t)
+		tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t)
+		execPath, err := os.Executable()
+		re.NoError(err)
+
+		startHelper := func(homeArg string) (*exec.Cmd, *strings.Builder) {
+			var out strings.Builder
+			cmd := exec.Command(execPath, "-test.run=^TestHelperEnsurePlaygroundInstalled$") //nolint:gosec
+			cmd.Env = append(os.Environ(),
+				"PD_TEST_HELPER_ENSURE_PLAYGROUND=1",
+				"PD_TEST_HELPER_TIUP_BIN="+fakeTiUP,
+				"PD_TEST_HELPER_TIUP_HOME="+homeArg,
+			)
+			cmd.Stdout = &out
+			cmd.Stderr = &out
+			return cmd, &out
+		}
+
+		// Pass one home with trailing slashes to verify both processes share one lock.
+		cmd1, out1 := startHelper(tiupHome)
+		cmd2, out2 := startHelper(tiupHome + string(os.PathSeparator) + string(os.PathSeparator))
+		re.NoError(cmd1.Start())
+		re.NoError(cmd2.Start())
+		err1 := cmd1.Wait()
+		err2 := cmd2.Wait()
+		re.NoError(err1, "helper 1 output:\n%s", out1.String())
+		re.NoError(err2, "helper 2 output:\n%s", out2.String())
+
+		re.True(isExecutable(playgroundBin))
+		logBytes, err := os.ReadFile(installLog) //nolint:gosec
+		re.NoError(err)
+		lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+		re.Len(lines, 1, "expected exactly one tiup install, got: %q", string(logBytes))
+	})
+
+	t.Run("in-process concurrent startups install once and preserve binary", func(t *testing.T) {
+		re := require.New(t)
+		tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t)
+
+		rec1 := &recordingTestingT{}
+		rec2 := &recordingTestingT{}
+		var wg sync.WaitGroup
+		runOne := func(rec *recordingTestingT, homeArg string) {
+			defer func() {
+				if r := recover(); r != nil && r != rec {
+					panic(r)
+				}
+			}()
+			ensurePlaygroundInstalledWithTiUPHome(require.New(rec), fakeTiUP, homeArg)
+		}
+		wg.Go(func() { runOne(rec1, tiupHome) })
+		wg.Go(func() { runOne(rec2, tiupHome+string(os.PathSeparator)) })
+		wg.Wait()
+
+		re.Empty(rec1.err)
+		re.Empty(rec2.err)
+		re.True(isExecutable(playgroundBin))
+		logBytes, err := os.ReadFile(installLog) //nolint:gosec
+		re.NoError(err)
+		lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+		re.Len(lines, 1, "expected exactly one tiup install, got: %q", string(logBytes))
+	})
+}
