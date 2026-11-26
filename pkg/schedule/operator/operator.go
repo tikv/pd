@@ -183,8 +183,13 @@ func (o *Operator) hasReciprocalMergeRegion(other *Operator) bool {
 
 func (o *Operator) findMergeRegionStep() (MergeRegion, bool) {
 	for _, step := range o.steps {
-		if mr, ok := step.(MergeRegion); ok {
+		switch mr := step.(type) {
+		case MergeRegion:
 			return mr, true
+		case *MergeRegion:
+			if mr != nil {
+				return *mr, true
+			}
 		}
 	}
 	return MergeRegion{}, false

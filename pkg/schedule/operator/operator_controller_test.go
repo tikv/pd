@@ -1979,6 +1979,53 @@ func (suite *operatorControllerTestSuite) TestReplaceMergeOperatorPreservesNewOp
 		re.Equal(CANCELED, oppA.Status())
 		re.Equal(CANCELED, oppB.Status())
 		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+
+		// Pointer *MergeRegion steps are recognized identically to value MergeRegion steps:
+		// compatible mixed pointer/value synced pairs and all-pointer split pairs are accepted,
+		// while opposite-direction pointer steps are still rejected and nil *MergeRegion steps do not panic.
+		ptrActiveStep := &MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta()}
+		valPassiveStep := MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta(), IsPassive: true}
+		mixedPtrActive := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10, ptrActiveStep)
+		mixedValPassive := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10, valPassiveStep)
+		mixedPtrActive.Sync(mixedValPassive)
+		re.Equal(2, controller.AddWaitingOperator(mixedPtrActive, mixedValPassive))
+		re.Same(mixedPtrActive, controller.GetOperator(source.GetID()))
+		re.Same(mixedValPassive, controller.GetOperator(target.GetID()))
+		re.Equal(STARTED, mixedPtrActive.Status())
+		re.Equal(STARTED, mixedValPassive.Status())
+		re.Equal(uint64(2), controller.OperatorCount(OpMerge))
+		re.True(controller.RemoveOperator(mixedPtrActive))
+		re.Equal(CANCELED, mixedValPassive.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+
+		splitPtrActive := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10,
+			&MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta()})
+		splitPtrPassive := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10,
+			&MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta(), IsPassive: true})
+		splitPtrActive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+		splitPtrPassive.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+		re.True(controller.AddOperator(splitPtrActive))
+		re.True(controller.AddOperator(splitPtrPassive))
+		re.True(splitPtrActive.isPairedMergeOperator(splitPtrPassive))
+		re.True(controller.RemoveOperator(splitPtrPassive))
+		re.Equal(CANCELED, splitPtrActive.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+
+		oppPtrA := NewOperator("manual-merge", "test", source.GetID(), source.GetRegionEpoch(), OpMerge, 10,
+			&MergeRegion{FromRegion: source.GetMeta(), ToRegion: target.GetMeta()})
+		oppPtrB := NewOperator("manual-merge", "test", target.GetID(), target.GetRegionEpoch(), OpMerge, 10,
+			&MergeRegion{FromRegion: target.GetMeta(), ToRegion: source.GetMeta()})
+		oppPtrA.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(target.GetID(), 10))
+		oppPtrB.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(source.GetID(), 10))
+		re.Equal(0, controller.AddWaitingOperator(oppPtrA, oppPtrB))
+		re.Equal(CANCELED, oppPtrA.Status())
+		re.Equal(CANCELED, oppPtrB.Status())
+		re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+
+		var nilMergeStep *MergeRegion
+		nilStepOp := &Operator{steps: []OpStep{nilMergeStep}}
+		_, ok := nilStepOp.findMergeRegionStep()
+		re.False(ok)
 	})
 
 	suite.Run("replacing partner after publishing second merge operator before start keeps counts balanced", func() {
