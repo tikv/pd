@@ -79,12 +79,12 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 		return 0, nil
 	}
 	unprocessedKeys := splitKeys
-	newRegions := make(map[uint64]struct{}, len(splitKeys))
+	requestResults := &splitRequestResults{newRegions: make(map[uint64]struct{}, len(splitKeys))}
 	for i := 0; i <= retryLimit; i++ {
 		if ctx.Err() != nil {
 			break
 		}
-		unprocessedKeys = r.splitRegionsByKeys(ctx, unprocessedKeys, newRegions)
+		unprocessedKeys = r.splitRegionsByKeys(ctx, unprocessedKeys, requestResults)
 		if len(unprocessedKeys) < 1 || i == retryLimit {
 			break
 		}
@@ -96,18 +96,19 @@ func (r *RegionSplitter) SplitRegions(ctx context.Context, splitKeys [][]byte, r
 		}
 		timer.Stop()
 	}
-	returned := make([]uint64, 0, len(newRegions))
-	for regionID := range newRegions {
+	returned := make([]uint64, 0, len(requestResults.newRegions))
+	for regionID := range requestResults.newRegions {
 		returned = append(returned, regionID)
 	}
 	return (len(splitKeys) - len(unprocessedKeys)) * 100 / len(splitKeys), returned
 }
 
-func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys [][]byte, newRegions map[uint64]struct{}) [][]byte {
-	validGroups, pendingKeys := r.groupKeysByRegion(splitKeys)
+func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys [][]byte, requestResults *splitRequestResults) [][]byte {
+	validGroups, pendingKeys := r.groupKeysByRegion(splitKeys, requestResults)
 	for key, group := range validGroups {
 		if parCtx.Err() != nil {
-			break
+			delete(validGroups, key)
+			continue
 		}
 		err := r.handler.SplitRegionByKeys(group.region, group.keys)
 		if err != nil {
@@ -146,35 +147,54 @@ outerLoop:
 		}
 	}
 	for newID := range results.getSplitRegions() {
-		newRegions[newID] = struct{}{}
+		requestResults.newRegions[newID] = struct{}{}
 	}
-	// Recheck unresolved keys for boundaries created after grouping without
-	// adding their Region IDs to the split results.
 	unprocessedKeys := results.getUnProcessedKeys(pendingKeys)
+	if len(unprocessedKeys) > 0 {
+		// Retain accepted keys across retries only when polling leaves a group unfinished.
+		for _, group := range validGroups {
+			if group.finished {
+				continue
+			}
+			if requestResults.acceptedKeys == nil {
+				requestResults.acceptedKeys = make(map[string]struct{})
+			}
+			for _, key := range group.keys {
+				requestResults.acceptedKeys[string(key)] = struct{}{}
+			}
+		}
+	}
 	remainingKeys := unprocessedKeys[:0]
 	for _, key := range unprocessedKeys {
 		region := r.cluster.GetRegionByKey(key)
 		if region == nil || !bytes.Equal(region.GetStartKey(), key) {
 			remainingKeys = append(remainingKeys, key)
+		} else {
+			requestResults.addAcceptedBoundary(region, key)
 		}
 	}
 	return remainingKeys
 }
 
 // groupKeysByRegion groups split keys and returns keys without an observed boundary.
-func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) (map[uint64]*regionGroupKeys, [][]byte) {
+func (r *RegionSplitter) groupKeysByRegion(keys [][]byte, requestResults *splitRequestResults) (map[uint64]*regionGroupKeys, [][]byte) {
 	groups := make(map[uint64]*regionGroupKeys, len(keys))
 	var pendingKeys [][]byte
 	for i, key := range keys {
 		region := r.cluster.GetRegionByKey(key)
 		existingBoundary := region != nil && bytes.Equal(region.GetStartKey(), key)
 		if existingBoundary {
-			// Preserve the caller's keys and avoid a copy for all-new requests.
+			requestResults.addAcceptedBoundary(region, key)
 			if pendingKeys == nil {
-				pendingKeys = make([][]byte, 0, len(keys)-1)
-				pendingKeys = append(pendingKeys, keys[:i]...)
+				// Share the unchanged prefix until another pending key requires a copy.
+				pendingKeys = keys[:i:i]
 			}
 		} else if pendingKeys != nil {
+			if len(pendingKeys) == cap(pendingKeys) {
+				copiedKeys := make([][]byte, len(pendingKeys), len(keys)-1)
+				copy(copiedKeys, pendingKeys)
+				pendingKeys = copiedKeys
+			}
 			pendingKeys = append(pendingKeys, key)
 		}
 		if region == nil {
@@ -268,6 +288,18 @@ type regionGroupKeys struct {
 	finished bool
 	region   *core.RegionInfo
 	keys     [][]byte
+}
+
+type splitRequestResults struct {
+	newRegions map[uint64]struct{}
+	// acceptedKeys retains unfinished split requests whose boundaries may appear later.
+	acceptedKeys map[string]struct{}
+}
+
+func (r *splitRequestResults) addAcceptedBoundary(region *core.RegionInfo, key []byte) {
+	if _, ok := r.acceptedKeys[string(key)]; ok {
+		r.newRegions[region.GetID()] = struct{}{}
+	}
 }
 
 type splitKeyResults struct {
