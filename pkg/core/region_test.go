@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -1876,5 +1877,88 @@ func BenchmarkQueryRegions(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+func TestValidateBatchSplitRequest(t *testing.T) {
+	region := &metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1}, Peers: []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}}}
+	require.NoError(t, ValidateBatchSplitRequest(MaxBatchSplitCount, region))
+	require.NoError(t, ValidateBatchSplitRequest(0, region))
+	for _, test := range []struct {
+		peers int
+		count uint32
+		valid bool
+	}{
+		{0, MaxBatchSplitCount, true},
+		{1, MaxBatchSplitCount, true},
+		{3, MaxBatchSplitCount, true},
+		{3, MaxBatchSplitCount + 1, false},
+		{5, 100000, true},
+		{5, MaxBatchSplitCount, false},
+		{9, 50000, true},
+		{9, 100000, false},
+		{100, 8000, true},
+		{32766, 0, true},
+		{32766, 25, true},
+		{32766, 26, false},
+	} {
+		t.Run(fmt.Sprintf("peers-%d-splits-%d", test.peers, test.count), func(t *testing.T) {
+			peers := make([]*metapb.Peer, test.peers)
+			ids := make([]uint64, test.peers)
+			for i := range peers {
+				peers[i] = &metapb.Peer{Id: uint64(i + 1)}
+				ids[i] = math.MaxUint64
+			}
+			request := &metapb.Region{Peers: peers}
+			err := ValidateBatchSplitRequest(test.count, request)
+			if !test.valid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			split := &pdpb.SplitID{NewRegionId: math.MaxUint64, NewPeerIds: ids}
+			response := &pdpb.AskBatchSplitResponse{Header: &pdpb.ResponseHeader{ClusterId: math.MaxUint64}, Ids: make([]*pdpb.SplitID, test.count)}
+			for i := range response.Ids {
+				response.Ids[i] = split
+			}
+			require.LessOrEqual(t, response.Size(), MaxBatchSplitResponseSize)
+		})
+	}
+	// Exercise packed-peer and enclosing-message length prefix transitions as
+	// well as regions where the split count cap is stricter than the byte budget.
+	for _, peerCount := range []int{0, 1, 3, 5, 6, 7, 11, 12, 13, 1636, 1637, 1638, 1639, 32766} {
+		t.Run(fmt.Sprintf("wire-size-boundary-peers-%d", peerCount), func(t *testing.T) {
+			ids := make([]uint64, peerCount)
+			for i := range ids {
+				ids[i] = math.MaxUint64
+			}
+			region := &metapb.Region{Peers: make([]*metapb.Peer, peerCount)}
+			split := &pdpb.SplitID{NewRegionId: math.MaxUint64, NewPeerIds: ids}
+			response := &pdpb.AskBatchSplitResponse{Header: &pdpb.ResponseHeader{ClusterId: math.MaxUint64}}
+			headerSize := response.Size()
+			response.Ids = []*pdpb.SplitID{split}
+			splitSize := response.Size() - headerSize
+			limit := min(MaxBatchSplitCount, (MaxBatchSplitResponseSize-headerSize)/splitSize)
+			response.Ids = make([]*pdpb.SplitID, limit)
+			for i := range response.Ids {
+				response.Ids[i] = split
+			}
+			require.NoError(t, ValidateBatchSplitRequest(uint32(limit), region))
+			encoded, err := response.Marshal()
+			require.NoError(t, err)
+			require.LessOrEqual(t, len(encoded), MaxBatchSplitResponseSize)
+			schedulingResponse := &schedulingpb.AskBatchSplitResponse{
+				Header: &schedulingpb.ResponseHeader{ClusterId: math.MaxUint64},
+				Ids:    response.Ids,
+			}
+			encodedScheduling, err := schedulingResponse.Marshal()
+			require.NoError(t, err)
+			require.Len(t, encodedScheduling, len(encoded))
+			require.Error(t, ValidateBatchSplitRequest(uint32(limit+1), region))
+			if limit < MaxBatchSplitCount {
+				response.Ids = append(response.Ids, split)
+				require.Greater(t, response.Size(), MaxBatchSplitResponseSize)
+			}
+		})
 	}
 }

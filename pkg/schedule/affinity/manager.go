@@ -79,6 +79,8 @@ type Manager struct {
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
+	// storeConditionsKnown reports whether unavailableStores has been populated by a store check.
+	storeConditionsKnown bool
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// Validated PD writes cannot introduce conflicts, so they only need to
@@ -170,19 +172,19 @@ func (m *Manager) initGroupLocked(group *Group) {
 		log.Error("group already initialized", zap.String("group-id", group.ID))
 		return
 	}
-	m.groups[group.ID] = &runtimeGroupInfo{
+	groupInfo := &runtimeGroupInfo{
 		ID:                  group.ID,
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
 		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
-		availability:        groupDegraded,
-		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
 		AffinityRegionCount: 0,
 		Regions:             make(map[uint64]regionCache),
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	m.setTargetAvailabilityLocked(groupInfo)
+	m.groups[group.ID] = groupInfo
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -222,6 +224,16 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	groupInfo.AffinityVer++
 }
 
+// setTargetAvailabilityLocked resets availability and the degradation deadline for a new or replaced target.
+// The caller must hold m.Lock().
+func (m *Manager) setTargetAvailabilityLocked(groupInfo *runtimeGroupInfo) {
+	availability := groupDegraded
+	if m.storeConditionsKnown {
+		availability = calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
+	}
+	groupInfo.resetTargetAvailability(availability)
+}
+
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -231,9 +243,13 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
-	groupInfo.SetAvailability(groupAvailable)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
+	if m.storeConditionsKnown {
+		m.setTargetAvailabilityLocked(groupInfo)
+	} else {
+		groupInfo.SetAvailability(groupAvailable)
+	}
 	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil
@@ -609,6 +625,7 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		}
 
 		if changed {
+			m.setTargetAvailabilityLocked(groupInfo)
 			m.resetCountLocked(groupInfo)
 		}
 	}
