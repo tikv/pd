@@ -257,6 +257,14 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
+	watched := IsBalanceRangeConfigWatched(c.cluster, scheduler.GetType())
+	if watched {
+		// Hold the controller lock until registration: a concurrent watch reload
+		// must either precede this load or find the registered scheduler after it.
+		if err := scheduler.ReloadConfig(); err != nil {
+			return err
+		}
+	}
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
 	// Run every step that can fail before registering and starting the
 	// scheduler, so a failure here never leaves a scheduler running (or
@@ -273,13 +281,13 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 			errs.ZapError(err))
 		// No need to return here, we still use the scheduler config to control the `disable` now.
 	}
-	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
-		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
-		// PrepareConfig above may already have taken effect (e.g. paused
-		// stores), so undo it before returning: this call must not leave
-		// the scheduler half set up.
-		scheduler.CleanConfig(c.cluster)
-		return err
+	if !watched {
+		if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
+			log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+			// PrepareConfig may already have taken effect (e.g. paused stores).
+			scheduler.CleanConfig(c.cluster)
+			return err
+		}
 	}
 	c.wg.Add(1)
 	go c.runScheduler(s)
@@ -312,9 +320,11 @@ func (c *Controller) RemoveScheduler(name string) error {
 	// remove the config in the future, if we want to use `Disable` of independent
 	// config.
 	_ = s.SetDisable(true)
-	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
-		log.Error("can not remove the scheduler config", errs.ZapError(err))
-		return err
+	if !IsBalanceRangeConfigWatched(c.cluster, s.GetType()) {
+		if err := c.storage.RemoveSchedulerConfig(name); err != nil {
+			log.Error("can not remove the scheduler config", errs.ZapError(err))
+			return err
+		}
 	}
 
 	s.Stop()

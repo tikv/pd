@@ -318,7 +318,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			continue
 		}
 		s, err := schedulers.CreateScheduler(types.ConvertOldStrToType[cfg.Type], c.opController,
-			c.cluster.GetStorage(), schedulers.ConfigJSONDecoderForRestore([]byte(data)), removeSchedulerCb)
+			c.cluster.GetStorage(), schedulers.ConfigDecoderForCluster(c.cluster, types.ConvertOldStrToType[cfg.Type], schedulers.ConfigJSONDecoderForRestore([]byte(data))), removeSchedulerCb)
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
@@ -358,7 +358,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 
 		tp := types.ConvertOldStrToType[schedulerCfg.Type]
 		s, err := schedulers.CreateScheduler(tp, c.opController,
-			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), removeSchedulerCb)
+			c.cluster.GetStorage(), schedulers.ConfigDecoderForCluster(c.cluster, tp, schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args)), removeSchedulerCb)
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type),
 				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
@@ -372,6 +372,12 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 				!errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
 				log.Error("can not add scheduler", zap.String("scheduler-name",
 					s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+				if schedulers.IsBalanceRangeConfigWatched(c.cluster, tp) {
+					// Keep the watched list entry so the MCS updater can retry a
+					// failed cache load without waiting for a new PD list event.
+					scheduleCfg.Schedulers[k] = schedulerCfg
+					k++
+				}
 			} else {
 				// Only records the valid scheduler config.
 				scheduleCfg.Schedulers[k] = schedulerCfg

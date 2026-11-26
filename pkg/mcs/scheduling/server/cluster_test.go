@@ -16,6 +16,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,13 +33,16 @@ import (
 
 func TestUpdateBalanceRangeJobStatus(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		code   int
-		status string
+		name      string
+		code      int
+		status    string
+		truncated bool
 	}{
 		{name: "success", code: http.StatusOK, status: "running"},
 		{name: "unsupported", code: http.StatusNotFound, status: "finished"},
 		{name: "conflict", code: http.StatusConflict, status: "finished"},
+		{name: "unsupported-truncated", code: http.StatusNotFound, status: "finished", truncated: true},
+		{name: "conflict-truncated", code: http.StatusConflict, status: "finished", truncated: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -58,6 +62,16 @@ func TestUpdateBalanceRangeJobStatus(t *testing.T) {
 				}
 				observed.err = json.NewDecoder(r.Body).Decode(&observed.body)
 				requests <- observed
+				if tc.truncated {
+					// Advertise more bytes than the handler sends so reading the
+					// response fails even though its HTTP status is available.
+					w.Header().Set("Content-Length", "100")
+					w.WriteHeader(tc.code)
+					if _, err := io.WriteString(w, "partial response"); err != nil {
+						t.Errorf("failed to write truncated response: %v", err)
+					}
+					return
+				}
 				if tc.code == http.StatusNotFound {
 					http.NotFound(w, r)
 					return
@@ -76,6 +90,10 @@ func TestUpdateBalanceRangeJobStatus(t *testing.T) {
 			default:
 				re.Error(err)
 				re.NotEqual(schedulers.ErrBalanceRangeJobStatusUnsupported, errors.Cause(err))
+			}
+			if tc.truncated {
+				re.ErrorContains(err, "failed to read response body: unexpected EOF")
+				re.ErrorContains(err, "partial response")
 			}
 			select {
 			case observed := <-requests:

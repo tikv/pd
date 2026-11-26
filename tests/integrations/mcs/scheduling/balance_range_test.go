@@ -30,11 +30,38 @@ import (
 )
 
 type balanceRangeJob struct {
+	Create time.Time  `json:"create"`
 	JobID  uint64     `json:"job-id"`
 	Alias  string     `json:"alias"`
 	Status string     `json:"status"`
 	Start  *time.Time `json:"start,omitempty"`
 	Finish *time.Time `json:"finish,omitempty"`
+}
+
+func (suite *serverTestSuite) TestBalanceRangeNewJobCreationIdentity() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	primary := tc.WaitForPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	primary.GetCluster().SetPrepared()
+	defer tests.MustDeleteScheduler(re, suite.backendEndpoints, types.BalanceRangeScheduler.String())
+
+	// The scheduler-list args and the watched job describe the same request,
+	// but only PD may assign Create. Re-decoding args in MCS used to create a
+	// second identity and overwrite its watched cache, preventing running.
+	suite.mustAddBalanceRangeJob(re, "new-job", "1h", "100", "200")
+	testutil.Eventually(re, func() bool {
+		jobs := listSchedulingBalanceRangeJobs(re, primary)
+		persisted := suite.listPersistedBalanceRangeJobs(re)
+		return len(jobs) == 1 && len(persisted) == 1 &&
+			jobs[0].Status == "running" && persisted[0].Status == "running" &&
+			!jobs[0].Create.IsZero() && jobs[0].Create.Equal(persisted[0].Create)
+	})
 }
 
 // listSchedulingBalanceRangeJobs returns the jobs in the memory of the scheduling server,

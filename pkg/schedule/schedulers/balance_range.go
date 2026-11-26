@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -235,6 +234,23 @@ type balanceRangeJobStatusUpdater interface {
 	UpdateBalanceRangeJobStatus(jobID uint64, create time.Time, status string) error
 }
 
+// IsBalanceRangeConfigWatched reports whether the scheduler uses the MCS watched
+// job cache rather than owning persistent scheduler configuration.
+func IsBalanceRangeConfigWatched(cluster sche.SchedulerCluster, typ types.CheckerSchedulerType) bool {
+	_, ok := cluster.(balanceRangeJobStatusUpdater)
+	return typ == types.BalanceRangeScheduler && ok
+}
+
+// ConfigDecoderForCluster leaves MCS balance-range jobs to the config watcher,
+// rather than reconstructing tasks (and their creation times) from scheduler args
+// or a potentially stale startup snapshot. Other schedulers keep their decoder.
+func ConfigDecoderForCluster(cluster sche.SchedulerCluster, typ types.CheckerSchedulerType, dec ConfigDecoder) ConfigDecoder {
+	if IsBalanceRangeConfigWatched(cluster, typ) {
+		return ConfigJSONDecoder([]byte("[]"))
+	}
+	return dec
+}
+
 var errJobStatusConflict = errors.New("job status conflict")
 
 // ErrBalanceRangeJobStatusUnsupported is returned by the balanceRangeJobStatusUpdater if the PD
@@ -425,9 +441,14 @@ func (conf *balanceRangeSchedulerConfig) mergeLocked(loaded []*balanceRangeSched
 	conf.jobs = loaded
 }
 
-// containsLocked checks whether the job still belongs to the current snapshot.
-func (conf *balanceRangeSchedulerConfig) containsLocked(job *balanceRangeSchedulerJob) bool {
-	return slices.Contains(conf.jobs, job)
+// findJobLocked finds the current snapshot of the same task, not merely a reused ID.
+func (conf *balanceRangeSchedulerConfig) findJobLocked(job *balanceRangeSchedulerJob) *balanceRangeSchedulerJob {
+	for _, current := range conf.jobs {
+		if current.JobID == job.JobID && current.Create.Equal(job.Create) {
+			return current
+		}
+	}
+	return nil
 }
 
 func (conf *balanceRangeSchedulerConfig) peekLocked() (int, *balanceRangeSchedulerJob) {
@@ -614,8 +635,15 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 	}
 	// If the running job has been completed by others, e.g. cancelled by the user, or removed from the jobs,
 	// e.g. the scheduler is re-created, it needs to stop the job and clean its key ranges.
-	if s.rangeJob != nil && (s.rangeJob.isComplete() || !s.conf.containsLocked(s.rangeJob)) {
-		s.cleanJobStatus(cluster, s.rangeJob)
+	if s.rangeJob != nil {
+		current := s.conf.findJobLocked(s.rangeJob)
+		if current != nil && current.Status == running {
+			// The watcher published another snapshot of the same running task.
+			// Rebind runtime bookkeeping without releasing its existing reservation.
+			s.rangeJob = current
+		} else {
+			s.cleanJobStatus(cluster, s.rangeJob)
+		}
 	}
 
 	index, job := s.conf.peekLocked()

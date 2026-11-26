@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"github.com/unrolled/render"
 
@@ -857,11 +858,14 @@ func TestBalanceRangeJobStatusRetryBackoff(t *testing.T) {
 	for i := range 10 {
 		// Expire the previous deadline without sleeping.
 		sc.nextRetry = time.Time{}
+		beforeRequest := time.Now()
 		re.False(sc.IsScheduleAllowed(cluster))
 		re.Equal(i+1, cluster.attempts)
 		expected := min(minJobStatusRetryInterval*time.Duration(1<<i), maxJobStatusRetryInterval)
 		re.Equal(expected, sc.retryInterval)
-		re.True(sc.nextRetry.After(time.Now()))
+		re.False(sc.nextRetry.Before(beforeRequest.Add(expected)))
+		// Suppression is independent of pauses after the failed request.
+		sc.nextRetry = time.Now().Add(time.Hour)
 		re.False(sc.IsScheduleAllowed(cluster))
 		re.Equal(i+1, cluster.attempts)
 		re.Equal(pending, sc.conf.jobs[0].Status)
@@ -1098,6 +1102,7 @@ func TestBalanceRangeWaitForWatchedCompletion(t *testing.T) {
 			re.False(sc.IsScheduleAllowed(cluster))
 			re.Equal(1, cluster.attempts)
 			re.Equal(minJobStatusRetryInterval, sc.retryInterval)
+			sc.nextRetry = time.Now().Add(time.Hour)
 			re.False(sc.IsScheduleAllowed(cluster))
 			re.Equal(1, cluster.attempts)
 			re.False(tc.GetKeyRangeManager().IsEmpty())
@@ -1174,4 +1179,69 @@ func TestBalanceRangeReloadReplacementAndDeletion(t *testing.T) {
 	re.Empty(sc.conf.jobs)
 	re.False(sc.IsScheduleAllowed(cluster))
 	re.True(tc.GetKeyRangeManager().IsEmpty())
+}
+
+func TestBalanceRangeReservationAcrossWatchedSnapshots(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	cluster := &mockJobStatusUpdater{Cluster: tc}
+	s := storage.NewStorageWithMemoryBackend()
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, s,
+		ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader-scatter", "tikv", "1h", "same-alias", "100", "200"}))
+	re.NoError(err)
+	sc := scheduler.(*balanceRangeScheduler)
+	publish := func(jobs []*balanceRangeSchedulerJob) {
+		data, err := EncodeConfig(jobs)
+		re.NoError(err)
+		re.NoError(s.SaveSchedulerConfig(sc.GetName(), data))
+		re.NoError(sc.ReloadConfig())
+	}
+	jobs := sc.conf.cloneLocked()
+	start := time.Now()
+	jobs[0].Status = running
+	jobs[0].Start = &start
+	publish(jobs)
+	sc.IsScheduleAllowed(cluster)
+	old := sc.rangeJob
+	re.NotNil(old)
+	re.False(tc.GetKeyRangeManager().IsEmpty())
+
+	// Cleanup clears scores, so an unchanged score also detects an unnecessary
+	// release/re-registration that would be invisible in the final range set.
+	sc.scoreMap = map[uint64]float64{42: 7}
+	score := balanceRangeGauge.WithLabelValues("42", "score")
+	score.Set(7)
+	defer score.Set(0)
+	publish(sc.conf.cloneLocked())
+	re.NotSame(old, sc.conf.jobs[0])
+	sc.IsScheduleAllowed(cluster)
+	re.Same(sc.conf.jobs[0], sc.rangeJob)
+	re.InDelta(7, testutil.ToFloat64(score), 0.001)
+	re.False(tc.GetKeyRangeManager().IsEmpty())
+	re.Empty(cluster.updates)
+
+	// Reusing both ID and alias does not reuse the reservation when Create changes.
+	jobs = sc.conf.cloneLocked()
+	jobs[0].Create = jobs[0].Create.Add(time.Nanosecond)
+	jobs[0].Status = pending
+	jobs[0].Start = nil
+	publish(jobs)
+	re.False(sc.IsScheduleAllowed(cluster))
+	re.Equal([]string{"0:running"}, cluster.updates)
+	re.Nil(sc.rangeJob)
+	re.True(tc.GetKeyRangeManager().IsEmpty())
+	re.Equal(pending, sc.conf.jobs[0].Status)
+	re.Nil(sc.conf.jobs[0].Start)
+	re.InDelta(0, testutil.ToFloat64(score), 0.001)
+
+	// HTTP acknowledgement alone must not reserve the new job's ranges.
+	re.False(sc.IsScheduleAllowed(cluster))
+	re.True(tc.GetKeyRangeManager().IsEmpty())
+	jobs[0].Status = running
+	jobs[0].Start = &start
+	publish(jobs)
+	sc.IsScheduleAllowed(cluster)
+	re.Same(sc.conf.jobs[0], sc.rangeJob)
+	re.False(tc.GetKeyRangeManager().IsEmpty())
 }

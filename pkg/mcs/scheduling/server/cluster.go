@@ -479,6 +479,7 @@ func (c *Cluster) updateScheduler() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	retryBalanceRange := false
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -486,6 +487,12 @@ func (c *Cluster) updateScheduler() {
 			return
 		case <-notifier:
 			// This is triggered by the watcher when the schedulers are updated.
+		case <-ticker.C:
+			// Retry failed balance-range registration without delaying list updates
+			// or depending on another scheduler-list event from PD.
+			if !retryBalanceRange {
+				continue
+			}
 		}
 
 		if !c.running.Load() {
@@ -505,6 +512,7 @@ func (c *Cluster) updateScheduler() {
 			schedulersController   = c.coordinator.GetSchedulersController()
 			latestSchedulersConfig = c.persistConfig.GetScheduleConfig().Schedulers
 		)
+		retryBalanceRange = false
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
 			// Skip the scheduler if it is disabled.
@@ -520,7 +528,7 @@ func (c *Cluster) updateScheduler() {
 				schedulerType,
 				c.coordinator.GetOperatorController(),
 				c.storage,
-				schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args),
+				schedulers.ConfigDecoderForCluster(c, schedulerType, schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args)),
 				schedulersController.RemoveScheduler,
 			)
 			if err != nil {
@@ -538,6 +546,9 @@ func (c *Cluster) updateScheduler() {
 				continue
 			}
 			if err := schedulersController.AddScheduler(s, scheduler.Args...); err != nil {
+				if schedulerType == types.BalanceRangeScheduler {
+					retryBalanceRange = true
+				}
 				log.Error("failed to add scheduler",
 					zap.String("scheduler-name", name),
 					zap.Strings("scheduler-args", scheduler.Args),
@@ -747,14 +758,18 @@ func (c *Cluster) UpdateBalanceRangeJobStatus(jobID uint64, create time.Time, st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		detail := string(body)
+		if readErr != nil {
+			detail = fmt.Sprintf("%s (failed to read response body: %v)", detail, readErr)
+		}
 		// The PD hasn't registered this API, e.g. it hasn't been upgraded yet.
 		if resp.StatusCode == http.StatusNotFound {
 			return errors.Annotatef(schedulers.ErrBalanceRangeJobStatusUnsupported,
-				"failed to update the status of balance range job %d to %s, body: %s", jobID, status, string(body))
+				"failed to update the status of balance range job %d to %s, body: %s", jobID, status, detail)
 		}
 		return errors.Errorf("failed to update the status of balance range job %d to %s, status code: %d, body: %s",
-			jobID, status, resp.StatusCode, string(body))
+			jobID, status, resp.StatusCode, detail)
 	}
 	return nil
 }
