@@ -17,12 +17,24 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"io"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 
+	mconfig "github.com/pingcap/metering_sdk/config"
+
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+)
+
+const (
+	pprofTOSRole     = "trn:iam::1:role/pprof-metering"
+	pprofTOSAK       = "test-tos-ak"
+	pprofTOSSK       = "test-tos-sk"
+	pprofTOSToken    = "test-tos-token"
+	redactedTOSValue = "***REDACTED***"
 )
 
 type pprofTestSuite struct {
@@ -35,7 +47,19 @@ func TestPprofTestSuite(t *testing.T) {
 }
 
 func (suite *pprofTestSuite) SetupSuite() {
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, _ string) {
+		// Leave Type empty so no cloud metering writer starts while exercising config serialization.
+		conf.Metering = mconfig.MeteringConfig{
+			Region: "cn-beijing",
+			Bucket: "metering",
+			TOS: &mconfig.MeteringTOSConfig{
+				AssumeRoleARN:   pprofTOSRole,
+				AccessKey:       pprofTOSAK,
+				SecretAccessKey: pprofTOSSK,
+				SessionToken:    pprofTOSToken,
+			},
+		}
+	})
 }
 
 func (suite *pprofTestSuite) TearDownSuite() {
@@ -60,4 +84,35 @@ func (suite *pprofTestSuite) checkGetZip(cluster *tests.TestCluster) {
 	zipReader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	re.NoError(err)
 	re.Len(zipReader.File, 7)
+
+	var configBytes []byte
+	for _, f := range zipReader.File {
+		if f.Name != "config" {
+			continue
+		}
+		rc, err := f.Open()
+		re.NoError(err)
+		configBytes, err = io.ReadAll(rc)
+		re.NoError(rc.Close())
+		re.NoError(err)
+		break
+	}
+	re.NotEmpty(configBytes)
+	re.NotContains(string(configBytes), pprofTOSAK)
+	re.NotContains(string(configBytes), pprofTOSSK)
+	re.NotContains(string(configBytes), pprofTOSToken)
+
+	var dumpedCfg config.Config
+	re.NoError(json.Unmarshal(configBytes, &dumpedCfg))
+	re.NotNil(dumpedCfg.Metering.TOS)
+	re.Equal(pprofTOSRole, dumpedCfg.Metering.TOS.AssumeRoleARN)
+	re.Equal(redactedTOSValue, dumpedCfg.Metering.TOS.AccessKey)
+	re.Equal(redactedTOSValue, dumpedCfg.Metering.TOS.SecretAccessKey)
+	re.Equal(redactedTOSValue, dumpedCfg.Metering.TOS.SessionToken)
+
+	liveTOS := leader.GetConfig().Metering.TOS
+	re.NotNil(liveTOS)
+	re.Equal(pprofTOSAK, liveTOS.AccessKey)
+	re.Equal(pprofTOSSK, liveTOS.SecretAccessKey)
+	re.Equal(pprofTOSToken, liveTOS.SessionToken)
 }

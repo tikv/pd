@@ -164,9 +164,9 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`), testutil.StatusNotOK(re))
 	re.NoError(err)
 
-	// Fail to get operator if from is latest.
-	time.Sleep(time.Second)
-	url := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
+	// A query starting after the existing records must return no operators.
+	from := time.Now().Unix() + 1
+	url := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(from, 10))
 	err = testutil.CheckGetJSON(tests.TestDialClient, url, nil,
 		testutil.StatusNotOK(re), testutil.StringContain(re, "operator not found"))
 	re.NoError(err)

@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -51,8 +52,12 @@ const (
 
 // Member is used for the election related logic. It implements Member interface.
 type Member struct {
-	leadership *election.Leadership
-	leader     atomic.Value // stored as *pdpb.Member
+	leadership   *election.Leadership
+	leader       atomic.Value // stored as *pdpb.Member
+	leaderMu     sync.Mutex
+	leaderCancel context.CancelFunc
+	// withdrawnLease fences serving and publication before Reset detaches the lease.
+	withdrawnLease atomic.Pointer[election.Lease]
 	// etcd and cluster information.
 	etcd   *embed.Etcd
 	client *clientv3.Client
@@ -160,7 +165,46 @@ func (m *Member) unsetLeader() {
 
 // PromoteSelf sets the member itself to a PD leader.
 func (m *Member) PromoteSelf() {
+	m.leaderMu.Lock()
+	defer m.leaderMu.Unlock()
 	m.setLeader(m.member)
+}
+
+// TryPromoteSelf publishes this member only while its leadership is live and
+// has not been withdrawn by Resign.
+func (m *Member) TryPromoteSelf() bool {
+	m.leaderMu.Lock()
+	defer m.leaderMu.Unlock()
+	lease := m.leadership.GetLease()
+	if !m.IsLeaseValid(lease) {
+		return false
+	}
+	m.setLeader(m.member)
+	return true
+}
+
+// IsLeaseValid reports whether a captured lease still belongs to this member
+// and has not expired or been withdrawn. It does not require full PD readiness.
+func (m *Member) IsLeaseValid(lease *election.Lease) bool {
+	return lease != nil && lease == m.leadership.GetLease() &&
+		!lease.IsExpired() && lease != m.withdrawnLease.Load()
+}
+
+// SetLeadershipCancel binds the cluster's cancellation to a captured lease.
+// Replacing the cluster context cancels its predecessor. A withdrawn lease
+// cannot install work after Resign has canceled the previous context.
+func (m *Member) SetLeadershipCancel(lease *election.Lease, cancel context.CancelFunc) bool {
+	m.leaderMu.Lock()
+	defer m.leaderMu.Unlock()
+	if !m.IsLeaseValid(lease) {
+		cancel()
+		return false
+	}
+	if m.leaderCancel != nil {
+		m.leaderCancel()
+	}
+	m.leaderCancel = cancel
+	return true
 }
 
 // GetElectionPath returns the path of the PD leader.
@@ -284,7 +328,17 @@ func (m *Member) WatchLeader(ctx context.Context, leader *pdpb.Member, revision 
 // the identity before anything that can block is what keeps a member that is no
 // longer serving from still answering as the leader.
 func (m *Member) Resign() {
+	m.leaderMu.Lock()
+	m.withdrawnLease.Store(m.leadership.GetLease())
 	m.unsetLeader()
+	if m.leaderCancel != nil {
+		m.leaderCancel()
+		m.leaderCancel = nil
+	}
+	m.leaderMu.Unlock()
+	// Reset can block on etcd or logging. Promotions already reject this lease
+	// without waiting for its revocation or holding leaderMu across that work.
+	failpoint.InjectCall("afterMemberLeaderWithdrawn", m.ID())
 	m.leadership.Reset()
 }
 

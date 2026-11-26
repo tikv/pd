@@ -87,6 +87,15 @@ func (suite *dashboardTestSuite) TestDashboardProxy() {
 }
 
 func (suite *dashboardTestSuite) checkRespCode(re *require.Assertions, url string, code int) {
+	testutil.Eventually(re, func() bool {
+		resp, err := suite.httpClient.Get(url)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		_, err = io.Copy(io.Discard, resp.Body)
+		return err == nil && resp.StatusCode == code
+	})
 	resp, err := suite.httpClient.Get(url)
 	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
@@ -95,14 +104,20 @@ func (suite *dashboardTestSuite) checkRespCode(re *require.Assertions, url strin
 	re.Equal(code, resp.StatusCode)
 }
 
-func waitForConfigSync() {
-	// Need to wait dashboard service start.
-	time.Sleep(3 * time.Second)
-}
-
 func (suite *dashboardTestSuite) checkServiceIsStarted(re *require.Assertions, internalProxy bool, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
-	waitForConfigSync()
-	dashboardAddress := leader.GetServer().GetPersistOptions().GetDashboardAddress()
+	var dashboardAddress string
+	testutil.Eventually(re, func() bool {
+		dashboardAddress = leader.GetServer().GetPersistOptions().GetDashboardAddress()
+		if dashboardAddress == "" || dashboardAddress == "auto" || dashboardAddress == "none" {
+			return false
+		}
+		for _, srv := range servers {
+			if srv.GetPersistOptions().GetDashboardAddress() != dashboardAddress {
+				return false
+			}
+		}
+		return true
+	})
 	hasServiceNode := false
 	for _, srv := range servers {
 		re.Equal(dashboardAddress, srv.GetPersistOptions().GetDashboardAddress())
@@ -123,7 +138,14 @@ func (suite *dashboardTestSuite) checkServiceIsStarted(re *require.Assertions, i
 }
 
 func (suite *dashboardTestSuite) checkServiceIsStopped(re *require.Assertions, servers map[string]*tests.TestServer) {
-	waitForConfigSync()
+	testutil.Eventually(re, func() bool {
+		for _, srv := range servers {
+			if srv.GetPersistOptions().GetDashboardAddress() != "none" {
+				return false
+			}
+		}
+		return true
+	})
 	for _, srv := range servers {
 		re.Equal("none", srv.GetPersistOptions().GetDashboardAddress())
 		addr := srv.GetAddr()

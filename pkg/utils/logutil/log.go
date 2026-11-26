@@ -175,6 +175,12 @@ func getRedactType() RedactInfoLogType {
 	return curRedactType.Load().(RedactInfoLogType)
 }
 
+// IsInfoLogFullyRedacted reports whether sensitive values are hidden entirely.
+// Marker mode retains the values and therefore returns false.
+func IsInfoLogFullyRedacted() bool {
+	return getRedactType() == RedactInfoLogON
+}
+
 func setRedactType(redactInfoLogType RedactInfoLogType) {
 	curRedactType.Store(redactInfoLogType)
 }

@@ -24,6 +24,7 @@ import (
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -44,18 +45,18 @@ const (
 func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router := r.Group("tso/keyspace-groups")
 	router.Use(middlewares.BootstrapChecker())
-	router.POST("", CreateKeyspaceGroups)
-	router.GET("", GetKeyspaceGroups)
-	router.GET("/:id", GetKeyspaceGroupByID)
-	router.DELETE("/:id", DeleteKeyspaceGroupByID)
-	router.PATCH("/:id", SetNodesForKeyspaceGroup)          // only to support set nodes
-	router.PATCH("/:id/*node", SetPriorityForKeyspaceGroup) // only to support set priority
-	router.POST("/:id/alloc", AllocNodesForKeyspaceGroup)
-	router.POST("/:id/split", SplitKeyspaceGroupByID)
-	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
-	router.POST("/:id/merge", MergeKeyspaceGroups)
-	router.DELETE("/:id/merge", FinishMergeKeyspaceByID)
-	router.DELETE("/:id/keyspaces", RemoveKeyspacesFromGroup)
+	router.POST("", middlewares.Audit("CreateKeyspaceGroups", audit.LocalLogLabel, audit.PrometheusHistogram), CreateKeyspaceGroups)
+	router.GET("", middlewares.Audit("GetKeyspaceGroups", audit.PrometheusHistogram), GetKeyspaceGroups)
+	router.GET("/:id", middlewares.Audit("GetKeyspaceGroupByID", audit.PrometheusHistogram), GetKeyspaceGroupByID)
+	router.DELETE("/:id", middlewares.Audit("DeleteKeyspaceGroupByID", audit.LocalLogLabel, audit.PrometheusHistogram), DeleteKeyspaceGroupByID)
+	router.PATCH("/:id", middlewares.Audit("SetNodesForKeyspaceGroup", audit.LocalLogLabel, audit.PrometheusHistogram), SetNodesForKeyspaceGroup)
+	router.PATCH("/:id/*node", middlewares.Audit("SetPriorityForKeyspaceGroup", audit.LocalLogLabel, audit.PrometheusHistogram), SetPriorityForKeyspaceGroup)
+	router.POST("/:id/alloc", middlewares.Audit("AllocNodesForKeyspaceGroup", audit.LocalLogLabel, audit.PrometheusHistogram), AllocNodesForKeyspaceGroup)
+	router.POST("/:id/split", middlewares.Audit("SplitKeyspaceGroupByID", audit.LocalLogLabel, audit.PrometheusHistogram), SplitKeyspaceGroupByID)
+	router.DELETE("/:id/split", middlewares.Audit("FinishSplitKeyspaceByID", audit.LocalLogLabel, audit.PrometheusHistogram), FinishSplitKeyspaceByID)
+	router.POST("/:id/merge", middlewares.Audit("MergeKeyspaceGroups", audit.LocalLogLabel, audit.PrometheusHistogram), MergeKeyspaceGroups)
+	router.DELETE("/:id/merge", middlewares.Audit("FinishMergeKeyspaceByID", audit.LocalLogLabel, audit.PrometheusHistogram), FinishMergeKeyspaceByID)
+	router.DELETE("/:id/keyspaces", middlewares.Audit("RemoveKeyspacesFromGroup", audit.LocalLogLabel, audit.PrometheusHistogram), RemoveKeyspacesFromGroup)
 }
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.

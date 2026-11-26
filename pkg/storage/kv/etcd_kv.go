@@ -318,6 +318,7 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
+	failpoint.InjectCall("beforeTxnCommit", txn.operations)
 	failpoint.Inject("slowTxn", func() {
 		time.Sleep(10 * time.Second)
 	})
@@ -346,6 +347,8 @@ func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
 	cmpList := make([]clientv3.Cmp, 0, len(conditions))
 	for _, c := range conditions {
 		switch c.CmpType {
+		case RawTxnCmpModRevisionEqual:
+			cmpList = append(cmpList, clientv3.Compare(clientv3.ModRevision(c.Key), "=", c.ModRevision))
 		case RawTxnCmpExists:
 			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(c.Key), ">", 0))
 		case RawTxnCmpNotExists:
@@ -443,8 +446,9 @@ func (l *rawTxnWrapper) Commit() (RawTxnResponse, error) {
 			kvs := make([]KeyValuePair, 0, len(rangeResp.Kvs))
 			for _, kv := range rangeResp.Kvs {
 				kvs = append(kvs, KeyValuePair{
-					Key:   string(kv.Key),
-					Value: string(kv.Value),
+					Key:         string(kv.Key),
+					Value:       string(kv.Value),
+					ModRevision: kv.ModRevision,
 				})
 			}
 			respItem = RawTxnResponseItem{

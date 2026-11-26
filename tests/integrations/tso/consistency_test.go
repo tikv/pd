@@ -157,7 +157,7 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 		resp, err = tsoClient.Recv()
 		closeErr := tsoClient.CloseSend()
 		return err == nil && closeErr == nil && resp != nil
-	}, 20*time.Second, 100*time.Millisecond) {
+	}, 20*time.Second, 10*time.Millisecond) {
 		return nil
 	}
 	return checkAndReturnTimestampResponse(as, resp)

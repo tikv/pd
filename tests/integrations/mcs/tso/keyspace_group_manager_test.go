@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -82,6 +83,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) allocID() uint32 {
 }
 
 func TestTSOKeyspaceGroupManagerSuite(t *testing.T) {
+	const cleaner = "github.com/tikv/pd/pkg/tso/fastDeletedGroupCleaner"
+	require.NoError(t, failpoint.Enable(cleaner, "return(true)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(cleaner)) })
 	suite.Run(t, &tsoKeyspaceGroupManagerTestSuite{})
 }
 
@@ -786,6 +790,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 		wg                        sync.WaitGroup
 		ctx, cancel               = context.WithCancel(suite.ctx)
 		lastPhysical, lastLogical int64
+		successfulRequests        atomic.Uint64
 	)
 	wg.Go(func() {
 		defer tsoClient.Close()
@@ -820,15 +825,22 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 				}
 			}
 			lastPhysical, lastLogical = physical, logical
+			successfulRequests.Add(1)
 		}
 	})
-	return func() {
-		// Wait for a while to make sure the client has sent more TSO requests.
-		time.Sleep(time.Second)
-		// Cancel the context to stop the client.
+	stop := sync.OnceFunc(func() {
 		cancel()
-		// Wait for the client to stop.
 		wg.Wait()
+	})
+	suite.T().Cleanup(stop)
+	const requestCount = 10
+	// Establish monotonic requests before the caller changes group membership.
+	testutil.Eventually(re, func() bool { return successfulRequests.Load() >= requestCount })
+	return func() {
+		defer stop()
+		completed := successfulRequests.Load()
+		// Keep the same client running until it has also served requests after the transition.
+		testutil.Eventually(re, func() bool { return successfulRequests.Load() >= completed+requestCount })
 	}
 }
 
@@ -956,6 +968,14 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 	// Set the TSO of the keyspace group `firstID` to a large value.
 	err = suite.tsoCluster.GetPrimaryServer(2222, firstID).ResetTS(tsoutil.GenerateTS(&ts), false, true, firstID)
 	re.NoError(err)
+	readKeyspaceTS := func() pdpb.Timestamp {
+		client := utils.SetupClientWithKeyspaceID(suite.ctx, re, 2222, []string{suite.pdLeaderServer.GetAddr()})
+		defer client.Close()
+		physical, logical, err := client.GetTS(suite.ctx)
+		re.NoError(err)
+		return pdpb.Timestamp{Physical: physical, Logical: logical}
+	}
+	before := readKeyspaceTS()
 	// Merge the keyspace group `firstID` and `secondID` to the default keyspace group.
 	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, constant.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
 		MergeList: []uint32{firstID, secondID},
@@ -976,6 +996,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 		}
 		return err == nil && tsoutil.CompareTimestamp(&mergedTS, &pdpb.Timestamp{}) > 0
 	}, testutil.WithTickInterval(5*time.Second), testutil.WithWaitFor(time.Minute))
+	after := readKeyspaceTS()
+	re.Positive(tsoutil.CompareTimestamp(&after, &before), "before merge: %v, after merge: %v", &before, &after)
 	re.Positive(tsoutil.CompareTimestamp(&mergedTS, &ts))
 }
 

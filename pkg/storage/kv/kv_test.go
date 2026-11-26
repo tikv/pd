@@ -242,11 +242,14 @@ func testRevisionLoadConflict(re *require.Assertions, kv *etcdKVBase) {
 func mustHaveKeys(re *require.Assertions, kv Base, prefix string, expected ...KeyValuePair) {
 	keys, values, err := kv.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 0)
 	re.NoError(err)
-	re.Len(expected, len(keys))
-	for i, key := range keys {
-		re.Equal(expected[i].Key, key)
-		re.Equal(expected[i].Value, values[i])
+	expectedKeys := make([]string, 0, len(expected))
+	expectedValues := make([]string, 0, len(expected))
+	for _, pair := range expected {
+		expectedKeys = append(expectedKeys, pair.Key)
+		expectedValues = append(expectedValues, pair.Value)
 	}
+	re.Equal(expectedKeys, keys)
+	re.Equal(expectedValues, values)
 }
 
 func testRawTxn(re *require.Assertions, kv interface {
@@ -310,7 +313,10 @@ func testRawTxn(re *require.Assertions, kv interface {
 	re.True(res.Succeeded)
 	re.Len(res.Responses, 1)
 	re.Len(res.Responses[0].KeyValuePairs, 1)
+	re.Equal("txn-k2", res.Responses[0].KeyValuePairs[0].Key)
 	re.Equal("v2", res.Responses[0].KeyValuePairs[0].Value)
+	initialRevision := res.Responses[0].KeyValuePairs[0].ModRevision
+	re.Positive(initialRevision)
 	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k1", Value: "v1"}, KeyValuePair{Key: "txn-k2", Value: "v2"})
 
 	// Test NotEqual condition, else branch, reading range in transaction, reading & writing mixed.
@@ -343,7 +349,7 @@ func testRawTxn(re *require.Assertions, kv interface {
 	re.False(res.Succeeded)
 	re.Len(res.Responses, 2)
 	re.Len(res.Responses[0].KeyValuePairs, 2)
-	re.Equal([]KeyValuePair{{Key: "txn-k1", Value: "v1"}, {Key: "txn-k2", Value: "v2"}}, res.Responses[0].KeyValuePairs)
+	re.Equal([]KeyValuePair{{Key: "txn-k1", Value: "v1", ModRevision: initialRevision}, {Key: "txn-k2", Value: "v2", ModRevision: initialRevision}}, res.Responses[0].KeyValuePairs)
 	re.Empty(res.Responses[1].KeyValuePairs)
 
 	mustHaveKeys(re, kv, "txn-",
@@ -474,6 +480,60 @@ func testRawTxn(re *require.Assertions, kv interface {
 	}, false)
 }
 
+func TestRawTxnModRevision(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	base := NewEtcdKVBase(client)
+	ctx := context.Background()
+	re.NoError(base.Save("routing", "group-a"))
+	re.NoError(base.Save("unrelated", "newer"))
+	response, err := base.CreateRawTxn().Then(RawTxnOp{Key: "routing", OpType: RawTxnOpGet}).Commit()
+	re.NoError(err)
+	re.True(response.Succeeded)
+	re.Len(response.Responses, 1)
+	re.Len(response.Responses[0].KeyValuePairs, 1)
+	stored, err := client.Get(ctx, "routing")
+	re.NoError(err)
+	revision := stored.Kvs[0].ModRevision
+	re.Less(revision, stored.Header.Revision)
+	re.Equal(KeyValuePair{Key: "routing", Value: "group-a", ModRevision: revision}, response.Responses[0].KeyValuePairs[0])
+	commit := func(key string) bool {
+		res, err := base.CreateRawTxn().If(RawTxnCondition{Key: key, CmpType: RawTxnCmpModRevisionEqual, ModRevision: revision}).Then(
+			RawTxnOp{Key: "safe-point", OpType: RawTxnOpPut, Value: "200"},
+			RawTxnOp{Key: "barrier", OpType: RawTxnOpDelete},
+		).Commit()
+		re.NoError(err)
+		return res.Succeeded
+	}
+	re.NoError(base.Save("barrier", "100"))
+	re.True(commit("routing"))
+	mustHaveKeys(re, base, "safe-point", KeyValuePair{Key: "safe-point", Value: "200"})
+	mustHaveKeys(re, base, "barrier")
+	for _, mutation := range []string{"same-value", "delete-recreate", "missing"} {
+		t.Run(mutation, func(t *testing.T) {
+			re := require.New(t)
+			re.NoError(base.Save("safe-point", "50"))
+			re.NoError(base.Save("barrier", "100"))
+			stored, err := client.Get(ctx, "routing")
+			re.NoError(err)
+			revision = stored.Kvs[0].ModRevision
+			switch mutation {
+			case "same-value":
+				re.NoError(base.Save("routing", "group-a"))
+			case "delete-recreate":
+				re.NoError(base.Remove("routing"))
+				re.NoError(base.Save("routing", "group-a"))
+			case "missing":
+				re.NoError(base.Remove("routing"))
+			}
+			re.False(commit("routing"))
+			mustHaveKeys(re, base, "safe-point", KeyValuePair{Key: "safe-point", Value: "50"})
+			mustHaveKeys(re, base, "barrier", KeyValuePair{Key: "barrier", Value: "100"})
+		})
+	}
+}
+
 func TestRawTxnWithContext(t *testing.T) {
 	started := make(chan struct{}, 1)
 	blocked := false
@@ -509,9 +569,15 @@ func TestRawTxnWithContext(t *testing.T) {
 	re.NoError(err)
 	re.True(response.Succeeded)
 	re.Len(response.Responses, 3)
-	re.Equal([]KeyValuePair{{Key: "context-key", Value: "value"}}, response.Responses[0].KeyValuePairs)
+	stored, err := client.Get(context.Background(), "context-key")
+	re.NoError(err)
+	re.Positive(stored.Kvs[0].ModRevision)
+	re.Equal([]KeyValuePair{{Key: "context-key", Value: "value", ModRevision: stored.Kvs[0].ModRevision}}, response.Responses[0].KeyValuePairs)
 	re.Empty(response.Responses[1].KeyValuePairs)
-	re.Equal([]KeyValuePair{{Key: "context-empty", Value: ""}}, response.Responses[2].KeyValuePairs)
+	stored, err = client.Get(context.Background(), "context-empty")
+	re.NoError(err)
+	re.Positive(stored.Kvs[0].ModRevision)
+	re.Equal([]KeyValuePair{{Key: "context-empty", Value: "", ModRevision: stored.Kvs[0].ModRevision}}, response.Responses[2].KeyValuePairs)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

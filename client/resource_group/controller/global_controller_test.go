@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -150,124 +151,126 @@ func TestSendTokenBucketRequestsStopsWhenContextIsCanceled(t *testing.T) {
 }
 
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		ctx := t.Context()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport", fmt.Sprintf("return(\"%s\")", defaultResourceGroupName)))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport", fmt.Sprintf("return(\"%s\")", "test-group")))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport"))
-	}()
+		re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport", fmt.Sprintf("return(\"%s\")", defaultResourceGroupName)))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport", fmt.Sprintf("return(\"%s\")", "test-group")))
+		defer func() {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport"))
+			re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport"))
+		}()
 
-	mockProvider := newMockResourceGroupProvider()
-	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
-	re.NoError(err)
-	controller.Start(ctx)
+		mockProvider := newMockResourceGroupProvider()
+		controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+		re.NoError(err)
+		controller.Start(ctx)
 
-	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
-	testResourceGroup := &rmpb.ResourceGroup{Name: "test-group", Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
-	mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultResourceGroup, nil)
-	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+		defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+		testResourceGroup := &rmpb.ResourceGroup{Name: "test-group", Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+		mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultResourceGroup, nil)
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
 
-	c1, err := controller.tryGetResourceGroupController(ctx, defaultResourceGroupName, false)
-	re.NoError(err)
-	re.Equal(defaultResourceGroup, c1.meta)
+		c1, err := controller.tryGetResourceGroupController(ctx, defaultResourceGroupName, false)
+		re.NoError(err)
+		re.Equal(defaultResourceGroup, c1.meta)
 
-	c2, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
-	re.NoError(err)
-	re.Equal(testResourceGroup, c2.meta)
+		c2, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		re.Equal(testResourceGroup, c2.meta)
 
-	// test report ru consumption
-	var totalConsumption rmpb.Consumption
-	c2.mu.Lock()
-	totalConsumption = *c2.mu.consumption
-	c2.mu.Unlock()
-	delta := &rmpb.Consumption{
-		RRU:                      1.0,
-		WRU:                      2.0,
-		ReadBytes:                10,
-		WriteBytes:               20,
-		TotalCpuTimeMs:           30.0,
-		SqlLayerCpuTimeMs:        40.0,
-		KvReadRpcCount:           50,
-		KvWriteRpcCount:          60,
-		ReadCrossAzTrafficBytes:  100,
-		WriteCrossAzTrafficBytes: 200,
-	}
-	controller.ReportConsumption("test-group", delta)
-	// check the consumption
-	c2.mu.Lock()
-	add(&totalConsumption, delta)
-	require.Equal(t, c2.mu.consumption, &totalConsumption)
-	c2.mu.Unlock()
+		// test report ru consumption
+		var totalConsumption rmpb.Consumption
+		c2.mu.Lock()
+		totalConsumption = *c2.mu.consumption
+		c2.mu.Unlock()
+		delta := &rmpb.Consumption{
+			RRU:                      1.0,
+			WRU:                      2.0,
+			ReadBytes:                10,
+			WriteBytes:               20,
+			TotalCpuTimeMs:           30.0,
+			SqlLayerCpuTimeMs:        40.0,
+			KvReadRpcCount:           50,
+			KvWriteRpcCount:          60,
+			ReadCrossAzTrafficBytes:  100,
+			WriteCrossAzTrafficBytes: 200,
+		}
+		controller.ReportConsumption("test-group", delta)
+		// check the consumption
+		c2.mu.Lock()
+		add(&totalConsumption, delta)
+		require.Equal(t, c2.mu.consumption, &totalConsumption)
+		c2.mu.Unlock()
 
-	controller.ReportRUV2Consumption("test-group", 3.0, 4.0, 5.0)
-	c2.mu.Lock()
-	totalConsumption.TikvRUV2 += 3.0
-	totalConsumption.TidbRUV2 += 4.0
-	totalConsumption.TiflashRUV2 += 5.0
-	require.Equal(t, c2.mu.consumption, &totalConsumption)
-	c2.mu.Unlock()
+		controller.ReportRUV2Consumption("test-group", 3.0, 4.0, 5.0)
+		c2.mu.Lock()
+		totalConsumption.TikvRUV2 += 3.0
+		totalConsumption.TidbRUV2 += 4.0
+		totalConsumption.TiflashRUV2 += 5.0
+		require.Equal(t, c2.mu.consumption, &totalConsumption)
+		c2.mu.Unlock()
 
-	// test report with unknown group
-	controller.ReportConsumption("unknown-name", delta)
-	controller.ReportRUV2Consumption("unknown-name", 1.0, 1.0, 1.0)
+		// test report with unknown group
+		controller.ReportConsumption("unknown-name", delta)
+		controller.ReportRUV2Consumption("unknown-name", 1.0, 1.0, 1.0)
 
-	var expectResp []*rmpb.TokenBucketResponse
-	recTestGroupAcquireTokenRequest := make(chan bool)
-	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		request := args.Get(1).(*rmpb.TokenBucketsRequest)
-		var responses []*rmpb.TokenBucketResponse
-		for _, req := range request.Requests {
-			if req.ResourceGroupName == defaultResourceGroupName {
-				// no response the default group request, that's mean `len(c.run.currentRequests) != 0` always.
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(100 * time.Second):
+		var expectResp []*rmpb.TokenBucketResponse
+		recTestGroupAcquireTokenRequest := make(chan bool)
+		mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			request := args.Get(1).(*rmpb.TokenBucketsRequest)
+			var responses []*rmpb.TokenBucketResponse
+			for _, req := range request.Requests {
+				if req.ResourceGroupName == defaultResourceGroupName {
+					// no response the default group request, that's mean `len(c.run.currentRequests) != 0` always.
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(100 * time.Second):
+					}
+					responses = append(responses, &rmpb.TokenBucketResponse{
+						ResourceGroupName: defaultResourceGroupName,
+						GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
+							{
+								GrantedTokens: &rmpb.TokenBucket{
+									Tokens: 100000,
+								},
+							},
+						},
+					})
+				} else {
+					responses = append(responses, &rmpb.TokenBucketResponse{
+						ResourceGroupName: req.ResourceGroupName,
+						GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
+							{
+								GrantedTokens: &rmpb.TokenBucket{
+									Tokens: 100000,
+								},
+							},
+						},
+					})
 				}
-				responses = append(responses, &rmpb.TokenBucketResponse{
-					ResourceGroupName: defaultResourceGroupName,
-					GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
-						{
-							GrantedTokens: &rmpb.TokenBucket{
-								Tokens: 100000,
-							},
-						},
-					},
-				})
-			} else {
-				responses = append(responses, &rmpb.TokenBucketResponse{
-					ResourceGroupName: req.ResourceGroupName,
-					GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
-						{
-							GrantedTokens: &rmpb.TokenBucket{
-								Tokens: 100000,
-							},
-						},
-					},
-				})
 			}
+			// receive test-group request
+			if len(request.Requests) == 1 && request.Requests[0].ResourceGroupName == "test-group" {
+				recTestGroupAcquireTokenRequest <- true
+			}
+			expectResp = responses
+		}).Return(expectResp, nil)
+		// wait default group request token by PeriodicReport.
+		synctest.Sleep(2 * time.Second)
+		counter := c2.run.requestUnitTokens
+		counter.limiter.mu.Lock()
+		counter.limiter.notify()
+		counter.limiter.mu.Unlock()
+		select {
+		case res := <-recTestGroupAcquireTokenRequest:
+			re.True(res)
+		case <-time.After(5 * time.Second):
+			re.Fail("timeout")
 		}
-		// receive test-group request
-		if len(request.Requests) == 1 && request.Requests[0].ResourceGroupName == "test-group" {
-			recTestGroupAcquireTokenRequest <- true
-		}
-		expectResp = responses
-	}).Return(expectResp, nil)
-	// wait default group request token by PeriodicReport.
-	time.Sleep(2 * time.Second)
-	counter := c2.run.requestUnitTokens
-	counter.limiter.mu.Lock()
-	counter.limiter.notify()
-	counter.limiter.mu.Unlock()
-	select {
-	case res := <-recTestGroupAcquireTokenRequest:
-		re.True(res)
-	case <-time.After(5 * time.Second):
-		re.Fail("timeout")
-	}
+	})
 }
 
 func TestTryGetController(t *testing.T) {

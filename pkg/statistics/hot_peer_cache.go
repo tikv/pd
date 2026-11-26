@@ -671,6 +671,9 @@ func (f *HotPeerCache) removeItem(item *HotPeerStat) {
 	}
 	if stores, ok := f.storesOfRegion[item.RegionID]; ok {
 		delete(stores, item.StoreID)
+		if len(stores) == 0 {
+			delete(f.storesOfRegion, item.RegionID)
+		}
 	}
 	if regions, ok := f.regionsOfStore[item.StoreID]; ok {
 		delete(regions, item.RegionID)

@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -37,9 +38,9 @@ const tsoPrimaryEvictPath = "/tso/api/v1/primary/evict"
 // RegisterMicroservice registers microservice handler to the router.
 func RegisterMicroservice(r *gin.RouterGroup) {
 	router := r.Group("ms")
-	router.GET("members/:service", GetMembers)
-	router.GET("primary/:service", GetPrimary)
-	router.POST("tso/primary/evict", EvictTSOPrimary)
+	router.GET("members/:service", middlewares.Audit("GetMicroserviceMembers", audit.PrometheusHistogram), GetMembers)
+	router.GET("primary/:service", middlewares.Audit("GetPrimary", audit.PrometheusHistogram), GetPrimary)
+	router.POST("tso/primary/evict", middlewares.Audit("EvictTSOPrimary", audit.LocalLogLabel, audit.PrometheusHistogram), EvictTSOPrimary)
 }
 
 // GetMembers gets all members of the cluster for the specified service.

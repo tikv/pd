@@ -117,7 +117,7 @@ func TestGCState(t *testing.T) {
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
-	keyspaceLevel, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
+	keyspaceLevel, err := pdTests.CreateKeyspaceWithHistoricalGCMode(ctx, leaderServer.GetServer(),
 		&keyspace.CreateKeyspaceRequest{
 			Name: "gc_state_ks_level",
 			Config: map[string]string{
@@ -133,10 +133,7 @@ func TestGCState(t *testing.T) {
 	if !kerneltype.IsNextGen() {
 		unified, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
 			&keyspace.CreateKeyspaceRequest{
-				Name: "gc_state_unified",
-				Config: map[string]string{
-					keyspace.GCManagementType: keyspace.UnifiedGC,
-				},
+				Name:       "gc_state_unified",
 				CreateTime: time.Now().Unix(),
 			},
 		)

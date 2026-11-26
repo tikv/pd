@@ -89,7 +89,7 @@
 - No ignored errors unless allowed in `.golangci.yml` errcheck exclusions.
 - Error strings: lowercase, no trailing punctuation.
 - Prefer sentinel errors over panic; panic only on programmer bugs/impossible states.
-- HTTP handlers: use errcode + `errorResp`; avoid `http.Error`.
+- HTTP handlers: use `apiutil.ErrorResp` with `errs.NewInvalidInputErr` or `errs.NewInternalErr`; avoid `http.Error`.
 
 ## Logging
 - Use existing structured logging (zap/log); avoid `fmt.Println`.
@@ -178,6 +178,6 @@ Reusable agent skills live under `.agents/skills/`. Each skill has a `SKILL.md` 
 - Keep imports ordered, gofmt clean, modules tidy.
 - Respect depguard bans, revive/testifylint findings; fix before submission.
 - Ensure `PD_EDITION` set correctly; enable failpoints where required.
-- Keep error handling consistent with `pingcap/errors` and errcode usage.
+- Keep error handling consistent with `pingcap/errors` and the `pkg/errs` HTTP helpers.
 - Avoid new global state; keep concurrency safe; close resources.
 - Leave workspace clean (no stray tmp, coverage, or generated dashboard files).

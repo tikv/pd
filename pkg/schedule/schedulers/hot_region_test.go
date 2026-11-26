@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/docker/go-units"
@@ -315,80 +316,82 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 }
 
 func TestSplitIfRegionTooHot(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest()
-	defer cancel()
-	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
-	b := &metapb.Buckets{
-		RegionId:   1,
-		PeriodInMs: 1000,
-		Keys: [][]byte{
-			fmt.Appendf(nil, "%21d", 11),
-			fmt.Appendf(nil, "%21d", 12),
-			fmt.Appendf(nil, "%21d", 13),
-			fmt.Appendf(nil, "%21d", 14),
-			fmt.Appendf(nil, "%21d", 15),
-		},
-		Stats: &metapb.BucketStats{
-			ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB, 11 * units.KiB, 10 * units.KiB},
-			ReadKeys:   []uint64{256, 256, 156, 256},
-			ReadQps:    []uint64{0, 0, 0, 0},
-			WriteBytes: []uint64{100 * units.KiB, 10 * units.KiB, 10 * units.KiB, 10 * units.KiB},
-			WriteQps:   []uint64{256, 256, 156, 256},
-			WriteKeys:  []uint64{0, 0, 0, 0},
-		},
-	}
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		cancel, _, tc, oc := prepareSchedulersTest()
+		defer cancel()
+		hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+		re.NoError(err)
+		hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+		b := &metapb.Buckets{
+			RegionId:   1,
+			PeriodInMs: 1000,
+			Keys: [][]byte{
+				fmt.Appendf(nil, "%21d", 11),
+				fmt.Appendf(nil, "%21d", 12),
+				fmt.Appendf(nil, "%21d", 13),
+				fmt.Appendf(nil, "%21d", 14),
+				fmt.Appendf(nil, "%21d", 15),
+			},
+			Stats: &metapb.BucketStats{
+				ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB, 11 * units.KiB, 10 * units.KiB},
+				ReadKeys:   []uint64{256, 256, 156, 256},
+				ReadQps:    []uint64{0, 0, 0, 0},
+				WriteBytes: []uint64{100 * units.KiB, 10 * units.KiB, 10 * units.KiB, 10 * units.KiB},
+				WriteQps:   []uint64{256, 256, 156, 256},
+				WriteKeys:  []uint64{0, 0, 0, 0},
+			},
+		}
 
-	task := buckets.NewCheckPeerTask(b)
-	re.True(tc.CheckAsync(task))
-	time.Sleep(time.Millisecond * 10)
+		task := buckets.NewCheckPeerTask(b)
+		re.True(tc.CheckAsync(task))
+		synctest.Sleep(time.Millisecond * 10)
 
-	tc.AddRegionStore(1, 3)
-	tc.AddRegionStore(2, 2)
-	tc.AddRegionStore(3, 2)
+		tc.AddRegionStore(1, 3)
+		tc.AddRegionStore(2, 2)
+		tc.AddRegionStore(3, 2)
 
-	tc.UpdateStorageReadBytes(1, 6*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(2, 1*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(3, 1*units.MiB*utils.StoreHeartBeatReportInterval)
-	// Region 1, 2 and 3 are hot regions.
-	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
+		tc.UpdateStorageReadBytes(1, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageReadBytes(2, 1*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageReadBytes(3, 1*units.MiB*utils.StoreHeartBeatReportInterval)
+		// Region 1, 2 and 3 are hot regions.
+		addRegionInfo(tc, utils.Read, []testRegionInfo{
+			{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
+		})
+		tc.SetRegionBucketEnabled(true)
+		ops, _ := hb.Schedule(tc, false)
+		re.Len(ops, 1)
+		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
+			pdpb.CheckPolicy_USEKEY, [][]byte{fmt.Appendf(nil, "%21d", 13)})
+		re.NoError(err)
+		re.Equal(expectOp.Brief(), ops[0].Brief())
+		re.Equal(expectOp.Kind(), ops[0].Kind())
+
+		ops, _ = hb.Schedule(tc, false)
+		re.Empty(ops)
+
+		tc.UpdateStorageWrittenBytes(1, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(2, 1*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(3, 1*units.MiB*utils.StoreHeartBeatReportInterval)
+		// Region 1, 2 and 3 are hot regions.
+		addRegionInfo(tc, utils.Write, []testRegionInfo{
+			{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
+		})
+		hb, err = CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+		re.NoError(err)
+		hb.(*hotScheduler).types = []resourceType{writePeer}
+		ops, _ = hb.Schedule(tc, false)
+		re.Len(ops, 1)
+		expectOp, err = operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
+			pdpb.CheckPolicy_USEKEY, [][]byte{fmt.Appendf(nil, "%21d", 12)})
+		re.NoError(err)
+		re.Equal(expectOp.Brief(), ops[0].Brief())
+		re.Equal(expectOp.Kind(), ops[0].Kind())
+		re.Equal(operator.OpSplit, ops[0].Kind())
+
+		ops, _ = hb.Schedule(tc, false)
+		re.Empty(ops)
 	})
-	tc.SetRegionBucketEnabled(true)
-	ops, _ := hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
-		pdpb.CheckPolicy_USEKEY, [][]byte{fmt.Appendf(nil, "%21d", 13)})
-	re.NoError(err)
-	re.Equal(expectOp.Brief(), ops[0].Brief())
-	re.Equal(expectOp.Kind(), ops[0].Kind())
-
-	ops, _ = hb.Schedule(tc, false)
-	re.Empty(ops)
-
-	tc.UpdateStorageWrittenBytes(1, 6*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 1*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 1*units.MiB*utils.StoreHeartBeatReportInterval)
-	// Region 1, 2 and 3 are hot regions.
-	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
-	})
-	hb, err = CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb.(*hotScheduler).types = []resourceType{writePeer}
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	expectOp, err = operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
-		pdpb.CheckPolicy_USEKEY, [][]byte{fmt.Appendf(nil, "%21d", 12)})
-	re.NoError(err)
-	re.Equal(expectOp.Brief(), ops[0].Brief())
-	re.Equal(expectOp.Kind(), ops[0].Kind())
-	re.Equal(operator.OpSplit, ops[0].Kind())
-
-	ops, _ = hb.Schedule(tc, false)
-	re.Empty(ops)
 }
 
 func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
@@ -1731,6 +1734,60 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	re.Contains(hb.regionPendings, uint64(4))
 	re.True(typeutil.Float64Equal(509.0*units.KiB, hb.regionPendings[4].origin.Loads[utils.RegionReadBytes]))
 	clearPendingInfluence(hb)
+}
+
+func TestHotReadMoveLeaderLocationSafeguard(t *testing.T) {
+	for _, enablePlacementRules := range []bool{false, true} {
+		for _, rankFormula := range []string{"v1", "v2"} {
+			for _, testCase := range []struct {
+				locationLabels []string
+				targetHost     string
+			}{
+				{nil, "h2"},
+				{nil, "h5"},
+				{[]string{"host"}, "h2"},
+				{[]string{"host"}, "h5"},
+			} {
+				t.Run(fmt.Sprintf("rules=%t/rank=%s/labels=%v/target-host=%s", enablePlacementRules, rankFormula, testCase.locationLabels, testCase.targetHost), func(t *testing.T) {
+					re := require.New(t)
+					cancel, _, tc, oc := prepareSchedulersTest()
+					defer cancel()
+					tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+					tc.SetEnablePlacementRules(enablePlacementRules)
+					tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, "host")
+					tc.SetLocationLabels(testCase.locationLabels)
+					scheduler, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+					re.NoError(err)
+					hb := scheduler.(*hotScheduler)
+					hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+					hb.conf.setRankFormulaVersion(rankFormula)
+					hb.conf.setHistorySampleDuration(0)
+
+					for id, host := range map[uint64]string{1: "h1", 2: "h2", 3: "h3", 4: "h4", 5: testCase.targetHost} {
+						tc.AddLabelsStore(id, 3, map[string]string{"host": host})
+					}
+					for id, rate := range map[uint64]float64{1: 7.5, 2: 4.9, 3: 3.7, 4: 6, 5: 0} {
+						tc.UpdateStorageReadBytes(id, uint64(rate*units.MiB*utils.StoreHeartBeatReportInterval))
+					}
+					addRegionInfo(tc, utils.Read, []testRegionInfo{
+						{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
+						{2, []uint64{2, 1, 3}, 511 * units.KiB, 0, 0},
+						{3, []uint64{1, 2, 3}, 510 * units.KiB, 0, 0},
+					})
+
+					ops, _ := hb.Schedule(tc, false)
+					re.Len(ops, 1)
+					if testCase.targetHost == "h2" && (enablePlacementRules || len(testCase.locationLabels) > 0) {
+						// Store 5 shares the host of an existing peer. Reject the
+						// replacement, but still allow transfer to an existing peer.
+						operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
+					} else {
+						operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 5)
+					}
+				})
+			}
+		}
+	}
 }
 
 func TestHotReadRegionScheduleSkipsLeaderEvictedMoveLeaderTarget(t *testing.T) {
