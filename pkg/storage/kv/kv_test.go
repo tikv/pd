@@ -166,9 +166,8 @@ func testSaveMultiple(re *require.Assertions, kv Base, count int) {
 	}
 }
 
-// testLoadConflict checks that if any value loaded during the current transaction
-// has been modified by another transaction before the current one commit,
-// then the current transaction must fail.
+// testLoadConflict checks that on etcd, a write to a key read by Load changes
+// its ModRevision and causes the reading transaction's commit to fail.
 func testLoadConflict(re *require.Assertions, kv Base) {
 	re.NoError(kv.Save("testKey", "initialValue"))
 	// loader loads the test key value.
@@ -314,9 +313,22 @@ func testTxnLoadLargeJSON(t *testing.T, kv *etcdKVBase) {
 func testTxnLoadRangeModRevision(t *testing.T, kv *etcdKVBase) {
 	re := require.New(t)
 	const prefix = "range-mod-revision/"
-	re.NoError(kv.Save(prefix+"b", "A"))
 	re.NoError(kv.Save(prefix+"a", "A"))
+	re.NoError(kv.Save(prefix+"b", "A"))
 	re.NoError(kv.Save("range-mod-revision0", "outside prefix"))
+
+	t.Run("unreturned-key-update", func(t *testing.T) {
+		re := require.New(t)
+		// Writing b after a makes a's ModRevision older than the range response's revision.
+		re.NoError(kv.RunInTxn(t.Context(), func(txn Txn) error {
+			keys, values, err := txn.LoadRange(prefix, "\x00", 1)
+			re.NoError(err)
+			re.Equal([]string{prefix + "a"}, keys)
+			re.Equal([]string{"A"}, values)
+			return kv.Save(prefix+"b", "B")
+		}))
+		re.NoError(kv.Save(prefix+"b", "A"))
+	})
 
 	for _, tc := range []struct {
 		name         string
@@ -363,6 +375,7 @@ func testTxnLoadRangeModRevision(t *testing.T, kv *etcdKVBase) {
 }
 
 func TestTxnLoadRangeCancellation(t *testing.T) {
+	const key = "cancel-range"
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
@@ -370,7 +383,7 @@ func TestTxnLoadRangeCancellation(t *testing.T) {
 			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(
 				func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn,
 					invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-					if method == "/etcdserverpb.KV/Range" {
+					if r, ok := req.(*etcdserverpb.RangeRequest); ok && string(r.Key) == key {
 						cancel()
 					}
 					return invoker(ctx, method, req, reply, cc, opts...)
@@ -381,10 +394,10 @@ func TestTxnLoadRangeCancellation(t *testing.T) {
 	defer clean()
 	re := require.New(t)
 	kv := NewEtcdKVBase(client)
-	re.NoError(kv.Save("cancel-range", "value"))
+	re.NoError(kv.Save(key, "value"))
 	err := kv.RunInTxn(ctx, func(txn Txn) error {
 		re.NoError(ctx.Err())
-		keys, values, err := txn.LoadRange("cancel-range", "\x00", 1)
+		keys, values, err := txn.LoadRange(key, "\x00", 1)
 		re.ErrorIs(err, context.Canceled)
 		re.Nil(keys)
 		re.Nil(values)

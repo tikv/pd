@@ -212,10 +212,11 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 // Transaction commit will be successful only if all conditions are met,
 // including the revision checks for keys read during the transaction.
 type etcdTxn struct {
-	kv         *etcdKVBase
-	ctx        context.Context
-	conditions []clientv3.Cmp
-	operations []clientv3.Op
+	kv           *etcdKVBase
+	ctx          context.Context
+	conditions   []clientv3.Cmp
+	operations   []clientv3.Op
+	linearizeKey string
 }
 
 // RunInTxn runs user provided function f in a transaction.
@@ -285,6 +286,9 @@ func (txn *etcdTxn) LoadWithRevision(key string) (string, int64, error) {
 	default:
 		return "", 0, errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
 	}
+	if txn.linearizeKey == "" {
+		txn.linearizeKey = key
+	}
 	txn.conditions = append(txn.conditions, condition)
 	return value, revision, nil
 }
@@ -305,6 +309,9 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 		condition := clientv3.Compare(clientv3.ModRevision(key), "=", item.ModRevision)
 		txn.conditions = append(txn.conditions, condition)
 	}
+	if txn.linearizeKey == "" && len(keys) > 0 {
+		txn.linearizeKey = keys[0]
+	}
 	return keys, values, nil
 }
 
@@ -314,10 +321,20 @@ func (txn *etcdTxn) commit() error {
 	failpoint.Inject("slowTxn", func() {
 		time.Sleep(10 * time.Second)
 	})
-	// Using slowLogTxn to commit transaction.
+	ops := txn.operations
+	if len(txn.conditions) > 0 && len(ops) == 0 {
+		key := txn.linearizeKey
+		if key == "" {
+			// A caller can supply comparisons without reading through the transaction.
+			key = string(txn.conditions[0].KeyBytes())
+		}
+		// A non-serializable Get makes etcd linearize the transaction before
+		// evaluating comparisons, even when it takes the empty Else branch.
+		ops = append(ops, clientv3.OpGet(key, clientv3.WithCountOnly()))
+	}
 	slowLogTxn := NewSlowLogTxnWithContext(txn.ctx, txn.kv.client)
 	slowLogTxn.If(txn.conditions...)
-	slowLogTxn.Then(txn.operations...)
+	slowLogTxn.Then(ops...)
 	resp, err := slowLogTxn.Commit()
 	if err != nil {
 		return err
