@@ -626,7 +626,7 @@ func TestClusterIsolationWithIdenticalTagDifferentTiUPHome(t *testing.T) {
 			re.NoError(os.MkdirAll(filepath.Dir(binPath), 0750))
 			script := fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
-  echo "$TIUP_HOME/components/playground/v1.17.1/tiup-playground"
+  echo "$0"
   exit 0
 fi
 if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
@@ -648,13 +648,15 @@ exit 1
 			return binPath
 		}
 
+		execPath, err := os.Executable()
+		re.NoError(err)
 		startFakeServer := func(binaryName string, extraArgs ...string) int {
 			fakeBin := filepath.Join(repoDir, "bin", binaryName)
-			if target, err := os.Readlink(fakeBin); err != nil || target != os.Args[0] {
+			if target, err := os.Readlink(fakeBin); err != nil || target != execPath {
 				if rmErr := os.Remove(fakeBin); rmErr != nil && !os.IsNotExist(rmErr) {
 					re.NoError(rmErr)
 				}
-				re.NoError(os.Symlink(os.Args[0], fakeBin))
+				re.NoError(os.Symlink(execPath, fakeBin))
 			}
 			args := append([]string{fakeBin, "-test.run=^TestHelperFakeServer$", "--"}, extraArgs...)
 			cmd := &exec.Cmd{
@@ -957,7 +959,7 @@ func TestClusterWithSpacesInTiUPHome(t *testing.T) {
 home="${TIUP_HOME:-$HOME/.tiup}"
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   if [ -f "$home/playground-installed" ]; then
-    echo "$home/components/playground/v1.17.1/tiup-playground"
+    echo "$0"
     exit 0
   fi
   exit 1
@@ -1035,7 +1037,7 @@ func TestClusterStopDoesNotKillSimilarTag(t *testing.T) {
 		binPath := filepath.Join(t.TempDir(), "tiup")
 		script := fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
-  echo "/fake/tiup-playground"
+  echo "$0"
   exit 0
 fi
 if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
@@ -1140,7 +1142,7 @@ func setupFakeFailingClusterEnv(t *testing.T, pidFile string) (repoDir, fakeTiUP
 	fakeTiUP = filepath.Join(t.TempDir(), "tiup")
 	script := fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
-  echo "/fake/tiup-playground"
+  echo "$0"
   exit 0
 fi
 if [ "$1" = "playground" ] && [ "$2" = "display" ]; then
@@ -1270,13 +1272,10 @@ func TestClusterWaitTimeoutBudget(t *testing.T) {
 		re.NoError(os.WriteFile(filepath.Join(repoDir, rel), []byte("#!/bin/sh\n"), 0600))
 	}
 
-	markerDir := t.TempDir()
-	displayStartedFile := filepath.Join(markerDir, "display.started")
-	readyFile := filepath.Join(markerDir, "display.ready")
 	fakeTiUP := filepath.Join(t.TempDir(), "tiup")
-	script := fmt.Sprintf(`#!/bin/sh
+	script := `#!/bin/sh
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
-  echo "/fake/tiup-playground"
+  echo "$0"
   exit 0
 fi
 if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
@@ -1287,18 +1286,12 @@ if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
   exit 0
 fi
 if [ "$1" = "playground" ] && [ "$2" = "display" ]; then
-  if [ ! -f %q ]; then
-    : > %q
-  fi
-  if [ -f %q ]; then
-    echo "Pid Role Uptime"
-    exit 0
-  fi
-  echo "Error: no playground running"
-  exit 1
+  sleep 0.35
+  echo "Pid Role Uptime"
+  exit 0
 fi
 exit 1
-`, displayStartedFile, displayStartedFile, readyFile)
+`
 	re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
 	re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
 
@@ -1316,49 +1309,16 @@ exit 1
 	clusterPollPeriod = 20 * time.Millisecond
 
 	// A full cluster that becomes ready after clusterWaitTimeout (200ms) still
-	// succeeds within fullClusterWaitTimeout (2s). Arm the delay only after the
-	// first display poll runs so scheduling pauses before launch cannot make the
-	// marker appear prematurely.
-	stopMarker := make(chan struct{})
-	markerDone := make(chan struct{})
-	readyErrCh := make(chan error, 1)
-	go func() {
-		defer close(markerDone)
-		ticker := time.NewTicker(5 * time.Millisecond)
-		defer ticker.Stop()
-		for !fileExists(displayStartedFile) {
-			select {
-			case <-stopMarker:
-				readyErrCh <- nil
-				return
-			case <-ticker.C:
-			}
-		}
-		timer := time.NewTimer(350 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-stopMarker:
-			readyErrCh <- nil
-			return
-		case <-timer.C:
-		}
-		readyErrCh <- os.WriteFile(readyFile, []byte("ready"), 0600)
-	}()
-	t.Cleanup(func() {
-		close(stopMarker)
-		<-markerDone
-	})
-
+	// succeeds within fullClusterWaitTimeout (2s). The delay lives inside the
+	// fake display probe so pre-launch scheduling pauses cannot satisfy readiness early.
 	fullTag := fmt.Sprintf("pd_real_cluster_test_full_budget_%d", time.Now().UnixNano())
 	fullCluster := newCluster(re, fullTag, filepath.Join(t.TempDir(), fullTag), "")
 	defer fullCluster.stop()
 	start := time.Now()
 	fullCluster.start()
-	re.NoError(<-readyErrCh)
 	re.GreaterOrEqual(time.Since(start), 300*time.Millisecond)
 
 	// A tikv-slim cluster still enforces the shorter clusterWaitTimeout.
-	re.NoError(os.Remove(readyFile))
 	rec := &failNowRecorder{}
 	done := make(chan struct{})
 	slimTag := fmt.Sprintf("pd_real_cluster_test_slim_budget_%d", time.Now().UnixNano())
@@ -1370,6 +1330,48 @@ exit 1
 	}()
 	<-done
 	re.True(rec.failed)
+}
+
+func TestEnsurePlaygroundInstalledRecoversIncompleteInstall(t *testing.T) {
+	re := require.New(t)
+	tiupHome := t.TempDir()
+	incompleteDir := filepath.Join(tiupHome, "components", "playground", "v1.16.4")
+	re.NoError(os.MkdirAll(filepath.Join(incompleteDir, "download-in-progress"), 0750))
+	expectedBin := filepath.Join(incompleteDir, "tiup-playground")
+
+	installLog := filepath.Join(t.TempDir(), "install.log")
+	fakeTiUP := filepath.Join(tiupHome, "bin", "tiup")
+	re.NoError(os.MkdirAll(filepath.Dir(fakeTiUP), 0750))
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
+  if [ -d %q ]; then
+    echo %q
+    exit 0
+  fi
+  exit 1
+fi
+if [ "$1" = "install" ] && [ "$2" = "playground" ]; then
+  if [ -d %q ]; then
+    echo "stale-dir-present" > %q
+    exit 0
+  fi
+  mkdir -p %q
+  printf '#!/bin/sh\nexit 0\n' > %q
+  chmod 700 %q
+  echo "installed" > %q
+  exit 0
+fi
+exit 1
+`, incompleteDir, expectedBin, incompleteDir, installLog, incompleteDir, expectedBin, expectedBin, installLog)
+	re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
+	re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
+
+	re.False(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+	ensurePlaygroundInstalledWithTiUPHome(re, fakeTiUP, tiupHome)
+	re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+	logData, err := os.ReadFile(installLog) //nolint:gosec
+	re.NoError(err)
+	re.Equal("installed", strings.TrimSpace(string(logData)))
 }
 
 func TestClusterStopPGIDSignalGuard(t *testing.T) {
@@ -1420,7 +1422,7 @@ func TestClusterStopPGIDSignalGuard(t *testing.T) {
 		re := require.New(t)
 		script := `#!/bin/sh
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
-  echo "/fake/tiup-playground"
+  echo "$0"
   exit 0
 fi
 if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
@@ -1468,7 +1470,7 @@ exit 1
 		tmpPIDFile := childPIDFile + ".tmp"
 		script := fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
-  echo "/fake/tiup-playground"
+  echo "$0"
   exit 0
 fi
 if [ "$1" = "playground" ] && [ "$2" = "nightly" ]; then
@@ -1916,7 +1918,7 @@ func TestResolveTiUPBinAndRelativeTiUPHome(t *testing.T) {
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   printf 'probe|%%s\n' "$TIUP_HOME" >> %q
   if [ -f %q ]; then
-    echo "$TIUP_HOME/components/playground/v1.17.1/tiup-playground"
+    echo "$0"
     exit 0
   fi
   exit 1

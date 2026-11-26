@@ -371,8 +371,12 @@ func ensurePlaygroundInstalled(re *require.Assertions, bin string) {
 }
 
 func ensurePlaygroundInstalledWithTiUPHome(re *require.Assertions, bin, absTiUPHome string) {
-	if isPlaygroundInstalledWithTiUPHome(bin, absTiUPHome) {
+	binPath := probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
+	if isExecutable(binPath) {
 		return
+	}
+	if binPath != "" {
+		cleanupIncompletePlaygroundDir(binPath, absTiUPHome)
 	}
 	log.Info("installing tiup playground component before starting cluster")
 	ctx, cancel := context.WithTimeout(context.Background(), tiupInstallTimeout)
@@ -382,6 +386,8 @@ func ensurePlaygroundInstalledWithTiUPHome(re *require.Assertions, bin, absTiUPH
 		log.Info(output)
 	}
 	re.NoError(err)
+	installedPath := probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
+	re.Truef(isExecutable(installedPath), "tiup playground binary %q is not executable after install", installedPath)
 }
 
 func isPlaygroundInstalled(bin string) bool {
@@ -389,10 +395,31 @@ func isPlaygroundInstalled(bin string) bool {
 }
 
 func isPlaygroundInstalledWithTiUPHome(bin, absTiUPHome string) bool {
+	return isExecutable(probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome))
+}
+
+func probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), tiupProbeTimeout)
 	defer cancel()
 	output, err := runExecWithEnvOutputContext(ctx, "", envWithTiUPHome(absTiUPHome), bin, "--binary", "playground")
-	return err == nil && strings.TrimSpace(output) != ""
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(output)
+}
+
+func cleanupIncompletePlaygroundDir(binPath, absTiUPHome string) {
+	if binPath == "" || absTiUPHome == "" {
+		return
+	}
+	verDir := filepath.Dir(filepath.Clean(binPath))
+	playgroundRoot := filepath.Clean(filepath.Join(absTiUPHome, "components", "playground"))
+	if filepath.Clean(filepath.Dir(verDir)) != playgroundRoot || verDir == playgroundRoot {
+		return
+	}
+	log.Warn("removing incomplete tiup playground version directory before reinstall",
+		zap.String("dir", verDir), zap.String("binary", binPath))
+	_ = os.RemoveAll(verDir)
 }
 
 func buildPlaygroundArgs(mode, tag string, portOffset int, instances map[string]int) []string {

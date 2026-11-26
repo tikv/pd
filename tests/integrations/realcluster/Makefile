@@ -42,7 +42,11 @@ tiup:
 	else \
 		TIUP_BIN="$$TIUP_DIR/bin/tiup"; \
 	fi; \
-	if [ -x "$$TIUP_BIN" ] && "$$TIUP_BIN" --binary playground > /dev/null 2>&1; then \
+	PG_BIN=""; \
+	if [ -x "$$TIUP_BIN" ]; then \
+		PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
+	fi; \
+	if [ -x "$$TIUP_BIN" ] && [ -n "$$PG_BIN" ] && [ -x "$$PG_BIN" ]; then \
 		echo "tiup already installed"; \
 		echo "tiup version: $$("$$TIUP_BIN" --version)"; \
 	else \
@@ -54,9 +58,22 @@ tiup:
 			echo "tiup already installed"; \
 		fi; \
 		echo "tiup version: $$("$$TIUP_BIN" --version)"; \
-		if ! "$$TIUP_BIN" --binary playground > /dev/null 2>&1; then \
+		PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
+		if [ -z "$$PG_BIN" ] || [ ! -x "$$PG_BIN" ]; then \
+			if [ -n "$$PG_BIN" ]; then \
+				PG_VER_DIR="$$(dirname "$$PG_BIN")"; \
+				if [ "$$(dirname "$$PG_VER_DIR")" = "$$TIUP_DIR/components/playground" ]; then \
+					echo "Removing incomplete tiup playground directory $$PG_VER_DIR..."; \
+					rm -rf "$$PG_VER_DIR"; \
+				fi; \
+			fi; \
 			echo "Installing tiup playground..."; \
 			"$$TIUP_BIN" install playground; \
+			PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
+			if [ -z "$$PG_BIN" ] || [ ! -x "$$PG_BIN" ]; then \
+				echo "tiup playground binary is missing or not executable after install: $$PG_BIN" >&2; \
+				exit 1; \
+			fi; \
 		fi; \
 	fi
 
@@ -81,7 +98,7 @@ kill_cluster:
 		sleep 30; \
 	fi
 
-test:
+test: tiup
 	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover -timeout 20m || (\
 	echo "The following is pd-0 log" ; \
 	cat ~/.tiup/data/pd_real_cluster_test/pd-0/pd.log ; \
