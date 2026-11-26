@@ -15,8 +15,10 @@
 package schedulers
 
 import (
+	"encoding/hex"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -233,6 +235,16 @@ func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKi
 		tolerantSizeRatio = max(maxRegionCount*adjustRatio, minTolerantSizeRatio)
 	}
 	return tolerantSizeRatio
+}
+
+// formatKeyRanges renders the ranges as hex so that keys with bytes that are
+// not valid UTF-8 survive the text logger.
+func formatKeyRanges(ranges []keyutil.KeyRange) string {
+	parts := make([]string, 0, len(ranges))
+	for _, r := range ranges {
+		parts = append(parts, hex.EncodeToString(r.StartKey)+"-"+hex.EncodeToString(r.EndKey))
+	}
+	return strings.Join(parts, ",")
 }
 
 func getKeyRanges(args []string) ([]keyutil.KeyRange, error) {
