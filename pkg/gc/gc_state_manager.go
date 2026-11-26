@@ -1252,7 +1252,7 @@ func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier,
 // and GC barriers. The behaviors are mapped as follows:
 //
 //   - The service safe point with service ID "gc_worker" is mapped to the txn safe point.
-//   - The global "native_br" service safe point is retired. Its caller must use the global GC barrier API.
+//   - The global "native_br" service safe point is mapped to the "native_br" global GC barrier.
 //   - The service safe point with other service IDs are mapped to GC barriers with barrier IDs equal to the given
 //     service IDs.
 //
@@ -1271,12 +1271,15 @@ func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier,
 //     the minimal service safe point. Returns a simulated service safe point whose serviceID starts with
 //     "tidb_min_start_ts_" to simulate the minimal service safe point. It may actually be either a GC barrier or
 //     a *TiDB min start ts*.
-//  2. If "native_br" resolves to NullKeyspace, the operation returns an error. On other keyspaces it still
-//     calls SetGCBarrier or DeleteGCBarrier.
+//  2. If "native_br" resolves to NullKeyspace, a positive TTL sets the global barrier and the response reports
+//     its stored TS. If an explicit TS is too low, the response reports the minimum accepted TS so the client
+//     can retry. A non-positive TTL deletes the global barrier and returns zero.
 //  3. If the given serviceID is anything else, it internally calls SetGCBarrier or DeleteGCBarrier, depending on
 //     whether the `ttl` is positive or not. As the txn safe point is always less or equal to any GC barriers, we
 //     simulate the case that the service safe point of "gc_worker" is the minimal one, and return a service safe point
 //     with the service ID equals to "gc_worker".
+//
+// Pass zero for now to use the PD host clock. Global barriers sample it during admission.
 func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
 	defer observation.logWarnings()
@@ -1294,6 +1297,12 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
+	if serviceID == keypath.NativeBRServiceSafePointID && keyspaceID == constant.NullKeyspaceID {
+		return m.updateNativeBRServiceSafePoint(ctx, newServiceSafePoint, ttl, now)
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
 	if serviceID == keypath.GCWorkerServiceSafePointID {
 		if ttl != math.MaxInt64 {
 			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
@@ -1317,10 +1326,6 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 		}
 		return minServiceSafePoint, res.OldTxnSafePoint != res.NewTxnSafePoint, nil
 	}
-	if serviceID == keypath.NativeBRServiceSafePointID && keyspaceID == constant.NullKeyspaceID {
-		return nil, false, errors.New("global native_br service safe point is retired: use SetGlobalGCBarrier or DeleteGlobalGCBarrier")
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ttl > 0 {
@@ -1343,6 +1348,28 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 	}
 	updated = ttl > 0 && txnSafePoint <= newServiceSafePoint
 	return minServiceSafePoint, updated, nil
+}
+
+func (m *GCStateManager) updateNativeBRServiceSafePoint(ctx context.Context, ts uint64, ttl int64, now time.Time) (*endpoint.ServiceSafePoint, bool, error) {
+	const id = keypath.NativeBRServiceSafePointID
+	minimum := &endpoint.ServiceSafePoint{ServiceID: keypath.GCWorkerServiceSafePointID, ExpiredAt: math.MaxInt64}
+	if ttl <= 0 {
+		if _, err := m.DeleteGlobalGCBarrier(ctx, id); err != nil {
+			return nil, false, err
+		}
+		return minimum, false, nil
+	}
+	barrier, err := m.SetGlobalGCBarrier(ctx, id, ts, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
+	if err != nil {
+		rejection, ok := errors.AsType[*globalGCBarrierTSUnsafeError](err)
+		if !ok {
+			return nil, false, err
+		}
+		minimum.SafePoint = rejection.floor
+		return minimum, false, nil
+	}
+	minimum.SafePoint = barrier.BarrierTS
+	return minimum, true, nil
 }
 
 // AdvanceTxnSafePointResult represents the result of an invocation of GCStateManager.AdvanceTxnSafePoint.
@@ -1430,7 +1457,7 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 
 func (m *GCStateManager) setGlobalGCBarrierImpl(ctx context.Context, barrierID string, requestedTS uint64, ttl time.Duration, suppliedTime time.Time) (*endpoint.GlobalGCBarrier, error) {
 	var newBarrier *endpoint.GlobalGCBarrier
-	var rejection error
+	var rejectedFloor uint64
 	admissionTime := suppliedTime
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		barriers, err := m.gcMetaStorage.LoadAllGlobalGCBarriers()
@@ -1463,7 +1490,7 @@ func (m *GCStateManager) setGlobalGCBarrierImpl(ctx context.Context, barrierID s
 			selectedTS = floor
 		} else if requestedTS < floor {
 			// Validate the read-only transaction's revision before reporting this threshold.
-			rejection = errs.ErrGlobalGCBarrierTSUnsafe.GenWithStackByArgs(requestedTS, floor)
+			rejectedFloor = floor
 			return nil
 		}
 		var expiresAt *time.Time
@@ -1477,14 +1504,25 @@ func (m *GCStateManager) setGlobalGCBarrierImpl(ctx context.Context, barrierID s
 	if err != nil {
 		return nil, err
 	}
-	if rejection != nil {
-		return nil, rejection
+	if rejectedFloor > 0 {
+		return nil, &globalGCBarrierTSUnsafeError{
+			error: errs.ErrGlobalGCBarrierTSUnsafe.GenWithStackByArgs(requestedTS, rejectedFloor),
+			floor: rejectedFloor,
+		}
 	}
 	log.Info("global GC barrier set", zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", newBarrier.BarrierTS),
 		zap.Duration("ttl", ttl), zap.Stringer("new-gc-barrier", newBarrier))
 	m.barrierMetrics.updateMetrics(barrierMetricScope{global: true}, &endpoint.GCBarrier{BarrierID: newBarrier.BarrierID, BarrierTS: newBarrier.BarrierTS, ExpirationTime: newBarrier.ExpirationTime.Time}, admissionTime)
 	return newBarrier, nil
 }
+
+// globalGCBarrierTSUnsafeError carries the committed admission floor for the legacy native_br response.
+type globalGCBarrierTSUnsafeError struct {
+	error
+	floor uint64
+}
+
+func (e *globalGCBarrierTSUnsafeError) Unwrap() error { return e.error }
 
 // DeleteGlobalGCBarrier deletes a global GC barrier by the given barrierID.
 // Returns the information of the deleted GC barrier, or nil if the barrier does not exist.

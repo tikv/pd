@@ -1014,7 +1014,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 	nativeBRServiceID := "native_br"
 	cdcServiceSafePoint := uint64(10)
 	gcWorkerSafePoint := uint64(8)
-	nativeBRSafePoint := uint64(14)
+	nativeBRSafePoint := gcTestTS(1)
 	brSafePoint := uint64(15)
 
 	wg := sync.WaitGroup{}
@@ -1054,13 +1054,13 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeys
 		as.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
-	// The retired global native_br entry point rejects concurrent writes as well.
+	// Updating native_br registers a global barrier alongside the scoped service safe points.
 	go func() {
 		defer wg.Done()
 		minimum, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, nativeBRServiceID, nativeBRSafePoint, math.MaxInt64, time.Now())
-		as.ErrorContains(err, "SetGlobalGCBarrier")
-		as.False(updated)
-		as.Nil(minimum)
+		if as.NoError(err) && as.True(updated) && as.NotNil(minimum) {
+			as.Equal(nativeBRSafePoint, minimum.SafePoint)
+		}
 	}()
 
 	go func() {
@@ -1639,6 +1639,19 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarrierRechecksFloorOnRevisionConf
 	re.Nil(s.getGlobalGCBarrier("copy"))
 }
 
+func (s *gcStateManagerTestSuite) TestLegacyNativeBRReturnsFloorAfterRevisionConflict() {
+	re := s.Require()
+	now := time.Now()
+	s.prepareGlobalGCBarrierRevisionConflict(s.T().Context(), now)
+
+	// The rejection at the old floor conflicts with the removal of the last active barrier.
+	minimum, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, keypath.NativeBRServiceSafePointID, gcTestTS(1)-1, 60, now)
+	re.NoError(err)
+	re.False(updated)
+	re.Equal(gcTestTS(2), minimum.SafePoint)
+	re.Nil(s.getGlobalGCBarrier(keypath.NativeBRServiceSafePointID))
+}
+
 func (s *gcStateManagerTestSuite) TestGlobalGCBarrierReselectsTSOnRevisionConflict() {
 	re := s.Require()
 	ctx := context.Background()
@@ -2006,27 +2019,53 @@ func (s *gcStateManagerTestSuite) TestLegacyGCWorkerBarrierExpiry() {
 
 func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNativeBR() {
 	re := s.Require()
-	now := time.Now()
+	const id = keypath.NativeBRServiceSafePointID
+	now := time.Now().Truncate(time.Second)
+	update := func(ts uint64, ttl int64) (uint64, bool) {
+		s.T().Helper()
+		minimum, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, id, ts, ttl, now)
+		re.NoError(err)
+		re.Equal(keypath.GCWorkerServiceSafePointID, minimum.ServiceID)
+		return minimum.SafePoint, updated
+	}
+	floor := gcTestTS(1)
+	minimum, updated := update(0, 60)
+	re.True(updated)
+	re.Equal(floor, minimum)
+	original := endpoint.NewGlobalGCBarrier(id, floor, new(now.Add(time.Minute)))
+	re.Equal(original, s.getGlobalGCBarrier(id))
 
-	// A legacy request must neither initialize a global barrier at zero nor rewrite
-	// or delete a native barrier that happens to have the same ID.
-	for _, ttl := range []int64{3600, 0, -1} {
-		minimum, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", 0, ttl, now)
-		re.ErrorContains(err, "SetGlobalGCBarrier")
-		re.Nil(minimum)
+	setTestTSOWindow(s.T(), s.storage, 2)
+	minimum, updated = update(floor-1, 3600)
+	re.False(updated)
+	re.Equal(floor, minimum)
+	re.Equal(original, s.getGlobalGCBarrier(id))
+	minimum, updated = update(minimum, 120)
+	re.True(updated)
+	re.Equal(floor, minimum)
+	re.Equal(endpoint.NewGlobalGCBarrier(id, floor, new(now.Add(2*time.Minute))), s.getGlobalGCBarrier(id))
+
+	for _, ttl := range []int64{0, -1} {
+		reachedTS, updated := update(gcTestTS(2)+1, 60)
+		re.True(updated)
+		re.Equal(gcTestTS(2)+1, reachedTS)
+		minimum, updated = update(0, ttl)
 		re.False(updated)
-		re.Nil(s.getGlobalGCBarrier("native_br"))
+		re.Zero(minimum)
+		re.Nil(s.getGlobalGCBarrier(id))
 	}
-	b, err := s.manager.SetGlobalGCBarrier(context.Background(), "native_br", 0, time.Hour, now)
-	re.NoError(err)
-	for _, ttl := range []int64{3600, 0, -1} {
-		_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", b.BarrierTS+1, ttl, now)
-		re.ErrorContains(err, "SetGlobalGCBarrier")
-		re.Equal(b, s.getGlobalGCBarrier("native_br"))
-	}
-	_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "native_br")
-	re.NoError(err)
-	_, err = s.manager.AdvanceTxnSafePoint(2, 32, now)
+
+	re.NoError(s.storage.Remove(keypath.TimestampPath(constant.DefaultKeyspaceGroupID)))
+	result, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, id, 0, 60, now)
+	re.ErrorContains(err, "no persisted TSO window")
+	re.Nil(result)
+	re.False(updated)
+}
+
+func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForScopedNativeBR() {
+	re := s.Require()
+	now := time.Now()
+	_, err := s.manager.AdvanceTxnSafePoint(2, 32, now)
 	re.NoError(err)
 
 	// "native_br" on other keyspaces is transformed into GC barriers

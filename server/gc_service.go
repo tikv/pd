@@ -203,22 +203,21 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	if rc == nil {
 		return &pdpb.UpdateServiceGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
-	now := time.Now()
 	serviceID := string(request.ServiceId)
-	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTTL(), now)
+	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTTL(), time.Time{})
 	if err != nil {
 		return nil, err
 	}
 	if updated {
 		log.Info("update service GC safe point",
 			zap.String("service-id", serviceID),
-			zap.Int64("expire-at", now.Unix()+request.GetTTL()),
-			zap.Uint64("safepoint", request.GetSafePoint()))
+			zap.Int64("ttl", request.GetTTL()),
+			zap.Uint64("requested-safepoint", request.GetSafePoint()))
 	}
 	return &pdpb.UpdateServiceGCSafePointResponse{
 		Header:       grpcutil.WrapHeader(),
 		ServiceId:    []byte(min.ServiceID),
-		TTL:          min.ExpiredAt - now.Unix(),
+		TTL:          min.ExpiredAt - time.Now().Unix(),
 		MinSafePoint: min.SafePoint,
 	}, nil
 }
@@ -385,16 +384,15 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 		return &pdpb.UpdateServiceSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	now := time.Now()
 	serviceID := string(request.ServiceId)
-	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(request.GetKeyspaceId(), serviceID, request.GetSafePoint(), request.GetTtl(), now)
+	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(request.GetKeyspaceId(), serviceID, request.GetSafePoint(), request.GetTtl(), time.Time{})
 	if err != nil {
 		return nil, err
 	}
 	return &pdpb.UpdateServiceSafePointV2Response{
 		Header:       grpcutil.WrapHeader(),
 		ServiceId:    []byte(min.ServiceID),
-		Ttl:          min.ExpiredAt - now.Unix(),
+		Ttl:          min.ExpiredAt - time.Now().Unix(),
 		MinSafePoint: min.SafePoint,
 	}, nil
 }

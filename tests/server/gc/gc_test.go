@@ -446,6 +446,47 @@ func TestLegacyServiceSafePointBarrierTTL(t *testing.T) {
 	}
 }
 
+//nolint:staticcheck // Exercises the deprecated native_br service safe point RPC.
+func TestLegacyNativeBRGlobalBarrier(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	leader := newWatchGCStatesCluster(t, 1, true).GetLeaderServer()
+	client := newWatchGCStatesClient(t, leader.GetAddr())
+	header := testutil.NewRequestHeader(leader.GetClusterID())
+	const id = keypath.NativeBRServiceSafePointID
+	global, err := client.SetGlobalGCBarrier(ctx, &pdpb.SetGlobalGCBarrierRequest{
+		Header: header, BarrierId: id, TtlSeconds: 60,
+	})
+	re.NoError(err)
+	re.Nil(global.GetHeader().GetError())
+	ts := global.GetNewBarrierInfo().GetBarrierTs()
+	re.Greater(ts, uint64(1))
+
+	// An old native_br retries its initial request with the minimum timestamp PD returns.
+	req := &pdpb.UpdateServiceGCSafePointRequest{Header: header, ServiceId: []byte(id), SafePoint: ts - 1, TTL: 600}
+	rejected, err := client.UpdateServiceGCSafePoint(ctx, req)
+	re.NoError(err)
+	re.Nil(rejected.GetHeader().GetError())
+	re.Equal(ts, rejected.GetMinSafePoint())
+	req.SafePoint = rejected.GetMinSafePoint()
+	renewed, err := client.UpdateServiceGCSafePoint(ctx, req)
+	re.NoError(err)
+	re.Nil(renewed.GetHeader().GetError())
+	re.Equal(ts, renewed.GetMinSafePoint())
+
+	state, err := client.GetGCState(ctx, &pdpb.GetGCStateRequest{
+		Header: header, KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID), IncludeGlobalGcBarriers: true,
+	})
+	re.NoError(err)
+	re.Nil(state.GetHeader().GetError())
+	barriers := state.GetGlobalGcBarriers().GetBarriers()
+	re.Len(barriers, 1)
+	re.Equal(id, barriers[0].GetBarrierId())
+	re.Equal(ts, barriers[0].GetBarrierTs())
+	re.Greater(barriers[0].GetTtlSeconds(), int64(60))
+	re.LessOrEqual(barriers[0].GetTtlSeconds(), req.GetTTL())
+}
+
 func TestGCOperations(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
