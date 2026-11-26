@@ -369,8 +369,7 @@ func (c *Cli) connectionCtxsUpdater() {
 }
 
 // updateConnectionCtxs will choose the proper way to update the connections.
-// It will return a bool to indicate whether the update is successful.
-func (c *Cli) updateConnectionCtxs(ctx context.Context) bool {
+func (c *Cli) updateConnectionCtxs(ctx context.Context) {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnectToTSO
 	if c.option.GetEnableTSOFollowerProxy() {
@@ -378,9 +377,7 @@ func (c *Cli) updateConnectionCtxs(ctx context.Context) bool {
 	}
 	if err := createTSOConnection(ctx); err != nil {
 		log.Warn("[tso] update connection contexts failed", errs.ZapError(err))
-		return false
 	}
-	return true
 }
 
 // tryConnectToTSO will try to connect to the TSO leader. If the connection becomes unreachable
@@ -400,11 +397,13 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 	defer timer.Stop()
 	// Retry several times before falling back to the follower when the network problem happens
 retryLoop:
-	// Superseded work has its own bound so it preserves the network-failure budget
-	// while still yielding to the dispatcher's stream-creation timeout.
-	for attempts, supersededAttempts := 0, 0; attempts < constants.MaxRetryTimes && supersededAttempts < constants.MaxRetryTimes; {
+	for attempts := 0; attempts < constants.MaxRetryTimes; {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		// Let the updater process the pending option change and use proxy recovery.
+		if c.option.GetEnableTSOFollowerProxy() {
+			return nil
 		}
 		// The next attempt starts one interval after this one starts, or earlier if the leader
 		// switches, so a slow attempt does not add a full interval on top of itself.
@@ -424,7 +423,6 @@ retryLoop:
 			if !c.trackStreamBuild(cctx, cancel, url) {
 				cancel()
 				// No build was attempted for this obsolete lookup. Preserve the retry budget.
-				supersededAttempts++
 				err = context.Canceled
 				continue
 			}
@@ -433,7 +431,6 @@ retryLoop:
 			if superseded {
 				cancel()
 				stream = nil
-				supersededAttempts++
 				err = context.Canceled
 				c.svcDiscovery.ScheduleCheckMemberChanged()
 				continue
@@ -474,7 +471,6 @@ retryLoop:
 			cancel()
 		} else {
 			if c.getLeaderURL() != url {
-				supersededAttempts++
 				err = context.Canceled
 				continue
 			}

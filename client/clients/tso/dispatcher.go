@@ -57,7 +57,7 @@ type tsoServiceProvider interface {
 	getOption() *opt.Option
 	getServiceDiscovery() sd.ServiceDiscovery
 	getConnectionCtxMgr() *cctx.Manager[*tsoStream]
-	updateConnectionCtxs(ctx context.Context) bool
+	scheduleUpdateTSOConnectionCtxs()
 }
 
 const dispatcherCheckRPCConcurrencyInterval = time.Second * 5
@@ -233,9 +233,9 @@ tsoBatchLoop:
 					continue streamChoosingLoop
 				}
 				log.Info("[tso] tso stream is not ready")
-				if provider.updateConnectionCtxs(ctx) {
-					continue streamChoosingLoop
-				}
+				// The updater owns stream recovery. Keep waiting here so its work
+				// cannot delay this batch's timeout or cancellation.
+				provider.scheduleUpdateTSOConnectionCtxs()
 				timer := time.NewTimer(constants.RetryInterval)
 				select {
 				case <-ctx.Done():
