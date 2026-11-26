@@ -271,6 +271,49 @@ func TestKeyTypeToRegionBoundType(t *testing.T) {
 	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Txn))
 }
 
+func TestMetadataSplitBounds(t *testing.T) {
+	raw := func(id uint32) []byte { return MakeRegionBound(id).RawLeftBound }
+	txn := func(id uint32) []byte { return MakeRegionBound(id).TxnLeftBound }
+	txnMax := MakeRegionBound(constant.MaxValidKeyspaceID)
+	metas := []*keyspacepb.KeyspaceMeta{
+		{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 0}, Config: map[string]string{RegionBoundType: "raw"}},
+		{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 3}, Config: map[string]string{RegionBoundType: "raw"}},
+		{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 4}, Config: map[string]string{RegionBoundType: "raw"}},
+		{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 6}},
+		{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 7}, Config: map[string]string{RegionBoundType: "invalid"}},
+		{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: constant.MaxValidKeyspaceID}, Config: map[string]string{RegionBoundType: "txn"}},
+	}
+	cache := &BoundaryCache{}
+	cache.Replace(metas)
+	for _, tc := range []struct {
+		name       string
+		start, end []byte
+		limit      int
+		want       [][]byte
+	}{
+		{"whole range", nil, nil, 10, [][]byte{raw(0), raw(1), raw(3), raw(4), raw(5), raw(6), raw(7), txn(7), txn(8), txnMax.TxnLeftBound, txnMax.TxnRightBound}},
+		{"one keyspace", raw(3), raw(4), 10, nil},
+		{"strict clipping and sparse IDs", raw(1), raw(5), 10, [][]byte{raw(3), raw(4)}},
+		{"partial prefix across modes", raw(4)[:4], txn(8), 10, [][]byte{raw(4), raw(5), raw(6), raw(7), txn(7)}},
+		{"exclude the end fence before limiting", raw(1), raw(4), 1, [][]byte{raw(3)}},
+		{"largest ID with infinite end", txnMax.TxnLeftBound, nil, 10, [][]byte{txnMax.TxnRightBound}},
+		{"no overlap with a mode block", []byte("s"), []byte("w"), 10, nil},
+		{"limit per mode", nil, nil, 1, [][]byte{raw(6), raw(7), txnMax.TxnLeftBound, txnMax.TxnRightBound}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			keys, ok := findMetadataSplitKeys(tc.start, tc.end, rawFallbackFinder{cache}, tc.limit)
+			require.True(t, ok)
+			require.Equal(t, tc.want, keys)
+		})
+	}
+}
+
+type rawFallbackFinder struct{ cache *BoundaryCache }
+
+func (f rawFallbackFinder) GetKeyspaceBoundaryIDs(raw, txn *IDRange, limit int) (rawIDs, txnIDs []uint32, ready bool) {
+	return f.cache.Lookup(raw, txn, limit, coreconstant.Raw)
+}
+
 func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {

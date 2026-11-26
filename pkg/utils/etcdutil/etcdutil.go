@@ -433,6 +433,8 @@ type LoopWatcher struct {
 	deleteFn func(*mvccpb.KeyValue) error
 	// postEventsFn is used to call after handling all events.
 	postEventsFn func([]*clientv3.Event) error
+	beforeLoadFn func()
+	afterLoadFn  func(complete bool)
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
 	// initialLoadSuccessFn is called after the initial load succeeds and before watching starts.
@@ -596,24 +598,22 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		watcher       clientv3.Watcher
 		watcherCancel context.CancelFunc
 	)
-	defer func() {
+	closeWatch := func() {
 		if watcherCancel != nil {
 			watcherCancel()
+			watcherCancel = nil
 		}
 		if watcher != nil {
 			watcher.Close()
+			watcher = nil
 		}
-	}()
+	}
+	defer closeWatch()
 	ticker := time.NewTicker(RequestProgressInterval)
 	defer ticker.Stop()
 
 	for {
-		if watcherCancel != nil {
-			watcherCancel()
-		}
-		if watcher != nil {
-			watcher.Close()
-		}
+		closeWatch()
 		watcher = clientv3.NewWatcher(lw.client)
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
@@ -761,6 +761,9 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					reloadFn = lw.load
 				}
 				if reloadFn != nil {
+					// The snapshot supersedes the stream. Stop receiving events
+					// while reload retries may back off indefinitely.
+					closeWatch()
 					loadedRevision, shouldContinue := lw.reloadWithRetry(ctx, reloadFn)
 					if !shouldContinue {
 						return max(revision, loadedRevision), nil
@@ -842,14 +845,20 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	)
 	opts := lw.buildLoadingOpts(limit, snapshotRevision)
 
+	if lw.beforeLoadFn != nil {
+		lw.beforeLoadFn()
+	}
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
 		preErr = err
 		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
 			zap.String("key", lw.key), zap.Error(err))
 	}
 	defer func() {
-		if consistentLoad && lw.atomicLoadCallbacks &&
-			(preErr != nil || callbackErr != nil || !loadCompleted) {
+		complete := preErr == nil && callbackErr == nil && loadCompleted
+		if lw.afterLoadFn != nil {
+			lw.afterLoadFn(complete)
+		}
+		if consistentLoad && lw.atomicLoadCallbacks && !complete {
 			return
 		}
 		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
@@ -1091,6 +1100,13 @@ func (lw *LoopWatcher) SetConsistentLoad() {
 // SetConsistentLoad.
 func (lw *LoopWatcher) SetAtomicLoadCallbacks() {
 	lw.atomicLoadCallbacks = true
+}
+
+// SetLoadCallbacks runs callbacks around each consistent full load. The after
+// callback receives whether the snapshot read and all item callbacks completed.
+// It must be called before StartWatchLoop.
+func (lw *LoopWatcher) SetLoadCallbacks(before func(), after func(complete bool)) {
+	lw.beforeLoadFn, lw.afterLoadFn = before, after
 }
 
 // SetInitialLoadSuccessFn sets a callback that runs after the initial load succeeds.

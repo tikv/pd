@@ -313,8 +313,8 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if len(config) != 0 {
 		request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 		request.Config[UserKindKey] = config[UserKindKey]
-		request.Config[RegionBoundType] = boundType.String()
 	}
+	request.Config[RegionBoundType] = boundType.String()
 
 	tracer.OnGetConfigFinished()
 
@@ -452,8 +452,8 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	if len(config) != 0 {
 		request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 		request.Config[UserKindKey] = config[UserKindKey]
-		request.Config[RegionBoundType] = boundType.String()
 	}
+	request.Config[RegionBoundType] = boundType.String()
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: id},

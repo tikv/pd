@@ -28,9 +28,12 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -100,6 +103,65 @@ func (suite *keyspaceTestSuite) TestRegionLabeler() {
 	for _, meta := range keyspaces {
 		checkLabelRule(re, meta.GetId(), regionLabeler)
 	}
+}
+
+func (suite *keyspaceTestSuite) TestMetadataModeOnCreate() {
+	opts := suite.server.GetPersistOptions()
+	original := opts.GetPDServerConfig()
+	defer opts.SetPDServerConfig(original)
+	for i, mode := range []string{"raw", "txn"} {
+		cfg := original.Clone()
+		cfg.KeyType = mode
+		opts.SetPDServerConfig(cfg)
+		for _, byID := range []bool{false, true} {
+			suite.Run(fmt.Sprintf("%s/by-id=%t", mode, byID), func() {
+				re := suite.Require()
+				name := fmt.Sprintf("mode-%s-%t", mode, byID)
+				var meta *keyspacepb.KeyspaceMeta
+				var err error
+				if byID {
+					id := uint32(7001 + i)
+					meta, err = suite.manager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{ID: &id, Name: name})
+				} else {
+					meta, err = suite.manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{Name: name})
+				}
+				re.NoError(err)
+				loaded, err := suite.manager.LoadKeyspaceByID(meta.GetId())
+				re.NoError(err)
+				re.Equal(mode, loaded.GetConfig()[keyspace.RegionBoundType])
+			})
+		}
+	}
+}
+
+func (suite *keyspaceTestSuite) TestEmbeddedIgnoresMetadataOnlyBoundaries() {
+	re := suite.Require()
+	opts := suite.server.GetPersistOptions()
+	original := opts.GetPDServerConfig()
+	defer opts.SetPDServerConfig(original)
+	cfg := original.Clone()
+	cfg.KeyType = "raw"
+	opts.SetPDServerConfig(cfg)
+	id := uint32(7011)
+	_, err := suite.manager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{ID: &id, Name: "metadata-only"})
+	re.NoError(err)
+
+	cluster := suite.server.GetRaftCluster()
+	start := keyspace.MakeRegionBound(id - 1).RawLeftBound
+	at := keyspace.MakeRegionBound(id).RawLeftBound
+	end := keyspace.MakeRegionBound(id + 2).RawLeftBound
+	region := func(id uint64, lo, hi []byte) *core.RegionInfo {
+		return core.NewRegionInfo(&metapb.Region{Id: id, StartKey: lo, EndKey: hi}, nil)
+	}
+	regionLabeler := cluster.GetRegionLabeler()
+	split := checker.NewSplitChecker(cluster, cluster.GetRuleManager(), regionLabeler)
+	re.NotNil(split.Check(region(1, start, end)))
+	re.False(checker.AllowMerge(cluster, region(1, start, at), region(2, at, end)))
+
+	labelID := "keyspaces/" + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
+	re.NoError(regionLabeler.DeleteLabelRule(labelID))
+	re.Nil(split.Check(region(1, start, end)))
+	re.True(checker.AllowMerge(cluster, region(1, start, at), region(2, at, end)))
 }
 
 func checkLabelRule(re *require.Assertions, id uint32, regionLabeler *labeler.RegionLabeler) {

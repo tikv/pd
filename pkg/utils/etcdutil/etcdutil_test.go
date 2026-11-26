@@ -1167,7 +1167,8 @@ func (suite *loopWatcherTestSuite) TestWatcherAtomicLoadCallbacksDiscardIncomple
 
 	ctx, cancel := context.WithCancel(suite.ctx)
 	staged := make(map[string]string)
-	published := false
+	var started, published bool
+	completed := true
 	watcher := NewLoopWatcher(
 		ctx,
 		&suite.wg,
@@ -1189,11 +1190,14 @@ func (suite *loopWatcherTestSuite) TestWatcherAtomicLoadCallbacksDiscardIncomple
 	)
 	watcher.SetConsistentLoad()
 	watcher.SetAtomicLoadCallbacks()
+	watcher.SetLoadCallbacks(func() { started = true }, func(complete bool) { completed = complete })
 	watcher.SetLoadBatchSize(1)
 
 	_, err := watcher.load(ctx)
 	re.NoError(err)
 	re.NotEmpty(staged)
+	re.True(started)
+	re.False(completed)
 	re.False(published)
 }
 
@@ -2034,6 +2038,24 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsFailedAtomicWatchBatch() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
+	streams := make(chan context.Context, 1)
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: suite.client.Endpoints(),
+		DialOptions: []grpc.DialOption{grpc.WithChainStreamInterceptor(func(
+			ctx context.Context, desc *grpc.StreamDesc, conn *grpc.ClientConn, method string, stream grpc.Streamer, opts ...grpc.CallOption,
+		) (grpc.ClientStream, error) {
+			if method == "/etcdserverpb.Watch/Watch" {
+				select {
+				case streams <- ctx:
+				default:
+				}
+			}
+			return stream(ctx, desc, conn, method, opts...)
+		})},
+	})
+	re.NoError(err)
+	defer func() { re.NoError(client.Close()) }()
+
 	const prefix = "TestWatcherReloadsFailedAtomicWatchBatch/"
 	validKey := prefix + "valid"
 	invalidKey := prefix + "invalid"
@@ -2043,13 +2065,13 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsFailedAtomicWatchBatch() {
 	cache := make(map[string]string)
 	var pending map[string]string
 	invalidErr := errors.New("invalid watch value")
-	firstFailure := make(chan struct{})
+	firstReloadFailure := make(chan struct{})
 	published := make(chan struct{}, 1)
-	failed := false
+	failures := 0
 	watcher := NewLoopWatcher(
 		ctx,
 		&sync.WaitGroup{},
-		suite.client,
+		client,
 		"test",
 		prefix,
 		func([]*clientv3.Event) error {
@@ -2059,12 +2081,9 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsFailedAtomicWatchBatch() {
 		func(kv *mvccpb.KeyValue) error {
 			key := string(kv.Key)
 			if key == invalidKey {
-				if !failed {
-					failed = true
-					if _, err := suite.client.Delete(suite.ctx, invalidKey); err != nil {
-						return err
-					}
-					close(firstFailure)
+				failures++
+				if failures == 2 {
+					close(firstReloadFailure)
 				}
 				return invalidErr
 			}
@@ -2109,10 +2128,18 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsFailedAtomicWatchBatch() {
 	re.NoError(err)
 
 	select {
-	case <-firstFailure:
+	case <-firstReloadFailure:
 	case <-time.After(3 * time.Second):
-		suite.T().Fatal("watcher did not process the failed batch")
+		suite.T().Fatal("watcher did not attempt to reload the failed batch")
 	}
+	select {
+	case stream := <-streams:
+		re.ErrorIs(stream.Err(), context.Canceled, "failed stream must close before the snapshot reload")
+	default:
+		suite.T().Fatal("watch RPC was not observed")
+	}
+	_, err = suite.client.Delete(ctx, invalidKey)
+	re.NoError(err)
 	select {
 	case <-published:
 	case <-time.After(3 * time.Second):
