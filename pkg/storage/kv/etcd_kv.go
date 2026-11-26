@@ -71,17 +71,7 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 
 // LoadRange loads a range of keys [key, endKey) from etcd.
 func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
-	var OpOption []clientv3.OpOption
-	// If endKey is "\x00", it means to scan with prefix.
-	// If the key is empty and endKey is "\x00", it means to scan all keys.
-	if endKey == "\x00" {
-		OpOption = append(OpOption, clientv3.WithPrefix())
-	} else {
-		OpOption = append(OpOption, clientv3.WithRange(endKey))
-	}
-
-	OpOption = append(OpOption, clientv3.WithLimit(int64(limit)))
-	resp, err := etcdutil.EtcdKVGet(kv.client, key, OpOption...)
+	resp, err := kv.loadRangeResp(kv.client.Ctx(), key, endKey, limit)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -92,6 +82,15 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []s
 		values = append(values, string(item.Value))
 	}
 	return keys, values, nil
+}
+
+func (kv *etcdKVBase) loadRangeResp(ctx context.Context, key, endKey string, limit int) (*clientv3.GetResponse, error) {
+	// An endKey of "\x00" selects a prefix scan. An empty prefix scans all keys.
+	rangeOpt := clientv3.WithRange(endKey)
+	if endKey == "\x00" {
+		rangeOpt = clientv3.WithPrefix()
+	}
+	return etcdutil.EtcdKVGetWithContext(ctx, kv.client, key, rangeOpt, clientv3.WithLimit(int64(limit)))
 }
 
 // Save puts a key-value pair to etcd.
@@ -211,7 +210,7 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 // It stores modification in operations to apply as a single transaction during commit.
 // All load/loadRange result will be stored in conditions.
 // Transaction commit will be successful only if all conditions are met,
-// aka, no other transaction has modified values loaded during current transaction.
+// including the revision checks for keys read during the transaction.
 type etcdTxn struct {
 	kv         *etcdKVBase
 	ctx        context.Context
@@ -259,19 +258,16 @@ func (txn *etcdTxn) Remove(key string) error {
 	return nil
 }
 
-// Load loads the target value from etcd and puts a comparator into conditions.
+// Load reads a key from etcd and checks its ModRevision at commit time.
+// If the key is missing, it checks that the key is still absent at commit time.
 func (txn *etcdTxn) Load(key string) (string, error) {
-	value, _, err := txn.loadValue(key, false)
+	value, _, err := txn.LoadWithRevision(key)
 	return value, err
 }
 
 // LoadWithRevision returns the value and its mod revision and compares that revision
 // at commit time, keeping large values out of the transaction request.
 func (txn *etcdTxn) LoadWithRevision(key string) (string, int64, error) {
-	return txn.loadValue(key, true)
-}
-
-func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, int64, error) {
 	resp, err := etcdutil.EtcdKVGetWithContext(txn.ctx, txn.kv.client, key)
 	if err != nil {
 		return "", 0, err
@@ -281,45 +277,38 @@ func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, int64, 
 	var revision int64
 	switch respLen := len(resp.Kvs); respLen {
 	case 0:
-		// If target key does not contain a value, pin the CreateRevision of the key to 0.
-		// Returned value should be empty string.
-		value = ""
 		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
 	case 1:
 		value = string(resp.Kvs[0].Value)
 		revision = resp.Kvs[0].ModRevision
-		if compareRevision {
-			condition = clientv3.Compare(clientv3.ModRevision(key), "=", revision)
-		} else {
-			// If target key has value, must make sure it stays the same at the time of commit.
-			condition = clientv3.Compare(clientv3.Value(key), "=", value)
-		}
+		condition = clientv3.Compare(clientv3.ModRevision(key), "=", revision)
 	default:
-		// If response contains multiple kvs, error occurred.
 		return "", 0, errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
 	}
-	// Append the check condition to transaction.
 	txn.conditions = append(txn.conditions, condition)
 	return value, revision, nil
 }
 
-// LoadRange loads the target range from etcd,
-// Then for each value loaded, it puts a comparator into conditions.
+// LoadRange reads a range from etcd and checks the ModRevision of each
+// returned key at commit time.
 func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
-	keys, values, err = txn.kv.LoadRange(key, endKey, limit)
-	// If LoadRange failed, preserve the failure behavior of base LoadRange.
+	resp, err := txn.kv.loadRangeResp(txn.ctx, key, endKey, limit)
 	if err != nil {
-		return keys, values, err
+		return nil, nil, err
 	}
-	// If LoadRange successful, must make sure values stay the same before commit.
-	for i := range keys {
-		condition := clientv3.Compare(clientv3.Value(keys[i]), "=", values[i])
+	keys = make([]string, 0, len(resp.Kvs))
+	values = make([]string, 0, len(resp.Kvs))
+	for _, item := range resp.Kvs {
+		key := string(item.Key)
+		keys = append(keys, key)
+		values = append(values, string(item.Value))
+		condition := clientv3.Compare(clientv3.ModRevision(key), "=", item.ModRevision)
 		txn.conditions = append(txn.conditions, condition)
 	}
-	return keys, values, err
+	return keys, values, nil
 }
 
-// commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
+// commit applies the operations in etcd if all transaction conditions hold.
 func (txn *etcdTxn) commit() error {
 	failpoint.InjectCall("beforeTxnCommit", txn.operations)
 	failpoint.Inject("slowTxn", func() {
