@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -78,8 +79,18 @@ type Manager struct {
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
+	// storeConditionsKnown reports whether unavailableStores has been populated by a store check.
+	storeConditionsKnown bool
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
+	// Validated PD writes cannot introduce conflicts, so they only need to
+	// recompute when existing conflicts may have been resolved.
+	hasRangeConflicts bool
+	// rangeConflictsStale is set when the etcd sync methods change groups or key
+	// ranges without recomputing range conflicts.
+	rangeConflictsStale bool
+	// The label watcher has not finished applying this batch. Protected by metaMutex.
+	labelRuleBatchInProgress bool
 	// keyRanges cached in memory to reduce labeler lock contention
 	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges
 	// labelRuleBuffer is a buffer used during etcd synchronization. It holds the
@@ -87,6 +98,10 @@ type Manager struct {
 	// has no group, because the group watcher may be behind: the rule may arrive
 	// before its group, or before the deletion of the group that it replaces.
 	labelRuleBuffer map[string]*labeler.LabelRule // {group_id} -> labelRule
+
+	// splitMutex orders denial and recovery notifications. Policy lookups run outside it.
+	splitMutex         syncutil.Mutex
+	splitDeniedRegions cache.Cache // region ID -> *splitDenial
 }
 
 // NewManager creates a new affinity Manager.
@@ -106,6 +121,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		unavailableStores:   make(map[uint64]storeCondition),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
+		splitDeniedRegions:  cache.NewCache(splitDeniedRegionLimit, cache.LRUCache),
 	}
 	if err := m.initialize(); err != nil {
 		return nil, err
@@ -115,7 +131,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 
 // initialize loads affinity groups from storage and rebuilds the group-label mapping.
 func (m *Manager) initialize() error {
-	// metaMutex must be locked, because loadRegionLabel will acquire RWMutex to protect keyRanges
+	// Hold both locks while rebuilding ranges and their runtime conflict state.
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	m.Lock()
@@ -137,10 +153,7 @@ func (m *Manager) initialize() error {
 	}
 
 	// load region labels
-	if err = m.loadRegionLabel(); err != nil {
-		log.Error("failed to rebuild group-label mapping", zap.Error(err))
-		return err
-	}
+	m.loadRegionLabel()
 
 	m.startAvailabilityCheckLoop()
 	log.Info("affinity manager initialized", zap.Int("group-count", len(m.groups)))
@@ -159,19 +172,19 @@ func (m *Manager) initGroupLocked(group *Group) {
 		log.Error("group already initialized", zap.String("group-id", group.ID))
 		return
 	}
-	m.groups[group.ID] = &runtimeGroupInfo{
+	groupInfo := &runtimeGroupInfo{
 		ID:                  group.ID,
 		CreateTimestamp:     group.CreateTimestamp,
 		LeaderStoreID:       group.LeaderStoreID,
 		VoterStoreIDs:       slices.Clone(group.VoterStoreIDs),
-		availability:        groupDegraded,
-		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
 		AffinityRegionCount: 0,
 		Regions:             make(map[uint64]regionCache),
 		LabelRule:           nil,
 		RangeCount:          0,
 	}
+	m.setTargetAvailabilityLocked(groupInfo)
+	m.groups[group.ID] = groupInfo
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -211,6 +224,16 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	groupInfo.AffinityVer++
 }
 
+// setTargetAvailabilityLocked resets availability and the degradation deadline for a new or replaced target.
+// The caller must hold m.Lock().
+func (m *Manager) setTargetAvailabilityLocked(groupInfo *runtimeGroupInfo) {
+	availability := groupDegraded
+	if m.storeConditionsKnown {
+		availability = calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
+	}
+	groupInfo.resetTargetAvailability(availability)
+}
+
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -220,9 +243,13 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
-	groupInfo.SetAvailability(groupAvailable)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
+	if m.storeConditionsKnown {
+		m.setTargetAvailabilityLocked(groupInfo)
+	} else {
+		groupInfo.SetAvailability(groupAvailable)
+	}
 	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil
@@ -242,6 +269,28 @@ func (m *Manager) ExpireAffinityGroup(groupID string) {
 	m.Lock()
 	defer m.Unlock()
 	m.updateGroupAvailabilityLocked(groupID, groupExpired)
+}
+
+// ExpireAffinityGroupIf changes the Group availability to groupExpired only when
+// the group still matches the expected runtime instance, version, and target.
+func (m *Manager) ExpireAffinityGroupIf(expected *GroupState) (*GroupState, bool) {
+	if expected == nil {
+		return nil, false
+	}
+	m.Lock()
+	defer m.Unlock()
+	groupInfo, ok := m.groups[expected.ID]
+	if !ok ||
+		(expected.groupInfoPtr != nil && groupInfo != expected.groupInfoPtr) ||
+		groupInfo.CreateTimestamp != expected.CreateTimestamp ||
+		groupInfo.AffinityVer != expected.affinityVer ||
+		groupInfo.LeaderStoreID != expected.LeaderStoreID ||
+		!slices.Equal(groupInfo.VoterStoreIDs, expected.VoterStoreIDs) {
+		return nil, false
+	}
+	groupInfo.SetAvailability(groupExpired)
+	m.resetCountLocked(groupInfo)
+	return newGroupState(groupInfo), true
 }
 
 // DegradeAffinityGroup changes the Group availability to groupDegraded.
@@ -285,14 +334,6 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	groupInfo.RangeCount = rangeCount
 }
 
-func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
-	m.Lock()
-	defer m.Unlock()
-	for groupID, labelRule := range labels {
-		m.updateGroupLabelRuleLocked(groupID, labelRule, needClear)
-	}
-}
-
 func (m *Manager) clearGroupCacheLocked(groupID string) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
@@ -312,11 +353,23 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	delete(m.groups, groupID)
 }
 
+// deleteGroups requires metaMutex so range conflicts can be scanned before
+// taking the manager write lock.
 func (m *Manager) deleteGroups(groupIDs []string) {
+	if len(groupIDs) == 0 {
+		return
+	}
+	var conflicts map[string]struct{}
+	if m.hasRangeConflicts {
+		conflicts = m.collectRangeConflictsLocked()
+	}
 	m.Lock()
 	defer m.Unlock()
 	for _, groupID := range groupIDs {
 		m.deleteGroupLocked(groupID)
+	}
+	if m.hasRangeConflicts {
+		m.reconcileRangeConflictsLocked(conflicts)
 	}
 }
 
@@ -403,7 +456,7 @@ func (m *Manager) calcRegionAffinityGroupState(region *core.RegionInfo, saveCach
 		groupID := m.regionLabeler.GetRegionLabel(region, AffinityLabelKey)
 		failpoint.InjectCall("afterRegionLabelLookup")
 		group = m.GetAffinityGroupState(groupID)
-		if group == nil {
+		if group == nil || group.rangeConflict {
 			return nil, false
 		}
 		cache = &regionCache{
@@ -474,6 +527,31 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // These methods are called by the watcher in microservice.
 // They are called by the watcher when it receives events from etcd.
+// The Sync methods do not recompute range conflicts, because each recompute
+// sorts all key ranges. The watcher calls ReconcileRangeConflicts once after
+// each batch of events instead.
+
+// SetLabelRuleBatchInProgress marks the label watcher batch under metaMutex.
+func (m *Manager) SetLabelRuleBatchInProgress(inProgress bool) {
+	m.metaMutex.Lock()
+	m.labelRuleBatchInProgress = inProgress
+	m.metaMutex.Unlock()
+}
+
+// ReconcileRangeConflicts recomputes range conflicts after the Sync methods
+// change groups or key ranges. It returns immediately if there is nothing to
+// recompute.
+func (m *Manager) ReconcileRangeConflicts() {
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	if m.labelRuleBatchInProgress || !m.rangeConflictsStale {
+		return
+	}
+	conflicts := m.collectRangeConflictsLocked()
+	m.Lock()
+	defer m.Unlock()
+	m.reconcileRangeConflictsLocked(conflicts)
+}
 
 // SyncGroupFromEtcd synchronizes a group from etcd to the in-memory state.
 func (m *Manager) SyncGroupFromEtcd(group *Group) {
@@ -534,6 +612,7 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		}
 		// Once group created, the buffer must be deleted.
 		delete(m.labelRuleBuffer, group.ID)
+		m.rangeConflictsStale = true
 	} else {
 		changed := false
 		if groupInfo.LeaderStoreID != group.LeaderStoreID {
@@ -546,6 +625,7 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		}
 
 		if changed {
+			m.setTargetAvailabilityLocked(groupInfo)
 			m.resetCountLocked(groupInfo)
 		}
 	}
@@ -574,6 +654,7 @@ func (m *Manager) SyncGroupDeleteFromEtcd(groupID string) {
 		m.labelRuleBuffer[groupID] = groupInfo.LabelRule
 	}
 	m.deleteGroupLocked(groupID)
+	m.rangeConflictsStale = true
 }
 
 // SyncKeyRangesFromEtcd synchronizes key ranges from a label rule.
@@ -620,6 +701,7 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 	// Pass the rangeCount directly instead of letting updateGroupLabelRuleLocked calculate it
 	// because labelRule.Data might be []any (from watcher) instead of []*labeler.KeyRangeRule
 	m.updateGroupLabelRuleLockedWithCount(groupID, labelRule, len(gkr.KeyRanges), false)
+	m.rangeConflictsStale = true
 
 	return nil
 }
@@ -644,6 +726,7 @@ func (m *Manager) SyncKeyRangesDeleteFromEtcd(ruleID string) {
 	if _, exists := m.groups[groupID]; exists {
 		m.updateGroupLabelRuleLocked(groupID, nil, true)
 	}
+	m.rangeConflictsStale = true
 }
 
 // InvalidCacheByLabelRules clears the Region cache of the groups whose label rules have changed in the region labeler.

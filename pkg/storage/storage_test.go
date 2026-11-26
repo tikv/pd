@@ -23,6 +23,7 @@ import (
 
 	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -433,6 +435,52 @@ func BenchmarkLoadRegionsByRandomMerge(b *testing.B) {
 	for _, r := range ratios {
 		b.Run(fmt.Sprintf("merge ratio %d", r.ratio), func(b *testing.B) {
 			benchmarkLoadRegions(b, 1000000, r.ratio)
+		})
+	}
+}
+
+func TestLoadRegionsTermFence(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	for _, tc := range []struct {
+		local bool
+		valid bool
+	}{
+		{local: false, valid: false},
+		{local: false, valid: true},
+		{local: true, valid: false},
+	} {
+		t.Run(fmt.Sprintf("local=%t/valid=%t", tc.local, tc.valid), func(t *testing.T) {
+			re := require.New(t)
+			shared := NewStorageWithEtcdBackend(client)
+			localStorage := NewStorageWithMemoryBackend()
+			s := NewCoreStorage(shared, localStorage)
+			TrySwitchRegionStorage(s, tc.local)
+			parent := &metapb.Region{Id: 100, StartKey: []byte("a"), EndKey: []byte("z"), RegionEpoch: &metapb.RegionEpoch{Version: 1}}
+			child := &metapb.Region{Id: 101, StartKey: []byte("a"), EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 2}}
+			// Seed both backends to detect accidental redirection of local cleanup.
+			for _, backend := range []Storage{shared, localStorage} {
+				re.NoError(backend.SaveRegion(parent))
+				re.NoError(backend.SaveRegion(child))
+			}
+			expectedRevision := int64(1)
+			if tc.valid {
+				expectedRevision = 0
+			}
+			cache := core.NewBasicCluster()
+			err := TryLoadRegionsOnceWithConditions(t.Context(), s, cache.CheckAndPutRegion, clientv3.Compare(clientv3.CreateRevision("/test-region-leader"), "=", expectedRevision))
+			if !tc.local && !tc.valid {
+				re.Error(err)
+			} else {
+				re.NoError(err)
+			}
+			region := &metapb.Region{}
+			exists, err := shared.LoadRegion(parent.GetId(), region)
+			re.NoError(err)
+			re.Equal(tc.local || !tc.valid, exists)
+			exists, err = localStorage.LoadRegion(parent.GetId(), region)
+			re.NoError(err)
+			re.Equal(!tc.local, exists)
 		})
 	}
 }

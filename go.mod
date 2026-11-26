@@ -33,7 +33,6 @@ require (
 	github.com/joho/godotenv v1.4.0
 	github.com/mailru/easyjson v0.9.1
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
 	github.com/pingcap/kvproto v0.0.0-20261029034354-9192d38c8b67
@@ -46,14 +45,14 @@ require (
 	github.com/rleungx/leakcheck v1.1.0
 	github.com/sasha-s/go-deadlock v0.3.9
 	github.com/shirou/gopsutil/v3 v3.23.3
-	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99
+	github.com/smallnest/chanx v1.2.1-0.20261118073114-cf251b591d2f
 	github.com/soheilhy/cmux v0.1.5
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/http-swagger v1.2.6
 	github.com/swaggo/swag v1.16.6
-	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
+	github.com/syndtr/goleveldb v1.0.1-0.20210305035536-64b5b1c73954
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni/v3 v3.1.1
 	go.etcd.io/etcd/api/v3 v3.5.33

@@ -122,10 +122,12 @@ type Client interface {
 
 	// UpdateKeyspaceConfig patches the keyspace config and returns the updated keyspace meta.
 	UpdateKeyspaceConfig(ctx context.Context, keyspaceName string, params *UpdateKeyspaceConfigParams) (*keyspacepb.KeyspaceMeta, error)
-	// UpdateKeyspaceGCManagementType update the `gc_management_type` in keyspace meta config.
-	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// UpdateKeyspaceGCManagementType updates the `gc_management_type` in keyspace meta config.
+	// An empty mode is rejected before sending the request.
+	// If `gc_management_type` is `unified`, it means the current keyspace requires a tidb without 'keyspace-name'
 	// configured to run a global gc worker to calculate a global gc safe point.
-	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+	// If `gc_management_type` is `keyspace_level` it means the current keyspace can calculate gc safe point by its own.
+	// The effective mode is immutable; updates may repeat the current canonical value.
 	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
 	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
 	GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error)
@@ -1169,8 +1171,11 @@ func (c *client) UpdateKeyspaceConfig(ctx context.Context, keyspaceName string, 
 }
 
 // UpdateKeyspaceGCManagementType patches the keyspace config.
-func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
-	_, err := c.patchKeyspaceConfig(ctx, UpdateKeyspaceGCManagementTypeName, keyspaceName, keyspaceGCmanagementType)
+func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, params *KeyspaceGCManagementTypeConfig) error {
+	if params != nil && params.Config.GCManagementType == "" {
+		return errors.New("gc_management_type must not be empty")
+	}
+	_, err := c.patchKeyspaceConfig(ctx, UpdateKeyspaceGCManagementTypeName, keyspaceName, params)
 	return err
 }
 

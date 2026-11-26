@@ -51,6 +51,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -513,6 +514,78 @@ func TestSetOfflineStore(t *testing.T) {
 	re.NoError(err)
 	cluster.checkStores()
 	re.Nil(cluster.GetStore(1))
+}
+
+func TestRemovingStoreWithZeroRegionSize(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		source      core.RegionSource
+		leaderStore uint64
+		role        metapb.PeerRole
+	}{
+		{name: "storage", source: core.Storage},
+		{name: "synced leader", source: core.Sync, leaderStore: 1},
+		{name: "synced follower", source: core.Sync, leaderStore: 2},
+		{name: "synced learner", source: core.Sync, leaderStore: 2, role: metapb.PeerRole_Learner},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+			cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+			for _, store := range newTestStores(4, "5.0.0") {
+				re.NoError(cluster.PutMetaStore(store.GetMeta()))
+			}
+			meta := &metapb.Region{
+				Id:          1,
+				RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+				Peers: []*metapb.Peer{
+					{Id: 1, StoreId: 1, Role: tc.role},
+					{Id: 2, StoreId: 2},
+					{Id: 3, StoreId: 3},
+				},
+			}
+			if tc.source == core.Storage {
+				re.NoError(cluster.storage.SaveRegion(meta))
+				re.NoError(cluster.storage.LoadRegions(ctx, cluster.CheckAndPutRegion))
+			} else {
+				cluster.PutRegion(core.NewRegionInfo(meta, meta.Peers[tc.leaderStore-1], core.SetSource(tc.source)))
+			}
+			re.NoError(cluster.RemoveStore(1, false))
+
+			// The Region index is populated before the asynchronous store statistics refresh.
+			re.Equal(1, cluster.GetStoreRegionCount(1))
+			re.Zero(cluster.GetStore(1).GetRegionCount())
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoving())
+
+			cluster.UpdateAllStoreStatus()
+			re.Equal(1, cluster.GetStore(1).GetRegionCount())
+			re.Zero(cluster.GetStore(1).GetRegionSize())
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoving())
+
+			// Preparation can finish while synced Regions still have no size statistics.
+			cluster.SetPrepared()
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoving())
+
+			region := cluster.GetRegion(1).Clone(core.WithRemoveStorePeer(1), core.WithLeader(meta.Peers[1]), core.WithIncConfVer())
+			cluster.PutRegion(region)
+			re.Zero(cluster.GetStoreRegionCount(1))
+			re.Equal(1, cluster.GetStore(1).GetRegionCount())
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoving())
+
+			cluster.UpdateAllStoreStatus()
+			cluster.checkStores()
+			re.True(cluster.GetStore(1).IsRemoved())
+			re.Zero(cluster.GetStore(1).GetRegionCount())
+			re.Zero(cluster.GetStore(1).GetRegionSize())
+		})
+	}
 }
 
 func TestSetOfflineWithReplica(t *testing.T) {
@@ -1137,6 +1210,22 @@ func TestRemovingProcess(t *testing.T) {
 	re.Equal(50.0, p.CurrentSpeed)
 	// left second = 15 * 100 / 50 = 60s
 	re.Equal(30.0, p.LeftSecond)
+
+	// The Region index can become empty before cached store statistics are refreshed.
+	for _, region := range regionInStore1[5:] {
+		cluster.RemoveRegionIfExist(region.GetID())
+	}
+	re.Zero(cluster.GetStoreRegionCount(storeID))
+	re.Positive(cluster.GetStore(storeID).GetRegionCount())
+	re.Positive(cluster.GetStore(storeID).GetRegionSize())
+	cluster.checkStores()
+	re.True(cluster.GetStore(storeID).IsRemoving())
+
+	cluster.UpdateAllStoreStatus()
+	cluster.checkStores()
+	re.True(cluster.GetStore(storeID).IsRemoved())
+	re.Zero(cluster.GetStore(storeID).GetRegionCount())
+	re.Zero(cluster.GetStore(storeID).GetRegionSize())
 }
 
 func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
@@ -4142,6 +4231,180 @@ func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
 	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
+func TestInitSchedulersRestoresLegacyFallback(t *testing.T) {
+	for _, needRun := range []bool{true, false} {
+		for _, test := range []struct {
+			name     string
+			typ      types.CheckerSchedulerType
+			config   string
+			disabled bool
+			batch    int
+		}{
+			{"malformed leader", types.BalanceLeaderScheduler, `{"batch":`, false, schedulers.BalanceLeaderBatchSize},
+			{"invalid leader field", types.BalanceLeaderScheduler, `{"batch":"invalid"}`, false, schedulers.BalanceLeaderBatchSize},
+			{"invalid region field", types.BalanceRegionScheduler, `{"ranges":false}`, false, 0},
+			{"valid leader tuning", types.BalanceLeaderScheduler, `{"batch":17}`, false, 17},
+			{"disabled leader", types.BalanceLeaderScheduler, `{"batch":"invalid"}`, true, 0},
+		} {
+			t.Run(fmt.Sprintf("run=%t/%s", needRun, test.name), func(t *testing.T) {
+				re := require.New(t)
+				tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
+					for i := range cfg.Schedulers {
+						if cfg.Schedulers[i].Type == types.SchedulerTypeCompatibleMap[test.typ] {
+							cfg.Schedulers[i].Disable = test.disabled
+						}
+					}
+				}, nil, nil, re)
+				defer cleanup()
+				name := test.typ.String()
+				re.NoError(tc.storage.SaveSchedulerConfig(name, []byte(test.config)))
+				expectedSchedulers := tc.GetScheduleConfig().Clone().Schedulers
+				for range 2 {
+					co.InitSchedulers(needRun)
+					handlers := co.GetSchedulersController().GetSchedulerHandlers()
+					saved, err := tc.storage.LoadSchedulerConfig(name)
+					re.NoError(err)
+					re.Equal(expectedSchedulers, tc.GetScheduleConfig().Schedulers)
+					if test.disabled {
+						re.NotContains(handlers, name)
+						re.Nil(co.GetSchedulersController().GetScheduler(name))
+						re.Equal(test.config, saved)
+						continue
+					}
+					restored, ok := handlers[name].(schedulers.Scheduler)
+					re.True(ok, "scheduler must be registered after restoration")
+					if needRun {
+						re.NotNil(co.GetSchedulersController().GetScheduler(name))
+					}
+					active, err := restored.EncodeConfig()
+					re.NoError(err)
+					re.JSONEq(string(active), saved)
+					_, err = schedulers.CreateScheduler(test.typ, co.GetOperatorController(),
+						tc.storage, schedulers.ConfigJSONDecoder([]byte(saved)))
+					re.NoError(err)
+					if test.batch != 0 {
+						var config struct {
+							Batch int `json:"batch"`
+						}
+						re.NoError(json.Unmarshal([]byte(saved), &config))
+						re.Equal(test.batch, config.Batch)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestInitSchedulersNormalizesLegacyConfig(t *testing.T) {
+	for _, needRun := range []bool{true, false} {
+		for _, legacy := range []string{
+			`"history-sample-duration":"1h","history-sample-interval":"1s"`,
+			`"history-sample-duration":"-1m"`,
+			`"max-peer-number":0`,
+			`"max-peer-number":-1`,
+			`"max-zombie-rounds":-1`,
+			`"byte-rate-rank-step-ratio":0`,
+		} {
+			t.Run(fmt.Sprintf("run=%t/%s", needRun, legacy), func(t *testing.T) {
+				re := require.New(t)
+				tc, co, cleanup := prepare(nil, nil, nil, re)
+				defer cleanup()
+				name := types.BalanceHotRegionScheduler.String()
+				payload := []byte(`{"min-hot-byte-rate":321,"read-priorities":["key","byte"],` + legacy + `}`)
+				re.NoError(tc.storage.SaveSchedulerConfig(name, payload))
+				expectedSchedulers := tc.GetScheduleConfig().Clone().Schedulers
+				var normalized string
+				for range 2 {
+					co.InitSchedulers(needRun)
+					handlers := co.GetSchedulersController().GetSchedulerHandlers()
+					restored, ok := handlers[name].(schedulers.Scheduler)
+					re.True(ok)
+					if needRun {
+						re.NotNil(co.GetSchedulersController().GetScheduler(name))
+					}
+					active, err := restored.EncodeConfig()
+					re.NoError(err)
+					saved, err := tc.storage.LoadSchedulerConfig(name)
+					re.NoError(err)
+					re.JSONEq(string(active), saved)
+					if normalized != "" {
+						re.JSONEq(normalized, saved)
+					}
+					normalized = saved
+					// The saved result must also satisfy strict validation.
+					_, err = schedulers.CreateScheduler(types.BalanceHotRegionScheduler, co.GetOperatorController(),
+						tc.storage, schedulers.ConfigJSONDecoder([]byte(saved)))
+					re.NoError(err)
+					var config struct {
+						MaxPeerNum            int      `json:"max-peer-number"`
+						MinHotByteRate        float64  `json:"min-hot-byte-rate"`
+						ReadPriorities        []string `json:"read-priorities"`
+						HistorySampleDuration string   `json:"history-sample-duration"`
+						HistorySampleInterval string   `json:"history-sample-interval"`
+					}
+					re.NoError(json.Unmarshal([]byte(saved), &config))
+					re.Equal(float64(321), config.MinHotByteRate)
+					if strings.Contains(legacy, `"max-peer-number":0`) {
+						re.Equal(0, config.MaxPeerNum)
+					} else {
+						re.Equal(1000, config.MaxPeerNum)
+					}
+					re.Equal([]string{"key", "byte"}, config.ReadPriorities)
+					if strings.Contains(legacy, `"history-sample-interval":"1s"`) {
+						re.Equal("1h0m0s", config.HistorySampleDuration)
+						re.Equal("1s", config.HistorySampleInterval)
+					}
+					re.Equal(expectedSchedulers, tc.GetScheduleConfig().Schedulers)
+					_, reloadedOpt, err := newTestScheduleConfig()
+					re.NoError(err)
+					re.NoError(reloadedOpt.Reload(tc.storage))
+					re.Equal(expectedSchedulers, reloadedOpt.GetSchedulers())
+					re.Contains(handlers, types.BalanceRegionScheduler.String())
+				}
+			})
+		}
+	}
+}
+
+func TestInitSchedulersRestoresLegacyV2GreatDecRatio(t *testing.T) {
+	for _, needRun := range []bool{true, false} {
+		for _, ratio := range []float64{-1, 0, 2} {
+			t.Run(fmt.Sprintf("run=%t/ratio=%g", needRun, ratio), func(t *testing.T) {
+				re := require.New(t)
+				tc, co, cleanup := prepare(nil, nil, nil, re)
+				defer cleanup()
+				name := types.BalanceHotRegionScheduler.String()
+				payload := fmt.Appendf(nil,
+					`{"rank-formula-version":"v2","great-dec-ratio":%g,"min-hot-byte-rate":321,"read-priorities":["key","byte"]}`, ratio)
+				re.NoError(tc.storage.SaveSchedulerConfig(name, payload))
+				co.InitSchedulers(needRun)
+				handlers := co.GetSchedulersController().GetSchedulerHandlers()
+				re.Contains(handlers, name)
+				if needRun {
+					re.NotNil(co.GetSchedulersController().GetScheduler(name))
+				}
+				restored, ok := handlers[name].(schedulers.Scheduler)
+				re.True(ok)
+				active, err := restored.EncodeConfig()
+				re.NoError(err)
+				saved, err := tc.storage.LoadSchedulerConfig(name)
+				re.NoError(err)
+				for _, data := range [][]byte{active, []byte(saved)} {
+					var config struct {
+						GreatDecRatio  float64  `json:"great-dec-ratio"`
+						MinHotByteRate float64  `json:"min-hot-byte-rate"`
+						ReadPriorities []string `json:"read-priorities"`
+					}
+					re.NoError(json.Unmarshal(data, &config))
+					re.InDelta(ratio, config.GreatDecRatio, 1e-12)
+					re.Equal(float64(321), config.MinHotByteRate)
+					re.Equal([]string{"key", "byte"}, config.ReadPriorities)
+				}
+			})
+		}
+	}
+}
+
 func TestInitSchedulersPreservesConcurrentScheduleUpdate(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
@@ -4715,6 +4978,7 @@ func TestShouldRun(t *testing.T) {
 		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
 		re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), nr))
+		tc.UpdateAllStoreStatus()
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
@@ -4751,22 +5015,24 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 		{6, false},
 		{7, false},
 		{8, false},
-		{9, true},
+		{9, false},
+		{10, true},
 	}
 
 	for _, testCase := range testCases {
 		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
 		re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), nr))
+		tc.UpdateAllStoreStatus()
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	re.Equal(9, tc.GetNotFromStorageRegionsCnt())
+	re.Equal(10, tc.GetNotFromStorageRegionsCnt())
 
-	// Now, after server is prepared, there exist some regions with no leader.
-	re.Equal(uint64(0), tc.GetRegion(10).GetLeader().GetStoreId())
+	// Scheduling starts only after the last stored region has been collected.
+	re.Equal(uint64(1), tc.GetRegion(10).GetLeader().GetStoreId())
 }
 
 func TestAddScheduler(t *testing.T) {
@@ -5037,6 +5303,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(newOpt.Persist(storage))
 	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 
+	tc.UpdateAllStoreStatus()
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	controller = co.GetSchedulersController()
@@ -5132,6 +5399,7 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(newOpt.Reload(tc.storage))
 	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.UpdateAllStoreStatus()
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	re.Empty(controller.GetSchedulerNames())
@@ -5172,6 +5440,7 @@ func TestRestart(t *testing.T) {
 	co.GetWaitGroup().Wait()
 
 	// Recreate coordinator then add another replica on store 3.
+	tc.UpdateAllStoreStatus()
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	re.NoError(dispatchHeartbeat(co, region, stream))
@@ -5553,6 +5822,130 @@ func TestInterval(t *testing.T) {
 			re.Empty(sc.Schedule(false))
 		}
 		re.Less(sc.GetInterval(), time.Second*time.Duration(n/2))
+	}
+}
+
+func TestCheckStoresWithPartialRegionCollection(t *testing.T) {
+	for _, mode := range []struct {
+		name        string
+		independent bool
+	}{
+		{name: "integrated"},
+		{name: "independent", independent: true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name              string
+				collected         int
+				reported          uint32
+				unassigned        int
+				schedulerPrepared bool
+				recheck           bool
+				integratedState   metapb.NodeState
+				independentState  metapb.NodeState
+			}{
+				{name: "89 percent", collected: 89},
+				{name: "90 percent", collected: 90, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+				{name: "99 percent", collected: 99, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+				{name: "all collected", collected: 100, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+				{name: "reported count incomplete", collected: 90, reported: 101, independentState: metapb.NodeState_Serving},
+				{name: "global count incomplete", collected: 90, unassigned: 12, independentState: metapb.NodeState_Serving},
+				{name: "collection drops after preparation", collected: 90, recheck: true, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+				{name: "scheduler already prepared", collected: 89, schedulerPrepared: true, integratedState: metapb.NodeState_Serving, independentState: metapb.NodeState_Serving},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					re := require.New(t)
+					ctx := t.Context()
+					_, opt, err := newTestScheduleConfig()
+					re.NoError(err)
+					cfg := opt.GetReplicationConfig()
+					cfg.EnablePlacementRules = false
+					cfg.MaxReplicas = 1
+					opt.SetReplicationConfig(cfg)
+					cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+					cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+					if mode.independent {
+						cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
+					}
+					if tc.schedulerPrepared {
+						cluster.SetPrepared()
+					}
+					now := time.Now()
+					for _, store := range newTestStores(2, "6.0.0") {
+						meta := store.GetMeta()
+						meta.StartTimestamp = now.Add(-time.Hour).Unix()
+						reported := uint32(100)
+						if meta.GetId() == 1 && tc.reported != 0 {
+							reported = tc.reported
+						}
+						if meta.GetId() == 2 {
+							meta.NodeState = metapb.NodeState_Preparing
+						}
+						cluster.PutStore(core.NewStoreInfo(meta,
+							core.SetLastHeartbeatTS(now), core.SetRegionSize(1000),
+							core.SetStoreStats(&pdpb.StoreStats{RegionCount: reported})))
+					}
+					for i := range 200 {
+						storeID := uint64(i/100 + 1)
+						peer := &metapb.Peer{Id: uint64(i + 1), StoreId: storeID}
+						meta := newTestRegionMeta(uint64(i + 1))
+						meta.Peers = []*metapb.Peer{peer}
+						source := core.Storage
+						if storeID == 2 || i < tc.collected {
+							source = core.Heartbeat
+						}
+						cluster.PutRegion(core.NewRegionInfo(meta, peer, core.SetSource(source), core.SetApproximateSize(10)))
+					}
+					for i := range tc.unassigned {
+						cluster.PutRegion(core.NewRegionInfo(newTestRegionMeta(uint64(201+i)), nil, core.SetSource(core.Storage)))
+					}
+
+					// Store preparation must retain its thresholds without lowering the scheduler's 100% gate.
+					re.Equal(100, cluster.GetStoreRegionCount(1))
+					re.Equal(tc.collected, cluster.GetNotFromStorageRegionsCntByStore(1))
+					schedulerPrepared := tc.schedulerPrepared || tc.collected == 100
+					cluster.UpdateAllStoreStatus()
+					re.Equal(schedulerPrepared, cluster.coordinator.ShouldRun())
+					re.Less(cluster.GetStore(2).GetUptime(), opt.GetMaxStorePreparingTime())
+					cluster.checkStores()
+					state := tc.integratedState
+					if mode.independent {
+						state = tc.independentState
+					}
+					re.Equal(state, cluster.GetStore(2).GetNodeState())
+					re.Equal(schedulerPrepared, cluster.IsPrepared())
+					if tc.recheck {
+						cluster.PutStore(cluster.GetStore(1).Clone(core.SetStoreStats(&pdpb.StoreStats{RegionCount: 200})))
+						for _, storeID := range []uint64{3, 4} {
+							if storeID == 4 {
+								// A new coordinator must collect its own preparation evidence.
+								cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+							}
+							meta := newTestStores(storeID, "6.0.0")[storeID-1].GetMeta()
+							meta.NodeState = metapb.NodeState_Preparing
+							meta.StartTimestamp = now.Add(-time.Hour).Unix()
+							cluster.PutStore(core.NewStoreInfo(meta,
+								core.SetLastHeartbeatTS(now), core.SetRegionSize(1000),
+								core.SetStoreStats(&pdpb.StoreStats{RegionCount: 100})))
+							for i := range uint64(100) {
+								id := (storeID-1)*100 + i + 1
+								peer := &metapb.Peer{Id: id, StoreId: storeID}
+								region := newTestRegionMeta(id)
+								region.Peers = []*metapb.Peer{peer}
+								cluster.PutRegion(core.NewRegionInfo(region, peer, core.SetSource(core.Heartbeat), core.SetApproximateSize(10)))
+							}
+							re.False(cluster.coordinator.ShouldRun())
+							cluster.checkStores()
+							state := metapb.NodeState_Serving
+							if storeID == 4 && !mode.independent {
+								state = metapb.NodeState_Preparing
+							}
+							re.Equal(state, cluster.GetStore(storeID).GetNodeState())
+						}
+					}
+				})
+			}
+		})
 	}
 }
 

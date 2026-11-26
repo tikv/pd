@@ -369,7 +369,7 @@ func TestLegacyServiceSafePointBarrierTTL(t *testing.T) {
 	leader := cluster.GetLeaderServer()
 	client := newWatchGCStatesClient(t, leader.GetAddr())
 	header := testutil.NewRequestHeader(leader.GetClusterID())
-	ks, err := leader.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks, err := tests.CreateKeyspaceWithHistoricalGCMode(ctx, leader.GetServer(), &keyspace.CreateKeyspaceRequest{
 		Name:       "independent",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),
@@ -502,7 +502,7 @@ func TestGCOperations(t *testing.T) {
 	re.NotNil(leaderServer)
 	re.NoError(leaderServer.BootstrapCluster())
 
-	ks1, err := leaderServer.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks1, err := tests.CreateKeyspaceWithHistoricalGCMode(ctx, leaderServer.GetServer(), &keyspace.CreateKeyspaceRequest{
 		Name:       "ks1",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),
@@ -1514,7 +1514,7 @@ func TestWatchGCStatesInitialAndSkipInitialRegistrationBoundary(t *testing.T) {
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
 
-	ks, err := leaderServer.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks, err := tests.CreateKeyspaceWithHistoricalGCMode(t.Context(), leaderServer.GetServer(), &keyspace.CreateKeyspaceRequest{
 		Name:       "watch-gc-states",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),

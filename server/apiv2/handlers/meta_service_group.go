@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -38,9 +39,9 @@ const (
 func RegisterMetaServiceGroup(r *gin.RouterGroup) {
 	router := r.Group("meta-service-groups")
 	router.Use(middlewares.BootstrapChecker())
-	router.GET("", GetMetaServiceGroups)
-	router.PATCH("", PatchMetaServiceGroups)
-	router.PATCH("/:id/status", PatchMetaServiceGroupStatus)
+	router.GET("", middlewares.Audit("GetMetaServiceGroups", audit.PrometheusHistogram), GetMetaServiceGroups)
+	router.PATCH("", middlewares.Audit("PatchMetaServiceGroups", audit.LocalLogLabel, audit.PrometheusHistogram), PatchMetaServiceGroups)
+	router.PATCH("/:id/status", middlewares.Audit("PatchMetaServiceGroupStatus", audit.LocalLogLabel, audit.PrometheusHistogram), PatchMetaServiceGroupStatus)
 }
 
 // MetaServiceGroupStatus represents the status of a meta-service group.

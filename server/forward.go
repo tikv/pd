@@ -85,8 +85,7 @@ func (s *GrpcServer) forwardToTSOService(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		if request.GetCount() == 0 {
-			err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
+		if err := tsoutil.ValidateTSOCount(uint64(request.GetCount())); err != nil {
 			return errs.ErrUnknown(err)
 		}
 		tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
@@ -461,7 +460,10 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 // metadata belongs to the current PD leader. The metadata is controlled by the
 // caller, so it must be validated before both local handling and dialing.
 func (s *GrpcServer) validatePDForwardedHost(forwardedHost string) error {
-	leader := s.GetLeader()
+	return validateForwardedHost(forwardedHost, s.GetLeader())
+}
+
+func validateForwardedHost(forwardedHost string, leader *pdpb.Member) error {
 	if leader == nil || len(leader.GetClientUrls()) == 0 {
 		return errs.ErrNotLeader
 	}

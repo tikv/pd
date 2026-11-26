@@ -1283,6 +1283,7 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	re := suite.Require()
 	cluster := suite.srv.GetRaftCluster()
 	re.NotNil(cluster)
+	storeCount := len(stores)
 	// Use stores[3]: this test destructively transitions it through
 	// offline -> tombstone, and stores[0..2] are the ones other tests in
 	// this suite heartbeat regions through (peers[0..2]) and expect to
@@ -1303,8 +1304,7 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 
 	actualStores, err := suite.client.GetAllStores(context.Background())
 	re.NoError(err)
-	re.Len(actualStores, len(stores))
-	stores = actualStores
+	re.Len(actualStores, storeCount)
 
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId(), false)
@@ -1320,9 +1320,9 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 
 	// Should return offline stores.
 	contains := false
-	stores, err = suite.client.GetAllStores(context.Background())
+	actualStores, err = suite.client.GetAllStores(context.Background())
 	re.NoError(err)
-	for _, store := range stores {
+	for _, store := range actualStores {
 		if store.GetId() == offlineStore.GetId() {
 			contains = true
 			re.Equal(offlineStore, store)
@@ -1345,9 +1345,9 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	}
 	// Should return tombstone stores.
 	contains = false
-	stores, err = suite.client.GetAllStores(context.Background())
+	actualStores, err = suite.client.GetAllStores(context.Background())
 	re.NoError(err)
-	for _, store := range stores {
+	for _, store := range actualStores {
 		if store.GetId() == physicallyDestroyedStoreID {
 			contains = true
 			re.NotEqual(metapb.StoreState_Up, store.GetState())
@@ -1357,14 +1357,15 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	re.True(contains)
 
 	// Should not return tombstone stores.
-	stores, err = suite.client.GetAllStores(context.Background(), opt.WithExcludeTombstone())
+	// Bury the store explicitly so this check does not depend on the background job.
+	re.NoError(cluster.BuryStore(physicallyDestroyedStoreID, false))
+	actualStores, err = suite.client.GetAllStores(context.Background(), opt.WithExcludeTombstone())
 	re.NoError(err)
-	for _, store := range stores {
-		if store.GetId() == physicallyDestroyedStoreID {
-			re.Equal(metapb.StoreState_Offline, store.GetState())
-			re.True(store.PhysicallyDestroyed)
-		}
+	re.Len(actualStores, storeCount-1)
+	for _, store := range actualStores {
+		re.NotEqual(physicallyDestroyedStoreID, store.GetId())
 	}
+	re.Len(stores, storeCount)
 }
 
 func (suite *clientStatelessTestSuite) TestScatterRegion() {
@@ -1455,7 +1456,7 @@ func TestWatch(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 
-	key := "test"
+	key := "resource_group/meta_storage_test"
 	resp, err := client.Get(ctx, []byte(key))
 	re.NoError(err)
 	rev := resp.GetHeader().GetRevision()
@@ -1504,7 +1505,7 @@ func TestPutGet(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 
-	key := []byte("test")
+	key := []byte("/tidb/br-stream/meta_storage_test")
 	putResp, err := client.Put(context.Background(), key, []byte("1"))
 	re.NoError(err)
 	re.Empty(putResp.GetPrevKv())
@@ -1538,7 +1539,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 	s := cluster.GetLeaderServer()
-	watchPrefix := "watch_test"
+	watchPrefix := "resource_group/meta_storage_watch_test"
 	defer func() {
 		_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+"test")
 		re.NoError(err)
@@ -2364,7 +2365,7 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 
 func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 	re := s.Require()
-	ks1, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks1, err := tests.CreateKeyspaceWithHistoricalGCMode(s.ctx, s.srv, &keyspace.CreateKeyspaceRequest{
 		Name:       "ks1",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),
@@ -2372,7 +2373,7 @@ func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 	re.NoError(err)
 	re.Equal(uint32(1), ks1.GetId())
 
-	ks2, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks2, err := tests.CreateKeyspaceWithHistoricalGCMode(s.ctx, s.srv, &keyspace.CreateKeyspaceRequest{
 		Name:       "ks2",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),
@@ -2843,7 +2844,7 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re := s.Require()
 	ctx := context.Background()
 	s.prepareKeyspacesForGCTest()
-	ks3, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks3, err := tests.CreateKeyspaceWithHistoricalGCMode(s.ctx, s.srv, &keyspace.CreateKeyspaceRequest{
 		Name:       "ks3",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.UnifiedGC},
 		CreateTime: time.Now().Unix(),

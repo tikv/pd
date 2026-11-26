@@ -62,7 +62,6 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	handlers.RegisterSafePoint(root)
 	handlers.RegisterMicroservice(root)
 	handlers.RegisterMaintenance(root)
-	root.Use(middlewares.AffinityMicroserviceRedirector())
 	handlers.RegisterAffinity(root)
 	return router, group, nil
 }
