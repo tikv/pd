@@ -39,7 +39,7 @@ const (
 	gcStateWarmupMaxRetryDelay = 30 * time.Second
 )
 
-// A scope stays completed even if its cached value is later invalidated.
+// A scope stays completed for the rest of the campaign after it is loaded or skipped.
 // joined is polled by the fixed worker pool, never by per-scope goroutines.
 type gcStateWarmupScope struct {
 	completed  bool
@@ -415,10 +415,14 @@ func (w *gcStateWarmup) recordBatchResult(result gcStateLoadResult, now time.Tim
 
 func (w *gcStateWarmup) recordScopeResult(id uint32, scope *gcStateWarmupScope, err error, now time.Time) {
 	scope.running = false
-	if err == nil {
-		if !scope.completed {
-			w.remaining--
+	if scope.completed {
+		return
+	}
+	if err == nil || canSkipKeyspaceGCState(id, err) {
+		if err != nil {
+			log.Error("skipping keyspace during GC state cache warmup", zap.Uint32("keyspace-id", id), zap.Error(err))
 		}
+		w.remaining--
 		scope.completed = true
 		return
 	}

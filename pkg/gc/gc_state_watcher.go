@@ -456,10 +456,15 @@ func (m *GCStateManager) iterateEnabledKeyspacesGCStates(
 			continue
 		}
 		state, err := m.getGCStateImpl(ctx, entry.id, true)
-		if err != nil {
+		if err == nil {
+			cb(state)
+			continue
+		}
+		if !canSkipKeyspaceGCState(entry.id, err) {
 			return err
 		}
-		cb(state)
+		log.Error("skipping keyspace during GC watch initialization",
+			zap.Uint32("keyspace-id", entry.id), zap.Error(err))
 	}
 	return nil
 }

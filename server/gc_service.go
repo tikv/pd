@@ -709,6 +709,9 @@ func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, request *pdpb.Advan
 	}
 	oldGCSafePoint, newGCSafePoint, err := s.gcStateManager.AdvanceGCSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget())
 	if err != nil {
+		if errors.Is(err, errs.ErrNotLeader) {
+			return nil, errs.ErrNotLeader
+		}
 		return &pdpb.AdvanceGCSafePointResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
@@ -746,6 +749,9 @@ func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.Adva
 
 	res, err := s.gcStateManager.AdvanceTxnSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget(), time.Now())
 	if err != nil {
+		if errors.Is(err, errs.ErrNotLeader) {
+			return nil, errs.ErrNotLeader
+		}
 		return &pdpb.AdvanceTxnSafePointResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
@@ -789,6 +795,9 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
 	newBarrier, err := s.gcStateManager.SetGCBarrier(keyspaceID, barrierID, barrierTS, ttl, now)
 	if err != nil {
+		if errors.Is(err, errs.ErrNotLeader) {
+			return nil, errs.ErrNotLeader
+		}
 		return &pdpb.SetGCBarrierResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil

@@ -42,12 +42,14 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -65,6 +67,99 @@ const (
 	skipCampaignLeaderCheckFailpoint  = "github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"
 	watchGCStatesRegisteredFailpoint  = "github.com/tikv/pd/pkg/gc/watchGCStatesRegistered"
 )
+
+func TestStarterGCMigrationStartupRetry(t *testing.T) {
+	if !kerneltype.IsNextGen() {
+		t.Skip("only NextGen PD reads the Starter GC migration cutoff")
+	}
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	t.Cleanup(cluster.Destroy)
+	re.NoError(cluster.RunInitialServers())
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	leaderServer := cluster.GetServer(leader)
+	re.NoError(leaderServer.BootstrapCluster())
+	manager := leaderServer.GetServer().GetGCStateManager()
+	_, err = manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 120, time.Now())
+	re.NoError(err)
+	_, _, err = manager.AdvanceGCSafePoint(constant.NullKeyspaceID, 100)
+	re.NoError(err)
+	client := leaderServer.GetEtcdClient()
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(follower)
+	cfg := follower.GetConfig().Clone()
+	re.NoError(follower.Stop())
+
+	key := keypath.GCMigrationCutoffPath()
+	_, err = client.Put(ctx, key, "invalid")
+	re.NoError(err)
+	failed, err := tests.NewTestServer(ctx, cfg.Clone(), nil)
+	re.NoError(err)
+	re.ErrorContains(failed.Run(), "invalid starter GC migration cutoff")
+
+	// The live quorum can repair the cutoff while this member is down.
+	_, err = client.Delete(ctx, key)
+	re.NoError(err)
+	_, err = client.Put(ctx, key, "1")
+	re.NoError(err)
+	retry, err := tests.NewTestServer(ctx, cfg, nil)
+	re.NoError(err)
+	re.NoError(retry.Run())
+	t.Cleanup(func() { re.NoError(retry.Stop()) })
+	re.Equal(follower.GetServerID(), retry.GetServerID())
+
+	// Unified GC reads are served locally even on a follower with a cutoff.
+	re.False(retry.IsLeader())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, retry.GetAddr()+"/pd/api/v1/gc/safepoint", http.NoBody)
+	re.NoError(err)
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	var points api.ListServiceGCSafepoint
+	re.NoError(json.NewDecoder(resp.Body).Decode(&points))
+	re.EqualValues(100, points.GCSafePoint)
+	re.EqualValues(120, points.MinServiceGcSafepoint)
+}
+
+func TestStarterGCMigrationWriteRPCsAfterLeaderLoss(t *testing.T) {
+	if !kerneltype.IsNextGen() {
+		t.Skip("only NextGen PD reads the Starter GC migration cutoff")
+	}
+	re := require.New(t)
+	ctx := t.Context()
+	cluster := newWatchGCStatesCluster(t, 1, true)
+	original := cluster.GetLeaderServer()
+	_, err := original.GetEtcdClient().Put(ctx, keypath.GCMigrationCutoffPath(), "1")
+	re.NoError(err)
+	cfg := original.GetConfig().Clone()
+	re.NoError(original.Stop())
+	upgraded, err := tests.NewTestServer(ctx, cfg, nil)
+	re.NoError(err)
+	re.NoError(upgraded.Run())
+	t.Cleanup(func() { re.NoError(upgraded.Stop()) })
+	re.True(upgraded.WaitLeader())
+
+	// The RPC role check still succeeds while the GC manager's generation has
+	// already retired. Its fencing error must reach clients as Unavailable.
+	manager := upgraded.GetServer().GetGCStateManager()
+	stop := manager.OnNodeBecomesLeader()
+	stop()
+	re.True(upgraded.IsLeader())
+	client := newWatchGCStatesClient(t, upgraded.GetAddr())
+	header := testutil.NewRequestHeader(upgraded.GetClusterID())
+	scope := makeKeyspaceScope(constant.NullKeyspaceID)
+	_, err = client.AdvanceGCSafePoint(ctx, &pdpb.AdvanceGCSafePointRequest{Header: header, KeyspaceScope: scope, Target: 10})
+	re.Equal(codes.Unavailable, status.Code(err))
+	_, err = client.AdvanceTxnSafePoint(ctx, &pdpb.AdvanceTxnSafePointRequest{Header: header, KeyspaceScope: scope, Target: 10})
+	re.Equal(codes.Unavailable, status.Code(err))
+	_, err = client.SetGCBarrier(ctx, &pdpb.SetGCBarrierRequest{Header: header, KeyspaceScope: scope, BarrierId: "cdc", BarrierTs: 10, TtlSeconds: 60})
+	re.Equal(codes.Unavailable, status.Code(err))
+}
 
 func makeKeyspaceScope(keyspaceID uint32) *pdpb.KeyspaceScope {
 	return &pdpb.KeyspaceScope{

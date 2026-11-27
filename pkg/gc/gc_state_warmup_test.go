@@ -413,30 +413,16 @@ func TestGCStateWarmupQueueReconciliation(t *testing.T) {
 	}
 }
 
-// Transport failure retries the original batch; a malformed member does not
-// prevent healthy members from completing or make them repeat on recovery.
+// A transport failure retries the batch. A malformed member can be skipped
+// once the read succeeds and the error can be attributed to that scope.
 func TestGCStateWarmupRetriesFailures(t *testing.T) {
 	var reads atomic.Int32
-	retryEntered := make(chan struct{}, 1)
-	release := make(chan struct{})
 	storage, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
 		etcdClientCfgModifier: func(cfg *clientv3.Config) {
 			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 				if txn := gcWarmupRead(req); txn != nil && string(txn.Success[0].GetRequestRange().Key) != keypath.TxnSafePointPath(constant.NullKeyspaceID) {
-					n := reads.Add(1)
-					if n == 1 {
+					if reads.Add(1) == 1 {
 						return errors.New("injected transport failure")
-					}
-					if n == 3 {
-						if len(txn.Success) != 2 {
-							return errors.New("recovery repeated healthy scopes")
-						}
-						retryEntered <- struct{}{}
-						select {
-						case <-release:
-						case <-ctx.Done():
-							return ctx.Err()
-						}
 					}
 				}
 				return invoke(ctx, method, req, reply, cc, opts...)
@@ -450,19 +436,13 @@ func TestGCStateWarmupRetriesFailures(t *testing.T) {
 	w.onInitialSnapshot(gcWarmupEntries(100, 60))
 	started := time.Now()
 	runGCWarmupTest(t, w)
-	gcWarmupWait(t, retryEntered)
+	gcWarmupWait(t, w.done)
 	require.GreaterOrEqual(t, time.Since(started), time.Second, "failures must back off")
+	require.Equal(t, int32(2), reads.Load())
 	for _, e := range gcWarmupEntries(100, 60) {
 		_, ok := m.gcStateCache.load(e.id)
 		require.Equal(t, e.id != 101, ok)
 	}
-	require.NoError(t, storage.Save(keypath.TxnSafePointPath(101), "123"))
-	close(release)
-	gcWarmupWait(t, w.done)
-	require.Equal(t, int32(3), reads.Load())
-	value, ok := m.gcStateCache.load(101)
-	require.True(t, ok)
-	require.Equal(t, uint64(123), value.TxnSafePoint)
 }
 
 func TestGCStateWarmupJoinedSuccessSurvivesInvalidation(t *testing.T) {
@@ -568,23 +548,18 @@ func TestGCStateWarmupInitialTargetsOnly(t *testing.T) {
 
 func newGCWarmupRuntimeTest(t *testing.T, intercept grpc.UnaryClientInterceptor) *GCStateManager {
 	t.Helper()
-	var clientCfg clientv3.Config
-	_, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{etcdClientCfgModifier: func(cfg *clientv3.Config) {
-		cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(intercept))
-		clientCfg = *cfg
-	}})
-	client, err := clientv3.New(clientCfg)
-	require.NoError(t, err)
+	_, _, m, clean, cancel := newGCStateManagerForTest(t, newGCStateManagerForTestOptions{
+		useEnabledKeyspaceIndex: true,
+		etcdClientCfgModifier: func(cfg *clientv3.Config) {
+			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(intercept))
+		},
+	})
+	m.stopGCStateGeneration(m.activeGeneration.Load())
 	t.Cleanup(func() {
 		m.stopGCStateGeneration(m.activeGeneration.Load())
-		require.NoError(t, client.Close())
 		cancel()
 		clean()
 	})
-	// The unconfigured manager remains passive in classic deployments.
-	require.Nil(t, m.activeGeneration.Load().index)
-	m.stopGCStateGeneration(m.activeGeneration.Load())
-	m.SetEtcdClient(client)
 	return m
 }
 

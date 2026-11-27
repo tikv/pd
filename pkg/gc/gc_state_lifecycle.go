@@ -19,9 +19,11 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
@@ -59,13 +61,24 @@ func (g *gcStateGeneration) retire() {
 	}
 }
 
-// SetEtcdClient enables metadata discovery and initial GC warmup. NextGen
-// configures it before the first leadership generation; other deployments leave
-// it unset and retain passive cache loading.
-func (m *GCStateManager) SetEtcdClient(client *clientv3.Client) {
-	m.lifecycleMu.Lock()
-	defer m.lifecycleMu.Unlock()
-	m.etcdClient = client
+// LoadMigrationCutoff returns the revision of the Starter upgrade cutoff, or zero
+// if the cluster has no cutoff. The upgrade script creates it before PD starts.
+func LoadMigrationCutoff(ctx context.Context, client *clientv3.Client) (int64, error) {
+	key := keypath.GCMigrationCutoffPath()
+	resp, err := etcdutil.EtcdKVGetWithContext(ctx, client, key)
+	if err != nil {
+		return 0, errors.Annotate(err, "read starter GC migration cutoff")
+	}
+	if len(resp.Kvs) == 0 {
+		return 0, nil
+	}
+	entry := resp.Kvs[0]
+	if string(entry.Value) != "1" || entry.Version != 1 || entry.Lease != 0 ||
+		entry.CreateRevision <= 0 || entry.CreateRevision != entry.ModRevision {
+		return 0, errors.Errorf("invalid starter GC migration cutoff %s (version %d, create revision %d, mod revision %d, lease %d)",
+			key, entry.Version, entry.CreateRevision, entry.ModRevision, entry.Lease)
+	}
+	return entry.CreateRevision, nil
 }
 
 // OnNodeBecomesLeader starts a unique leadership generation and returns its

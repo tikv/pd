@@ -879,7 +879,11 @@ func TestGCStateLoadPublicationPrecedesSafePointWriter(t *testing.T) {
 			}
 			values, err := provider.LoadGCSafePointPairs(context.Background(), []uint32{2})
 			require.NoError(t, err)
-			require.Equal(t, []endpoint.GCSafePointReadResult{{KeyspaceID: 2, TxnSafePoint: 90, GCSafePoint: 70}}, values)
+			require.Len(t, values, 1)
+			require.NoError(t, values[0].Err)
+			require.Equal(t, uint32(2), values[0].KeyspaceID)
+			require.Equal(t, uint64(90), values[0].TxnSafePoint)
+			require.Equal(t, uint64(70), values[0].GCSafePoint)
 			unblock()
 			for _, done := range []<-chan error{loaded, written} {
 				select {
@@ -894,7 +898,11 @@ func TestGCStateLoadPublicationPrecedesSafePointWriter(t *testing.T) {
 			require.Equal(t, tc.want, entry, "late publication must not overwrite the writer's newer state")
 			values, err = provider.LoadGCSafePointPairs(context.Background(), []uint32{2})
 			require.NoError(t, err)
-			require.Equal(t, []endpoint.GCSafePointReadResult{{KeyspaceID: 2, TxnSafePoint: tc.want.TxnSafePoint, GCSafePoint: tc.want.GCSafePoint}}, values)
+			require.Len(t, values, 1)
+			require.NoError(t, values[0].Err)
+			require.Equal(t, uint32(2), values[0].KeyspaceID)
+			require.Equal(t, tc.want.TxnSafePoint, values[0].TxnSafePoint)
+			require.Equal(t, tc.want.GCSafePoint, values[0].GCSafePoint)
 		})
 	}
 }

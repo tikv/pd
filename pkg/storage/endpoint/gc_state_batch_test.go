@@ -79,6 +79,12 @@ func TestLoadGCSafePointPairs(t *testing.T) {
 	expectedGC := []uint64{0, 42, 0, 63, 0, 0, 0, math.MaxUint64}
 	for i, result := range results {
 		re.Equal(ids[i], result.KeyspaceID)
+		if ids[i] == 9 {
+			re.Zero(result.TxnSafePointRevision)
+		} else {
+			re.Positive(result.TxnSafePointRevision)
+		}
+		re.Equal(ids[i] == 0, result.TxnSafePointEmpty)
 		if ids[i] == 11 || ids[i] == 12 {
 			re.Error(result.Err)
 			continue
@@ -120,7 +126,10 @@ func TestLoadGCSafePointPairs(t *testing.T) {
 	re.NoError(se.Save(keypath.TxnSafePointPath(constant.NullKeyspaceID), ""))
 	results, err = provider.LoadGCSafePointPairs(context.Background(), []uint32{constant.NullKeyspaceID})
 	re.NoError(err)
-	re.Equal([]GCSafePointReadResult{{KeyspaceID: constant.NullKeyspaceID}}, results)
+	revision, err := provider.LoadTxnSafePointRevision(context.Background(), constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Positive(revision)
+	re.Equal([]GCSafePointReadResult{{KeyspaceID: constant.NullKeyspaceID, TxnSafePointRevision: revision, TxnSafePointEmpty: true}}, results)
 }
 
 func TestLoadGCSafePointPairsBatchBounds(t *testing.T) {

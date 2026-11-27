@@ -16,6 +16,8 @@ package gc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/pingcap/failpoint"
 
@@ -23,6 +25,36 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
+
+// keyspaceGCStateLoadError marks failures confined to a keyspace or its
+// migration source. Watch initialization and warmup can skip affected keyspaces.
+type keyspaceGCStateLoadError struct{ cause error }
+
+func (e *keyspaceGCStateLoadError) Error() string { return e.cause.Error() }
+func (e *keyspaceGCStateLoadError) Unwrap() error { return e.cause }
+
+// Cause exposes the original error to github.com/pingcap/errors.
+func (e *keyspaceGCStateLoadError) Cause() error { return e.cause }
+
+func canSkipKeyspaceGCState(id uint32, err error) bool {
+	if id == constant.NullKeyspaceID {
+		return false
+	}
+	_, ok := errors.AsType[*keyspaceGCStateLoadError](err)
+	return ok
+}
+
+// loadLocalSafePointPairs marks per-scope decode errors for watch and warmup.
+// Storage and response errors affect the whole batch.
+func (m *GCStateManager) loadLocalSafePointPairs(ctx context.Context, ids []uint32) ([]endpoint.GCSafePointReadResult, error) {
+	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
+	for i := range pairs {
+		if decodeErr := pairs[i].Err; decodeErr != nil {
+			pairs[i].Err = &keyspaceGCStateLoadError{decodeErr}
+		}
+	}
+	return pairs, err
+}
 
 // err becomes immutable when done closes. Success describes this load, even if
 // its cached values have been invalidated before a waiter observes completion.
@@ -68,19 +100,10 @@ func (g *gcStateGeneration) loadContext(ctx context.Context) (context.Context, c
 // Cached completions and joined flights do not consume read slots. next consumes
 // only available candidates and must not acquire the manager or generation lock.
 //
-// This call owns the manager read lock through publication, excluding safe-point
-// writers. Assembly is serialized by generation.mu, so concurrent workers cannot
-// split a partial batch. The lock order is manager, generation, then any short
-// scheduling lock acquired by next; generation.mu is released before storage I/O.
-// ctx must be independent of individual foreground waiters. Generation retirement
-// cancels the I/O, and joined flights are returned without waiting for them.
+// Each local read holds the manager read lock through publication, excluding
+// safe-point writers. Pending migrations retain their flights while doing
+// external I/O outside the lock. Joined flights never block the batch.
 func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool)) (gcStateLoadResult, error) {
-	if err := ctx.Err(); err != nil {
-		return gcStateLoadResult{}, err
-	}
-	failpoint.InjectCall("beforeGCStateLoadManagerLock")
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	if err := ctx.Err(); err != nil {
 		return gcStateLoadResult{}, err
 	}
@@ -90,6 +113,54 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 	ctx, cancel := generation.loadContext(ctx)
 	defer cancel()
 	batch := &gcStateLoadBatch{result: gcStateLoadResult{failed: make(map[uint32]error), joined: make(map[uint32]*gcStateLoadFlight)}}
+	pending, err := m.loadLocalGCStateBatch(ctx, generation, next, batch)
+	if err != nil {
+		return gcStateLoadResult{}, err
+	}
+	if len(pending) != 0 {
+		m.migrateStarterBatch(ctx, generation, pending, 0, func(items []*migrationItem) {
+			m.publishStarterGroup(ctx, generation, batch, items)
+		})
+	}
+	return batch.result, nil
+}
+
+// Hold the read lock from the group's final local read through publication.
+// An ordinary GC write may already have advanced beyond the frozen T.
+func (m *GCStateManager) publishStarterGroup(ctx context.Context, generation *gcStateGeneration, batch *gcStateLoadBatch, items []*migrationItem) {
+	ids := make([]uint32, 0, len(items))
+	for _, item := range items {
+		if item.err == nil {
+			ids = append(ids, item.localRead.KeyspaceID)
+		}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	pairs, err := m.loadLocalSafePointPairs(ctx, ids)
+	generation.mu.Lock()
+	defer generation.mu.Unlock()
+	for _, item := range items {
+		pair := endpoint.GCSafePointReadResult{Err: item.err}
+		if pair.Err == nil {
+			pair.Err = err
+			if err == nil {
+				pair, pairs = pairs[0], pairs[1:]
+				if pair.Err == nil {
+					pair.Err = validateStarterGCState(pair)
+				}
+			}
+		}
+		m.finishGCStateFlight(ctx, generation, batch, item.index, pair)
+	}
+}
+
+func (m *GCStateManager) loadLocalGCStateBatch(ctx context.Context, generation *gcStateGeneration, next func() (uint32, bool), batch *gcStateLoadBatch) ([]*migrationItem, error) {
+	failpoint.InjectCall("beforeGCStateLoadManagerLock")
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.activeGeneration.Load() != generation {
+		return nil, errs.ErrNotLeader
+	}
 	// Keep flight claims and batch assembly in one critical section.
 	// Once a flight is claimed, every exit goes through publication below.
 	err := func() error {
@@ -134,53 +205,72 @@ func (m *GCStateManager) loadGCStateBatch(ctx context.Context, generation *gcSta
 				}
 			}
 		}
-		// Leadership may have been gated while next was assembling the batch,
-		// before retirement can acquire generation.mu and cancel its context.
-		if m.activeGeneration.Load() != generation {
-			cancel()
-		}
 		return nil
 	}()
-	if err != nil {
-		return gcStateLoadResult{}, err
+	if err != nil || len(batch.keyspaceIDs) == 0 {
+		return nil, err
 	}
-	if len(batch.keyspaceIDs) == 0 {
-		return batch.result, nil
-	}
-	values, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, batch.keyspaceIDs)
-	failpoint.InjectCall("afterGCStateLoadBatchRead", ctx, m, batch.keyspaceIDs)
-	generation.mu.Lock()
-	defer generation.mu.Unlock()
+	var values []endpoint.GCSafePointReadResult
 	if m.activeGeneration.Load() != generation {
 		err = errs.ErrNotLeader
-	} else if ctx.Err() != nil {
-		err = ctx.Err()
+	} else {
+		values, err = m.loadLocalSafePointPairs(ctx, batch.keyspaceIDs)
+		failpoint.InjectCall("afterGCStateLoadBatchRead", ctx, m, batch.keyspaceIDs)
 	}
-	for i, id := range batch.keyspaceIDs {
-		flight := batch.flights[i]
-		scopeErr := err
-		if scopeErr == nil {
-			scopeErr = values[i].Err
-		}
-		if generation.flights[id] != flight {
-			// Retirement completed this flight. It must not retire a replacement.
-			scopeErr = flight.err
-		} else {
-			if scopeErr == nil {
-				m.gcStateCache.store(id, gcStateCacheEntry{TxnSafePoint: values[i].TxnSafePoint, GCSafePoint: values[i].GCSafePoint})
-				failpoint.InjectCall("onGCStateLoadPublished", m, id)
+	generation.mu.Lock()
+	defer generation.mu.Unlock()
+	var pending []*migrationItem
+	for i := range batch.keyspaceIDs {
+		pair := endpoint.GCSafePointReadResult{Err: err}
+		if err == nil {
+			pair = values[i]
+			var needsMigration bool
+			needsMigration, pair.Err = needsStarterMigration(pair, m.migrationCutoff)
+			if needsMigration {
+				pending = append(pending, &migrationItem{index: i, localRead: pair})
+				continue
 			}
-			flight.err = scopeErr
-			close(flight.done)
-			delete(generation.flights, id)
 		}
-		if scopeErr == nil {
-			batch.result.completed = append(batch.result.completed, id)
-		} else {
-			batch.result.failed[id] = scopeErr
-		}
+		m.finishGCStateFlight(ctx, generation, batch, i, pair)
 	}
-	return batch.result, nil
+	return pending, nil
+}
+
+// Both the manager read lock and generation.mu are held.
+func (m *GCStateManager) finishGCStateFlight(ctx context.Context, generation *gcStateGeneration, batch *gcStateLoadBatch, i int, pair endpoint.GCSafePointReadResult) {
+	id, flight := batch.keyspaceIDs[i], batch.flights[i]
+	if generation.flights[id] != flight {
+		// Retirement completed this flight. It must not retire a replacement.
+		pair.Err = flight.err
+	} else {
+		if m.activeGeneration.Load() != generation {
+			pair.Err = errs.ErrNotLeader
+		} else if ctx.Err() != nil {
+			pair.Err = ctx.Err()
+		}
+		if pair.Err == nil {
+			m.gcStateCache.store(id, gcStateCacheEntry{TxnSafePoint: pair.TxnSafePoint, GCSafePoint: pair.GCSafePoint})
+			failpoint.InjectCall("onGCStateLoadPublished", m, id)
+		}
+		flight.err = pair.Err
+		close(flight.done)
+		delete(generation.flights, id)
+	}
+	if pair.Err == nil {
+		batch.result.completed = append(batch.result.completed, id)
+	} else {
+		batch.result.failed[id] = pair.Err
+	}
+}
+
+func validateStarterGCState(pair endpoint.GCSafePointReadResult) error {
+	if pair.TxnSafePointEmpty {
+		return &keyspaceGCStateLoadError{fmt.Errorf("empty transaction safe point for keyspace %d", pair.KeyspaceID)}
+	}
+	if pair.GCSafePoint > pair.TxnSafePoint {
+		return &keyspaceGCStateLoadError{fmt.Errorf("keyspace %d GC safe point %d exceeds transaction safe point %d", pair.KeyspaceID, pair.GCSafePoint, pair.TxnSafePoint)}
+	}
+	return nil
 }
 
 // loadGCState gives each foreground request independent cancellation. The owner
@@ -264,6 +354,9 @@ func (m *GCStateManager) loadGCState(ctx context.Context, generation *gcStateGen
 }
 
 func (m *GCStateManager) readGCStateDirect(ctx context.Context, generation *gcStateGeneration, id uint32) endpoint.GCSafePointReadResult {
+	if err := m.ensureMigratedTxnSafePoint(ctx, generation, id); err != nil {
+		return endpoint.GCSafePointReadResult{Err: err}
+	}
 	failpoint.InjectCall("beforeGCStateLoadManagerLock")
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -272,12 +365,12 @@ func (m *GCStateManager) readGCStateDirect(ctx context.Context, generation *gcSt
 	}
 	ctx, cancel := generation.loadContext(ctx)
 	defer cancel()
+	failpoint.InjectCall("getGCStateCacheAccess", "miss")
+	gcStateCacheAccessMissCounter.Inc()
 	if err := ctx.Err(); err != nil {
 		return endpoint.GCSafePointReadResult{Err: err}
 	}
-	failpoint.InjectCall("getGCStateCacheAccess", "miss")
-	gcStateCacheAccessMissCounter.Inc()
-	values, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, []uint32{id})
+	values, err := m.loadLocalSafePointPairs(ctx, []uint32{id})
 	if m.activeGeneration.Load() != generation {
 		err = errs.ErrNotLeader
 	} else if ctx.Err() != nil {
@@ -286,7 +379,9 @@ func (m *GCStateManager) readGCStateDirect(ctx context.Context, generation *gcSt
 	if err != nil {
 		return endpoint.GCSafePointReadResult{Err: err}
 	}
-	// Return the pair from this transaction directly; do not publish it to the
-	// cache or re-enter the shared-load retry loop.
-	return values[0]
+	result := values[0]
+	if m.migrationCutoff > 0 && id != constant.NullKeyspaceID && result.Err == nil {
+		result.Err = validateStarterGCState(result)
+	}
+	return result
 }

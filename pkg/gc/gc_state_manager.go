@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -214,14 +215,28 @@ type GCStateManager struct {
 	generation       *gcStateGeneration
 	etcdClient       *clientv3.Client
 
+	// migrationCutoff is the CreateRevision of the Starter upgrade cutoff key in PD etcd.
+	// Keyspaces with a txn safe point revision at or below the cutoff need verification. Zero disables the check.
+	migrationCutoff int64
+
 	watchers      map[uint64]*GCStateWatcher
 	nextWatcherID uint64
 }
 
-// NewGCStateManager creates a GCStateManager of GC and services.
-func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig, keyspaceManager *keyspace.Manager, metaServiceGroupManager *keyspace.MetaServiceGroupManager) *GCStateManager {
+// NewGCStateManager creates the GC state manager. A non-nil etcd client enables
+// the keyspace index and warmup. A positive migration cutoff enables Starter GC migration.
+func NewGCStateManager(
+	store endpoint.GCStateProvider,
+	cfg config.PDServerConfig,
+	keyspaceManager *keyspace.Manager,
+	metaServiceGroupManager *keyspace.MetaServiceGroupManager,
+	etcdClient *clientv3.Client,
+	migrationCutoff int64,
+) *GCStateManager {
 	m := &GCStateManager{
 		gcMetaStorage:                    store,
+		etcdClient:                       etcdClient,
+		migrationCutoff:                  migrationCutoff,
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
 		metaServiceGroupManager:          metaServiceGroupManager,
@@ -312,6 +327,34 @@ func gcKeyspaceScope(keyspaceID uint32, meta *keyspacepb.KeyspaceMeta, isUserAPI
 	return keyspaceID, meta.GetName(), nil
 }
 
+// lockForTxnSafePoint verifies a pending Starter safe point before taking the
+// manager lock, so a slow source does not block unrelated GC operations.
+func (m *GCStateManager) lockForTxnSafePoint(ctx context.Context, id uint32, lock sync.Locker) error {
+	if m.migrationCutoff == 0 {
+		lock.Lock()
+		return nil
+	}
+	generation := m.activeGeneration.Load()
+	if err := m.ensureMigratedTxnSafePoint(ctx, generation, id); err != nil {
+		return err
+	}
+	lock.Lock()
+	if m.activeGeneration.Load() != generation {
+		lock.Unlock()
+		return errs.ErrNotLeader
+	}
+	return nil
+}
+
+// Unified GC state always lives in PD etcd. Followers can serve its legacy reads.
+func (m *GCStateManager) lockForTxnSafePointRead(ctx context.Context, id uint32) error {
+	if id == constant.NullKeyspaceID {
+		m.mu.RLock()
+		return nil
+	}
+	return m.lockForTxnSafePoint(ctx, id, m.mu.RLocker())
+}
+
 // CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
 func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 	keyspaceID, _, err := m.redirectKeyspace(keyspaceID, false)
@@ -342,9 +385,6 @@ func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (o
 	}
 	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	return m.advanceGCSafePointImpl(ctx, keyspaceID, target, false)
 }
 
@@ -359,13 +399,15 @@ func (m *GCStateManager) CompatibleUpdateGCSafePoint(keyspaceID uint32, target u
 	}
 	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	return m.advanceGCSafePointImpl(ctx, keyspaceID, target, true)
 }
 
 func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID uint32, target uint64, compatible bool) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
+	if err = m.lockForTxnSafePoint(ctx, keyspaceID, &m.mu); err != nil {
+		return 0, 0, err
+	}
+	defer m.mu.Unlock()
+
 	newGCSafePoint = target
 	var txnSafePoint uint64
 
@@ -473,6 +515,10 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, n
 // Local reports are read inside the transaction so queued requests use the latest local state.
 func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, keyspaceMeta txnSafePointKeyspace, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	failpoint.InjectCall("txnSafePointKeyspaceLoaded")
+	generation := m.activeGeneration.Load()
+	if err := m.ensureMigratedTxnSafePoint(ctx, generation, keyspaceID); err != nil {
+		return AdvanceTxnSafePointResult{}, err
+	}
 	var externalMinStartTS *minStartTSInfo
 	groupID := keyspaceMeta.meta.GetConfig()[keyspace.MetaServiceGroupIDKey]
 	if keyspaceID != constant.NullKeyspaceID && groupID != "" {
@@ -484,6 +530,9 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.migrationCutoff != 0 && m.activeGeneration.Load() != generation {
+		return AdvanceTxnSafePointResult{}, errs.ErrNotLeader
+	}
 
 	// Marks whether it's needed to provide the compatibility for old versions.
 	//
@@ -785,24 +834,31 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 	if err != nil {
 		return nil, err
 	}
+	if err := validateGCBarrierID(barrierID); err != nil {
+		return nil, err
+	}
 	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
 
-	m.mu.Lock()
+	if err := m.lockForTxnSafePoint(ctx, keyspaceID, &m.mu); err != nil {
+		return nil, err
+	}
 	defer m.mu.Unlock()
 
 	return m.setGCBarrierImpl(ctx, keyspaceID, barrierID, barrierTS, ttl, now)
 }
 
-func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
-	// The barrier ID (or service ID of the service safe points) is reserved for keeping backward compatibility.
+func validateGCBarrierID(barrierID string) error {
+	// Legacy service safe point APIs use gc_worker to advance the txn safe point.
 	if barrierID == keypath.GCWorkerServiceSafePointID {
-		return nil, errs.ErrReservedGCBarrierID.GenWithStackByArgs(barrierID)
+		return errs.ErrReservedGCBarrierID.GenWithStackByArgs(barrierID)
 	}
-	// Disallow empty barrierID
-	if len(barrierID) == 0 {
-		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
+	if barrierID == "" {
+		return errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
 	}
+	return nil
+}
 
+func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
 	var expirationTime *time.Time = nil
 	if ttl < time.Duration(math.MaxInt64) {
 		t := now.Add(ttl)
@@ -848,6 +904,9 @@ func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*
 	if err != nil {
 		return nil, err
 	}
+	if err := validateGCBarrierID(barrierID); err != nil {
+		return nil, err
+	}
 	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
 
 	m.mu.Lock()
@@ -876,15 +935,6 @@ func (m *GCStateManager) ForceDeleteServiceGCSafePoint(serviceID string) error {
 }
 
 func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
-	// The barrier ID (or service ID of the service safe points) is reserved for keeping backward compatibility.
-	if barrierID == keypath.GCWorkerServiceSafePointID {
-		return nil, errs.ErrReservedGCBarrierID.GenWithStackByArgs(barrierID)
-	}
-	// Disallow empty barrierID
-	if len(barrierID) == 0 {
-		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
-	}
-
 	var deletedBarrier *endpoint.GCBarrier
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
@@ -942,10 +992,11 @@ func (m *GCStateManager) getGCStateImplSlow(ctx context.Context, keyspaceID uint
 	// not blocked while tests pin the request at the slow-path boundary.
 	failpoint.InjectCall("getGCStateBeforeSlowPath")
 
-	m.mu.RLock()
 	if generation := m.activeGeneration.Load(); excludeGCBarriers && generation != nil {
-		m.mu.RUnlock()
 		return m.loadGCState(ctx, generation, keyspaceID)
+	}
+	if err := m.lockForTxnSafePointRead(ctx, keyspaceID); err != nil {
+		return GCState{}, err
 	}
 	defer m.mu.RUnlock()
 
@@ -1047,7 +1098,9 @@ func (m *GCStateManager) GetGCStateWithGlobalGCBarriers(keyspaceID uint32, exclu
 		return GCState{}, nil, err
 	}
 
-	m.mu.RLock()
+	if err := m.lockForTxnSafePointRead(context.Background(), keyspaceID); err != nil {
+		return GCState{}, nil, err
+	}
 	defer m.mu.RUnlock()
 
 	var (
@@ -1140,16 +1193,15 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCB
 				actualKeyspaces[keyspaceID] = struct{}{}
 			})
 
-		// Filter out invalid GC states that may be stale in the cache.
-		keyspacesToRemove := make([]uint32, 0)
 		for keyspaceID := range gcStates {
-			if _, ok := actualKeyspaces[keyspaceID]; !ok {
-				keyspacesToRemove = append(keyspacesToRemove, keyspaceID)
+			if _, ok := actualKeyspaces[keyspaceID]; ok {
+				continue
 			}
-		}
-		for _, keyspaceID := range keyspacesToRemove {
 			delete(gcStates, keyspaceID)
-			m.gcStateCache.remove(keyspaceID)
+			// An incomplete scan may not have reached an active keyspace yet.
+			if err == nil {
+				m.gcStateCache.remove(keyspaceID)
+			}
 		}
 
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
@@ -1324,7 +1376,14 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 		}
 		return minServiceSafePoint, res.OldTxnSafePoint != res.NewTxnSafePoint, nil
 	}
-	m.mu.Lock()
+	if err := validateGCBarrierID(serviceID); err != nil {
+		return nil, false, err
+	}
+	if keyspaceID == constant.NullKeyspaceID {
+		m.mu.Lock()
+	} else if err := m.lockForTxnSafePoint(ctx, keyspaceID, &m.mu); err != nil {
+		return nil, false, err
+	}
 	defer m.mu.Unlock()
 	if ttl > 0 {
 		_, err = m.setGCBarrierImpl(ctx, keyspaceID, serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
