@@ -38,7 +38,12 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-const maxPendingListLen = 100000
+const (
+	maxPendingListLen = 100000
+	// addRulePeerDesc is the description of the operator that adds a peer
+	// missing from a placement rule.
+	addRulePeerDesc = "add-rule-peer"
+)
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
@@ -138,6 +143,21 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		}
 	}
 	return nil
+}
+
+// RecordOpSuccess is called when an operator completes successfully.
+// An add-rule-peer operator adds only one peer, so the region may still miss
+// peers required by placement rules, e.g. a rule that requires multiple
+// TiFlash learners. It puts the region into the pending processed regions to
+// check it again soon instead of waiting for the next patrol round.
+func (c *RuleChecker) RecordOpSuccess(op *operator.Operator) {
+	if op.Desc() != addRulePeerDesc {
+		return
+	}
+	if c.pendingProcessedRegions.Len() > DefaultPendingRegionCacheSize {
+		return
+	}
+	c.pendingProcessedRegions.Put(op.RegionID(), nil)
 }
 
 // RecordRegionPromoteToNonWitness put the recently switch non-witness region into cache. RuleChecker
@@ -263,7 +283,7 @@ func (c *RuleChecker) addRulePeerWithOptions(region *core.RegionInfo, fit *place
 		return nil, errs.ErrNoStoreToAdd
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
-	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
+	op, err := operator.CreateAddPeerOperator(addRulePeerDesc, c.cluster, region, peer, operator.OpReplica)
 	if err != nil {
 		return nil, err
 	}
