@@ -47,6 +47,7 @@ func RegisterAffinity(r *gin.RouterGroup) {
 			createAudit(c)
 		}
 	}, PostAffinityGroups)
+	router.POST("/targets", bootstrap, middlewares.Audit("UpdateAffinityGroupTargets", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateAffinityGroupTargets)
 	router.PATCH("", bootstrap, middlewares.Audit("BatchModifyAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram), BatchModifyAffinityGroups)
 	router.PUT("/:group_id", bootstrap, middlewares.Audit("UpdateAffinityGroupPeers", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateAffinityGroupPeers)
 	router.DELETE("/:group_id", bootstrap, middlewares.Audit("DeleteAffinityGroup", audit.LocalLogLabel, audit.PrometheusHistogram), DeleteAffinityGroup)
@@ -406,6 +407,41 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 	}
 
 	c.IndentedJSON(http.StatusOK, state)
+}
+
+// UpdateAffinityGroupTargets writes leader and voter targets for several affinity groups.
+// A target is written only if the stored group matches the expected contents and any supplied modification revision.
+// The scheduling service uses it to store the targets it decides.
+// Targets commit independently. Canceling the request stops further work and preserves commits already made.
+//
+//	@Tags			affinity-groups
+//	@Summary		Write leader and voter targets for affinity groups whose stored groups are unchanged.
+//	@Description	Each target commits independently, so an HTTP 500 on a later target leaves earlier commits in place.
+//	@Param			body	body	affinity.GroupTargetsRequest	true	"Targets with the groups they were decided from"
+//	@Produce		json
+//	@Success		200	{object}	affinity.GroupTargetsResponse	"IDs of groups whose targets were newly written or already stored with the requested peers"
+//	@Failure		400	{string}	string							"The input is invalid."
+//	@Failure		500	{string}	string							"PD server failed to proceed the request."
+//	@Router			/affinity-groups/targets [post]
+func UpdateAffinityGroupTargets(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager, err := svr.GetAffinityManager()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	req := &affinity.GroupTargetsRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	written, err := manager.UpdateAffinityGroupTargets(c.Request.Context(), req.Targets)
+	if handleAffinityError(c, err) {
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, &affinity.GroupTargetsResponse{WrittenGroupIDs: written})
 }
 
 // DeleteAffinityGroup deletes a specific affinity group by group id.

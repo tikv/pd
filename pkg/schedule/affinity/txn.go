@@ -347,17 +347,18 @@ func (m *Manager) runGroupOpsInTxn(groupOps [][]func(kv.Txn) error) (int, error)
 }
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group
-// and resets target availability using cached store conditions. The updated group
-// can be degraded or expired. Before the first store check, the update marks the
-// group available.
+// and resets target availability using cached store conditions. Before the first
+// store scan, it checks the candidate stores directly and marks the group
+// available on success.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	return m.updateAffinityGroupPeersWithState(groupID, nil, leaderStoreID, voterStoreIDs)
 }
 
 // updateAffinityGroupPeersWithState updates the leader and voter stores of an affinity group
 // and resets target availability as described by UpdateAffinityGroupPeers.
-// A nil observed state indicates an admin update. Otherwise the runtime group and version must match,
-// its ranges must not conflict, and voter stores can change only when regular scheduling is allowed.
+// A nil observed state indicates an admin update. An observation must match the runtime
+// group instance, affinity version, and watched revision. Its ranges must not conflict,
+// and voter stores can change only when regular scheduling is allowed.
 func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *GroupState, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
@@ -382,11 +383,11 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
-	voterStoreIDs = slices.Clone(voterStoreIDs)
-	slices.Sort(voterStoreIDs)
+	voterStoreIDs = sortedStoreIDs(voterStoreIDs)
 	if observed != nil {
 		// A recreated group can reuse the observed version.
-		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer || group.rangeConflict {
+		if group.groupInfoPtr != observed.groupInfoPtr || group.affinityVer != observed.affinityVer ||
+			group.modRevision != observed.modRevision || group.rangeConflict {
 			return group, nil
 		}
 		// Changing only the leader is allowed while regular scheduling is disabled.
@@ -394,11 +395,48 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 		if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
 		}
+		if group.AffinitySchedulingAllowed && leaderStoreID != group.LeaderStoreID {
+			return group, nil
+		}
+		if m.targetWriter != nil {
+			observation := observedTarget{
+				target: GroupTarget{
+					ExpectedModRevision: observed.modRevision,
+					LeaderStoreID:       leaderStoreID,
+					VoterStoreIDs:       voterStoreIDs,
+				},
+				groupInfoPtr: observed.groupInfoPtr,
+				affinityVer:  observed.affinityVer,
+				persistOnly:  group.AffinitySchedulingAllowed && group.targetUnpersisted,
+			}
+			m.RLock()
+			current := m.groups[groupID]
+			if !observation.matches(current) {
+				m.RUnlock()
+				return m.GetAffinityGroupState(groupID), nil
+			}
+			conditionsKnown := m.storeConditionsKnown
+			observation.target.Expected = current.storedGroup()
+			observation.target.Expected.VoterStoreIDs = slices.Clone(observation.target.Expected.VoterStoreIDs)
+			m.RUnlock()
+			if !conditionsKnown && !group.targetUnpersisted && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
+				return group, nil
+			}
+			result := observation.target.result()
+			matchesStored := sameStoredGroup(&observation.target.Expected, result)
+			if !group.AffinitySchedulingAllowed && (matchesStored || sameStoredGroup(&group.Group, result)) {
+				m.recoverLocalObservedTarget(&observation, matchesStored)
+			}
+			if !matchesStored {
+				m.sendObservedTarget(observation)
+			}
+			return m.GetAffinityGroupState(groupID), nil
+		}
 	}
 
 	// Step 2: Save the Group in storage.
 	group.LeaderStoreID = leaderStoreID
-	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
+	group.VoterStoreIDs = voterStoreIDs
 	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
 	}); err != nil {

@@ -1394,13 +1394,7 @@ func (c *RaftCluster) persistStoreHeartbeat(storeID uint64, heartbeatTime time.T
 	persisted := false
 	err := c.storage.RunInTxn(ctx, func(txn kv.Txn) error {
 		key := keypath.StorePath(storeID)
-		var value string
-		var err error
-		if revisionTxn, ok := txn.(kv.RevisionTxn); ok {
-			value, err = revisionTxn.LoadWithRevision(key)
-		} else {
-			value, err = txn.Load(key)
-		}
+		value, _, err := kv.LoadWithRevision(txn, key)
 		if err != nil || value == "" {
 			return err
 		}

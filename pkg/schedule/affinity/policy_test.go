@@ -34,6 +34,13 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
+func (m *Manager) applyStoreConditions(unavailableStores map[uint64]storeCondition) bool {
+	m.RLock()
+	generation := m.storeConditionsGeneration
+	m.RUnlock()
+	return m.applyStoreScan(unavailableStores, generation)
+}
+
 func TestStoreCondition(t *testing.T) {
 	re := require.New(t)
 	re.Equal(groupDegraded, storeLeaderEvicted.groupAvailability())
@@ -327,7 +334,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store1)
 	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2"})
-	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()), core.SetNodeState(metapb.NodeState_Removing))
+	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store2)
 
 	conf := mockconfig.NewTestOptions()
@@ -347,9 +354,8 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	re.NotNil(state)
 	re.True(state.AffinitySchedulingAllowed)
 
-	// Simulate store 2 unavailable.
-	unavailable := map[uint64]storeCondition{2: storeRemoved}
-	re.True(manager.applyStoreConditions(unavailable))
+	storeInfos.PutStore(store2.Clone(core.SetNodeState(metapb.NodeState_Removing)))
+	manager.checkGroupsAvailability()
 
 	state2 := manager.GetAffinityGroupState("avail")
 	re.NotNil(state2)
@@ -377,8 +383,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store2)
 
-	// Store 3 is a disconnected follower that is also evicted as a stopping store.
-	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2*time.Minute)), core.StoppingStoreEvicted())
+	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now()), core.StoppingStoreEvicted())
 	storeInfos.PutStore(store3)
 
 	conf := mockconfig.NewTestOptions()
@@ -402,7 +407,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers(group1.ID, group1.LeaderStoreID, group1.VoterStoreIDs)
 	re.NoError(err)
 
-	// Create a test affinity group with unhealthy store
+	// Create a test affinity group with store 3 as a follower.
 	group2 := &Group{
 		ID:            "group2",
 		LeaderStoreID: 2,
@@ -419,7 +424,8 @@ func TestStoreHealthCheck(t *testing.T) {
 	groupInfo2 := manager.groups["group2"]
 	re.True(groupInfo2.IsAffinitySchedulingAllowed())
 
-	// Manually call checkStoreHealth to test
+	// Disconnect store 3 after assigning it to the group.
+	storeInfos.PutStore(store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute))))
 	manager.checkGroupsAvailability()
 
 	// After health check, group1 should still be in effect (all stores healthy)
@@ -457,6 +463,21 @@ func TestStoreHealthCheck(t *testing.T) {
 
 	// Group2 should not be restored from expired status
 	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
+
+	// A store can recover while there are no groups to check.
+	storeInfos.PutStore(store3)
+	manager.checkGroupsAvailability()
+	generation := manager.storeConditionsGeneration
+	downStores := manager.collectUnavailableStores()
+	re.NoError(manager.DeleteAffinityGroups([]string{group1.ID, group2.ID}, false))
+	storeInfos.PutStore(store3Healthy)
+	manager.checkGroupsAvailability()
+	group2.ID = "recovered"
+	manager.SyncGroupFromEtcdWithRevision(group2, 1)
+	re.Equal(groupDegraded, getGroupForTest(re, manager, group2.ID).GetAvailability())
+	re.False(manager.applyStoreScan(downStores, generation))
+	manager.checkGroupsAvailability()
+	re.Equal(groupAvailable, getGroupForTest(re, manager, group2.ID).GetAvailability())
 }
 
 func TestAvailabilityCheckWithUnchangedTombstone(t *testing.T) {
@@ -475,7 +496,8 @@ func TestAvailabilityCheckWithUnchangedTombstone(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
 	re.NoError(err)
 
-	// Cache the tombstone before any groups are synced.
+	// Cache the tombstone before syncing the group under test.
+	manager.SyncGroupFromEtcd(&Group{ID: "seed"})
 	manager.checkGroupsAvailability()
 	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3}})
 	re.True(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
@@ -560,7 +582,8 @@ func TestAvailabilityCheckWithoutGroups(t *testing.T) {
 	manager.SyncGroupFromEtcd(&Group{ID: "synced", LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
 	state := manager.GetAffinityGroupState("synced")
 	re.NotNil(state)
-	re.True(state.RegularSchedulingAllowed)
+	re.False(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed, "a target synced before the first store scan starts degraded")
 	manager.checkGroupsAvailability()
 	re.True(manager.GetAffinityGroupState("synced").RegularSchedulingAllowed)
 	manager.checkGroupsAvailability()

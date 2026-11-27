@@ -90,7 +90,7 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 			log.Warn("failed to unmarshal affinity group", zap.String("key", string(kv.Key)), zap.Error(err))
 			return err
 		}
-		w.affinityManager.SyncGroupFromEtcd(group)
+		w.affinityManager.SyncGroupFromEtcdWithRevision(group, kv.ModRevision)
 		return nil
 	}
 

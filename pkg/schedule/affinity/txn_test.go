@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -44,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -70,7 +72,7 @@ func TestNextGenTiDBGroupOperations(t *testing.T) {
 	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
-	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}))
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1}, core.SetLastHeartbeatTS(time.Now())))
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
@@ -319,6 +321,128 @@ func newTestAffinityManager(t *testing.T, store storage.Storage, stores *core.St
 	manager, err := NewManager(t.Context(), store, stores, mockconfig.NewTestOptions(), regionLabeler)
 	require.NoError(t, err)
 	return manager
+}
+
+func TestTargetCASAndLostReplyWithEtcd(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	ctx := t.Context()
+	test := newTargetTestWithStorage(t, ctx, storage.NewStorageWithEtcdBackend(client), "g", "h")
+	store, state := test.store, test.GetAffinityGroupState
+	other := newTestAffinityManager(t, store, test.storeSetInformer.(*core.StoresInfo))
+	adminWrite := func(leader uint64) {
+		_, err := other.UpdateAffinityGroupPeers("g", leader, []uint64{1, 2, 3})
+		test.NoError(err)
+	}
+	read := func() *mvccpb.KeyValue {
+		resp, err := client.Get(ctx, keypath.AffinityGroupPath("g"))
+		test.NoError(err)
+		test.Len(resp.Kvs, 1)
+		return resp.Kvs[0]
+	}
+	test.checkGroupsAvailability()
+	first, stale := test.target("h", 1, 1, 2, 3), test.target("g", 1, 1, 2, 3)
+	before := state("h").affinityVer
+	writes := 0
+	test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+		return store.RunInTxn(ctx, func(txn kv.Txn) error {
+			err := apply(txn)
+			writes++
+			if writes == 2 {
+				adminWrite(2)
+			}
+			return err
+		})
+	})
+	written, err := test.UpdateAffinityGroupTargets(ctx, []GroupTarget{first, stale})
+	test.ErrorIs(err, errs.ErrEtcdTxnConflict, "another Manager wrote between the read and commit")
+	test.Equal([]string{"h"}, written)
+	test.Equal(first.result(), test.stored("h"), "earlier commits survive a later error")
+	test.Equal(before+1, state("h").affinityVer)
+	test.Equal(uint64(2), test.stored("g").LeaderStoreID)
+	test.Zero(state("g").LeaderStoreID)
+
+	test.storage = store
+	test.ExpireAffinityGroup("g")
+	test.applyStoreConditions(map[uint64]storeCondition{2: storeBusy})
+	test.write([]string{}, stale)
+	degraded := state("g")
+	test.Equal(uint64(2), degraded.LeaderStoreID)
+	test.False(degraded.AffinitySchedulingAllowed)
+	test.False(degraded.RegularSchedulingAllowed, "the reconciled target gets a degraded window")
+	test.applyStoreConditions(nil)
+
+	target, original := test.target("g", 3, 1, 2, 3), read()
+	target.ExpectedModRevision = original.ModRevision
+	adminWrite(1)
+	adminWrite(2)
+	restored := read()
+	test.Equal(original.Value, restored.Value)
+	test.Greater(restored.ModRevision, original.ModRevision)
+	test.write([]string{}, target)
+	test.Equal(restored.ModRevision, read().ModRevision, "a stale revision must reject ABA even when the group matches")
+
+	target.ExpectedModRevision = restored.ModRevision
+	lostReply := errors.New("committed reply lost")
+	test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+		test.NoError(store.RunInTxn(ctx, apply))
+		return lostReply
+	})
+	_, err = test.UpdateAffinityGroupTargets(ctx, []GroupTarget{target})
+	test.ErrorIs(err, lostReply)
+	test.Equal(uint64(2), state("g").LeaderStoreID)
+	test.Equal(target.result(), test.stored("g"))
+	test.storage = store
+	beforeRetry := read().ModRevision
+	target.Expected.VoterStoreIDs = []uint64{3, 2, 1}
+	test.write([]string{"g"}, target)
+	test.Equal(*target.result(), state("g").Group)
+	test.Equal(beforeRetry, read().ModRevision, "idempotent retries do not put again")
+
+	test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{targetTestRange}}}, nil))
+	test.GetAndCacheRegionAffinityGroupState(targetRegion(3, 1, 2))
+	stable := state("g")
+	test.Equal(1, stable.AffinityRegionCount)
+	test.Equal(PhaseStable, stable.Phase)
+	test.write([]string{"g"}, target)
+	test.Equal(stable, state("g"))
+}
+
+func TestUpdateAffinityGroupTargetsSkipsRangeConflict(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	test := newTargetTestWithStorage(t, t.Context(), storage.NewStorageWithEtcdBackend(client), "g", "h")
+	readGroupRevision := func() int64 {
+		resp, err := client.Get(t.Context(), keypath.AffinityGroupPath("g"))
+		test.NoError(err)
+		test.Len(resp.Kvs, 1)
+		return resp.Kvs[0].ModRevision
+	}
+
+	_, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2})
+	test.NoError(err)
+	test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: testKeyRanges("a", "d")}}, nil))
+	revision := readGroupRevision()
+	changed, unchanged := test.target("g", 2, 1, 2), test.target("g", 1, 1, 2)
+	changed.ExpectedModRevision, unchanged.ExpectedModRevision = revision, revision
+
+	rule := MakeLabelRule(GroupKeyRanges{GroupID: "h", KeyRanges: testKeyRanges("b", "c")})
+	test.NoError(test.regionLabeler.SetLabelRule(rule))
+	test.NoError(test.SyncKeyRangesFromEtcd(rule))
+	test.ReconcileRangeConflicts()
+	test.True(test.GetAffinityGroupState("g").rangeConflict)
+	test.Equal(revision, readGroupRevision(), "only the label rule changed")
+	test.write([]string{}, changed)
+	test.write([]string{"g"}, unchanged)
+	test.Equal(revision, readGroupRevision(), "neither skipping nor confirming writes a new value")
+	test.Equal(unchanged.result(), test.stored("g"))
+
+	test.NoError(test.regionLabeler.DeleteLabelRule(rule.ID))
+	test.SyncKeyRangesDeleteFromEtcd(rule.ID)
+	test.ReconcileRangeConflicts()
+	test.False(test.GetAffinityGroupState("g").rangeConflict)
+	test.write([]string{"g"}, changed)
+	test.Equal(changed.result(), test.stored("g"))
 }
 
 // Persist pairs directly to model legacy data that would fail write validation.

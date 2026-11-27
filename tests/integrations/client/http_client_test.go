@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
@@ -34,6 +35,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	pdClient "github.com/tikv/pd/client"
 	pd "github.com/tikv/pd/client/http"
@@ -47,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -1384,6 +1387,18 @@ func (suite *httpClientTestSuite) TestAffinityGroups() {
 	client := suite.client
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+
+	for id := uint64(1); id <= 3; id++ {
+		tests.MustHandleStoreHeartbeat(re, suite.cluster, &pdpb.StoreHeartbeatRequest{
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+			Stats: &pdpb.StoreStats{
+				StoreId:   id,
+				Capacity:  10 * units.GiB,
+				UsedSize:  units.GiB,
+				Available: 9 * units.GiB,
+			},
+		})
+	}
 
 	testKey1 := testutil.TxnKeyspaceKey([]byte("test_key_1"))
 	testKey2 := testutil.TxnKeyspaceKey([]byte("test_key_2"))

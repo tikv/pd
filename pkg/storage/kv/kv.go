@@ -135,7 +135,18 @@ type Txn interface {
 // detects same-value rewrites as conflicts.
 type RevisionTxn interface {
 	Txn
-	LoadWithRevision(key string) (string, error)
+	// LoadWithRevision returns the value and its mod revision, or revision zero if absent.
+	LoadWithRevision(key string) (string, int64, error)
+}
+
+// LoadWithRevision loads a value and its modification revision when supported by txn.
+// Transactions without revision support return revision zero.
+func LoadWithRevision(txn Txn, key string) (string, int64, error) {
+	if revisionTxn, ok := txn.(RevisionTxn); ok {
+		return revisionTxn.LoadWithRevision(key)
+	}
+	value, err := txn.Load(key)
+	return value, 0, err
 }
 
 // ConditionalTxnRunner runs a transaction with additional etcd comparisons.

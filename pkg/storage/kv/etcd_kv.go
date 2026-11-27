@@ -261,22 +261,24 @@ func (txn *etcdTxn) Remove(key string) error {
 
 // Load loads the target value from etcd and puts a comparator into conditions.
 func (txn *etcdTxn) Load(key string) (string, error) {
-	return txn.loadValue(key, false)
+	value, _, err := txn.loadValue(key, false)
+	return value, err
 }
 
-// LoadWithRevision loads the target value from etcd and compares its mod revision
+// LoadWithRevision returns the value and its mod revision and compares that revision
 // at commit time, keeping large values out of the transaction request.
-func (txn *etcdTxn) LoadWithRevision(key string) (string, error) {
+func (txn *etcdTxn) LoadWithRevision(key string) (string, int64, error) {
 	return txn.loadValue(key, true)
 }
 
-func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, error) {
+func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, int64, error) {
 	resp, err := etcdutil.EtcdKVGetWithContext(txn.ctx, txn.kv.client, key)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	var condition clientv3.Cmp
 	var value string
+	var revision int64
 	switch respLen := len(resp.Kvs); respLen {
 	case 0:
 		// If target key does not contain a value, pin the CreateRevision of the key to 0.
@@ -285,19 +287,20 @@ func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, error) 
 		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
 	case 1:
 		value = string(resp.Kvs[0].Value)
+		revision = resp.Kvs[0].ModRevision
 		if compareRevision {
-			condition = clientv3.Compare(clientv3.ModRevision(key), "=", resp.Kvs[0].ModRevision)
+			condition = clientv3.Compare(clientv3.ModRevision(key), "=", revision)
 		} else {
 			// If target key has value, must make sure it stays the same at the time of commit.
 			condition = clientv3.Compare(clientv3.Value(key), "=", value)
 		}
 	default:
 		// If response contains multiple kvs, error occurred.
-		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+		return "", 0, errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
 	}
 	// Append the check condition to transaction.
 	txn.conditions = append(txn.conditions, condition)
-	return value, nil
+	return value, revision, nil
 }
 
 // LoadRange loads the target range from etcd,

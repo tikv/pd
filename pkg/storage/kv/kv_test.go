@@ -222,11 +222,12 @@ func testRevisionLoadConflict(re *require.Assertions, kv *etcdKVBase) {
 	)
 	re.NoError(kv.Save(key, "value"))
 	err := kv.RunInTxn(context.Background(), func(txn Txn) error {
-		value, err := txn.(RevisionTxn).LoadWithRevision(key)
+		value, revision, err := txn.(RevisionTxn).LoadWithRevision(key)
 		if err != nil {
 			return err
 		}
 		re.Equal("value", value)
+		re.Positive(revision)
 		// Rewriting the same value changes only the revision. A revision-based
 		// comparison must still reject the stale transaction.
 		re.NoError(kv.Save(key, value))
