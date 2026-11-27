@@ -168,7 +168,8 @@ func (rs *KeyRanges) Delete(base *KeyRange) {
 			res = append(res, &KeyRange{StartKey: r.StartKey, EndKey: MinEndKey(r.EndKey, base.StartKey)})
 		}
 
-		if less(base.EndKey, r.EndKey, right) {
+		// An empty base end key is unbounded, so nothing of r is left after it.
+		if len(base.EndKey) > 0 && less(base.EndKey, r.EndKey, right) {
 			startKey := MaxStartKey(r.StartKey, base.EndKey)
 			if len(r.StartKey) == 0 {
 				startKey = base.EndKey
@@ -192,6 +193,10 @@ func (rs *KeyRanges) SubtractKeyRanges(base *KeyRange) []KeyRange {
 		if less(start, kr.StartKey, left) {
 			r := &KeyRange{StartKey: start, EndKey: MinEndKey(kr.StartKey, base.EndKey)}
 			res = append(res, *r)
+		}
+		// An empty end key is unbounded, so kr covers the rest of base.
+		if len(kr.EndKey) == 0 {
+			return res
 		}
 		if len(start) == 0 {
 			start = kr.EndKey
