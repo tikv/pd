@@ -31,7 +31,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	_ "embed"
 )
+
+//go:embed Makefile
+var realClusterMakefile []byte
 
 type triggerDeadlineCtx struct {
 	context.Context
@@ -625,6 +630,10 @@ func TestClusterIsolationWithIdenticalTagDifferentTiUPHome(t *testing.T) {
 			binPath := filepath.Join(home, "bin", "tiup")
 			re.NoError(os.MkdirAll(filepath.Dir(binPath), 0750))
 			script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "tiup-playground test"
+  exit 0
+fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   echo "$0"
   exit 0
@@ -957,6 +966,10 @@ func TestClusterWithSpacesInTiUPHome(t *testing.T) {
 	displayReady := filepath.Join(t.TempDir(), "display.ready")
 	script := fmt.Sprintf(`#!/bin/sh
 home="${TIUP_HOME:-$HOME/.tiup}"
+if [ "$1" = "--version" ]; then
+  echo "tiup-playground test"
+  exit 0
+fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   if [ -f "$home/playground-installed" ]; then
     echo "$0"
@@ -1036,6 +1049,10 @@ func TestClusterStopDoesNotKillSimilarTag(t *testing.T) {
 	makeFakeTiUP := func(pidFile string) string {
 		binPath := filepath.Join(t.TempDir(), "tiup")
 		script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "tiup-playground test"
+  exit 0
+fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   echo "$0"
   exit 0
@@ -1141,6 +1158,10 @@ func setupFakeFailingClusterEnv(t *testing.T, pidFile string) (repoDir, fakeTiUP
 	logDir = t.TempDir()
 	fakeTiUP = filepath.Join(t.TempDir(), "tiup")
 	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "tiup-playground test"
+  exit 0
+fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   echo "$0"
   exit 0
@@ -1274,6 +1295,10 @@ func TestClusterWaitTimeoutBudget(t *testing.T) {
 
 	fakeTiUP := filepath.Join(t.TempDir(), "tiup")
 	script := `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "tiup-playground test"
+  exit 0
+fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   echo "$0"
   exit 0
@@ -1394,6 +1419,125 @@ exit 1
 			return before, isPlaygroundInstalled(fakeTiUP)
 		})
 	})
+
+	t.Run("truncated executable recovered by Go and make tiup and reused offline", func(t *testing.T) {
+		re := require.New(t)
+		execPath, err := os.Executable()
+		re.NoError(err)
+		actualBinary, err := os.ReadFile(execPath) //nolint:gosec
+		re.NoError(err)
+		re.Greater(len(actualBinary), 2048)
+
+		type truncatedCase struct {
+			name      string
+			payload   []byte
+			checkMake bool
+		}
+		cases := []truncatedCase{
+			{name: "64-byte truncated native executable", payload: actualBinary[:64], checkMake: true},
+			{name: "zero-byte executable", payload: nil, checkMake: true},
+			{name: "trailing-truncated native executable", payload: actualBinary[:len(actualBinary)-1024], checkMake: false},
+		}
+
+		setupTruncated := func(t *testing.T, payload []byte) (tiupHome, fakeTiUP, partialBin, installLog, offlineMarker string) {
+			t.Helper()
+			re := require.New(t)
+			tiupHome = filepath.Join(t.TempDir(), "tiup-home")
+			verDir := filepath.Join(tiupHome, "components", "playground", "v1.16.4")
+			partialBin = filepath.Join(verDir, "tiup-playground")
+			re.NoError(os.MkdirAll(verDir, 0750))
+			re.NoError(os.WriteFile(partialBin, payload, 0700)) //nolint:gosec
+			re.NoError(os.MkdirAll(filepath.Join(tiupHome, "bin"), 0750))
+			re.NoError(os.WriteFile(filepath.Join(tiupHome, "bin", "root.json"), []byte("{}\n"), 0600))
+
+			installLog = filepath.Join(t.TempDir(), "install.log")
+			offlineMarker = filepath.Join(t.TempDir(), "offline.mode")
+			fakeTiUP = filepath.Join(tiupHome, "bin", "tiup")
+			script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "1.16.4 tiup"
+  exit 0
+fi
+if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
+  if [ -d %q ]; then
+    echo %q
+    exit 0
+  fi
+  exit 1
+fi
+if [ "$1" = "install" ] && [ "$2" = "playground" ]; then
+  if [ -f %q ]; then
+    echo "unexpected-offline-install" >> %q
+    exit 1
+  fi
+  if [ -d %q ]; then
+    echo "stale-dir-present" >> %q
+    exit 1
+  fi
+  mkdir -p %q
+  printf '#!/bin/sh\nif [ "$1" = "--version" ]; then\n  echo "tiup-playground v1.16.4"\n  exit 0\nfi\nexit 1\n' > %q
+  chmod 0700 %q
+  echo "installed" >> %q
+  exit 0
+fi
+exit 1
+`, verDir, partialBin, offlineMarker, installLog, verDir, installLog, verDir, partialBin, partialBin, installLog)
+			re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
+			re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
+			return tiupHome, fakeTiUP, partialBin, installLog, offlineMarker
+		}
+
+		for _, tc := range cases {
+			t.Run("go/"+tc.name, func(t *testing.T) {
+				re := require.New(t)
+				tiupHome, fakeTiUP, partialBin, installLog, offlineMarker := setupTruncated(t, tc.payload)
+
+				re.False(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+				ensurePlaygroundInstalledWithTiUPHome(re, fakeTiUP, tiupHome)
+				re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+
+				// Flip to offline mode: subsequent probes and ensure calls must reuse without install.
+				re.NoError(os.WriteFile(offlineMarker, []byte("offline"), 0600))
+				re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+				ensurePlaygroundInstalledWithTiUPHome(re, fakeTiUP, tiupHome)
+
+				logData, err := os.ReadFile(installLog) //nolint:gosec
+				re.NoError(err)
+				re.Equal("installed", strings.TrimSpace(string(logData)))
+				info, err := os.Stat(partialBin)
+				re.NoError(err)
+				re.NotEqual(int64(len(tc.payload)), info.Size())
+			})
+
+			if tc.checkMake {
+				t.Run("make/"+tc.name, func(t *testing.T) {
+					re := require.New(t)
+					if _, err := exec.LookPath("make"); err != nil {
+						t.Skip("make not found in PATH")
+					}
+					makefileDir := writeRealClusterMakefileDir(t)
+					tiupHome, fakeTiUP, _, installLog, offlineMarker := setupTruncated(t, tc.payload)
+
+					cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+					cmd.Env = append(os.Environ(), "TIUP_HOME="+tiupHome)
+					out, err := cmd.CombinedOutput()
+					re.NoError(err, "make tiup failed:\n%s", string(out))
+					re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+
+					// Offline reuse via make tiup must not invoke install again.
+					re.NoError(os.WriteFile(offlineMarker, []byte("offline"), 0600))
+					cmd2 := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+					cmd2.Env = append(os.Environ(), "TIUP_HOME="+tiupHome)
+					out2, err := cmd2.CombinedOutput()
+					re.NoError(err, "offline make tiup reuse failed:\n%s", string(out2))
+
+					logData, err := os.ReadFile(installLog) //nolint:gosec
+					re.NoError(err)
+					re.Equal("installed", strings.TrimSpace(string(logData)))
+				})
+			}
+		}
+	})
 }
 
 func TestClusterStopPGIDSignalGuard(t *testing.T) {
@@ -1443,6 +1587,10 @@ func TestClusterStopPGIDSignalGuard(t *testing.T) {
 	t.Run("skips final group SIGKILL after clean launcher exit", func(t *testing.T) {
 		re := require.New(t)
 		script := `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "tiup-playground test"
+  exit 0
+fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   echo "$0"
   exit 0
@@ -1491,6 +1639,10 @@ exit 1
 		childPIDFile := filepath.Join(t.TempDir(), "survivor.pid")
 		tmpPIDFile := childPIDFile + ".tmp"
 		script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "tiup-playground test"
+  exit 0
+fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   echo "$0"
   exit 0
@@ -1937,6 +2089,10 @@ func TestResolveTiUPBinAndRelativeTiUPHome(t *testing.T) {
 	installedMarker := filepath.Join(t.TempDir(), "playground.installed")
 	deployReady := filepath.Join(t.TempDir(), "deploy.ready")
 	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "tiup-playground test"
+  exit 0
+fi
 if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
   printf 'probe|%%s\n' "$TIUP_HOME" >> %q
   if [ -f %q ]; then
@@ -2139,10 +2295,7 @@ exit 1
 		}
 		execPath, err := os.Executable()
 		re.NoError(err)
-		makefileDir := findRealClusterMakefileDir(t)
-		if makefileDir == "" {
-			t.Skip("Makefile not found from test working directory")
-		}
+		makefileDir := writeRealClusterMakefileDir(t)
 
 		for _, makeFirst := range []bool{false, true} {
 			tiupHome, fakeTiUP, playgroundBin, installLog := setupIncompletePlayground(t, 2)
@@ -2178,7 +2331,7 @@ exit 1
 			re.NoError(goErr, "makeFirst=%v go helper output:\n%s", makeFirst, goOut.String())
 			re.NoError(makeErr, "makeFirst=%v make tiup output:\n%s", makeFirst, makeOut.String())
 
-			re.True(isExecutable(playgroundBin))
+			re.True(isPlaygroundBinaryUsable(playgroundBin, tiupHome))
 			logBytes, err := os.ReadFile(installLog) //nolint:gosec
 			re.NoError(err)
 			lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
@@ -2191,10 +2344,7 @@ exit 1
 		if _, err := exec.LookPath("make"); err != nil {
 			t.Skip("make not found in PATH")
 		}
-		makefileDir := findRealClusterMakefileDir(t)
-		if makefileDir == "" {
-			t.Skip("Makefile not found from test working directory")
-		}
+		makefileDir := writeRealClusterMakefileDir(t)
 
 		// Case 1: read-only TIUP_HOME prevents opening the lock file.
 		if os.Geteuid() != 0 {
@@ -2209,6 +2359,7 @@ exit 1
 			cmd.Env = append(os.Environ(), "TIUP_HOME="+tiupHome)
 			out, err := cmd.CombinedOutput()
 			re.Error(err, "expected make tiup to fail on read-only TIUP_HOME, output:\n%s", string(out))
+			re.Contains(string(out), "Checking tiup installation")
 			re.True(fileExists(marker), "incomplete directory must be preserved when lock file open fails")
 			re.False(fileExists(installLog), "installer must not run when lock file open fails")
 		}
@@ -2228,6 +2379,7 @@ exit 1
 		)
 		out, err := cmd.CombinedOutput()
 		re.Error(err, "expected make tiup to fail when flock returns non-zero, output:\n%s", string(out))
+		re.Contains(string(out), "Checking tiup installation")
 		re.True(fileExists(marker), "incomplete directory must be preserved when flock fails")
 		re.False(fileExists(installLog), "installer must not run when flock fails")
 	})
@@ -2253,7 +2405,7 @@ exit 1
 
 		re.Empty(rec1.err)
 		re.Empty(rec2.err)
-		re.True(isExecutable(playgroundBin))
+		re.True(isPlaygroundBinaryUsable(playgroundBin, tiupHome))
 		logBytes, err := os.ReadFile(installLog) //nolint:gosec
 		re.NoError(err)
 		lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
@@ -2261,16 +2413,9 @@ exit 1
 	})
 }
 
-func findRealClusterMakefileDir(t *testing.T) string {
+func writeRealClusterMakefileDir(t *testing.T) string {
 	t.Helper()
-	if wd, err := os.Getwd(); err == nil && fileExists(filepath.Join(wd, "Makefile")) {
-		return wd
-	}
-	if _, file, _, ok := runtime.Caller(0); ok && filepath.IsAbs(file) {
-		dir := filepath.Dir(file)
-		if fileExists(filepath.Join(dir, "Makefile")) {
-			return dir
-		}
-	}
-	return ""
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"), realClusterMakefile, 0600))
+	return dir
 }

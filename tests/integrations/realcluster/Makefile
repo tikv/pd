@@ -50,12 +50,16 @@ tiup:
 			printf '%s\n' "$$TIUP_DIR/bin/tiup"; \
 		fi; \
 	}; \
+	is_playground_usable() { \
+		local pg_bin="$$1"; \
+		[ -n "$$pg_bin" ] && [ -f "$$pg_bin" ] && [ -s "$$pg_bin" ] && [ -x "$$pg_bin" ] && ( "$$pg_bin" --version >/dev/null 2>&1 ) 2>/dev/null; \
+	}; \
 	TIUP_BIN="$$(resolve_tiup_bin)"; \
 	PG_BIN=""; \
 	if [ -x "$$TIUP_BIN" ]; then \
 		PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
 	fi; \
-	if [ -x "$$TIUP_BIN" ] && [ -n "$$PG_BIN" ] && [ -x "$$PG_BIN" ]; then \
+	if [ -x "$$TIUP_BIN" ] && is_playground_usable "$$PG_BIN"; then \
 		echo "tiup already installed"; \
 		echo "tiup version: $$("$$TIUP_BIN" --version)"; \
 	else \
@@ -72,7 +76,7 @@ tiup:
 			fi; \
 			echo "tiup version: $$("$$TIUP_BIN" --version)"; \
 			PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
-			if [ -z "$$PG_BIN" ] || [ ! -x "$$PG_BIN" ]; then \
+			if ! is_playground_usable "$$PG_BIN"; then \
 				if [ -n "$$PG_BIN" ]; then \
 					PG_VER_DIR="$$(dirname "$$PG_BIN")"; \
 					PG_PARENT="$$(cd "$$(dirname "$$PG_VER_DIR")" 2>/dev/null && pwd -P || true)"; \
@@ -85,8 +89,8 @@ tiup:
 				echo "Installing tiup playground..."; \
 				"$$TIUP_BIN" install playground; \
 				PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
-				if [ -z "$$PG_BIN" ] || [ ! -x "$$PG_BIN" ]; then \
-					echo "tiup playground binary is missing or not executable after install: $$PG_BIN" >&2; \
+				if ! is_playground_usable "$$PG_BIN"; then \
+					echo "tiup playground binary is missing or not runnable after install: $$PG_BIN" >&2; \
 					exit 1; \
 				fi; \
 			fi; \
@@ -94,7 +98,7 @@ tiup:
 		if command -v flock >/dev/null 2>&1; then \
 			(set -eu; exec 9>>"$$LOCK_FILE" && flock -x 9 && run_install); \
 		elif command -v perl >/dev/null 2>&1; then \
-			export -f resolve_tiup_bin run_install; \
+			export -f resolve_tiup_bin is_playground_usable run_install; \
 			export TIUP_DIR; \
 			perl -MFcntl=:flock -e 'open my $$fh, ">>", shift @ARGV or die $$!; flock($$fh, LOCK_EX) or die $$!; my $$rc = system(@ARGV); exit($$rc == -1 ? 127 : ($$rc & 127 ? 128 + ($$rc & 127) : $$rc >> 8))' "$$LOCK_FILE" bash -c 'run_install'; \
 		else \
