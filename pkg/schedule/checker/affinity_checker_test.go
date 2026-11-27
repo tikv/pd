@@ -17,11 +17,14 @@ package checker
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"slices"
+	"strconv"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/failpoint"
@@ -29,9 +32,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/schedule/affinity/balanceplan"
 	scheconfig "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -511,69 +516,6 @@ func TestAffinityAvailabilityCheckWithUnhealthyStores(t *testing.T) {
 		re.True(groupInfo.AffinitySchedulingAllowed, "Group should be restored when all stores are healthy")
 		re.Equal(affinity.PhaseStable, groupInfo.Phase)
 	})
-}
-
-// TestAffinityCheckerNoOperatorWhenAligned tests that no operator is created when region matches group.
-func TestAffinityCheckerNoOperatorWhenAligned(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	addAffinityTestRegion(tc, 1, 1, 2, 3) // Perfect match
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	// Create affinity group matching current state
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 1,
-		VoterStoreIDs: []uint64{1, 2, 3},
-	}
-	err := createAffinityGroupForTest(affinityManager, group, affinityTestRange("", ""))
-	re.NoError(err)
-
-	// Check should return nil because region is already aligned
-	ops := checker.Check(tc.GetRegion(1))
-	re.Nil(ops)
-}
-
-// TestAffinityCheckerTransferLeaderWithoutPeer tests leader transfer when target store has no peer.
-func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	tc.AddRegionStore(4, 10)
-	addAffinityTestRegion(tc, 1, 1, 2, 4) // Leader on 1, but need leader on 3
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	// Create affinity group with leader on store 3, but store 3 has no peer yet
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 3,
-		VoterStoreIDs: []uint64{1, 2, 3},
-	}
-	err := createAffinityGroupForTest(affinityManager, group, affinityTestRange("", ""))
-	re.NoError(err)
-
-	// Check should create move peer operator first (replace 4 with 3)
-	// NOT transfer leader, because target store doesn't have a peer
-	ops := checker.Check(tc.GetRegion(1))
-	re.NotNil(ops)
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
-	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
 // TestAffinityCheckerMultipleGroups tests checker with multiple affinity groups.
@@ -1277,7 +1219,7 @@ func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
 			cluster.PutRegion(region2)
 
 			affinityManager := cluster.GetAffinityManager()
-			checker := NewAffinityChecker(context.Background(), cluster, opt)
+			checker := NewAffinityChecker(ctx, cluster, opt)
 			group := &affinity.Group{
 				ID:            "test_group",
 				LeaderStoreID: 1,
@@ -1353,278 +1295,46 @@ func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 	re.Nil(ops, "Should not merge into an unhealthy adjacent region")
 }
 
-// TestAffinityCheckerComplexMove tests moving multiple peers and transferring leader in one operation.
-// This tests the combo operator's ability to handle complex transformations.
-func TestAffinityCheckerComplexMove(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+func TestAffinityCheckerTargetLayout(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		peers  []uint64
+		leader uint64
+		voters []uint64
+		kind   operator.OpKind
+	}{
+		{"aligned", []uint64{1, 2, 3}, 1, []uint64{1, 2, 3}, 0},
+		{"unordered voters", []uint64{1, 2, 3}, 1, []uint64{3, 1, 2}, 0},
+		{"leader only", []uint64{1, 2, 3}, 3, []uint64{1, 2, 3}, operator.OpLeader},
+		{"voters only", []uint64{1, 2, 4}, 1, []uint64{1, 2, 3}, operator.OpRegion},
+		{"leader without peer", []uint64{1, 2, 4}, 3, []uint64{1, 2, 3}, operator.OpLeader | operator.OpRegion},
+		{"partial overlap", []uint64{1, 2, 3}, 4, []uint64{1, 4, 5}, operator.OpLeader | operator.OpRegion},
+		{"disjoint voters", []uint64{1, 2, 4}, 5, []uint64{3, 5, 6}, operator.OpLeader | operator.OpRegion},
+		{"one replica", []uint64{1}, 2, []uint64{2}, operator.OpLeader | operator.OpRegion},
+		{"five replicas", []uint64{1, 2, 3, 4, 5}, 8, []uint64{6, 7, 8, 9, 10}, operator.OpLeader | operator.OpRegion},
+		{"different replica counts", []uint64{1, 2, 3}, 8, []uint64{6, 7, 8, 9, 10}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAffinityBalanceTest(t, 10)
+			f.SetMaxReplicasWithLabel(true, len(tc.peers))
+			addAffinityTestRegion(f.Cluster, 1, tc.peers[0], tc.peers[1:]...)
+			target := &affinity.Group{ID: "test_group", LeaderStoreID: tc.leader, VoterStoreIDs: tc.voters}
+			require.NoError(t, createAffinityGroupForTest(f.affinityManager, target, affinityTestRange("", "")))
+			region := f.GetRegion(1)
+			group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
+			require.NotNil(t, group)
+			require.Equal(t, target.ID, group.ID)
 
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	tc.AddRegionStore(4, 10)
-	tc.AddRegionStore(5, 10)
-	tc.AddRegionStore(6, 10)
-
-	// Current: peers on [1, 2, 4], leader on 1
-	// Expected: peers on [3, 5, 6], leader on 5
-	// This requires replacing all 3 peers AND transferring leader
-	addAffinityTestRegion(tc, 1, 1, 2, 4)
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 5,
-		VoterStoreIDs: []uint64{3, 5, 6},
+			ops := f.Check(region)
+			if tc.kind == 0 {
+				require.Empty(t, ops)
+				return
+			}
+			require.Len(t, ops, 1)
+			require.Equal(t, "affinity-move-region", ops[0].Desc())
+			require.Equal(t, operator.OpAffinity|tc.kind, ops[0].Kind())
+		})
 	}
-	err := createAffinityGroupForTest(affinityManager, group, affinityTestRange("", ""))
-	re.NoError(err)
-
-	// Check should create a combo operator for the complex transformation
-	ops := checker.Check(tc.GetRegion(1))
-	re.NotNil(ops)
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
-	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
-	re.Equal(operator.OpLeader, ops[0].Kind()&operator.OpLeader)
-	re.Equal(operator.OpRegion, ops[0].Kind()&operator.OpRegion)
-}
-
-// TestAffinityCheckerPartialOverlap tests when current and expected peers partially overlap.
-func TestAffinityCheckerPartialOverlap(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	tc.AddRegionStore(4, 10)
-	tc.AddRegionStore(5, 10)
-
-	// Current: peers on [1, 2, 3], leader on 1
-	// Expected: peers on [1, 4, 5], leader on 4
-	// Stores 2, 3 need to be replaced with 4, 5, and leader transferred to 4
-	addAffinityTestRegion(tc, 1, 1, 2, 3)
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 4,
-		VoterStoreIDs: []uint64{1, 4, 5},
-	}
-	err := createAffinityGroupForTest(affinityManager, group, affinityTestRange("", ""))
-	re.NoError(err)
-
-	ops := checker.Check(tc.GetRegion(1))
-	re.NotNil(ops)
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
-}
-
-// TestAffinityCheckerOnlyLeaderTransfer tests when only leader transfer is needed (no peer changes).
-func TestAffinityCheckerOnlyLeaderTransfer(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-
-	// Current: peers on [1, 2, 3], leader on 1
-	// Expected: peers on [1, 2, 3], leader on 3
-	// Only leader transfer is needed
-	addAffinityTestRegion(tc, 1, 1, 2, 3)
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 3,
-		VoterStoreIDs: []uint64{1, 2, 3},
-	}
-	err := createAffinityGroupForTest(affinityManager, group, affinityTestRange("", ""))
-	re.NoError(err)
-
-	ops := checker.Check(tc.GetRegion(1))
-	re.NotNil(ops)
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
-	// Should have OpLeader since we're transferring leader
-	re.Equal(operator.OpLeader, ops[0].Kind()&operator.OpLeader)
-}
-
-// TestAffinityCheckerOnlyPeerChange tests when only peer changes are needed (no leader transfer).
-func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	tc.AddRegionStore(4, 10)
-
-	// Current: peers on [1, 2, 4], leader on 1
-	// Expected: peers on [1, 2, 3], leader on 1
-	// Only peer change is needed (replace 4 with 3)
-	addAffinityTestRegion(tc, 1, 1, 2, 4)
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 1,
-		VoterStoreIDs: []uint64{1, 2, 3},
-	}
-	err := createAffinityGroupForTest(affinityManager, group, affinityTestRange("", ""))
-	re.NoError(err)
-
-	ops := checker.Check(tc.GetRegion(1))
-	re.NotNil(ops)
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
-
-	// Verify OpLeader is NOT set (since leader doesn't change)
-	re.Equal(operator.OpKind(0), ops[0].Kind()&operator.OpLeader, "OpLeader should not be set when leader doesn't change")
-	// Verify OpRegion is set
-	re.Equal(operator.OpRegion, ops[0].Kind()&operator.OpRegion)
-}
-
-// TestAffinityCheckerSameStoreOrder tests when voter stores are in different order.
-func TestAffinityCheckerSameStoreOrder(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-
-	// Current: peers on [1, 2, 3], leader on 1
-	addAffinityTestRegion(tc, 1, 1, 2, 3)
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	// Expected: same stores but in different order [3, 1, 2], leader on 1
-	// This should NOT require any operator since stores are the same
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 1,
-		VoterStoreIDs: []uint64{3, 1, 2}, // Different order
-	}
-	err := createAffinityGroupForTest(affinityManager, group, affinityTestRange("", ""))
-	re.NoError(err)
-
-	// Should return nil since stores are the same (order doesn't matter)
-	ops := checker.Check(tc.GetRegion(1))
-	re.Nil(ops)
-}
-
-// TestAffinityCheckerReplicaCountMatch tests that affinity checker only works
-// when the region's replica count matches both placement rules and affinity group requirements.
-func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-
-	// Add 10 stores
-	for i := uint64(1); i <= 10; i++ {
-		tc.AddRegionStore(i, 10)
-	}
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	// Test case 1: Single replica - placement rules and affinity group both require 1 replica
-	tc.SetMaxReplicasWithLabel(true, 1)
-	addAffinityTestRegion(tc, 1, 1)
-
-	group1 := &affinity.Group{
-		ID:            "test_group_1",
-		LeaderStoreID: 2,
-		VoterStoreIDs: []uint64{2},
-	}
-	err := createAffinityGroupForTest(affinityManager, group1, affinityTestRange("", "g"))
-	re.NoError(err)
-
-	// Set region 1 to have the right key range
-	region1 := tc.GetRegion(1).Clone(
-		withAffinityTestRange("", "g"),
-	)
-	tc.PutRegion(region1)
-
-	// Should create operator when replica counts match
-	ops := checker.Check(tc.GetRegion(1))
-	re.NotNil(ops, "Should create operator when replica counts match (1 replica)")
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
-
-	// Test case 2: 5 replicas - placement rules and affinity group both require 5 replicas
-	tc.SetMaxReplicasWithLabel(true, 5)
-	addAffinityTestRegion(tc, 2, 1, 2, 3, 4, 5)
-
-	group2 := &affinity.Group{
-		ID:            "test_group_2",
-		LeaderStoreID: 8,
-		VoterStoreIDs: []uint64{6, 7, 8, 9, 10},
-	}
-	err = createAffinityGroupForTest(affinityManager, group2, affinityTestRange("g", "n"))
-	re.NoError(err)
-
-	// Set region 2 to have the right key range
-	region2 := tc.GetRegion(2).Clone(
-		withAffinityTestRange("g", "n"),
-	)
-	tc.PutRegion(region2)
-
-	// Should create operator when replica counts match
-	ops = checker.Check(tc.GetRegion(2))
-	re.NotNil(ops, "Should create operator when replica counts match (5 replicas)")
-	re.Len(ops, 1)
-	re.Equal("affinity-move-region", ops[0].Desc())
-
-	// Test case 3: Mismatch - region has 3 replicas but affinity group requires 5
-	tc.SetMaxReplicasWithLabel(true, 3)
-	addAffinityTestRegion(tc, 3, 1, 2, 3)
-
-	group3 := &affinity.Group{
-		ID:            "test_group_3",
-		LeaderStoreID: 8,
-		VoterStoreIDs: []uint64{6, 7, 8, 9, 10}, // 5 replicas
-	}
-	err = createAffinityGroupForTest(affinityManager, group3, affinityTestRange("n", ""))
-	re.NoError(err)
-
-	// Set region 3 to have the right key range
-	region3 := tc.GetRegion(3).Clone(
-		withAffinityTestRange("n", ""),
-	)
-	tc.PutRegion(region3)
-
-	groupState, _ := affinityManager.GetRegionAffinityGroupState(tc.GetRegion(3))
-	re.NotNil(groupState)
-	re.Equal(group3.ID, groupState.ID)
-
-	// Should NOT create operator when replica counts don't match
-	ops = checker.Check(tc.GetRegion(3))
-	re.Nil(ops, "Should not create operator when region has 3 replicas but affinity group requires 5")
 }
 
 // TestAffinityCheckerRegionNoLeader tests region without leader.
@@ -2022,67 +1732,32 @@ func TestAffinityCheckerNormalizeGroupWhenPlacementRuleMismatch(t *testing.T) {
 	re.Equal([]uint64{1, 2, 3}, groupState.VoterStoreIDs)
 }
 
-// TestAffinityCheckerTargetStoreEvictLeader tests that operator is not created when target store has evict-leader.
-func TestAffinityCheckerTargetStoreEvictLeader(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	addAffinityTestRegion(tc, 1, 1, 2, 3) // Leader on store 1
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	// Create affinity group with leader on store 2
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 2,
-		VoterStoreIDs: []uint64{1, 2, 3},
+func TestAffinityCheckerLeaderTransferRestrictions(t *testing.T) {
+	for _, condition := range []string{"grant-leader", "evict-leader", "reject-leader"} {
+		t.Run(condition, func(t *testing.T) {
+			f := newAffinityBalanceTest(t, 3)
+			id := f.seed("100", 1, 1)[0]
+			_, err := f.affinityManager.UpdateAffinityGroupPeers(id, 2, []uint64{1, 2, 3})
+			require.NoError(t, err)
+			region := f.GetRegion(1)
+			require.Len(t, f.Check(region), 1)
+			switch condition {
+			case "grant-leader":
+				require.NoError(t, f.PauseLeaderTransfer(1, constant.Out))
+			case "evict-leader":
+				f.SetStoreEvictLeader(2, true)
+			case "reject-leader":
+				f.SetLabelProperty("reject-leader", "reject", "leader")
+				f.SetStoreLabel(2, map[string]string{"reject": "leader"})
+			}
+			require.Empty(t, f.Check(region))
+			require.Equal(t, uint64(2), f.affinityManager.GetAffinityGroupState(id).LeaderStoreID)
+			if condition == "grant-leader" {
+				f.ResumeLeaderTransfer(1, constant.Out)
+				require.Len(t, f.Check(region), 1)
+			}
+		})
 	}
-	err := createAffinityGroupForTest(affinityManager, group, affinityTestRange("", ""))
-	re.NoError(err)
-
-	tc.SetStoreEvictLeader(2, true)
-
-	// Check should return nil because target store doesn't allow leader transfer in
-	ops := checker.Check(tc.GetRegion(1))
-	re.Nil(ops, "Should not create operator when target store has evict-leader")
-}
-
-// TestAffinityCheckerTargetStoreRejectLeader tests that operator is not created when target store has reject-leader label.
-func TestAffinityCheckerTargetStoreRejectLeader(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	addAffinityTestRegion(tc, 1, 1, 2, 3) // Leader on store 1
-
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
-
-	// Create affinity group with leader on store 2
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 2,
-		VoterStoreIDs: []uint64{1, 2, 3},
-	}
-	err := createAffinityGroupForTest(affinityManager, group, affinityTestRange("", ""))
-	re.NoError(err)
-
-	tc.SetLabelProperty("reject-leader", "reject", "leader")
-	tc.AddLabelsStore(2, 10, map[string]string{"reject": "leader"})
-
-	// Check should return nil because target store has reject-leader label
-	ops := checker.Check(tc.GetRegion(1))
-	re.Nil(ops, "Should not create operator when target store has reject-leader label")
 }
 
 // TestAffinityCheckerRegionHasBetterLocation tests how the checker handles a Region where isRegionPlacementRuleSatisfiedWithBestLocation returns false.
@@ -2573,4 +2248,361 @@ func TestAffinityMergeCheckWithOperatorController(t *testing.T) {
 	re.Nil(ops, "Should skip merge because region1 is in cache")
 	ops = affinityChecker.Check(region3)
 	re.Nil(ops, "Should skip merge because adjacent region (mergedRegion12) is in cache")
+}
+
+func TestAffinityFeedbackConflictingRegions(t *testing.T) {
+	f := newAffinityBalanceTest(t, 7, "a", "d", "b", "c", "b", "c", "d")
+	for id := uint64(1); id <= 7; id++ {
+		f.UpdateRegionCount(id, 10+int(id)*10)
+	}
+	f.setVoters(2)
+	f.addLearnerRule(1)
+	f.AddLeaderRegion(1, 1, 2)
+	f.AddLeaderRegion(2, 1, 2)
+	regions := []*core.RegionInfo{learnerAt(f.GetRegion(1), 5), learnerAt(f.GetRegion(2), 6)}
+	ids := []uint64{1, 2, 3, 4, 5, 6, 7}
+	check := f.balanceTargetCheck(t.Context(), ids, regions)
+	loc := [][]int32{{0}, {3}, {1}, {2}, {1}, {2}, {3}}
+	in := &balanceplan.Input{Stores: 7, BaseVoters: []int{0, 5, 0, 0, 0, 0, 0}, Groups: []balanceplan.Group{{Rules: []*balanceplan.Rule{{Role: balanceplan.RoleVoter, Count: 2, Stores: []int{0, 1, 2, 3, 6}, Location: loc}}, Voters: []int{0, 1}, Leader: 0, Forced: []int{0}, LeaderPinned: true, CanLead: slices.Repeat([]bool{true}, 7), Exclude: []int{4, 5}, CheckTarget: check}}}
+	legal := 0
+	for _, s := range []int{1, 2, 3, 6} {
+		f := check([]int{0, s}, 0, balanceplan.DefaultWorkBudget)
+		if f.Status == balanceplan.TargetSatisfied {
+			legal++
+		}
+	}
+	require.Equal(t, 2, legal)
+	r := balanceplan.Plan(in, balanceplan.Options{Seed: 7})
+	require.True(t, r.Score.Less(r.Baseline))
+	require.Contains(t, r.Voters[0], 6)
+	for i, v := range r.Voters {
+		require.Equal(t, balanceplan.TargetSatisfied, check(v, r.Leaders[i], balanceplan.DefaultWorkBudget).Status)
+	}
+}
+
+func TestAffinityFeedbackRuleReassignment(t *testing.T) {
+	f := newAffinityBalanceTest(t, 6, "x", "a", "a", "b", "d", "d")
+	for id := uint64(1); id <= 6; id++ {
+		f.UpdateRegionCount(id, int(id)*10)
+	}
+	for i, ids := range [][]string{{"1"}, {"2", "3", "4", "6"}, {"2", "3", "5"}} {
+		count, role := 1, placement.Voter
+		if i == 0 {
+			role = placement.Leader
+		}
+		if i == 1 {
+			count = 2
+		}
+		require.NoError(t, f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: strconv.Itoa(i), Index: i + 1, Override: i == 0, Role: role, Count: count, LocationLabels: []string{"zone"}, LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: ids}}}))
+	}
+	// The real fitter can assign a voter to a different rule than the solver.
+	f.AddLeaderRegion(1, 5, 1, 2, 4)
+	region := f.GetRegion(1).Clone(core.WithReplaceLeaderStore(1))
+	ids := []uint64{1, 2, 3, 4, 5, 6}
+	loc := [][]int32{{0}, {1}, {1}, {2}, {3}, {3}}
+	rules := []*balanceplan.Rule{{Role: balanceplan.RoleLeader, Count: 1, Stores: []int{0}, Location: loc}, {Role: balanceplan.RoleVoter, Count: 2, Stores: []int{1, 2, 3, 5}, Location: loc}, {Role: balanceplan.RoleVoter, Count: 1, Stores: []int{1, 2, 4}, Location: loc}}
+	check := f.balanceTargetCheck(t.Context(), ids, []*core.RegionInfo{region})
+	in := &balanceplan.Input{Stores: 6, BaseVoters: []int{0, 0, 0, 0, 5, 0}, Groups: []balanceplan.Group{{Rules: rules, Voters: []int{0, 1, 3, 4}, RuleOf: []int{0, 1, 1, 2}, Leader: 0, LeaderPinned: true, CanLead: []bool{true, false, false, false, false, false}}}}
+	raw := balanceplan.Plan(in, balanceplan.Options{Seed: 7})
+	require.Equal(t, balanceplan.TargetRejected, check(raw.Voters[0], raw.Leaders[0], balanceplan.DefaultWorkBudget).Status)
+	require.Equal(t, balanceplan.TargetSatisfied, check([]int{0, 1, 3, 5}, 0, balanceplan.DefaultWorkBudget).Status)
+	in.Groups[0].CheckTarget = check
+	r := balanceplan.Plan(in, balanceplan.Options{Seed: 7})
+	require.True(t, r.Score.Less(r.Baseline))
+	require.Equal(t, balanceplan.TargetSatisfied, check(r.Voters[0], r.Leaders[0], balanceplan.DefaultWorkBudget).Status)
+}
+
+func TestAffinityFeedbackForcedSource(t *testing.T) {
+	f := newAffinityBalanceTest(t, 5, "a", "a", "b", "b", "b")
+	for i, ids := range [][]string{{"1", "3"}, {"2", "4", "5"}} {
+		require.NoError(t, f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: strconv.Itoa(i), Index: i + 1, Override: i == 0, Role: placement.Voter, Count: 1, LocationLabels: []string{"zone"}, LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: ids}}}))
+	}
+	f.AddLeaderRegion(1, 1, 4)
+	region := f.GetRegion(1)
+	check := f.balanceTargetCheck(t.Context(), []uint64{1, 2, 3, 4, 5}, []*core.RegionInfo{region})
+	loc := [][]int32{{0}, {0}, {1}, {1}, {1}}
+	in := &balanceplan.Input{Stores: 5, BaseVoters: []int{0, 0, 0, 5, 0}, Groups: []balanceplan.Group{{Rules: []*balanceplan.Rule{{Count: 1, Stores: []int{0, 2}, Location: loc}, {Count: 1, Stores: []int{1, 3, 4}, Location: loc}}, Voters: []int{0, 3}, RuleOf: []int{0, 1}, Leader: 0, Forced: []int{0}, LeaderPinned: true, CanLead: slices.Repeat([]bool{true}, 5), CheckTarget: check}}}
+	require.Equal(t, balanceplan.TargetSatisfied, check([]int{0, 4}, 0, balanceplan.DefaultWorkBudget).Status)
+	r := balanceplan.Plan(in, balanceplan.Options{Seed: 7})
+	require.True(t, r.Score.Less(r.Baseline))
+	require.Contains(t, r.Voters[0], 0)
+	require.Equal(t, 0, r.Leaders[0])
+	require.Equal(t, balanceplan.TargetSatisfied, check(r.Voters[0], r.Leaders[0], balanceplan.DefaultWorkBudget).Status)
+}
+
+func TestAffinityFeedbackForcedSingleRule(t *testing.T) {
+	f := newAffinityBalanceTest(t, 6, "a", "b", "c", "c", "a", "b")
+	f.UpdateRegionCount(1, 100)
+	f.setVoters(2)
+	f.addLearnerRule(2)
+	f.AddLeaderRegion(1, 1, 3)
+	region := f.GetRegion(1).Clone(core.WithAddPeer(&metapb.Peer{Id: 100, StoreId: 5, Role: metapb.PeerRole_Learner}), core.WithAddPeer(&metapb.Peer{Id: 101, StoreId: 6, Role: metapb.PeerRole_Learner}))
+	check := f.balanceTargetCheck(t.Context(), []uint64{1, 2, 3, 4, 5, 6}, []*core.RegionInfo{region})
+	// The PD removal tie break chooses the pinned leader in [0,1]. Moving 1 also fixes it.
+	in := &balanceplan.Input{Stores: 6, BaseVoters: []int{0, 0, 5, 0, 0, 0}, Groups: []balanceplan.Group{{Rules: []*balanceplan.Rule{{Count: 2, Stores: []int{0, 1, 2, 3}, Location: [][]int32{{0}, {1}, {2}, {2}, {0}, {1}}}}, Voters: []int{0, 2}, Leader: 0, LeaderPinned: true, CanLead: slices.Repeat([]bool{true}, 6), Exclude: []int{4, 5}, CheckTarget: check}}}
+	require.Equal(t, balanceplan.TargetSatisfied, check([]int{0, 3}, 0, balanceplan.DefaultWorkBudget).Status)
+	r := balanceplan.Plan(in, balanceplan.Options{Seed: 7})
+	require.True(t, r.Score.Less(r.Baseline))
+	require.Equal(t, []int{0, 3}, r.Voters[0])
+}
+
+func TestAffinityFeedbackRegionRejectionDominatesTemporary(t *testing.T) {
+	f := newAffinityBalanceTest(t, 7, "a", "a", "b", "c", "b", "c", "d")
+	f.UpdateRegionCount(2, 100)
+	f.setVoters(2)
+	f.addLearnerRule(1)
+	f.AddLeaderRegion(1, 1, 2)
+	f.AddLeaderRegion(2, 1, 2)
+	r1 := learnerAt(f.GetRegion(1), 5)
+	r2 := learnerAt(f.GetRegion(2), 6)
+	for _, id := range []uint64{4, 6, 7} {
+		f.SetStoreBusy(id, true)
+	}
+	require.Equal(t, affinityPlacementTemporary, f.regionPlacementFeedback(r1, f.ruleManager.FitRegionWithoutCache(f.Cluster, r1)).status)
+	require.Equal(t, affinityPlacementRejected, f.regionPlacementFeedback(r2, f.ruleManager.FitRegionWithoutCache(f.Cluster, r2)).status)
+	for _, regions := range [][]*core.RegionInfo{{r1, r2}, {r2, r1}} {
+		f := f.balanceTargetCheck(t.Context(), []uint64{1, 2, 3, 4, 5, 6, 7}, regions)([]int{0, 1}, 0, balanceplan.DefaultWorkBudget)
+		require.Equal(t, balanceplan.TargetRejected, f.Status)
+	}
+}
+
+func TestAffinityFeedbackStopsBetweenRegions(t *testing.T) {
+	f := newAffinityBalanceTest(t, 3, "a", "b", "c")
+	f.AddLeaderRegion(1, 1, 2, 3)
+	regions := slices.Repeat([]*core.RegionInfo{f.GetRegion(1)}, 100)
+	check := f.balanceTargetCheck(t.Context(), []uint64{1, 2, 3}, regions)
+	limited := check([]int{0, 1, 2}, 0, 1)
+	full := check([]int{0, 1, 2}, 0, balanceplan.DefaultWorkBudget)
+	require.Equal(t, balanceplan.TargetRejected, limited.Status)
+	require.Equal(t, balanceplan.TargetSatisfied, full.Status)
+	require.Equal(t, limited.Work*100, full.Work)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	canceled := f.balanceTargetCheck(ctx, []uint64{1, 2, 3}, regions)([]int{0, 1, 2}, 0, balanceplan.DefaultWorkBudget)
+	require.Zero(t, canceled.Work)
+}
+
+func TestAffinityPlacementChecksEveryCompetingSource(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 4, "a", "b", "a", "c")
+	for i, ids := range [][]string{{"1", "2", "4"}, {"3"}} {
+		re.NoError(f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: strconv.Itoa(i),
+			Index: i + 1, Override: i == 0, Role: placement.Voter, Count: 2 - i, LocationLabels: []string{"zone"},
+			LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: ids}}}))
+	}
+	f.AddLeaderRegion(1, 1, 2, 3)
+	region := f.GetRegion(1)
+	for _, high := range []uint64{1, 2} {
+		f.UpdateRegionCount(1, 10)
+		f.UpdateRegionCount(2, 10)
+		f.UpdateRegionCount(high, 100)
+		fit := f.ruleManager.FitRegionWithoutCache(f.Cluster, region)
+		re.True(fit.IsSatisfied())
+		if high == 2 {
+			strategy := f.strategy(region, fit.RuleFits[0].Rule, false)
+			old, candidates, temporary := strategy.getBetterLocationCandidates(f.Cluster, region, fit, fit.RuleFits[0])
+			re.Equal(uint64(2), old)
+			re.Nil(candidates, "the sampled source alone misses the improvement")
+			re.False(temporary)
+			re.True(f.isRegionPlacementRuleSatisfiedWithBestLocation(region, true), "live Regions follow the RuleChecker repair predicate")
+		}
+		for _, detailed := range []bool{false, true} {
+			feedback := f.checkRegionPlacement(region, fit, detailed)
+			re.Equal(affinityPlacementRejected, feedback.status, "RegionScore must not change placement validity")
+			if detailed {
+				re.Contains(feedback.replacements, bestLocationReplacement{old: 1, candidates: []uint64{4}})
+			}
+		}
+	}
+}
+
+func TestAffinityHardIsolationDominatesTemporary(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 3, "a", "a", "b")
+	rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	rule.Count, rule.IsolationLevel = 2, "zone"
+	re.NoError(f.ruleManager.SetRule(rule))
+	f.AddLeaderRegion(1, 1, 2)
+	f.SetStoreBusy(3, true)
+	region := f.GetRegion(1)
+	fit := f.ruleManager.FitRegionWithoutCache(f.Cluster, region)
+	strategy := f.strategy(region, rule, false)
+	_, candidates, temporary := strategy.getBetterLocationCandidates(f.Cluster, region, fit, fit.RuleFits[0])
+	re.Nil(candidates)
+	re.True(temporary)
+	re.Equal(affinityPlacementRejected, f.checkRegionPlacement(region, fit, false).status)
+}
+
+func TestAffinityBalanceWitnessRulesStayUnsupported(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 4, "a", "b", "c", "d")
+	id := balanceTestGroupID("_tidb_pt_100_p1")
+	f.group(id, 1, 1, []uint64{1, 2, 3}, "a", "b")
+	rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	rule.IsWitness, rule.Count = true, 1
+	re.NoError(f.ruleManager.SetRule(rule))
+	plan := f.balancePlanInput(f.snapshot(), nil, nil)
+	re.Empty(plan.input.Groups)
+	re.Equal(1, plan.groupCounts[balanceGroupUnsupported])
+}
+
+func TestAffinityPlacementUnlabeledCoLocationRule(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 4, "z1", "z1", "z2", "z3")
+	re.NoError(f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: "r1", Index: 1,
+		Override: true, Role: placement.Voter, Count: 1,
+		LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"z1"}}}}))
+	re.NoError(f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: "r2", Index: 2,
+		Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"}}))
+	f.AddLeaderRegion(1, 1, 2, 3)
+	region := f.GetRegion(1)
+	for _, high := range []uint64{2, 3} {
+		f.UpdateRegionCount(2, 10)
+		f.UpdateRegionCount(3, 10)
+		f.UpdateRegionCount(high, 100)
+		fit := f.ruleManager.FitRegionWithoutCache(f.Cluster, region)
+		re.True(fit.IsSatisfied())
+		re.Empty(fit.RuleFits[0].Rule.LocationLabels)
+		for _, detailed := range []bool{false, true} {
+			feedback := f.checkRegionPlacement(region, fit, detailed)
+			re.Equal(affinityPlacementRejected, feedback.status, "an unlabeled co-located rule must not hide a better source")
+			if detailed {
+				re.Contains(feedback.replacements, bestLocationReplacement{old: 2, candidates: []uint64{4}})
+			}
+		}
+	}
+}
+
+func TestBalanceTargetCheckCanceledBeforeRegionFits(t *testing.T) {
+	f := newAffinityBalanceTest(t, 3)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	// A nil Region would panic if preparation tried to fit it after cancellation.
+	check := f.balanceTargetCheck(ctx, []uint64{1, 2, 3}, []*core.RegionInfo{nil})
+	feedback := check([]int{0, 1, 2}, 0, balanceplan.DefaultWorkBudget)
+	require.Equal(t, balanceplan.TargetRejected, feedback.Status)
+	require.Zero(t, feedback.Work)
+}
+
+func TestAffinityPlacementSingleRuleAndLearnerScanOnce(t *testing.T) {
+	for _, learner := range []bool{false, true} {
+		f := newAffinityBalanceTest(t, 4, "z1", "z2", "z3", "z4")
+		f.AddLeaderRegion(1, 1, 2, 3)
+		region := f.GetRegion(1)
+		if learner {
+			f.SetStoreLabel(4, map[string]string{"engine": "tiflash"})
+			require.NoError(t, f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: "learner",
+				Role: placement.Learner, Count: 1, LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}))
+			region = region.Clone(core.WithAddPeer(&metapb.Peer{Id: 100, StoreId: 4, Role: metapb.PeerRole_Learner}))
+		}
+		fit := f.ruleManager.FitRegionWithoutCache(f.Cluster, region)
+		feedback := f.checkRegionPlacement(region, fit, false)
+		require.Equal(t, affinityPlacementReady, feedback.status)
+		require.Equal(t, 1, feedback.scans)
+	}
+}
+
+// Unschedulable target stores cannot receive affinity operators.
+func TestAffinityOperatorTargetStores(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		leader bool
+	}{
+		{"removing", false}, {"down", false}, {"special use", false}, {"low space", false},
+		{"busy", false}, {"store limit", false}, {"store limit and snapshots", false}, {"removing", true}, {"busy", true},
+		{"reject-leader", true}, {"evict-leader", true},
+	} {
+		t.Run(fmt.Sprintf("%s/leader=%t", tc.name, tc.leader), func(t *testing.T) {
+			re := require.New(t)
+			f := newAffinityBalanceTest(t, 4)
+			ids := f.seed("100", 1, 1)
+			// Move a voter from store 3 to store 4, or the leader to store 2.
+			leader, voters, store := uint64(1), []uint64{1, 2, 4}, uint64(4)
+			if tc.leader {
+				leader, voters, store = 2, []uint64{1, 2, 3}, 2
+			}
+			_, err := f.affinityManager.UpdateAffinityGroupPeers(ids[0], leader, voters)
+			re.NoError(err)
+			region, group := f.GetRegion(1), f.affinityManager.GetAffinityGroupState(ids[0])
+			re.NotNil(f.targetOperator(region, group))
+			counter := affinityCheckerTargetStoreRejectedCounter
+			if f.blockStore(store, tc.name) == balanceTemporarilyBlocked {
+				counter = affinityCheckerTargetStoreBlockedCounter
+			}
+			before := promtestutil.ToFloat64(counter)
+			if tc.name == "store limit" {
+				re.NotNil(f.targetOperator(region, group))
+				re.Equal(before, promtestutil.ToFloat64(counter))
+				return
+			}
+			re.Nil(f.targetOperator(region, group))
+			re.Equal(1.0, promtestutil.ToFloat64(counter)-before)
+		})
+	}
+}
+
+func TestAffinityCheckConvergesDifferentLeadersOnSameVoters(t *testing.T) {
+	re := require.New(t)
+	enableFastAffinityAvailabilityCheck(t)
+	f := newAffinityBalanceTest(t, 4, "a", "b", "a", "c")
+	f.setRules(
+		&placement.Rule{ID: "primary", Index: 1, Override: true, Role: placement.Voter, Count: 2,
+			LocationLabels: []string{"zone"}, LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"1", "2", "4"}}}},
+		&placement.Rule{ID: "secondary", Index: 2, Role: placement.Voter, Count: 1,
+			LocationLabels: []string{"zone"}, LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"3"}}}},
+	)
+	f.UpdateRegionCount(2, 100)
+	id := balanceTestGroupID("_tidb_pt_100_p1")
+	f.group(id, 1, 1, []uint64{1, 2, 3}, "a", "b", "c")
+	f.waitForStoreScan(id)
+	f.PutRegion(f.GetRegion(2).Clone(core.WithLeader(f.GetRegion(2).GetStoreVoter(2))))
+	group := f.affinityManager.GetAffinityGroupState(id)
+	_, status := f.validateBalanceCurrentRegion(group, f.GetRegion(1))
+	re.Equal(balanceAllowed, status)
+	ops := f.Check(f.GetRegion(2))
+	re.Len(ops, 1)
+	step, ok := ops[0].Step(0).(operator.TransferLeader)
+	re.True(ok)
+	re.Equal(uint64(2), step.FromStore)
+	re.Equal(uint64(1), step.ToStore)
+	f.applyBalanceMove(ops[0], 1)
+	for _, regionID := range []uint64{1, 2} {
+		_, aligned := f.affinityManager.GetAndCacheRegionAffinityGroupState(f.GetRegion(regionID))
+		re.True(aligned)
+	}
+	re.True(group.MatchesTarget(f.affinityManager.GetAffinityGroupState(id)))
+}
+
+func TestAffinityPlacementScansTiedSourcesAcrossZones(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 6)
+	for i, location := range [][2]string{{"a", "1"}, {"a", "1"}, {"b", "1"}, {"b", "1"}, {"a", "2"}, {"b", "2"}} {
+		f.SetStoreLabel(uint64(i+1), map[string]string{"zone": location[0], "rack": location[1]})
+	}
+	rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	rule.Count = 4
+	rule.LocationLabels = []string{"zone", "rack"}
+	f.setRules(rule)
+	f.AddLeaderRegion(1, 1, 2, 3, 4)
+	f.UpdateRegionCount(2, 100)
+	region := f.GetRegion(1)
+
+	f.SetStoreBusy(5, true)
+	fit := f.ruleManager.FitRegionWithoutCache(f.Cluster, region)
+	strategy := f.strategy(region, rule, false)
+	old, candidates, temporary := strategy.getBetterLocationCandidates(f.Cluster, region, fit, fit.RuleFits[0])
+	re.Equal(uint64(2), old)
+	re.Nil(candidates)
+	re.True(temporary)
+	feedback := f.checkRegionPlacement(region, fit, false)
+	re.Equal(affinityPlacementRejected, feedback.status)
+	re.Greater(feedback.scans, 1)
+
+	f.SetStoreDown(5)
+	fit = f.ruleManager.FitRegionWithoutCache(f.Cluster, region)
+	old, candidates, temporary = strategy.getBetterLocationCandidates(f.Cluster, region, fit, fit.RuleFits[0])
+	re.Equal(uint64(2), old)
+	re.Nil(candidates)
+	re.False(temporary)
+	re.Equal(affinityPlacementRejected, f.checkRegionPlacement(region, fit, false).status)
 }
