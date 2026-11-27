@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1422,24 +1423,20 @@ exit 1
 
 	t.Run("truncated executable recovered by Go and make tiup and reused offline", func(t *testing.T) {
 		re := require.New(t)
-		execPath, err := os.Executable()
+		// Build a real native Go binary (default flags keep compressed DWARF sections)
+		// to serve as both the positive control and the source for truncated negatives.
+		buildDir := t.TempDir()
+		mainSrc := filepath.Join(buildDir, "main.go")
+		re.NoError(os.WriteFile(mainSrc, []byte("package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"tiup-playground v1.16.4\") }\n"), 0600))
+		builtBinPath := filepath.Join(buildDir, "tiup-playground")
+		buildCmd := exec.Command("go", "build", "-o", builtBinPath, mainSrc) //nolint:gosec
+		buildOut, err := buildCmd.CombinedOutput()
+		re.NoError(err, "go build native probe binary failed:\n%s", string(buildOut))
+		actualBinary, err := os.ReadFile(builtBinPath) //nolint:gosec
 		re.NoError(err)
-		actualBinary, err := os.ReadFile(execPath) //nolint:gosec
-		re.NoError(err)
-		re.Greater(len(actualBinary), 2048)
+		re.Greater(len(actualBinary), 8192)
 
-		type truncatedCase struct {
-			name      string
-			payload   []byte
-			checkMake bool
-		}
-		cases := []truncatedCase{
-			{name: "64-byte truncated native executable", payload: actualBinary[:64], checkMake: true},
-			{name: "zero-byte executable", payload: nil, checkMake: true},
-			{name: "trailing-truncated native executable", payload: actualBinary[:len(actualBinary)-1024], checkMake: false},
-		}
-
-		setupTruncated := func(t *testing.T, payload []byte) (tiupHome, fakeTiUP, partialBin, installLog, offlineMarker string) {
+		setupWithPayload := func(t *testing.T, payload []byte) (tiupHome, fakeTiUP, partialBin, installLog, offlineMarker string) {
 			t.Helper()
 			re := require.New(t)
 			tiupHome = filepath.Join(t.TempDir(), "tiup-home")
@@ -1475,22 +1472,57 @@ if [ "$1" = "install" ] && [ "$2" = "playground" ]; then
     exit 1
   fi
   mkdir -p %q
-  printf '#!/bin/sh\nif [ "$1" = "--version" ]; then\n  echo "tiup-playground v1.16.4"\n  exit 0\nfi\nexit 1\n' > %q
+  cp %q %q
   chmod 0700 %q
   echo "installed" >> %q
   exit 0
 fi
 exit 1
-`, verDir, partialBin, offlineMarker, installLog, verDir, installLog, verDir, partialBin, partialBin, installLog)
+`, verDir, partialBin, offlineMarker, installLog, verDir, installLog, verDir, builtBinPath, partialBin, partialBin, installLog)
 			re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
 			re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
 			return tiupHome, fakeTiUP, partialBin, installLog, offlineMarker
 		}
 
+		// Positive control: intact native Go binary with compressed DWARF sections
+		// must be reused offline by both Go and make tiup without reinstalling.
+		t.Run("positive/complete native go binary reused offline", func(t *testing.T) {
+			re := require.New(t)
+			tiupHome, fakeTiUP, partialBin, installLog, offlineMarker := setupWithPayload(t, actualBinary)
+			re.NoError(os.WriteFile(offlineMarker, []byte("offline"), 0600))
+
+			re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+			ensurePlaygroundInstalledWithTiUPHome(re, fakeTiUP, tiupHome)
+			re.False(fileExists(installLog), "intact native binary must not trigger Go reinstall")
+
+			if _, err := exec.LookPath("make"); err == nil {
+				makefileDir := writeRealClusterMakefileDir(t)
+				cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+				cmd.Env = append(os.Environ(), "TIUP_HOME="+tiupHome)
+				out, err := cmd.CombinedOutput()
+				re.NoError(err, "make tiup rejected intact native binary:\n%s", string(out))
+				re.False(fileExists(installLog), "intact native binary must not trigger make reinstall")
+			}
+
+			info, err := os.Stat(partialBin)
+			re.NoError(err)
+			re.Equal(int64(len(actualBinary)), info.Size())
+		})
+
+		type truncatedCase struct {
+			name    string
+			payload []byte
+		}
+		cases := []truncatedCase{
+			{name: "64-byte truncated native executable", payload: actualBinary[:64]},
+			{name: "zero-byte executable", payload: nil},
+			{name: "trailing-4096-byte truncated native executable", payload: actualBinary[:len(actualBinary)-4096]},
+		}
+
 		for _, tc := range cases {
 			t.Run("go/"+tc.name, func(t *testing.T) {
 				re := require.New(t)
-				tiupHome, fakeTiUP, partialBin, installLog, offlineMarker := setupTruncated(t, tc.payload)
+				tiupHome, fakeTiUP, partialBin, installLog, offlineMarker := setupWithPayload(t, tc.payload)
 
 				re.False(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
 				ensurePlaygroundInstalledWithTiUPHome(re, fakeTiUP, tiupHome)
@@ -1506,37 +1538,112 @@ exit 1
 				re.Equal("installed", strings.TrimSpace(string(logData)))
 				info, err := os.Stat(partialBin)
 				re.NoError(err)
-				re.NotEqual(int64(len(tc.payload)), info.Size())
+				re.Equal(int64(len(actualBinary)), info.Size())
 			})
 
-			if tc.checkMake {
-				t.Run("make/"+tc.name, func(t *testing.T) {
-					re := require.New(t)
-					if _, err := exec.LookPath("make"); err != nil {
-						t.Skip("make not found in PATH")
-					}
-					makefileDir := writeRealClusterMakefileDir(t)
-					tiupHome, fakeTiUP, _, installLog, offlineMarker := setupTruncated(t, tc.payload)
+			t.Run("make/"+tc.name, func(t *testing.T) {
+				re := require.New(t)
+				if _, err := exec.LookPath("make"); err != nil {
+					t.Skip("make not found in PATH")
+				}
+				makefileDir := writeRealClusterMakefileDir(t)
+				tiupHome, fakeTiUP, partialBin, installLog, offlineMarker := setupWithPayload(t, tc.payload)
 
-					cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
-					cmd.Env = append(os.Environ(), "TIUP_HOME="+tiupHome)
-					out, err := cmd.CombinedOutput()
-					re.NoError(err, "make tiup failed:\n%s", string(out))
-					re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+				cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+				cmd.Env = append(os.Environ(), "TIUP_HOME="+tiupHome)
+				out, err := cmd.CombinedOutput()
+				re.NoError(err, "make tiup failed:\n%s", string(out))
+				re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
 
-					// Offline reuse via make tiup must not invoke install again.
-					re.NoError(os.WriteFile(offlineMarker, []byte("offline"), 0600))
-					cmd2 := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
-					cmd2.Env = append(os.Environ(), "TIUP_HOME="+tiupHome)
-					out2, err := cmd2.CombinedOutput()
-					re.NoError(err, "offline make tiup reuse failed:\n%s", string(out2))
+				// Offline reuse via make tiup must not invoke install again.
+				re.NoError(os.WriteFile(offlineMarker, []byte("offline"), 0600))
+				cmd2 := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+				cmd2.Env = append(os.Environ(), "TIUP_HOME="+tiupHome)
+				out2, err := cmd2.CombinedOutput()
+				re.NoError(err, "offline make tiup reuse failed:\n%s", string(out2))
 
-					logData, err := os.ReadFile(installLog) //nolint:gosec
-					re.NoError(err)
-					re.Equal("installed", strings.TrimSpace(string(logData)))
-				})
-			}
+				logData, err := os.ReadFile(installLog) //nolint:gosec
+				re.NoError(err)
+				re.Equal("installed", strings.TrimSpace(string(logData)))
+				info, err := os.Stat(partialBin)
+				re.NoError(err)
+				re.Equal(int64(len(actualBinary)), info.Size())
+			})
 		}
+
+		// Timeout and process-group cleanup for a hanging --version probe in both Go and make tiup.
+		t.Run("hanging version probe times out and kills child group", func(t *testing.T) {
+			makeHangingScript := func(pidFile string) []byte {
+				return []byte(fmt.Sprintf("#!/bin/sh\nsleep 30 &\npid=$!\nprintf '%%s\\n' \"$pid\" >> %q\nwait\n", pidFile))
+			}
+			readChildPIDs := func(re *require.Assertions, pidFile string) []int {
+				b, err := os.ReadFile(pidFile) //nolint:gosec
+				re.NoError(err)
+				var pids []int
+				for line := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
+					if strings.TrimSpace(line) == "" {
+						continue
+					}
+					pid, err := strconv.Atoi(strings.TrimSpace(line))
+					re.NoError(err)
+					re.Positive(pid)
+					pids = append(pids, pid)
+				}
+				re.NotEmpty(pids)
+				return pids
+			}
+
+			t.Run("go", func(t *testing.T) {
+				re := require.New(t)
+				origProbeTimeout := tiupProbeTimeout
+				t.Cleanup(func() { tiupProbeTimeout = origProbeTimeout })
+				tiupProbeTimeout = 300 * time.Millisecond
+
+				pidFile := filepath.Join(t.TempDir(), "go-hang.pid")
+				tiupHome, fakeTiUP, _, installLog, _ := setupWithPayload(t, makeHangingScript(pidFile))
+
+				start := time.Now()
+				ensurePlaygroundInstalledWithTiUPHome(re, fakeTiUP, tiupHome)
+				re.Less(time.Since(start), 5*time.Second)
+
+				childPIDs := readChildPIDs(re, pidFile)
+				re.Eventually(func() bool {
+					return !slices.ContainsFunc(childPIDs, isProcessRunning)
+				}, 2*time.Second, 20*time.Millisecond)
+				logData, err := os.ReadFile(installLog) //nolint:gosec
+				re.NoError(err)
+				re.Equal("installed", strings.TrimSpace(string(logData)))
+			})
+
+			t.Run("make", func(t *testing.T) {
+				re := require.New(t)
+				if _, err := exec.LookPath("make"); err != nil {
+					t.Skip("make not found in PATH")
+				}
+				makefileDir := writeRealClusterMakefileDir(t)
+				pidFile := filepath.Join(t.TempDir(), "make-hang.pid")
+				tiupHome, fakeTiUP, _, installLog, _ := setupWithPayload(t, makeHangingScript(pidFile))
+
+				start := time.Now()
+				cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+				cmd.Env = append(os.Environ(),
+					"TIUP_HOME="+tiupHome,
+					"TIUP_PROBE_TIMEOUT=0.3",
+				)
+				out, err := cmd.CombinedOutput()
+				re.NoError(err, "make tiup failed to recover from hanging probe:\n%s", string(out))
+				re.Less(time.Since(start), 5*time.Second)
+				re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+
+				childPIDs := readChildPIDs(re, pidFile)
+				re.Eventually(func() bool {
+					return !slices.ContainsFunc(childPIDs, isProcessRunning)
+				}, 2*time.Second, 20*time.Millisecond)
+				logData, err := os.ReadFile(installLog) //nolint:gosec
+				re.NoError(err)
+				re.Equal("installed", strings.TrimSpace(string(logData)))
+			})
+		})
 	})
 }
 

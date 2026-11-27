@@ -548,7 +548,9 @@ func hasCompleteELFLayout(ef *elf.File, fileSize uint64) bool {
 		}
 	}
 	for _, s := range ef.Sections {
-		if s.Type != elf.SHT_NOBITS && s.Size > 0 && !fitsInSize(s.Offset, s.Size, fileSize) {
+		// Use FileSize (on-disk byte length) rather than Size, because Size is
+		// the uncompressed length for SHF_COMPRESSED sections (e.g. Go DWARF debug info).
+		if s.Type != elf.SHT_NOBITS && s.FileSize > 0 && !fitsInSize(s.Offset, s.FileSize, fileSize) {
 			return false
 		}
 	}
@@ -594,9 +596,7 @@ func isMachOMagic(magic [4]byte) bool {
 }
 
 func isMachOFatMagic(magic [4]byte) bool {
-	be := binary.BigEndian.Uint32(magic[:])
-	le := binary.LittleEndian.Uint32(magic[:])
-	return be == macho.MagicFat || le == macho.MagicFat
+	return binary.BigEndian.Uint32(magic[:]) == macho.MagicFat
 }
 
 func probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome string) string {
