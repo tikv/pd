@@ -300,7 +300,7 @@ func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Reque
 	}
 	keyspaceID := uint32(keyspaceID64)
 	keyspaceManager := h.svr.GetKeyspaceManager()
-	if _, err := keyspaceManager.LoadKeyspaceByID(keyspaceID); err != nil {
+	if _, err := keyspaceManager.LoadKeyspaceByID(r.Context(), keyspaceID); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}

@@ -837,7 +837,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRejectedRequestsDoNotDiscove
 	re.NoError(err)
 	// Seed unsupported metadata directly so this rejection is covered in both
 	// classic and NextGen builds, independent of keyspace creation defaults.
-	meta, err := m.keyspaceManager.LoadKeyspaceByID(2)
+	meta, err := m.keyspaceManager.LoadKeyspaceByID(s.T().Context(), 2)
 	re.NoError(err)
 	meta.Config[keyspace.GCManagementType] = keyspace.UnifiedGC
 	re.NoError(s.storage.RunInTxn(context.Background(), func(txn kv.Txn) error {

@@ -86,13 +86,13 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 // Request must specify keyspace ID.
 // On Error, keyspaceMeta in response will be nil,
 // error information will be encoded in response header with corresponding error type.
-func (s *KeyspaceServer) LoadKeyspaceByID(_ context.Context, request *keyspacepb.LoadKeyspaceByIDRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
+func (s *KeyspaceServer) LoadKeyspaceByID(ctx context.Context, request *keyspacepb.LoadKeyspaceByIDRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
 
 	manager := s.GetKeyspaceManager()
-	meta, err := manager.LoadKeyspaceByID(request.GetId())
+	meta, err := manager.LoadKeyspaceByID(ctx, request.GetId())
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}

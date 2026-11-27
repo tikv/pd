@@ -762,18 +762,9 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 	return meta, err
 }
 
-// LoadKeyspaceByID returns the keyspace specified by id.
-// It returns error if loading or unmarshalling met error or if keyspace does not exist.
-func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
-	meta, err := manager.loadKeyspaceMetaByID(manager.ctx, spaceID)
-	if manager.mgm != nil && meta != nil {
-		manager.mgm.AttachEndpoints(meta.GetConfig())
-	}
-	return meta, err
-}
-
-// LoadKeyspaceByIDWithContext loads the keyspace specified by id using the caller's context.
-func (manager *Manager) LoadKeyspaceByIDWithContext(ctx context.Context, spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
+// LoadKeyspaceByID loads the keyspace specified by id using the caller's context.
+// It returns metadata only after the storage transaction succeeds.
+func (manager *Manager) LoadKeyspaceByID(ctx context.Context, spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
 	ctx, cancel := manager.newLoadContext(ctx)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
@@ -1401,7 +1392,7 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	}
 	var loadedName string
 	// If the keyspace name is not in the cache, try to get it from the storage.
-	meta, err := manager.LoadKeyspaceByID(id)
+	meta, err := manager.LoadKeyspaceByID(manager.ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -1426,9 +1417,8 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 		return state.(keyspacepb.KeyspaceState), nil
 	}
 	var loadedState keyspacepb.KeyspaceState
-	// If the keyspace state is not in the cache, try to get it from the storage.
-	meta, err := manager.LoadKeyspaceByID(id)
-	// Only check wether the keyspace meta is nil, ensure the returned state is as latest as possible.
+	meta, err := manager.loadKeyspaceMetaByID(manager.ctx, id)
+	// Use the state we read even if the read transaction's final validation failed.
 	if meta == nil {
 		return keyspacepb.KeyspaceState_DISABLED, err
 	}

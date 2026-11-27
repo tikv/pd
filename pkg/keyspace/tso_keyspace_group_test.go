@@ -824,7 +824,7 @@ func TestRemoveKeyspacesFromGroupIsFencedByLeadershipTerm(t *testing.T) {
 	re.NoError(err)
 	removed := 0
 	for _, keyspaceID := range keyspaceIDs {
-		_, err := keyspaceManager.LoadKeyspaceByID(keyspaceID)
+		_, err := keyspaceManager.LoadKeyspaceByID(t.Context(), keyspaceID)
 		if errors.Is(err, errs.ErrKeyspaceNotFound) {
 			removed++
 			re.NotContains(group.Keyspaces, keyspaceID)
@@ -892,7 +892,7 @@ func TestRemoveKeyspacesFromGroupStaysWithinEtcdLimits(t *testing.T) {
 	re.NoError(err)
 	for _, keyspaceID := range keyspaceIDs {
 		re.NotContains(group.Keyspaces, keyspaceID)
-		_, err := keyspaceManager.LoadKeyspaceByID(keyspaceID)
+		_, err := keyspaceManager.LoadKeyspaceByID(t.Context(), keyspaceID)
 		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	}
 }
@@ -983,12 +983,12 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupUsesBoundedTran
 	re.Equal(int32(5), countingStore.runInTxnCount.Load())
 	for _, keyspaceID := range keyspaceIDs {
 		re.NotContains(result.group.Keyspaces, keyspaceID)
-		_, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		_, err := suite.kg.LoadKeyspaceByID(suite.T().Context(), keyspaceID)
 		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	}
 	for _, keyspaceID := range createdKeyspaceIDs {
 		re.Contains(result.group.Keyspaces, keyspaceID)
-		meta, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		meta, err := suite.kg.LoadKeyspaceByID(suite.T().Context(), keyspaceID)
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
 	}
@@ -1019,7 +1019,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupRefreshesCaches
 	re.ErrorIs(err, context.DeadlineExceeded)
 	removedIDs := make([]uint32, 0, maxKeyspaceRemovalBatchSize)
 	for _, keyspaceID := range keyspaceIDs {
-		_, err = suite.kg.LoadKeyspaceByID(keyspaceID)
+		_, err = suite.kg.LoadKeyspaceByID(suite.T().Context(), keyspaceID)
 		if errors.Is(err, errs.ErrKeyspaceNotFound) {
 			removedIDs = append(removedIDs, keyspaceID)
 			continue
@@ -1121,7 +1121,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersProtecte
 	re.NotContains(group.Keyspaces, archivedID)
 	re.Contains(group.Keyspaces, enabled.GetId())
 	re.Contains(group.Keyspaces, missingID)
-	_, err = suite.kg.LoadKeyspaceByID(archivedID)
+	_, err = suite.kg.LoadKeyspaceByID(suite.T().Context(), archivedID)
 	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 
 	// Retrying the same mixed request is a no-op: protected, already removed,
@@ -1269,9 +1269,9 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersInBatch(
 	re.NotContains(group.Keyspaces, archivedID)
 	re.Contains(group.Keyspaces, enabled.GetId())
 	re.Contains(group.Keyspaces, staleMemberID)
-	_, err = suite.kg.LoadKeyspaceByID(archivedID)
+	_, err = suite.kg.LoadKeyspaceByID(suite.T().Context(), archivedID)
 	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
-	_, err = suite.kg.LoadKeyspaceByID(enabled.GetId())
+	_, err = suite.kg.LoadKeyspaceByID(suite.T().Context(), enabled.GetId())
 	re.NoError(err)
 }
 
@@ -1354,7 +1354,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupDoesNotDeadlock
 	targetGroup, err := suite.kgm.GetKeyspaceGroupByID(1)
 	re.NoError(err)
 	re.Contains(targetGroup.Keyspaces, enabled.GetId())
-	meta, err := suite.kg.LoadKeyspaceByID(enabled.GetId())
+	meta, err := suite.kg.LoadKeyspaceByID(suite.T().Context(), enabled.GetId())
 	re.NoError(err)
 	re.Equal("1", meta.GetConfig()[TSOKeyspaceGroupIDKey])
 }
@@ -1383,7 +1383,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupStopsAfterCance
 	re.NoError(err)
 	removed := 0
 	for _, keyspaceID := range keyspaceIDs {
-		_, err := suite.kg.LoadKeyspaceByID(keyspaceID)
+		_, err := suite.kg.LoadKeyspaceByID(suite.T().Context(), keyspaceID)
 		if errors.Is(err, errs.ErrKeyspaceNotFound) {
 			removed++
 			re.NotContains(group.Keyspaces, keyspaceID)

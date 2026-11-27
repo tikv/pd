@@ -281,22 +281,12 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 // This function also returns the target keyspace name for diagnostic purpose. But note that it returns a user-friendly
 // string only for diagnostic purposes (it returns "<null_keyspace>" for NullKeyspaceID). DO NOT use it as the key for
 // identifying a keyspace.
-func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (uint32, string, error) {
-	return redirectGCKeyspace(keyspaceID, isUserAPI, m.keyspaceManager.LoadKeyspaceByID)
-}
-
-func (m *GCStateManager) redirectKeyspaceForRead(ctx context.Context, keyspaceID uint32) (uint32, string, error) {
-	return redirectGCKeyspace(keyspaceID, true, func(id uint32) (*keyspacepb.KeyspaceMeta, error) {
-		return m.keyspaceManager.LoadKeyspaceByIDWithContext(ctx, id)
-	})
-}
-
-func redirectGCKeyspace(keyspaceID uint32, isUserAPI bool, loadMeta func(uint32) (*keyspacepb.KeyspaceMeta, error)) (uint32, string, error) {
+func (m *GCStateManager) redirectKeyspace(ctx context.Context, keyspaceID uint32, isUserAPI bool) (uint32, string, error) {
 	// Regard IDs outside the valid range as NullKeyspace, including NullKeyspaceID itself.
 	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
 		return constant.NullKeyspaceID, "<null_keyspace>", nil
 	}
-	meta, err := loadMeta(keyspaceID)
+	meta, err := m.keyspaceManager.LoadKeyspaceByID(ctx, keyspaceID)
 	if err != nil {
 		return 0, "", err
 	}
@@ -337,7 +327,7 @@ func gcKeyspaceScope(keyspaceID uint32, meta *keyspacepb.KeyspaceMeta, isUserAPI
 
 // CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
 func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, error) {
-	keyspaceID, _, err := m.redirectKeyspace(keyspaceID, false)
+	keyspaceID, _, err := m.redirectKeyspace(context.Background(), keyspaceID, false)
 	if err != nil {
 		return 0, err
 	}
@@ -359,11 +349,12 @@ func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, e
 // have the responsibility to manage GC. It can only be called on NullKeyspace or keyspaces with keyspace level GC
 // enabled.
 func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
-	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, false)
+	ctx := context.Background()
+	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(ctx, keyspaceID, false)
 	if err != nil {
 		return
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -376,11 +367,12 @@ func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (o
 // This is provided for compatibility purpose, making the existing uses of the deprecated API `UpdateGCSafePoint`
 // still work.
 func (m *GCStateManager) CompatibleUpdateGCSafePoint(keyspaceID uint32, target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
-	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, false)
+	ctx := context.Background()
+	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(ctx, keyspaceID, false)
 	if err != nil {
 		return
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -804,11 +796,12 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("ttl", ttl)
 	}
 
-	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
+	ctx := context.Background()
+	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(ctx, keyspaceID, true)
 	if err != nil {
 		return nil, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -867,11 +860,12 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 // When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 // the NullKeyspace.
 func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
-	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
+	ctx := context.Background()
+	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(ctx, keyspaceID, true)
 	if err != nil {
 		return nil, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1028,7 +1022,7 @@ func (m *GCStateManager) getGCStateSnapshotLocked(ctx context.Context, keyspaceI
 // When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 // the NullKeyspace.
 func (m *GCStateManager) GetGCState(ctx context.Context, keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
-	keyspaceID, keyspaceName, err := m.redirectKeyspaceForRead(ctx, keyspaceID)
+	keyspaceID, keyspaceName, err := m.redirectKeyspace(ctx, keyspaceID, true)
 	if err != nil {
 		return GCState{}, err
 	}
@@ -1046,7 +1040,7 @@ func (m *GCStateManager) GetGCState(ctx context.Context, keyspaceID uint32, excl
 // GetGCStateWithGlobalGCBarriers gets one keyspace's GC state and every global
 // GC barrier from one storage snapshot.
 func (m *GCStateManager) GetGCStateWithGlobalGCBarriers(ctx context.Context, keyspaceID uint32, excludeGCBarriers bool) (GCState, []*endpoint.GlobalGCBarrier, error) {
-	keyspaceID, keyspaceName, err := m.redirectKeyspaceForRead(ctx, keyspaceID)
+	keyspaceID, keyspaceName, err := m.redirectKeyspace(ctx, keyspaceID, true)
 	if err != nil {
 		return GCState{}, nil, err
 	}
@@ -1270,7 +1264,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 	if serviceID == keypath.GCWorkerServiceSafePointID {
 		keyspaceID, keyspaceNameForDiag, keyspaceMeta, err = m.loadTxnSafePointKeyspace(ctx, keyspaceID, true)
 	} else {
-		keyspaceID, keyspaceNameForDiag, err = m.redirectKeyspace(keyspaceID, true)
+		keyspaceID, keyspaceNameForDiag, err = m.redirectKeyspace(ctx, keyspaceID, true)
 	}
 	if err != nil {
 		return nil, false, err

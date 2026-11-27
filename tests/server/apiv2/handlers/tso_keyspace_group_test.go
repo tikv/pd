@@ -519,9 +519,9 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroup() {
 	re.NotContains(kg.Keyspaces, keyspaceID1)
 	re.NotContains(kg.Keyspaces, keyspaceID2)
 	re.Contains(kg.Keyspaces, keyspaceID3) // keyspace3 should still be there
-	_, err = keyspaceManager.LoadKeyspaceByID(keyspaceID1)
+	_, err = keyspaceManager.LoadKeyspaceByID(suite.T().Context(), keyspaceID1)
 	re.True(perrors.ErrorEqual(err, errs.ErrKeyspaceNotFound))
-	_, err = keyspaceManager.LoadKeyspaceByID(keyspaceID2)
+	_, err = keyspaceManager.LoadKeyspaceByID(suite.T().Context(), keyspaceID2)
 	re.True(perrors.ErrorEqual(err, errs.ErrKeyspaceNotFound))
 
 	// Test 3: Mix valid and invalid keyspaces
@@ -539,7 +539,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroup() {
 	// Verify only keyspace3 is removed
 	kg = MustLoadKeyspaceGroupByID(re, suite.server, kgconstant.DefaultKeyspaceGroupID)
 	re.NotContains(kg.Keyspaces, keyspaceID3)
-	_, err = keyspaceManager.LoadKeyspaceByID(keyspaceID3)
+	_, err = keyspaceManager.LoadKeyspaceByID(suite.T().Context(), keyspaceID3)
 	re.True(perrors.ErrorEqual(err, errs.ErrKeyspaceNotFound))
 
 	// Test 4: Try to remove from non-existent group
