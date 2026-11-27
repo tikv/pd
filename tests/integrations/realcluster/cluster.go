@@ -174,6 +174,7 @@ type cluster struct {
 	cmd               *exec.Cmd
 	cmdDone           chan struct{}
 	trackedProcs      map[int]procInfo
+	pendingExitProcs  []procInfo
 }
 
 func newCluster(re *require.Assertions, tag, datadir, mode string, ins ...map[string]int) *cluster {
@@ -226,7 +227,25 @@ func (c *cluster) stop() {
 }
 
 func (c *cluster) stopWithErr() error {
-	if c.pgid == 0 && c.cmd == nil && len(c.trackedProcs) == 0 {
+	// Once reaping has started, all owned processes were already verified exited and the
+	// background cmd.Wait() may have already reaped the launcher; never use the old pgid/cmd
+	// as PGID ownership proof again—only wait for c.cmdDone to finish reaping.
+	if c.cmdDone != nil {
+		select {
+		case <-c.cmdDone:
+			c.pgid = 0
+			c.launcherStartTime = 0
+			c.cmd = nil
+			c.cmdDone = nil
+			c.trackedProcs = nil
+			c.pendingExitProcs = nil
+			log.Info("cluster stopped", zap.String("tag", c.tag))
+			return nil
+		case <-time.After(clusterStopWaitTimeout):
+			return fmt.Errorf("cluster %s launcher pid %d was not reaped within %s", c.tag, c.pgid, clusterStopWaitTimeout)
+		}
+	}
+	if c.pgid == 0 && c.cmd == nil && len(c.trackedProcs) == 0 && len(c.pendingExitProcs) == 0 {
 		return nil
 	}
 
@@ -245,6 +264,9 @@ func (c *cluster) stopWithErr() error {
 	}
 	owned := mergeOwnedProcs(tracked, procs, selectOwnedProcs(procs, c.datadir, pgid, launcherStartTime, selfPID))
 	hasGroupMembers := hasLivePGIDMembers(procs, pgid, launcherStartTime, selfPID)
+	exitTargets := make([]procInfo, 0, len(c.pendingExitProcs)+len(owned))
+	exitTargets = append(exitTargets, c.pendingExitProcs...)
+	exitTargets = append(exitTargets, owned...)
 
 	if pgid > 0 && (hasGroupMembers || (err != nil && cmd != nil)) {
 		_ = killProcess(-pgid, syscall.SIGTERM)
@@ -255,13 +277,16 @@ func (c *cluster) stopWithErr() error {
 	}
 
 	// Wait up to clusterStopGraceTimeout for graceful exit, then force kill verified survivors.
-	if err != nil || len(owned) > 0 || hasGroupMembers {
+	if err != nil || len(owned) > 0 || hasGroupMembers || len(exitTargets) > 0 {
 		deadline := time.Now().Add(clusterStopGraceTimeout)
 		for time.Now().Before(deadline) {
 			scanProcs, scanErr := listProcessesFn()
 			if scanErr == nil {
 				active := mergeOwnedProcs(tracked, scanProcs, selectOwnedProcs(scanProcs, c.datadir, pgid, launcherStartTime, selfPID))
-				if len(active) == 0 && !hasLivePGIDMembers(scanProcs, pgid, launcherStartTime, selfPID) {
+				exitTargets = append(exitTargets, active...)
+				if len(active) == 0 &&
+					!hasLivePGIDMembers(scanProcs, pgid, launcherStartTime, selfPID) &&
+					!hasLiveMatchingProcs(scanProcs, exitTargets) {
 					break
 				}
 			}
@@ -278,6 +303,7 @@ func (c *cluster) stopWithErr() error {
 	}
 	survivors := mergeOwnedProcs(tracked, procs, selectOwnedProcs(procs, c.datadir, pgid, launcherStartTime, selfPID))
 	hasGroupMembers = hasLivePGIDMembers(procs, pgid, launcherStartTime, selfPID)
+	exitTargets = append(exitTargets, survivors...)
 
 	if pgid > 0 && (hasGroupMembers || (err != nil && cmd != nil)) {
 		// While cmd remains un-reaped, POSIX guarantees pgid cannot be reused.
@@ -287,7 +313,8 @@ func (c *cluster) stopWithErr() error {
 	for _, p := range survivors {
 		_ = killProcess(p.pid, syscall.SIGKILL)
 	}
-	procsExited := err == nil && len(survivors) == 0 && (pgid <= 0 || !hasGroupMembers)
+	pendingUnconfirmed := filterLiveMatchingProcs(procs, exitTargets)
+	procsExited := err == nil && len(survivors) == 0 && len(pendingUnconfirmed) == 0 && (pgid <= 0 || !hasGroupMembers)
 	var remainingProcs []procInfo
 	var remainingGroup bool
 	var lastPostErr error
@@ -299,7 +326,9 @@ func (c *cluster) stopWithErr() error {
 			if postErr == nil {
 				remainingProcs = mergeOwnedProcs(tracked, postProcs, selectOwnedProcs(postProcs, c.datadir, pgid, launcherStartTime, selfPID))
 				remainingGroup = hasLivePGIDMembers(postProcs, pgid, launcherStartTime, selfPID)
-				if len(remainingProcs) == 0 && !remainingGroup {
+				exitTargets = append(exitTargets, remainingProcs...)
+				pendingUnconfirmed = filterLiveMatchingProcs(postProcs, exitTargets)
+				if len(remainingProcs) == 0 && !remainingGroup && len(pendingUnconfirmed) == 0 {
 					procsExited = true
 					break
 				}
@@ -311,38 +340,41 @@ func (c *cluster) stopWithErr() error {
 		}
 	}
 	if !procsExited {
-		// Keep pgid, launcherStartTime, cmd, and live trackedProcs intact so a subsequent
-		// stop() retries cleanup and POSIX keeps pgid reserved against kernel reuse.
+		// Keep pgid, launcherStartTime, cmd, and live process records intact so a subsequent
+		// stop() retries cleanup and restart()/deploy() cannot launch against live instances.
 		if lastPostErr == nil {
 			nextTracked := make(map[int]procInfo, len(remainingProcs))
 			for _, p := range remainingProcs {
-				nextTracked[p.pid] = p
+				if p.startTime > 0 {
+					nextTracked[p.pid] = p
+				}
 			}
 			c.trackedProcs = nextTracked
+			c.pendingExitProcs = pendingUnconfirmed
 		} else {
 			c.trackedProcs = tracked
+			c.pendingExitProcs = exitTargets
 		}
 		return fmt.Errorf(
-			"cluster %s still has owned processes after SIGKILL timeout (survivors=%d, livePGID=%t, scanErr=%v)",
-			c.tag, len(remainingProcs), remainingGroup, lastPostErr,
+			"cluster %s still has owned processes after SIGKILL timeout (survivors=%d, pendingExit=%d, livePGID=%t, scanErr=%v)",
+			c.tag, len(remainingProcs), len(pendingUnconfirmed), remainingGroup, lastPostErr,
 		)
 	}
 
 	// Reap the launcher only after all PGID and per-PID signals and exit waits complete,
 	// keeping its PID/PGID reserved against kernel reuse throughout stop().
 	if cmd != nil {
-		if c.cmdDone == nil {
-			done := make(chan struct{})
-			go func() {
-				_ = cmd.Wait()
-				close(done)
-			}()
-			c.cmdDone = done
-		}
+		done := make(chan struct{})
+		go func() {
+			_ = cmd.Wait()
+			close(done)
+		}()
+		c.cmdDone = done
+		c.trackedProcs = nil
+		c.pendingExitProcs = nil
 		select {
 		case <-c.cmdDone:
 		case <-time.After(clusterStopWaitTimeout):
-			c.trackedProcs = nil
 			return fmt.Errorf("cluster %s launcher pid %d was not reaped within %s", c.tag, pgid, clusterStopWaitTimeout)
 		}
 	}
@@ -351,6 +383,7 @@ func (c *cluster) stopWithErr() error {
 	c.cmd = nil
 	c.cmdDone = nil
 	c.trackedProcs = nil
+	c.pendingExitProcs = nil
 	log.Info("cluster stopped", zap.String("tag", c.tag))
 	return nil
 }
@@ -366,6 +399,7 @@ func (c *cluster) deploy() {
 	re.Zero(c.pgid, "cannot start cluster while previous instance is still tracked")
 	re.Nil(c.cmd, "cannot start cluster while previous launcher is still un-reaped")
 	re.Empty(c.trackedProcs, "cannot start cluster while previous owned processes remain tracked")
+	re.Empty(c.pendingExitProcs, "cannot start cluster while previous owned processes have not exited")
 	repoRoot := realClusterRepoRoot
 	if repoRoot == "" {
 		var err error
@@ -424,6 +458,7 @@ func (c *cluster) deploy() {
 	c.cmd = cmd
 	c.cmdDone = nil
 	c.trackedProcs = nil
+	c.pendingExitProcs = nil
 	c.launcherStartTime = readProcStartTimeFn(cmd.Process.Pid)
 }
 

@@ -606,9 +606,9 @@ func mergeOwnedProcs(tracked map[int]procInfo, currentProcs, freshOwned []procIn
 	return merged
 }
 
-func hasLiveMatchingProcs(procs, targets []procInfo) bool {
+func filterLiveMatchingProcs(procs, targets []procInfo) []procInfo {
 	if len(targets) == 0 {
-		return false
+		return nil
 	}
 	byPID := make(map[int]procInfo, len(procs))
 	for _, p := range procs {
@@ -617,17 +617,24 @@ func hasLiveMatchingProcs(procs, targets []procInfo) bool {
 		}
 		byPID[p.pid] = p
 	}
+	var alive []procInfo
+	seen := make(map[int]struct{}, len(targets))
 	for _, target := range targets {
+		if _, dup := seen[target.pid]; dup {
+			continue
+		}
 		cur, ok := byPID[target.pid]
-		if !ok {
+		if !ok || !sameProcIdentity(target, cur) {
 			continue
 		}
-		if !sameProcIdentity(target, cur) {
-			continue
-		}
-		return true
+		seen[target.pid] = struct{}{}
+		alive = append(alive, cur)
 	}
-	return false
+	return alive
+}
+
+func hasLiveMatchingProcs(procs, targets []procInfo) bool {
+	return len(filterLiveMatchingProcs(procs, targets)) > 0
 }
 
 func matchesClusterServerDataDir(binName string, args []string, cleanDataDir string) bool {

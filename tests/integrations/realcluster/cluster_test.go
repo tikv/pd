@@ -2444,11 +2444,13 @@ exit 1
 		re.Equal(uint64(1000), c.launcherStartTime)
 		re.Contains(c.trackedProcs, survivorPID)
 
-		// restart() must fail before calling start() when stopWithErr() times out.
+		// restart() must fail at stopWithErr() before reaching deploy() when stopWithErr() times out.
 		re.PanicsWithValue(errFailNowSpy, func() {
 			c.restart()
 		})
 		re.True(fakeT.failed)
+		re.Contains(fakeT.lastMsg, "after SIGKILL timeout", "restart must fail in stopWithErr rather than deploy guard")
+		re.NotContains(fakeT.lastMsg, "cannot start cluster")
 		re.Equal(launcherPID, c.pgid, "restart failure must still leave pgid intact for deferred cleanup")
 
 		mu.Lock()
@@ -2466,7 +2468,7 @@ exit 1
 		re.Empty(c.trackedProcs)
 	})
 
-	t.Run("preserves launcher cmd on wait timeout and reaps without double Wait on retry", func(t *testing.T) {
+	t.Run("preserves launcher cmd on wait timeout and reaps without signals or double Wait on retry", func(t *testing.T) {
 		re := require.New(t)
 		origKill := killProcess
 		origList := listProcessesFn
@@ -2484,19 +2486,40 @@ exit 1
 		clusterStopKillTimeout = 20 * time.Millisecond
 		clusterStopWaitTimeout = 40 * time.Millisecond
 
-		// Start a real short-lived subprocess, mock listProcessesFn to report no live
-		// processes and killProcess as a no-op so cmd.Wait() hits clusterStopWaitTimeout first.
-		cmd := exec.Command("sh", "-c", "sleep 0.25")
+		// Pipe-controlled subprocess avoids fixed sleep timing and guarantees deterministic exit/reaping.
+		pr, pw, err := os.Pipe()
+		re.NoError(err)
+		var closeOnce sync.Once
+		closeWriteEnd := func() {
+			closeOnce.Do(func() {
+				_ = pw.Close()
+			})
+		}
+
+		cmd := exec.Command("sh", "-c", "read _")
+		cmd.Stdin = pr
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		re.NoError(cmd.Start())
-		t.Cleanup(func() {
-			if cmd.Process != nil {
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			}
-		})
+		_ = pr.Close()
 
-		killProcess = func(int, syscall.Signal) error { return nil }
-		listProcessesFn = func() ([]procInfo, error) { return nil, nil }
+		var mu sync.Mutex
+		var signalCalls []signalCall
+		killProcess = func(pid int, sig syscall.Signal) error {
+			mu.Lock()
+			signalCalls = append(signalCalls, signalCall{pid: pid, sig: sig})
+			mu.Unlock()
+			return nil
+		}
+		var listShouldFail bool
+		listProcessesFn = func() ([]procInfo, error) {
+			mu.Lock()
+			fail := listShouldFail
+			mu.Unlock()
+			if fail {
+				return nil, errors.New("transient process scan failure")
+			}
+			return nil, nil
+		}
 
 		c := &cluster{
 			tag:               "wait_timeout_test",
@@ -2505,31 +2528,156 @@ exit 1
 			launcherStartTime: readProcStartTime(cmd.Process.Pid),
 			cmd:               cmd,
 		}
+		t.Cleanup(func() {
+			closeWriteEnd()
+			if c.cmdDone != nil {
+				<-c.cmdDone
+			} else if c.cmd != nil {
+				_ = c.cmd.Wait()
+			}
+		})
 
-		err := c.stopWithErr()
+		err = c.stopWithErr()
 		re.Error(err)
 		re.Equal(cmd.Process.Pid, c.pgid, "pgid must remain preserved when launcher Wait times out")
 		re.Same(cmd, c.cmd, "cmd must remain preserved when launcher Wait times out")
 		re.NotNil(c.cmdDone, "single Wait goroutine channel must be retained for retry")
 
-		// Wait until the subprocess exits on its own, then retry stop(): must reuse c.cmdDone and clear state.
+		// Release subprocess via pipe EOF, wait for background Wait to finish reaping, then make
+		// listProcessesFn fail: retry must reap cleanly via c.cmdDone with ZERO signals to old PGID.
+		closeWriteEnd()
+		<-c.cmdDone
+		mu.Lock()
+		listShouldFail = true
+		signalCalls = nil
+		mu.Unlock()
+
 		clusterStopWaitTimeout = 2 * time.Second
 		re.NoError(c.stopWithErr())
 		re.Zero(c.pgid)
 		re.Zero(c.launcherStartTime)
 		re.Nil(c.cmd)
 		re.Nil(c.cmdDone)
+		mu.Lock()
+		recorded := append([]signalCall(nil), signalCalls...)
+		mu.Unlock()
+		re.Empty(recorded, "retry after cmdDone exists must never signal old PGID even if process scan fails")
+	})
+
+	t.Run("ps fallback retains unconfirmed reparented helper and blocks restart without unverified SIGKILL", func(t *testing.T) {
+		re := require.New(t)
+		origKill := killProcess
+		origList := listProcessesFn
+		origGrace := clusterStopGraceTimeout
+		origKillTimeout := clusterStopKillTimeout
+		origWaitTimeout := clusterStopWaitTimeout
+		t.Cleanup(func() {
+			killProcess = origKill
+			listProcessesFn = origList
+			clusterStopGraceTimeout = origGrace
+			clusterStopKillTimeout = origKillTimeout
+			clusterStopWaitTimeout = origWaitTimeout
+		})
+		clusterStopGraceTimeout = 30 * time.Millisecond
+		clusterStopKillTimeout = 40 * time.Millisecond
+		clusterStopWaitTimeout = 40 * time.Millisecond
+
+		const (
+			launcherPID = 44001
+			helperPID   = 44002
+		)
+		helperProc := procInfo{
+			pid: helperPID, ppid: 1, pgid: helperPID, startTime: 0, state: 'S',
+			args: []string{"/usr/bin/ps-reparented-helper", "--run"},
+		}
+		var mu sync.Mutex
+		var scanCount int
+		var helperExited bool
+		var calls []signalCall
+		killProcess = func(pid int, sig syscall.Signal) error {
+			mu.Lock()
+			calls = append(calls, signalCall{pid: pid, sig: sig})
+			mu.Unlock()
+			return nil
+		}
+		listProcessesFn = func() ([]procInfo, error) {
+			mu.Lock()
+			scanCount++
+			n := scanCount
+			exited := helperExited
+			mu.Unlock()
+			if n == 1 {
+				// Scan 1 (ps fallback, startTime == 0): launcher owns helper in its own PGID.
+				return []procInfo{
+					{
+						pid: launcherPID, ppid: os.Getpid(), pgid: launcherPID, startTime: 0, state: 'S',
+						args: []string{"/bin/tiup", "playground", "nightly", "--tag", "ps_reparent_hold"},
+					},
+					{
+						pid: helperPID, ppid: launcherPID, pgid: helperPID, startTime: 0, state: 'S',
+						args: []string{"/usr/bin/ps-reparented-helper", "--run"},
+					},
+				}, nil
+			}
+			// Subsequent scans: launcher exited (zombie), helper was reparented to PID 1 while
+			// remaining alive in its own independent PGID with startTime == 0.
+			procs := []procInfo{
+				{pid: launcherPID, ppid: os.Getpid(), pgid: launcherPID, startTime: 0, state: 'Z'},
+			}
+			if !exited {
+				procs = append(procs, helperProc)
+			}
+			return procs, nil
+		}
+
+		fakeT := &failNowSpyT{}
+		c := &cluster{
+			re:                require.New(fakeT),
+			tag:               "ps_reparent_hold",
+			datadir:           "/tmp/tiup-ps-reparent/data/ps_reparent_hold",
+			pgid:              launcherPID,
+			launcherStartTime: 0,
+		}
+
+		// Both first stop and restart must fail while helper remains alive, without sending unverified SIGKILL.
+		re.Error(c.stopWithErr())
+		re.Equal(launcherPID, c.pgid)
+		re.NotEmpty(c.pendingExitProcs)
+
+		re.PanicsWithValue(errFailNowSpy, func() {
+			c.restart()
+		})
+		re.True(fakeT.failed)
+		re.Contains(fakeT.lastMsg, "after SIGKILL timeout", "restart must fail in stopWithErr rather than deploy guard")
+		re.NotContains(fakeT.lastMsg, "cannot start cluster")
+		re.Equal(launcherPID, c.pgid)
+
+		mu.Lock()
+		recorded := append([]signalCall(nil), calls...)
+		helperExited = true
+		mu.Unlock()
+		for _, call := range recorded {
+			re.False(call.pid == helperPID && call.sig == syscall.SIGKILL,
+				"must not send unverified SIGKILL to reparented ps-fallback helper without startTime")
+		}
+
+		// Once helper exits, subsequent stop clears state cleanly.
+		re.NoError(c.stopWithErr())
+		re.Zero(c.pgid)
+		re.Empty(c.pendingExitProcs)
 	})
 }
 
 var errFailNowSpy = errors.New("failNowSpy")
 
 type failNowSpyT struct {
-	failed bool
+	failed  bool
+	lastMsg string
 }
 
-func (f *failNowSpyT) Errorf(string, ...any) {
+func (f *failNowSpyT) Errorf(format string, args ...any) {
 	f.failed = true
+	f.lastMsg = fmt.Sprintf(format, args...)
 }
 
 func (f *failNowSpyT) FailNow() {
