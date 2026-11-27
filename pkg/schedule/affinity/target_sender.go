@@ -69,7 +69,7 @@ func (m *Manager) recoverLocalObservedTarget(obs *observedTarget, matchesStored 
 		m.RUnlock()
 		return
 	}
-	if len(queued) > 0 && !queued[0].matches(group) {
+	if len(queued) > 0 && (!queued[0].matches(group) || group.lastSentPolicyMismatch) {
 		queued = nil
 	}
 	active := len(queued) > 0 || (inFlight && sending.matches(group))
@@ -168,7 +168,7 @@ func (m *Manager) popObservedTargets(now time.Time) ([]observedTarget, time.Time
 		for len(queued) > 0 {
 			obs := queued[0]
 			switch {
-			case !obs.matches(group) || group.lastSentWritten:
+			case !obs.matches(group) || group.lastSentWritten || group.lastSentPolicyMismatch:
 				queued = nil
 			case obs.localOnly:
 				m.applyLocalObservedTargetLocked(&obs)
@@ -267,11 +267,7 @@ func (m *Manager) drainObservedTargets() {
 				obs.groupInfoPtr.lastSentTarget = &obs
 				obs.groupInfoPtr.lastSentWritten = slices.Contains(resp.WrittenGroupIDs, id)
 				obs.groupInfoPtr.lastSentPolicyMismatch = slices.Contains(resp.PolicyMismatchGroupIDs, id)
-				if obs.groupInfoPtr.lastSentPolicyMismatch {
-					if queued := m.pendingTargets[id]; len(queued) > 0 && queued[0].matches(obs.groupInfoPtr) {
-						m.pendingTargets[id] = nil
-					}
-				} else {
+				if !obs.groupInfoPtr.lastSentPolicyMismatch {
 					obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
 				}
 			}
