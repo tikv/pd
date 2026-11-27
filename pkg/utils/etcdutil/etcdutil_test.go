@@ -45,6 +45,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -1269,6 +1270,16 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultPaginationAcrossCo
 }
 
 func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
+	t.Run("stream error", func(t *testing.T) {
+		checkBatchedHistoryResume(t, false)
+	})
+	t.Run("closed channel", func(t *testing.T) {
+		checkBatchedHistoryResume(t, true)
+	})
+}
+
+func checkBatchedHistoryResume(t *testing.T, closeChannel bool) {
+	t.Helper()
 	re := require.New(t)
 	firstBatchApplied := make(chan struct{})
 	firstBatchHeader := make(chan int64, 1)
@@ -1281,7 +1292,12 @@ func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
 					if err != nil || method != "/etcdserverpb.Watch/Watch" || !firstStreamOpened.CompareAndSwap(false, true) {
 						return cs, err
 					}
-					return &interruptHistoryStream{ClientStream: cs, applied: firstBatchApplied, header: firstBatchHeader}, nil
+					return &interruptHistoryStream{
+						ClientStream: cs,
+						applied:      firstBatchApplied,
+						header:       firstBatchHeader,
+						closeChannel: closeChannel,
+					}, nil
 				},
 			))
 		},
@@ -1307,6 +1323,7 @@ func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
 	applied := make(map[string]string, historySize+1)
 	var putCount int
 	var firstBatchLastRev int64
+	var emptyPostCalls int
 	watcher := NewLoopWatcher(watchCtx, &sync.WaitGroup{}, client, "batched-history", prefix,
 		func([]*clientv3.Event) error { return nil },
 		func(kv *mvccpb.KeyValue) error {
@@ -1317,6 +1334,8 @@ func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
 		func(*mvccpb.KeyValue) error { return nil },
 		func(events []*clientv3.Event) error {
 			if len(events) == 0 {
+				emptyPostCalls++
+				cancelWatch()
 				return nil
 			}
 			last := events[len(events)-1].Kv
@@ -1331,8 +1350,18 @@ func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
 		}, true)
 
 	nextRevision, err := watcher.watch(watchCtx, snapshot.Header.Revision+1)
-	re.ErrorIs(err, rpctypes.ErrNoLeader)
-	re.Less(firstBatchLastRev, <-firstBatchHeader, "the first batch must end before the response header revision")
+	re.Zero(emptyPostCalls, "the watch invoked postEventsFn without events")
+	if closeChannel {
+		re.ErrorIs(err, errs.ErrEtcdWatcherCancel)
+	} else {
+		re.ErrorIs(err, rpctypes.ErrNoLeader)
+	}
+	select {
+	case header := <-firstBatchHeader:
+		re.Less(firstBatchLastRev, header, "the first batch must end before the response header revision")
+	default:
+		re.FailNow("the watch exited before receiving the first batch header")
+	}
 
 	// The marker ends the second watch even if it skips the remaining history.
 	_, err = client.Put(watchCtx, marker, marker)
@@ -1340,6 +1369,7 @@ func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
 	expected[marker] = marker
 	_, err = watcher.watch(watchCtx, nextRevision)
 	re.NoError(err)
+	re.Zero(emptyPostCalls)
 	re.Contains(applied, marker)
 	re.Len(applied, putCount, "watch replayed events")
 	re.Equal(len(expected), putCount, "watch resumed at revision %d, want %d", nextRevision, firstBatchLastRev+1)
@@ -1349,9 +1379,11 @@ func TestLoopWatcherResumesBatchedHistory(t *testing.T) {
 
 type interruptHistoryStream struct {
 	grpc.ClientStream
-	applied <-chan struct{}
-	header  chan<- int64
-	sent    bool
+	applied      <-chan struct{}
+	header       chan<- int64
+	closeChannel bool
+	watchID      int64
+	sent         bool
 }
 
 func (s *interruptHistoryStream) RecvMsg(msg any) error {
@@ -1359,6 +1391,16 @@ func (s *interruptHistoryStream) RecvMsg(msg any) error {
 		// Hold back all later responses until LoopWatcher applies the first batch.
 		select {
 		case <-s.applied:
+			if s.closeChannel {
+				// clientv3 closes the watch channel without forwarding this
+				// cancellation response when it has no compaction revision.
+				*msg.(*etcdserverpb.WatchResponse) = etcdserverpb.WatchResponse{
+					WatchId:  s.watchID,
+					Canceled: true,
+				}
+				s.applied = nil
+				return nil
+			}
 			return rpctypes.ErrGRPCNoLeader
 		case <-s.Context().Done():
 			return s.Context().Err()
@@ -1370,6 +1412,7 @@ func (s *interruptHistoryStream) RecvMsg(msg any) error {
 	resp := msg.(*etcdserverpb.WatchResponse)
 	if len(resp.Events) > 0 {
 		s.header <- resp.Header.Revision
+		s.watchID = resp.WatchId
 		s.sent = true
 	}
 	return nil
