@@ -1119,18 +1119,23 @@ func (l *RWLockStats) RUnlock() {
 
 // RegionsInfo for export
 type RegionsInfo struct {
-	t            RWLockStats
-	tree         *regionTree
-	regions      map[uint64]*regionItem // regionID -> regionInfo
-	st           RWLockStats
-	subRegions   map[uint64]*regionItem // regionID -> regionInfo
-	leaders      map[uint64]*regionTree // storeID -> sub regionTree
-	followers    map[uint64]*regionTree // storeID -> sub regionTree
-	learners     map[uint64]*regionTree // storeID -> sub regionTree
-	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
-	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
+	t               RWLockStats
+	tree            *regionTree
+	regions         map[uint64]*regionItem // regionID -> regionInfo
+	changeListeners map[*regionChangeListener]struct{}
+	st              RWLockStats
+	subRegions      map[uint64]*regionItem // regionID -> regionInfo
+	leaders         map[uint64]*regionTree // storeID -> sub regionTree
+	followers       map[uint64]*regionTree // storeID -> sub regionTree
+	learners        map[uint64]*regionTree // storeID -> sub regionTree
+	witnesses       map[uint64]*regionTree // storeID -> sub regionTree
+	pendingPeers    map[uint64]*regionTree // storeID -> sub regionTree
 	// This tree is used to check the overlaps among all the subtrees.
 	overlapTree *regionTree
+}
+
+type regionChangeListener struct {
+	notify func(uint64, *RegionInfo)
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -1145,6 +1150,51 @@ func NewRegionsInfo() *RegionsInfo {
 		witnesses:    make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
 		overlapTree:  newRegionTreeWithCountRef(),
+	}
+}
+
+// AddRegionChangeListener registers a listener for changes to a region's leader
+// or peer IDs and stores, including insertion and removal. A zero region ID
+// signals that the root cache was reset. Flow, term, and peer role changes alone
+// do not trigger a notification.
+// The listener receives the accepted immutable region, or nil after removal.
+//
+// Notifications run after the root mutation, under the root write lock. The
+// listener must not block or call methods that acquire that lock. The returned
+// function unregisters only this listener and may be called more than once.
+func (r *RegionsInfo) AddRegionChangeListener(notify func(uint64, *RegionInfo)) func() {
+	if notify == nil {
+		return func() {}
+	}
+	listener := &regionChangeListener{notify: notify}
+	r.t.Lock()
+	if r.changeListeners == nil {
+		r.changeListeners = make(map[*regionChangeListener]struct{})
+	}
+	r.changeListeners[listener] = struct{}{}
+	r.t.Unlock()
+	return func() {
+		r.t.Lock()
+		delete(r.changeListeners, listener)
+		r.t.Unlock()
+	}
+}
+
+func (r *RegionsInfo) notifyRegionChangeLocked(origin, region *RegionInfo) {
+	if len(r.changeListeners) == 0 {
+		return
+	}
+	if origin != nil && origin.GetLeader().GetId() == region.GetLeader().GetId() &&
+		origin.GetLeader().GetStoreId() == region.GetLeader().GetStoreId() &&
+		(origin.meta == region.meta || SortedPeersEqual(origin.GetPeers(), region.GetPeers())) {
+		return
+	}
+	r.notifyRegionIDLocked(region.GetID(), region)
+}
+
+func (r *RegionsInfo) notifyRegionIDLocked(regionID uint64, region *RegionInfo) {
+	for listener := range r.changeListeners {
+		listener.notify(regionID, region)
 	}
 }
 
@@ -1163,10 +1213,17 @@ func (r *RegionsInfo) getRegionLocked(regionID uint64) *RegionInfo {
 	return nil
 }
 
+func (r *RegionsInfo) getRegionItemAndInfoLocked(regionID uint64) (*regionItem, *RegionInfo) {
+	if item := r.regions[regionID]; item != nil {
+		return item, item.RegionInfo
+	}
+	return nil, nil
+}
+
 // CheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	r.t.Lock()
-	origin := r.getRegionLocked(region.GetID())
+	item, origin := r.getRegionItemAndInfoLocked(region.GetID())
 	var ols []*RegionInfo
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
@@ -1178,7 +1235,7 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 		r.t.Unlock()
 		return []*RegionInfo{region}
 	}
-	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
+	origin, overlaps, rangeChanged := r.setRegionLocked(region, item, true, ols...)
 	r.t.Unlock()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps
@@ -1203,7 +1260,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *R
 	tracer := ctx.Tracer
 	r.t.Lock()
 	var ols []*RegionInfo
-	origin := r.getRegionLocked(region.GetID())
+	item, origin := r.getRegionItemAndInfoLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
@@ -1215,7 +1272,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *R
 		return nil, err
 	}
 	tracer.OnValidateRegionFinished()
-	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
+	origin, overlaps, rangeChanged := r.setRegionLocked(region, item, true, ols...)
 	r.t.Unlock()
 	tracer.OnSetRegionFinished()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -1229,7 +1286,7 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 	tracer := ctx.Tracer
 	r.t.Lock()
 	var ols []*RegionInfo
-	origin := r.getRegionLocked(region.GetID())
+	item, origin := r.getRegionItemAndInfoLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
@@ -1241,7 +1298,7 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 		return nil, err
 	}
 	tracer.OnValidateRegionFinished()
-	_, overlaps, _ := r.setRegionLocked(region, true, ols...)
+	_, overlaps, _ := r.setRegionLocked(region, item, true, ols...)
 	r.t.Unlock()
 	tracer.OnSetRegionFinished()
 	return overlaps, nil
@@ -1415,17 +1472,15 @@ func check(region, origin *RegionInfo, overlaps []*RegionInfo) error {
 func (r *RegionsInfo) SetRegion(region *RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
 	r.t.Lock()
 	defer r.t.Unlock()
-	return r.setRegionLocked(region, false)
+	return r.setRegionLocked(region, r.regions[region.GetID()], false)
 }
 
-func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol ...*RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
-	var (
-		item   *regionItem // Pointer to the *RegionInfo of this ID.
-		origin *RegionInfo
-	)
+// Reuse the item inspected under the same root lock instead of looking it up again.
+func (r *RegionsInfo) setRegionLocked(region *RegionInfo, item *regionItem, withOverlaps bool, ol ...*RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
+	var origin *RegionInfo
 	rangeChanged := true // This Region is new, or its range has changed.
 
-	if item = r.regions[region.GetID()]; item != nil {
+	if item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
 		origin = item.RegionInfo
 		rangeChanged = !origin.rangeEqualsTo(region)
@@ -1450,6 +1505,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			r.tree.updateStat(origin, region)
 			// Update the RegionInfo in the regionItem.
 			item.RegionInfo = region
+			r.notifyRegionChangeLocked(origin, region)
 			return origin, nil, rangeChanged
 		}
 	} else {
@@ -1464,6 +1520,12 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			delete(r.regions, old.GetID())
 		}
 	}
+	if len(r.changeListeners) != 0 {
+		for _, old := range overlaps {
+			r.notifyRegionIDLocked(old.GetID(), r.getRegionLocked(old.GetID()))
+		}
+	}
+	r.notifyRegionChangeLocked(origin, region)
 	// return rangeChanged to prevent duplicated calculation
 	return origin, overlaps, rangeChanged
 }
@@ -1528,9 +1590,13 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	r.t.Lock()
 	defer r.t.Unlock()
+	_, existed := r.regions[region.GetID()]
 	// Remove from tree and regions.
 	r.tree.remove(region)
 	delete(r.regions, region.GetID())
+	if existed {
+		r.notifyRegionIDLocked(region.GetID(), nil)
+	}
 }
 
 // ResetRegionCache resets the regions info.
@@ -1541,6 +1607,7 @@ func (r *RegionsInfo) ResetRegionCache() {
 	defer r.st.Unlock()
 	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
+	r.notifyRegionIDLocked(0, nil)
 	failpoint.InjectCall("afterResetRegionRoot")
 	r.subRegions = make(map[uint64]*regionItem)
 	r.leaders = make(map[uint64]*regionTree)
@@ -1722,7 +1789,7 @@ func (r *RegionsInfo) QueryRegions(
 			idsToQuery = append(idsToQuery, id)
 		}
 		// Batch query the regions by IDs to reduce lock contention.
-		regions := r.getRegionsByIDs(idsToQuery)
+		regions := r.GetRegionsByIDs(idsToQuery)
 		for i, id := range idsToQuery {
 			region := regions[i]
 			if region == nil {
@@ -1771,8 +1838,10 @@ func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	return regions
 }
 
-// getRegionsByIDs searches RegionInfo from regionMap by IDs in batch.
-func (r *RegionsInfo) getRegionsByIDs(ids []uint64) []*RegionInfo {
+// GetRegionsByIDs returns one region per input ID, in the same order, with nil
+// entries for missing regions. It releases the root read lock between bounded
+// batches, so the entire result is not an atomic snapshot.
+func (r *RegionsInfo) GetRegionsByIDs(ids []uint64) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(ids))
 	for _, batch := range slice.SplitIntoBatches(ids, batchSearchSize) {
 		r.t.RLock()

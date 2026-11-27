@@ -16,6 +16,8 @@ package statistics
 
 import (
 	"context"
+	"sync/atomic"
+	"time"
 
 	"github.com/smallnest/chanx"
 
@@ -26,7 +28,37 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-const chanMaxLength = 6000000
+const (
+	chanMaxLength         = 6000000
+	readMetadataQueueSize = 4096
+)
+
+type readRegionMetadata struct {
+	id     uint64
+	region *core.RegionInfo
+}
+
+type readMetadataUpdates struct {
+	regions chan readRegionMetadata
+	dirty   atomic.Bool
+}
+
+// notify runs under the root lock, so accepted snapshots enter the mailbox in
+// publication order. Never wait for the owner; overflow requests reconciliation.
+func (u *readMetadataUpdates) notify(regionID uint64, region *core.RegionInfo) {
+	if regionID == 0 {
+		u.dirty.Store(true)
+		return
+	}
+	if u.dirty.Load() {
+		return
+	}
+	select {
+	case u.regions <- readRegionMetadata{id: regionID, region: region}:
+	default:
+		u.dirty.Store(true)
+	}
+}
 
 // HotCache is a cache hold hot regions.
 type HotCache struct {
@@ -42,6 +74,10 @@ func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 		writeCache: NewHotPeerCache(ctx, cluster, utils.Write),
 		readCache:  NewHotPeerCache(ctx, cluster, utils.Read),
 	}
+	updates := &readMetadataUpdates{regions: make(chan readRegionMetadata, readMetadataQueueSize)}
+	w.readCache.readMetadata = updates
+	unregister := cluster.AddRegionChangeListener(updates.notify)
+	context.AfterFunc(ctx, unregister)
 	go w.updateItems(w.readCache.taskQueue, w.runReadTask)
 	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)
 	return w
@@ -73,8 +109,8 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 	}
 }
 
-// CheckRegionFlowAsync checks the expired read and write items and the write
-// flow for a region asynchronously while retaining only immutable metadata.
+// CheckRegionFlowAsync checks expired write items and write flow asynchronously.
+// Read metadata follows successful root publication.
 func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
 	w.CheckRegionFlowWithOriginAsync(region, w.writeCache.cluster.GetRegion(region.GetID()))
 }
@@ -84,7 +120,6 @@ func (w *HotCache) CheckRegionFlowAsync(region *core.RegionInfo) {
 func (w *HotCache) CheckRegionFlowWithOriginAsync(region, origin *core.RegionInfo) {
 	checkExpiredTask, checkWritePeerTask := newRegionFlowTasks(region, origin)
 	w.CheckWriteAsync(checkExpiredTask)
-	w.CheckReadAsync(checkExpiredTask)
 	w.CheckWriteAsync(checkWritePeerTask)
 }
 
@@ -175,6 +210,9 @@ func (w *HotCache) CheckColdPeerAsync(storeID uint64, reportedRegions map[uint64
 func (w *HotCache) GetHotPeerStats(kind utils.RWType, minHotDegree int) map[uint64][]*HotPeerStat {
 	ret := make(chan map[uint64][]*HotPeerStat, 1)
 	collectRegionStatsTask := func(cache *HotPeerCache) {
+		if kind == utils.Read {
+			cache.refreshReadMetadata()
+		}
 		ret <- cache.GetHotPeerStats(minHotDegree)
 	}
 	var succ bool
@@ -190,8 +228,8 @@ func (w *HotCache) GetHotPeerStats(kind utils.RWType, minHotDegree int) map[uint
 	select {
 	case <-w.ctx.Done():
 		return nil
-	case r := <-ret:
-		return r
+	case stats := <-ret:
+		return stats
 	}
 }
 
@@ -203,6 +241,7 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 		retWrite <- cache.isRegionHotWithAnyPeers(region, minHotDegree)
 	}
 	checkRegionHotReadTask := func(cache *HotPeerCache) {
+		cache.refreshReadMetadata()
 		retRead <- cache.isRegionHotWithAnyPeers(region, minHotDegree)
 	}
 	succ1 := w.CheckWriteAsync(checkRegionHotWriteTask)
@@ -226,6 +265,9 @@ func waitRet(ctx context.Context, ret chan bool) bool {
 func (w *HotCache) GetHotPeerStat(kind utils.RWType, regionID, storeID uint64) *HotPeerStat {
 	ret := make(chan *HotPeerStat, 1)
 	getHotPeerStatTask := func(cache *HotPeerCache) {
+		if kind == utils.Read {
+			cache.refreshReadMetadata()
+		}
 		ret <- cache.getHotPeerStat(regionID, storeID)
 	}
 
@@ -242,9 +284,98 @@ func (w *HotCache) GetHotPeerStat(kind utils.RWType, regionID, storeID uint64) *
 	select {
 	case <-w.ctx.Done():
 		return nil
-	case r := <-ret:
-		return r
+	case stat := <-ret:
+		if kind == utils.Read && stat != nil && stat.readRole == readRoleInvalid {
+			return nil
+		}
+		return stat
 	}
+}
+
+// refreshReadMetadata runs only on the read-cache owner. Capturing the pending
+// prefix bounds work when publications continue while a query is running.
+func (f *HotPeerCache) refreshReadMetadata() {
+	updates := f.readMetadata
+	if updates == nil || len(updates.regions) == 0 && !updates.dirty.Load() {
+		return
+	}
+	// Clear before reading the root so a concurrent overflow stays pending.
+	refreshAll := updates.dirty.Swap(false)
+	count := len(updates.regions)
+	if !refreshAll && count == 0 {
+		return
+	}
+	if !refreshAll {
+		regions := make(map[uint64]*core.RegionInfo, count)
+		for range count {
+			update := <-updates.regions
+			if len(f.storesOfRegion[update.id]) != 0 {
+				regions[update.id] = update.region
+			}
+		}
+		for regionID, region := range regions {
+			f.refreshReadRegion(regionID, region)
+		}
+		return
+	}
+	// Discard the captured prefix before reading current roots. Any newer
+	// snapshot observed by that lookup has already notified under the root lock,
+	// so the next prefix (or a new overflow) cannot restore an older role.
+	for range count {
+		<-updates.regions
+	}
+	regionIDs := make([]uint64, 0, len(f.storesOfRegion))
+	for regionID, stores := range f.storesOfRegion {
+		if len(stores) != 0 {
+			regionIDs = append(regionIDs, regionID)
+		}
+	}
+	for i, region := range f.cluster.GetRegionsByIDs(regionIDs) {
+		f.refreshReadRegion(regionIDs[i], region)
+	}
+}
+
+func (f *HotPeerCache) refreshReadRegion(regionID uint64, region *core.RegionInfo) {
+	for storeID := range f.storesOfRegion[regionID] {
+		stat := f.getOldHotPeerStat(regionID, storeID)
+		if stat == nil {
+			continue
+		}
+		role := readRoleForRegion(stat.isLeader, stat.peerID, storeID, region)
+		if stat.readRole != role {
+			// Invalid entries retain physical provenance until replacement or
+			// expiry, but are excluded from queries and cold-sample renewal.
+			updated := *stat
+			updated.readRole = role
+			rankChanged := (stat.readRole == readRoleInvalid) != (role == readRoleInvalid)
+			// A leader change preserves the load and rank. Reheapifying would
+			// needlessly read rolling loads and acquire their locks.
+			f.peersOfStore[storeID].Replace(&updated, rankChanged)
+			if rankChanged {
+				if thresholds := f.thresholdsOfStore[storeID]; thresholds != nil {
+					thresholds.updatedTime = time.Time{}
+				}
+			}
+		}
+	}
+}
+
+func readRoleForRegion(sampledLeader bool, peerID, storeID uint64, region *core.RegionInfo) readPeerRole {
+	if region == nil {
+		return readRoleInvalid
+	}
+	peer := region.GetStorePeer(storeID)
+	if peer == nil || peerID != 0 && peer.GetId() != peerID {
+		return readRoleInvalid
+	}
+	isLeader := region.GetLeader().GetStoreId() == storeID
+	if sampledLeader == isLeader {
+		return readRoleSampled
+	}
+	if isLeader {
+		return readRoleLeader
+	}
+	return readRoleFollower
 }
 
 // CollectMetrics collects the hot cache metrics.

@@ -793,6 +793,15 @@ func (bs *balanceSolver) getRegion(peerStat *statistics.HotPeerStat, storeID uin
 	if region == nil {
 		return nil, nil
 	}
+	if bs.rwTy == utils.Read {
+		peer := region.GetStorePeer(storeID)
+		if peer == nil || !peerStat.MatchesPeer(peer.GetId()) ||
+			peerStat.IsLeader() != (region.GetLeader().GetStoreId() == storeID) {
+			// The cached load summary predates this peer or role change. Wait for refreshed
+			// statistics before considering this peer for any scheduling operation.
+			return nil, nil
+		}
+	}
 
 	switch bs.opTy {
 	case movePeer:
