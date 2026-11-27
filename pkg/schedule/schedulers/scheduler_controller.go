@@ -79,6 +79,23 @@ func (c *Controller) Wait() {
 	c.wg.Wait()
 }
 
+// WaitForRemovals waits for pending scheduler removals to finish. Call it
+// after stopping the loop that starts asynchronous removals.
+func (c *Controller) WaitForRemovals() {
+	c.RLock()
+	var removals []<-chan struct{}
+	for _, s := range c.schedulers {
+		if s.removalDone != nil {
+			removals = append(removals, s.removalDone)
+		}
+	}
+	c.RUnlock()
+	// The removal tasks need the controller lock to unregister their schedulers.
+	for _, done := range removals {
+		<-done
+	}
+}
+
 // GetScheduler returns a schedule controller by name.
 func (c *Controller) GetScheduler(name string) *ScheduleController {
 	c.RLock()
@@ -294,27 +311,45 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 
 // RemoveScheduler removes a scheduler by name.
 func (c *Controller) RemoveScheduler(name string) error {
+	done, err := c.beginSchedulerRemoval(name, nil, nil)
+	if err != nil {
+		return err
+	}
+	<-done
+	return nil
+}
+
+// StartRemoveScheduler starts removing the given instance without waiting for it
+// to exit. Once the instance is unregistered, it signals the reconciliation
+// notifier without blocking. Use the same buffered notifier for repeated
+// requests and leave it open.
+func (c *Controller) StartRemoveScheduler(scheduler *ScheduleController, notifier chan<- struct{}) error {
+	_, err := c.beginSchedulerRemoval(scheduler.GetName(), scheduler, notifier)
+	return err
+}
+
+func (c *Controller) beginSchedulerRemoval(name string, expected *ScheduleController, notifier chan<- struct{}) (<-chan struct{}, error) {
 	c.Lock()
 	defer c.Unlock()
 	if c.cluster == nil {
-		return errs.ErrNotBootstrapped.FastGenByArgs()
+		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 	s, ok := c.schedulers[name]
-	if !ok {
-		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	if !ok || (expected != nil && s != expected) {
+		return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	if done := s.removalDone; done != nil {
-		c.Unlock()
-		<-done
-		c.Lock()
-		return nil
+		if notifier != nil {
+			s.removalNotifier = notifier
+		}
+		return done, nil
 	}
 
 	conf := c.cluster.GetSchedulerConfig()
 	conf.RemoveSchedulerCfg(s.GetType())
 	if err := conf.Persist(c.storage); err != nil {
 		log.Error("the option can not persist scheduler config", errs.ZapError(err))
-		return err
+		return nil, err
 	}
 
 	// nolint:errcheck
@@ -324,21 +359,32 @@ func (c *Controller) RemoveScheduler(name string) error {
 	_ = s.SetDisable(true)
 	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
-		return err
+		return nil, err
 	}
 
 	// Stop only after config deletion succeeds. Keep the name reserved until
 	// the loop and CleanConfig finish, without blocking unrelated scheduler APIs.
 	s.removalDone = make(chan struct{})
+	s.removalNotifier = notifier
 	s.Stop()
-	c.Unlock()
+	go c.finishRemoveScheduler(name, s)
+	return s.removalDone, nil
+}
+
+func (c *Controller) finishRemoveScheduler(name string, s *ScheduleController) {
 	<-s.done
 	c.Lock()
+	defer c.Unlock()
 
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
+	// A config update may already have tried to re-add this name. Reconcile
+	// again now that the name is free; a pending signal is enough.
+	select {
+	case s.removalNotifier <- struct{}{}:
+	default:
+	}
 	close(s.removalDone)
-	return nil
 }
 
 // PauseOrResumeScheduler pauses or resumes a scheduler by name.
@@ -351,12 +397,15 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 	var s []*ScheduleController
 	if name != "all" {
 		sc, ok := c.schedulers[name]
-		if !ok {
+		if !ok || sc.removalDone != nil {
 			return errs.ErrSchedulerNotFound.FastGenByArgs()
 		}
 		s = append(s, sc)
 	} else {
 		for _, sc := range c.schedulers {
+			if sc.removalDone != nil {
+				continue
+			}
 			s = append(s, sc)
 		}
 	}
@@ -547,9 +596,10 @@ type ScheduleController struct {
 	nextInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc
-	done               chan struct{}  // Closed by runScheduler after CleanConfig returns.
-	removalDone        chan struct{}  // Guarded by the owning Controller's lock; closed after unregistration.
-	lifecycleMu        syncutil.Mutex // Serializes reload with exit cleanup.
+	done               chan struct{}   // Closed by runScheduler after CleanConfig returns.
+	removalDone        chan struct{}   // Guarded by the owning Controller's lock; closed after unregistration.
+	removalNotifier    chan<- struct{} // Guarded by the owning Controller's lock.
+	lifecycleMu        syncutil.Mutex  // Serializes reload with exit cleanup.
 	delayAt            atomic.Int64
 	delayUntil         atomic.Int64
 	diagnosticRecorder *DiagnosticRecorder

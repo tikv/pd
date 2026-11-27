@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -120,6 +121,20 @@ func TestRemoveSchedulerWaitsForLoopAndCleanup(t *testing.T) {
 	case result := <-removed:
 		t.Fatalf("removal returned before cleanup finished: %v", result.err)
 	default:
+	}
+
+	// Pause requests must not mutate the old instance while its name is reserved.
+	paused := make(chan [2]error, 1)
+	go func() {
+		paused <- [2]error{c.PauseOrResumeScheduler(name, 60), c.PauseOrResumeScheduler("all", 60)}
+	}()
+	select {
+	case results := <-paused:
+		re.ErrorIs(results[0], errs.ErrSchedulerNotFound)
+		re.NoError(results[1])
+		re.False(sc.IsPaused())
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pause requests during scheduler removal")
 	}
 
 	releaseCleanup()

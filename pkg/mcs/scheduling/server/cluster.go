@@ -467,22 +467,26 @@ func (c *Cluster) updateScheduler() {
 
 	// Make sure the coordinator has initialized all the existing schedulers.
 	c.waitSchedulersInitialized()
-	// Establish a notifier to listen the schedulers updating.
-	notifier := make(chan struct{}, 1)
+	// Config changes reconcile both additions and removals. A completed
+	// removal only needs to retry additions that a reserved name blocked.
+	configChanged := make(chan struct{}, 1)
+	removalCompleted := make(chan struct{}, 1)
 	// Make sure the check will be triggered once later.
-	trySend(notifier)
-	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
-	defer c.persistConfig.ClearSchedulersUpdatingNotifier(notifier)
+	trySend(configChanged)
+	c.persistConfig.SetSchedulersUpdatingNotifier(configChanged)
+	defer c.persistConfig.ClearSchedulersUpdatingNotifier(configChanged)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	for {
+		checkRemovals := false
 		select {
 		case <-c.ctx.Done():
 			log.Info("cluster is closing, stop listening the schedulers updating notifier")
 			return
-		case <-notifier:
-			// This is triggered by the watcher when the schedulers are updated.
+		case <-configChanged:
+			checkRemovals = true
+		case <-removalCompleted:
 		}
 
 		if !c.running.Load() {
@@ -492,7 +496,7 @@ func (c *Cluster) updateScheduler() {
 				return
 			case <-ticker.C:
 				// retry
-				trySend(notifier)
+				trySend(configChanged)
 				continue
 			}
 		}
@@ -545,9 +549,15 @@ func (c *Cluster) updateScheduler() {
 				zap.String("scheduler-name", name),
 				zap.Strings("scheduler-args", scheduler.Args))
 		}
+		if !checkRemovals {
+			continue
+		}
 		// Remove the deleted schedulers or disabled schedulers.
 		for _, name := range schedulersController.GetSchedulerNames() {
 			scheduler := schedulersController.GetScheduler(name)
+			if scheduler == nil {
+				continue
+			}
 			oldType := types.SchedulerTypeCompatibleMap[scheduler.GetType()]
 			shouldKeep := slice.AnyOf(latestSchedulersConfig, func(i int) bool {
 				return latestSchedulersConfig[i].Type == oldType && !latestSchedulersConfig[i].Disable
@@ -555,14 +565,12 @@ func (c *Cluster) updateScheduler() {
 			if shouldKeep {
 				continue
 			}
-			if err := schedulersController.RemoveScheduler(name); err != nil {
-				log.Error("failed to remove scheduler",
+			if err := schedulersController.StartRemoveScheduler(scheduler, removalCompleted); err != nil &&
+				!errs.ErrSchedulerNotFound.Equal(err) {
+				log.Error("failed to start scheduler removal",
 					zap.String("scheduler-name", name),
 					errs.ZapError(err))
-				continue
 			}
-			log.Info("remove scheduler successfully",
-				zap.String("scheduler-name", name))
 		}
 	}
 }
@@ -837,6 +845,9 @@ func (c *Cluster) StopBackgroundJobs() {
 	c.miscRunner.Stop()
 	c.logRunner.Stop()
 	c.wg.Wait()
+	// The config loop can start a removal after the coordinator stops waiting
+	// for scheduler loops. Join those removals once the config loop has exited.
+	c.coordinator.GetSchedulersController().WaitForRemovals()
 }
 
 // IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.
