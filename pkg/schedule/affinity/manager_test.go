@@ -177,6 +177,41 @@ func TestBasicGroupOperations(t *testing.T) {
 	re.False(manager.IsGroupExist("group1"))
 }
 
+type stubGroupStateProvider map[string]*GroupState
+
+func (p stubGroupStateProvider) GetAllAffinityGroupStates() []*GroupState {
+	return slices.Collect(maps.Values(p))
+}
+
+func (p stubGroupStateProvider) GetAffinityGroupState(id string) *GroupState {
+	return p[id]
+}
+
+func TestCollectGroupStatesWithCustomProvider(t *testing.T) {
+	re := require.New(t)
+	first := &GroupState{ID: "first"}
+	second := &GroupState{ID: "second"}
+	provider := stubGroupStateProvider{"first": first, "second": second}
+	all := map[string]*GroupState{"first": first, "second": second}
+
+	re.Equal(all, CollectAllGroupStates(provider))
+
+	states, err := CollectGroupStates(provider, nil)
+	re.NoError(err)
+	re.Equal(all, states)
+
+	states, err = CollectGroupStates(provider, []string{" second ", "second", "", "missing"})
+	re.NoError(err)
+	re.Equal(map[string]*GroupState{"second": second}, states)
+
+	states, err = CollectGroupStates(provider, []string{" "})
+	re.NoError(err)
+	re.Empty(states)
+
+	_, err = CollectGroupStates(provider, []string{"bad id"})
+	re.ErrorIs(err, errs.ErrInvalidGroupID)
+}
+
 func TestCollectGroupStatesByQuery(t *testing.T) {
 	re := require.New(t)
 	manager := newTxnTestManager(t)

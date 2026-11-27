@@ -21,9 +21,23 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
+type groupStateProvider interface {
+	GetAllAffinityGroupStates() []*GroupState
+	GetAffinityGroupState(id string) *GroupState
+}
+
 // CollectAllGroupStates returns all affinity group states mapped by ID.
-func CollectAllGroupStates(manager *Manager) map[string]*GroupState {
-	return manager.GetAffinityGroupStates(nil, "")
+func CollectAllGroupStates(provider groupStateProvider) map[string]*GroupState {
+	if m, ok := provider.(*Manager); ok {
+		return m.GetAffinityGroupStates(nil, "")
+	}
+
+	states := provider.GetAllAffinityGroupStates()
+	result := make(map[string]*GroupState, len(states))
+	for _, state := range states {
+		result[state.ID] = state
+	}
+	return result
 }
 
 // ParseGroupIDs parses and validates affinity group IDs from query values.
@@ -54,8 +68,25 @@ func ParseGroupIDs(rawIDs []string) ([]string, error) {
 
 // CollectGroupStates returns affinity group states for the specified ids.
 // When rawIDs is empty, it returns all affinity group states.
-func CollectGroupStates(manager *Manager, rawIDs []string) (map[string]*GroupState, error) {
-	return CollectGroupStatesByQuery(manager, rawIDs, "")
+func CollectGroupStates(provider groupStateProvider, rawIDs []string) (map[string]*GroupState, error) {
+	if m, ok := provider.(*Manager); ok {
+		return CollectGroupStatesByQuery(m, rawIDs, "")
+	}
+	if len(rawIDs) == 0 {
+		return CollectAllGroupStates(provider), nil
+	}
+
+	ids, err := ParseGroupIDs(rawIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]*GroupState, len(ids))
+	for _, id := range ids {
+		if state := provider.GetAffinityGroupState(id); state != nil {
+			result[id] = state
+		}
+	}
+	return result, nil
 }
 
 // idPrefixRegexp matches a prefix of a valid group ID. An empty prefix selects every group.
