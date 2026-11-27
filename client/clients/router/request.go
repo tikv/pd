@@ -24,6 +24,7 @@ import (
 
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
 )
 
 // Request is a region info request.
@@ -41,7 +42,8 @@ type Request struct {
 	// id is the requested Region ID when both key and prevKey are nil.
 	id uint64
 
-	options *opt.GetRegionOp
+	options         *opt.GetRegionOp
+	callerComponent caller.Component
 
 	done chan error
 	// region will be set after the request is done.
