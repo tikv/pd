@@ -50,6 +50,18 @@ tiup:
 			printf '%s\n' "$$TIUP_DIR/bin/tiup"; \
 		fi; \
 	}; \
+	lookup_playground_bin() { \
+		local tiup_bin="$$1"; \
+		local probe_timeout="$${TIUP_PROBE_TIMEOUT:-30}"; \
+		if ! command -v go >/dev/null 2>&1; then \
+			echo "go is required to verify tiup playground binary via $$tiup_bin" >&2; \
+			return 1; \
+		fi; \
+		if ! GOWORK=off CGO_ENABLED=0 go run ./internal/playgroundprobe/cmd --lookup "$$tiup_bin" "$$probe_timeout" 9>&-; then \
+			echo "failed to look up tiup playground binary via $$tiup_bin" >&2; \
+			return 1; \
+		fi; \
+	}; \
 	is_playground_usable() { \
 		local pg_bin="$$1"; \
 		local probe_timeout="$${TIUP_PROBE_TIMEOUT:-30}"; \
@@ -74,7 +86,7 @@ tiup:
 	TIUP_BIN="$$(resolve_tiup_bin)"; \
 	PG_BIN=""; \
 	if [ -x "$$TIUP_BIN" ]; then \
-		PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
+		PG_BIN="$$(lookup_playground_bin "$$TIUP_BIN")" || exit 1; \
 	fi; \
 	if [ -x "$$TIUP_BIN" ] && is_playground_usable "$$PG_BIN"; then \
 		echo "tiup already installed"; \
@@ -92,7 +104,7 @@ tiup:
 				echo "tiup already installed"; \
 			fi; \
 			echo "tiup version: $$("$$TIUP_BIN" --version)"; \
-			PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
+			PG_BIN="$$(lookup_playground_bin "$$TIUP_BIN")" || exit 1; \
 			if ! is_playground_usable "$$PG_BIN"; then \
 				if [ -n "$$PG_BIN" ]; then \
 					PG_VER_DIR="$$(dirname "$$PG_BIN")"; \
@@ -105,7 +117,7 @@ tiup:
 				fi; \
 				echo "Installing tiup playground..."; \
 				"$$TIUP_BIN" install playground; \
-				PG_BIN="$$("$$TIUP_BIN" --binary playground 2>/dev/null || true)"; \
+				PG_BIN="$$(lookup_playground_bin "$$TIUP_BIN")" || exit 1; \
 				if ! is_playground_usable "$$PG_BIN"; then \
 					echo "tiup playground binary is missing or not runnable after install: $$PG_BIN" >&2; \
 					exit 1; \
@@ -115,7 +127,7 @@ tiup:
 		if command -v flock >/dev/null 2>&1; then \
 			(set -eu; exec 9>>"$$LOCK_FILE" && flock -x 9 && run_install); \
 		elif command -v perl >/dev/null 2>&1; then \
-			export -f resolve_tiup_bin is_playground_usable run_install; \
+			export -f resolve_tiup_bin lookup_playground_bin is_playground_usable run_install; \
 			export TIUP_DIR; \
 			perl -MFcntl=:flock -e 'open my $$fh, ">>", shift @ARGV or die $$!; flock($$fh, LOCK_EX) or die $$!; my $$rc = system(@ARGV); exit($$rc == -1 ? 127 : ($$rc & 127 ? 128 + ($$rc & 127) : $$rc >> 8))' "$$LOCK_FILE" bash -c 'run_install'; \
 		else \

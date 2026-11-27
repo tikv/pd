@@ -1903,6 +1903,120 @@ wait
 	})
 }
 
+func TestPlaygroundLookupTimesOut(t *testing.T) {
+	// hangOnCall selects which `tiup --binary playground` call hangs: 1 is the
+	// lookup before the install lock, 2 is the lookup after acquiring it.
+	setup := func(t *testing.T, hangOnCall int) (tiupHome, fakeTiUP, pidFile, installLog string) {
+		t.Helper()
+		re := require.New(t)
+		tiupHome = filepath.Join(t.TempDir(), "tiup-home")
+		re.NoError(os.MkdirAll(filepath.Join(tiupHome, "bin"), 0750))
+		re.NoError(os.WriteFile(filepath.Join(tiupHome, "bin", "root.json"), []byte("{}\n"), 0600))
+		stateDir := t.TempDir()
+		pidFile = filepath.Join(stateDir, "lookup.pid")
+		countFile := filepath.Join(stateDir, "lookup.count")
+		installLog = filepath.Join(stateDir, "install.log")
+		fakeTiUP = filepath.Join(tiupHome, "bin", "tiup")
+		script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "1.16.4 tiup"
+  exit 0
+fi
+if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
+  if [ %d -gt 1 ] && [ ! -f %q ]; then
+    : > %q
+    exit 1
+  fi
+  sleep 30 &
+  printf '%%s\n%%s\n' "$$" "$!" >> %q
+  wait
+  exit 0
+fi
+if [ "$1" = "install" ]; then
+  echo "installed" >> %q
+fi
+exit 1
+`, hangOnCall, countFile, countFile, pidFile, installLog)
+		re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
+		re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
+		return tiupHome, fakeTiUP, pidFile, installLog
+	}
+	assertLookupCleanedUp := func(re *require.Assertions, tiupHome, pidFile, installLog string) {
+		b, err := os.ReadFile(pidFile) //nolint:gosec
+		re.NoError(err)
+		var pids []int
+		for line := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
+			pid, err := strconv.Atoi(strings.TrimSpace(line))
+			re.NoError(err)
+			pids = append(pids, pid)
+		}
+		re.Len(pids, 2)
+		re.Eventually(func() bool {
+			return !slices.ContainsFunc(pids, isProcessRunning)
+		}, 2*time.Second, 20*time.Millisecond, "hung tiup lookup or its child remained alive")
+		re.False(fileExists(installLog), "lookup timeout must not trigger install")
+		lockPath := filepath.Join(canonicalPathForLock(tiupHome), playgroundInstallLockFileName)
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec
+		re.NoError(err)
+		defer func() { _ = f.Close() }()
+		re.NoError(syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB), "install lock remained held after lookup timeout")
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}
+
+	for _, hangOnCall := range []int{1, 2} {
+		t.Run(fmt.Sprintf("go/hang_on_call_%d", hangOnCall), func(t *testing.T) {
+			re := require.New(t)
+			origProbeTimeout := tiupProbeTimeout
+			t.Cleanup(func() { tiupProbeTimeout = origProbeTimeout })
+			tiupProbeTimeout = 300 * time.Millisecond
+			tiupHome, fakeTiUP, pidFile, installLog := setup(t, hangOnCall)
+
+			rec := &recordingTestingT{}
+			start := time.Now()
+			func() {
+				defer func() {
+					if r := recover(); r != nil && r != rec {
+						panic(r)
+					}
+				}()
+				ensurePlaygroundInstalledWithTiUPHome(require.New(rec), fakeTiUP, tiupHome)
+			}()
+			re.Less(time.Since(start), 5*time.Second)
+			re.Contains(rec.err, "tiup playground lookup timed out after 300ms")
+			assertLookupCleanedUp(re, tiupHome, pidFile, installLog)
+		})
+
+		t.Run(fmt.Sprintf("make/hang_on_call_%d", hangOnCall), func(t *testing.T) {
+			re := require.New(t)
+			if _, err := exec.LookPath("make"); err != nil {
+				t.Skip("make not found in PATH")
+			}
+			makefileDir := writeRealClusterMakefileDir(t)
+			tiupHome, _, pidFile, installLog := setup(t, hangOnCall)
+
+			// Bound the whole make run well below the fake lookup's 30s sleep so an
+			// unbounded lookup fails this test instead of stalling it.
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "make", "-C", makefileDir, "tiup") //nolint:gosec
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			cmd.Cancel = func() error {
+				return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+			cmd.Env = append(os.Environ(),
+				"TIUP_HOME="+tiupHome,
+				"TIUP_PROBE_TIMEOUT=0.3",
+			)
+			out, err := cmd.CombinedOutput()
+			re.NoError(ctx.Err(), "make tiup was still waiting on tiup --binary playground, output:\n%s", string(out))
+			re.Error(err, "expected make tiup to fail when tiup --binary playground hangs, output:\n%s", string(out))
+			re.Contains(string(out), "tiup playground lookup timed out after 300ms")
+			re.Contains(string(out), "failed to look up tiup playground binary via "+filepath.Join(tiupHome, "bin", "tiup"))
+			assertLookupCleanedUp(re, tiupHome, pidFile, installLog)
+		})
+	}
+}
+
 func TestClusterStopPGIDSignalGuard(t *testing.T) {
 	type signalCall struct {
 		pid int

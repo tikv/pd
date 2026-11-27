@@ -27,14 +27,27 @@ import (
 
 const defaultProbeTimeout = 30 * time.Second
 
+// Usage:
+//
+//	playgroundprobe <playground-binary> [timeout]
+//	playgroundprobe --lookup <tiup-binary> [timeout]
+//
+// The first form prints "usable" or "unusable". The second form prints the path
+// reported by `tiup --binary playground`, or nothing if playground is not
+// installed, and fails if TiUP does not answer before the timeout.
 func main() {
-	if len(os.Args) < 2 || len(os.Args) > 3 {
-		fmt.Fprintf(os.Stderr, "usage: %s <playground-binary> [timeout]\n", os.Args[0])
+	args := os.Args[1:]
+	lookup := len(args) > 0 && args[0] == "--lookup"
+	if lookup {
+		args = args[1:]
+	}
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintf(os.Stderr, "usage: %s [--lookup <tiup-binary> | <playground-binary>] [timeout]\n", os.Args[0])
 		os.Exit(2)
 	}
 	rawTimeout := ""
-	if len(os.Args) == 3 {
-		rawTimeout = os.Args[2]
+	if len(args) == 2 {
+		rawTimeout = args[1]
 	}
 	timeout, err := playgroundprobe.ParseTimeout(rawTimeout, defaultProbeTimeout)
 	if err != nil {
@@ -43,16 +56,32 @@ func main() {
 	}
 	sigCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	ctx, cancel := context.WithTimeout(sigCtx, timeout)
-	usable := playgroundprobe.Check(ctx, os.Args[1], nil)
+	var (
+		binPath string
+		usable  bool
+	)
+	if lookup {
+		binPath, err = playgroundprobe.LookupBinary(ctx, args[0], nil)
+	} else {
+		usable = playgroundprobe.Check(ctx, args[0], nil)
+	}
 	interrupted := sigCtx.Err() != nil
 	cancel()
 	stopSignals()
 	if interrupted {
 		os.Exit(130)
 	}
-	if usable {
+	switch {
+	case lookup && err != nil:
+		fmt.Fprintf(os.Stderr, "tiup playground lookup timed out after %s: %v\n", timeout, err)
+		os.Exit(1)
+	case lookup:
+		if binPath != "" {
+			fmt.Println(binPath)
+		}
+	case usable:
 		fmt.Println("usable")
-		return
+	default:
+		fmt.Println("unusable")
 	}
-	fmt.Println("unusable")
 }

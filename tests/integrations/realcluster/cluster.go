@@ -466,13 +466,16 @@ func ensurePlaygroundInstalled(re *require.Assertions, bin string) {
 }
 
 func ensurePlaygroundInstalledWithTiUPHome(re *require.Assertions, bin, absTiUPHome string) {
-	if isPlaygroundBinaryUsable(probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome), absTiUPHome) {
+	binPath, err := probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
+	re.NoError(err)
+	if isPlaygroundBinaryUsable(binPath, absTiUPHome) {
 		return
 	}
 	unlock := lockPlaygroundInstall(re, absTiUPHome)
 	defer unlock()
 
-	binPath := probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
+	binPath, err = probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
+	re.NoError(err)
 	if isPlaygroundBinaryUsable(binPath, absTiUPHome) {
 		return
 	}
@@ -487,7 +490,8 @@ func ensurePlaygroundInstalledWithTiUPHome(re *require.Assertions, bin, absTiUPH
 		log.Info(output)
 	}
 	re.NoError(err)
-	installedPath := probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
+	installedPath, err := probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
+	re.NoError(err)
 	re.Truef(isPlaygroundBinaryUsable(installedPath, absTiUPHome), "tiup playground binary %q is not runnable after install", installedPath)
 }
 
@@ -561,7 +565,8 @@ func isPlaygroundInstalled(bin string) bool {
 }
 
 func isPlaygroundInstalledWithTiUPHome(bin, absTiUPHome string) bool {
-	return isPlaygroundBinaryUsable(probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome), absTiUPHome)
+	binPath, err := probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome)
+	return err == nil && isPlaygroundBinaryUsable(binPath, absTiUPHome)
 }
 
 func isPlaygroundBinaryUsable(binPath, absTiUPHome string) bool {
@@ -570,14 +575,14 @@ func isPlaygroundBinaryUsable(binPath, absTiUPHome string) bool {
 	return playgroundprobe.Check(ctx, binPath, envWithTiUPHome(absTiUPHome))
 }
 
-func probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome string) string {
+func probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), tiupProbeTimeout)
 	defer cancel()
-	output, err := runExecWithEnvOutputContext(ctx, "", envWithTiUPHome(absTiUPHome), bin, "--binary", "playground")
+	binPath, err := playgroundprobe.LookupBinary(ctx, bin, envWithTiUPHome(absTiUPHome))
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("tiup playground lookup timed out after %s: %w", tiupProbeTimeout, err)
 	}
-	return strings.TrimSpace(output)
+	return binPath, nil
 }
 
 func effectiveTiUPHome(absTiUPHome string) string {

@@ -64,7 +64,26 @@ func IsExecutable(path string) bool {
 // RunVersionCheck executes `binPath --version` in its own process group and
 // terminates the entire process group if ctx is canceled or times out.
 func RunVersionCheck(ctx context.Context, binPath string, env []string) error {
-	cmd := exec.CommandContext(ctx, binPath, "--version") //nolint:gosec
+	return newProcessGroupCommand(ctx, env, binPath, "--version").Run()
+}
+
+// LookupBinary executes `tiupBin --binary playground` in its own process group
+// and returns the reported playground binary path. It terminates the entire
+// process group and returns an error if ctx is canceled or times out. Any other
+// TiUP failure means that playground is not installed and returns an empty path.
+func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, error) {
+	out, err := newProcessGroupCommand(ctx, env, tiupBin, "--binary", "playground").Output()
+	if err == nil {
+		return strings.TrimSpace(string(out)), nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", fmt.Errorf("%s --binary playground did not finish: %w", tiupBin, ctxErr)
+	}
+	return "", nil
+}
+
+func newProcessGroupCommand(ctx context.Context, env []string, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec
 	if len(env) > 0 {
 		cmd.Env = env
 	}
@@ -76,7 +95,7 @@ func RunVersionCheck(ctx context.Context, binPath string, env []string) error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = 200 * time.Millisecond
-	return cmd.Run()
+	return cmd
 }
 
 // ParseTimeout parses a probe timeout given either as a Go duration (e.g. "30s",
