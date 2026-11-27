@@ -639,6 +639,7 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 	m.targetWriteMutex.Lock()
 	m.Lock()
 	prevBalanceVer := m.lastBalanceVersion
+	wasSentWritten := exists && existingGroup.lastSentWritten
 	if exists {
 		existingGroup.lastSentWritten = false
 		existingGroup.lastSentPolicyMismatch = false
@@ -666,6 +667,9 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 			// A newer write can restore a healthy target after the group has expired.
 			m.setTargetAvailabilityLocked(existingGroup)
 			m.resetCountLocked(existingGroup)
+		} else if !changed && wasSentWritten && !existingGroup.IsAvailable() && !existingGroup.IsExpired() && m.storeConditionsKnown && m.allVotersExist(existingGroup.VoterStoreIDs) &&
+			calcGroupAvailability(m.unavailableStores, existingGroup.LeaderStoreID, existingGroup.VoterStoreIDs) == groupAvailable {
+			m.updateGroupAvailabilityLocked(existingGroup.ID, groupAvailable)
 		}
 	}
 	if modRevision > 0 {

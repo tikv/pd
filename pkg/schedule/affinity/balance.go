@@ -58,6 +58,8 @@ var partitionAffinityGroupIDRegexp = regexp.MustCompile(`^_tidb_(ks[0-9]+_)?pt_[
 
 // TableIDForGroup returns the table of a TiDB partition affinity group. Other groups
 // belong to no table and are not balanced.
+// Group IDs are validated against the cluster's kernel mode at creation and clusters never switch
+// between Classic and NextGen, so matching the partition ID pattern suffices without rerunning ValidateGroupID.
 func TableIDForGroup(groupID string) (TableID, bool) {
 	if !partitionAffinityGroupIDRegexp.MatchString(groupID) {
 		return "", false

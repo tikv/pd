@@ -27,16 +27,40 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
-	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
-	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
+
+const balanceTestTableID TableID = "_tidb_ks1_pt_100"
+const balanceTestGroupID = "_tidb_ks1_pt_100_p1"
+
+func (test *targetTest) balanceSnapshot() *BalanceSnapshot {
+	return test.GetBalanceSnapshot(balanceTestTableID, test.GetBalanceCounts())
+}
+
+func (test *targetTest) groupTarget(id string, leader uint64, voters ...uint64) *Group {
+	return test.target(id, leader, voters...).result()
+}
+
+func (test *targetTest) balanceTargets(n int) ([]*Group, []string, *BalanceSnapshot) {
+	changes := make([]GroupKeyRanges, n)
+	ids := make([]string, n)
+	for i := range changes {
+		ids[i] = fmt.Sprintf("%s_p%d", balanceTestTableID, i+1)
+		changes[i].GroupID = ids[i]
+	}
+	test.NoError(test.CreateAffinityGroups(changes))
+	snapshot := test.balanceSnapshot()
+	targets := make([]*Group, n)
+	for i, id := range ids {
+		targets[i] = test.groupTarget(id, 1, 1, 2)
+	}
+	return targets, ids, snapshot
+}
 
 func TestTableIDForGroup(t *testing.T) {
 	re := require.New(t)
@@ -54,84 +78,53 @@ func TestTableIDForGroup(t *testing.T) {
 	}
 }
 
-func balanceKey(key string) []byte {
-	if !kerneltype.IsNextGen() {
-		return []byte(key)
-	}
-	prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1)
-	return codec.EncodeBytes(append(prefix, []byte(key)...))
-}
-
-const balanceTestTableID TableID = "_tidb_ks1_pt_100"
-
-func balanceTestSnapshot(m *Manager) *BalanceSnapshot {
-	return m.GetBalanceSnapshot(balanceTestTableID, m.GetBalanceCounts())
-}
-
-func balanceTestTargets(test *targetTest, n int) ([]*Group, *BalanceSnapshot) {
-	changes := make([]GroupKeyRanges, n)
-	for i := range changes {
-		changes[i].GroupID = fmt.Sprintf("%s_p%d", balanceTestTableID, i+1)
-	}
-	test.NoError(test.CreateAffinityGroups(changes))
-	snapshot := balanceTestSnapshot(test.Manager)
-	targets := make([]*Group, n)
-	for i, change := range changes {
-		targets[i] = test.target(change.GroupID, 1, 1, 2).result()
-	}
-	return targets, snapshot
-}
-
 func TestBalanceTableLifecycle(t *testing.T) {
-	re := require.New(t)
 	test := newTargetTest(t)
-	m := test.Manager
-	const table TableID = "_tidb_ks1_pt_100"
-	ids := []string{"_tidb_ks1_pt_100_p12", "_tidb_ks1_pt_100_p1", "_tidb_ks1_pt_101_p1", "custom"}
+	ids := []string{"_tidb_ks1_pt_100_p12", balanceTestGroupID, "_tidb_ks1_pt_101_p1", "custom"}
 	var version uint64
 	changed := func() {
 		t.Helper()
-		next, exists := m.GetBalanceVersion(table)
-		re.True(exists)
-		re.Greater(next, version)
+		next, exists := test.GetBalanceVersion(balanceTestTableID)
+		test.True(exists)
+		test.Greater(next, version)
 		version = next
 	}
-	re.False(m.IsBalanceTableEligible(table))
-	ranges := GroupKeyRanges{GroupID: ids[0], KeyRanges: []keyutil.KeyRange{{StartKey: balanceKey("a"), EndKey: balanceKey("b")}}}
-	re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{ranges}))
-	m.checkGroupsAvailability()
+	test.False(test.IsBalanceTableEligible(balanceTestTableID))
+	ranges := GroupKeyRanges{GroupID: ids[0], KeyRanges: testKeyRanges("a", "b")}
+	test.NoError(test.CreateAffinityGroups([]GroupKeyRanges{ranges}))
+	test.checkGroupsAvailability()
 	changed()
-	re.False(m.IsBalanceTableEligible(table))
-	_, err := m.UpdateAffinityGroupPeers(ids[0], 1, []uint64{1, 2, 3})
-	re.NoError(err)
+	test.False(test.IsBalanceTableEligible(balanceTestTableID))
+	_, err := test.UpdateAffinityGroupPeers(ids[0], 1, []uint64{1, 2, 3})
+	test.NoError(err)
 	changed()
 	// Region cache updates keep the version.
-	m.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, ranges.KeyRanges[0]))
-	re.Equal(version, m.GetBalanceSnapshot(table, m.GetBalanceCounts()).Version)
-	_, err = m.UpdateAffinityGroupPolicy(ids[0], BalancePolicyFixed)
-	re.NoError(err)
+	test.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, ranges.KeyRanges[0]))
+	test.Equal(version, test.balanceSnapshot().Version)
+	_, err = test.UpdateAffinityGroupPolicy(ids[0], BalancePolicyFixed)
+	test.NoError(err)
 	changed()
-	re.Equal(1, m.GetAffinityGroupState(ids[0]).AffinityRegionCount)
-	synced := m.GetAffinityGroupState(ids[0]).Group
+	test.Equal(1, test.GetAffinityGroupState(ids[0]).AffinityRegionCount)
+	synced := test.GetAffinityGroupState(ids[0]).Group
 	synced.BalancePolicy = BalancePolicyAuto
-	m.SyncGroupFromEtcd(&synced)
+	test.SyncGroupFromEtcd(&synced)
 	changed()
-	re.Equal(PhaseStable, m.GetAffinityGroupState(ids[0]).Phase)
-	added := GroupKeyRanges{GroupID: ids[0], KeyRanges: []keyutil.KeyRange{{StartKey: balanceKey("c"), EndKey: balanceKey("d")}}}
-	re.NoError(m.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{added}, nil))
+	test.Equal(PhaseStable, test.GetAffinityGroupState(ids[0]).Phase)
+	test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: ids[0], KeyRanges: testKeyRanges("c", "d")}}, nil))
 	changed()
-	m.ExpireAffinityGroup(ids[0])
+	test.ExpireAffinityGroup(ids[0])
 	changed()
-	re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: ids[1]}, {GroupID: ids[2]}, {GroupID: ids[3]}}))
+	test.NoError(test.CreateAffinityGroups([]GroupKeyRanges{{GroupID: ids[1]}, {GroupID: ids[2]}, {GroupID: ids[3]}}))
 	changed()
 	for _, id := range ids[1:] {
-		_, err = m.UpdateAffinityGroupPeers(id, 1, []uint64{1, 2, 3})
-		re.NoError(err)
+		_, err = test.UpdateAffinityGroupPeers(id, 1, []uint64{1, 2, 3})
+		test.NoError(err)
 	}
 	changed()
-	re.True(m.IsBalanceTableEligible(table))
+	test.True(test.IsBalanceTableEligible(balanceTestTableID))
+
 	// The snapshot has the groups of this table sorted by ID and the up TiKV stores.
-	stores := m.storeSetInformer.(*core.StoresInfo)
+	stores := test.storeSetInformer.(*core.StoresInfo)
 	for _, store := range []*metapb.Store{
 		{Id: 8, Labels: []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}},
 		{Id: 7, State: metapb.StoreState_Tombstone, NodeState: metapb.NodeState_Removed},
@@ -140,36 +133,37 @@ func TestBalanceTableLifecycle(t *testing.T) {
 	} {
 		stores.PutStore(core.NewStoreInfo(store))
 	}
-	counts := m.GetBalanceCounts()
-	re.Equal(BalanceCounts{Leader: map[uint64]int{1: 4}, Voter: map[uint64]int{1: 4, 2: 4, 3: 4}}, counts)
-	snapshot := m.GetBalanceSnapshot(table, counts)
-	re.Len(snapshot.Groups, 2)
-	re.Equal([]string{ids[1], ids[0]}, []string{snapshot.Groups[0].ID, snapshot.Groups[1].ID})
-	re.Len(snapshot.Ranges, 2)
-	re.Equal([]uint64{1, 2, 3, 4, 5}, snapshot.Stores)
+	counts := test.GetBalanceCounts()
+	test.Equal(BalanceCounts{Leader: map[uint64]int{1: 4}, Voter: map[uint64]int{1: 4, 2: 4, 3: 4}}, counts)
+	snapshot := test.GetBalanceSnapshot(balanceTestTableID, counts)
+	test.Len(snapshot.Groups, 2)
+	test.Equal([]string{ids[1], ids[0]}, []string{snapshot.Groups[0].ID, snapshot.Groups[1].ID})
+	test.Len(snapshot.Ranges, 2)
+	test.Equal([]uint64{1, 2, 3, 4, 5}, snapshot.Stores)
 	counts.Leader[4] = 7
-	re.Equal(counts, snapshot.Counts)
+	test.Equal(counts, snapshot.Counts)
+
 	// Key buffers are immutable; the snapshot owns its range entries and voters.
 	snapshot.Groups[0].VoterStoreIDs[0] = 4
 	snapshot.Ranges[ids[0]].KeyRanges[0] = keyutil.KeyRange{StartKey: []byte("x"), EndKey: []byte("y")}
-	re.Equal([]uint64{1, 2, 3}, m.GetAffinityGroupState(ids[1]).VoterStoreIDs)
-	re.Equal([]keyutil.KeyRange{{StartKey: balanceKey("a"), EndKey: balanceKey("b")}, {StartKey: balanceKey("c"), EndKey: balanceKey("d")}},
-		m.GetBalanceSnapshot(table, counts).Ranges[ids[0]].KeyRanges)
+	test.Equal([]uint64{1, 2, 3}, test.GetAffinityGroupState(ids[1]).VoterStoreIDs)
+	test.Equal(testKeyRanges("a", "b", "c", "d"), test.GetBalanceSnapshot(balanceTestTableID, counts).Ranges[ids[0]].KeyRanges)
+
 	// A table whose groups are all fixed is not eligible. Deleting its last group
 	// removes it, and creating the group again gives a larger version.
 	for _, id := range ids[:2] {
-		_, err = m.UpdateAffinityGroupPolicy(id, BalancePolicyFixed)
-		re.NoError(err)
+		_, err = test.UpdateAffinityGroupPolicy(id, BalancePolicyFixed)
+		test.NoError(err)
 		changed()
 	}
-	re.False(m.IsBalanceTableEligible(table))
-	re.NoError(m.DeleteAffinityGroups(ids[1:2], true))
+	test.False(test.IsBalanceTableEligible(balanceTestTableID))
+	test.NoError(test.DeleteAffinityGroups(ids[1:2], true))
 	changed()
-	re.NoError(m.DeleteAffinityGroups(ids[:1], true))
-	_, exists := m.GetBalanceVersion(table)
-	re.False(exists)
-	re.Nil(m.GetBalanceSnapshot(table, m.GetBalanceCounts()))
-	re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: ids[0]}}))
+	test.NoError(test.DeleteAffinityGroups(ids[:1], true))
+	_, exists := test.GetBalanceVersion(balanceTestTableID)
+	test.False(exists)
+	test.Nil(test.balanceSnapshot())
+	test.NoError(test.CreateAffinityGroups([]GroupKeyRanges{{GroupID: ids[0]}}))
 	changed()
 }
 
@@ -177,77 +171,75 @@ func TestCommitBalanceTargets(t *testing.T) {
 	writeErr := errors.New("writer unavailable")
 	for _, scenario := range []string{"stored", "admin", "fixed", "recreated", "writer", "watched", "superseded", "error", "partial"} {
 		t.Run(scenario, func(t *testing.T) {
-			re := require.New(t)
 			test := newTargetTest(t)
-			m, store := test.Manager, test.store
-			const id = "_tidb_ks1_pt_100_p1"
+			const id = balanceTestGroupID
 			expected := Group{ID: id, CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-			re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, id, &expected) }))
-			m.SyncGroupFromEtcd(&expected)
-			m.checkGroupsAvailability()
-			m.ExpireAffinityGroup(id)
-			snapshot := balanceTestSnapshot(m)
+			test.NoError(test.store.SaveAffinityGroup(test.store, id, &expected))
+			test.SyncGroupFromEtcd(&expected)
+			test.checkGroupsAvailability()
+			test.ExpireAffinityGroup(id)
+			snapshot := test.balanceSnapshot()
 			target := expected
 			target.LeaderStoreID, target.VoterStoreIDs = 2, []uint64{1, 2, 4}
 			stored, want, allowed := target, target, true
 			wantWritten := []string{id}
+			var wantErr error
+			useWriter := false
 			switch scenario {
 			case "admin":
-				_, err := m.UpdateAffinityGroupPeers(id, 3, []uint64{1, 3, 4})
-				re.NoError(err)
+				_, err := test.UpdateAffinityGroupPeers(id, 3, []uint64{1, 3, 4})
+				test.NoError(err)
 			case "fixed":
-				_, err := m.UpdateAffinityGroupPolicy(id, BalancePolicyFixed)
-				re.NoError(err)
+				_, err := test.UpdateAffinityGroupPolicy(id, BalancePolicyFixed)
+				test.NoError(err)
 			case "recreated":
-				re.NoError(m.DeleteAffinityGroups([]string{id}, true))
-				re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
-				_, err := m.UpdateAffinityGroupPeers(id, 1, []uint64{1, 2, 3})
-				re.NoError(err)
-			case "writer", "watched", "superseded", "error", "partial":
+				test.NoError(test.DeleteAffinityGroups([]string{id}, true))
+				test.NoError(test.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
+				_, err := test.UpdateAffinityGroupPeers(id, 1, []uint64{1, 2, 3})
+				test.NoError(err)
+			case "watched":
+				useWriter = true
+			case "superseded":
+				// The watcher delivers another target, which is used instead.
+				useWriter = true
+				want.LeaderStoreID, want.VoterStoreIDs = 4, []uint64{1, 3, 4}
+			case "writer":
+				useWriter, want, allowed = true, expected, false
+			case "partial":
+				useWriter, want, allowed, wantErr = true, expected, false, writeErr
+			case "error":
+				useWriter, want, allowed, wantWritten, wantErr = true, expected, false, nil, writeErr
+			}
+			if useWriter {
 				stored = expected
 				test.useWriter(func(_ context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
-					re.Equal([]GroupTarget{{Expected: expected, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 4}}}, targets)
+					test.Equal([]GroupTarget{{Expected: expected, LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2, 4}}}, targets)
 					if scenario == "watched" || scenario == "superseded" {
-						m.SyncGroupFromEtcd(&want)
+						test.SyncGroupFromEtcd(&want)
 					}
-					if scenario == "error" {
-						return GroupTargetsResponse{}, writeErr
-					}
-					if scenario == "partial" {
-						return GroupTargetsResponse{WrittenGroupIDs: []string{id}}, writeErr
-					}
-					return GroupTargetsResponse{WrittenGroupIDs: []string{id}}, nil
+					return GroupTargetsResponse{WrittenGroupIDs: wantWritten}, wantErr
 				})
+			} else if scenario != "stored" {
+				current := test.GetAffinityGroupState(id)
+				stored, want, allowed, wantWritten = current.Group, current.Group, current.AffinitySchedulingAllowed, nil
 			}
-			stale := scenario == "admin" || scenario == "fixed" || scenario == "recreated"
-			if stale {
-				stored = m.GetAffinityGroupState(id).Group
-				want, allowed, wantWritten = stored, m.GetAffinityGroupState(id).AffinitySchedulingAllowed, nil
-			} else if scenario == "superseded" {
-				// The watcher delivers another target, which is used instead.
-				want.LeaderStoreID, want.VoterStoreIDs = 4, []uint64{1, 3, 4}
-			} else if scenario == "writer" || scenario == "partial" {
-				want, allowed = expected, false
-			} else if scenario == "error" {
-				want, allowed, wantWritten = expected, false, nil
-			}
-			written, err := m.CommitBalanceTargets(t.Context(), snapshot, []*Group{&target})
-			if scenario == "error" || scenario == "partial" {
-				re.ErrorIs(err, writeErr)
+			written, err := test.CommitBalanceTargets(t.Context(), snapshot, []*Group{&target})
+			if wantErr != nil {
+				test.ErrorIs(err, wantErr)
 			} else {
-				re.NoError(err)
+				test.NoError(err)
 			}
-			re.ElementsMatch(wantWritten, written)
-			state := m.GetAffinityGroupState(id)
-			re.Equal(want, state.Group)
-			re.Equal(allowed, state.AffinitySchedulingAllowed)
-			re.Equal(stored, *test.stored(id))
+			test.ElementsMatch(wantWritten, written)
+			state := test.GetAffinityGroupState(id)
+			test.Equal(want, state.Group)
+			test.Equal(allowed, state.AffinitySchedulingAllowed)
+			test.Equal(stored, *test.stored(id))
 			if scenario == "writer" || scenario == "partial" {
 				// The reply only reports persisted IDs; the watcher publishes them.
-				m.SyncGroupFromEtcd(&target)
-				state = m.GetAffinityGroupState(id)
-				re.Equal(target, state.Group)
-				re.True(state.AffinitySchedulingAllowed)
+				test.SyncGroupFromEtcd(&target)
+				state = test.GetAffinityGroupState(id)
+				test.Equal(target, state.Group)
+				test.True(state.AffinitySchedulingAllowed)
 			}
 		})
 	}
@@ -256,9 +248,8 @@ func TestCommitBalanceTargets(t *testing.T) {
 func TestCommitBalanceTargetsRejectsStaleRevision(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
-	const id = "_tidb_ks1_pt_100_p1"
-	store := storage.NewStorageWithEtcdBackend(client)
-	test := newTargetTestWithStorage(t, t.Context(), store, id)
+	const id = balanceTestGroupID
+	test := newTargetTestWithStorage(t, t.Context(), storage.NewStorageWithEtcdBackend(client), id)
 	_, err := test.UpdateAffinityGroupPeers(id, 1, []uint64{1, 2, 3})
 	test.NoError(err)
 	key := keypath.AffinityGroupPath(id)
@@ -266,7 +257,7 @@ func TestCommitBalanceTargetsRejectsStaleRevision(t *testing.T) {
 	test.NoError(err)
 	test.Len(before.Kvs, 1)
 	test.SyncGroupFromEtcdWithRevision(test.stored(id), before.Kvs[0].ModRevision)
-	snapshot := balanceTestSnapshot(test.Manager)
+	snapshot := test.balanceSnapshot()
 	target := snapshot.Group(id).Group
 	target.LeaderStoreID = 2
 	_, err = client.Put(t.Context(), key, string(before.Kvs[0].Value))
@@ -284,50 +275,24 @@ func TestCommitBalanceTargetsRejectsStaleRevision(t *testing.T) {
 // returned an error: the next plan, decided from the stale memory, is not
 // written and refreshes the memory, so that the plan after it is written.
 func TestCommitBalanceTargetsAfterLostReply(t *testing.T) {
-	re := require.New(t)
-	test := newTargetTest(t)
-	m := test.Manager
-	const id = "_tidb_ks1_pt_100_p1"
-	re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
-	lost := &lostReplyStorage{AffinityStorage: m.storage, lose: true}
-	m.storage = lost
+	const id = balanceTestGroupID
+	test := newTargetTest(t, id)
+	test.storage = &lostReplyStorage{AffinityStorage: test.storage, lose: true}
 	commit := func(leader uint64) ([]string, error) {
-		snapshot := balanceTestSnapshot(m)
-		target := test.target(id, leader, 1, 2, 3)
-		return m.CommitBalanceTargets(t.Context(), snapshot, []*Group{target.result()})
+		return test.CommitBalanceTargets(t.Context(), test.balanceSnapshot(), []*Group{test.groupTarget(id, leader, 1, 2, 3)})
 	}
 	_, err := commit(1)
-	re.Error(err)
-	re.Equal(uint64(1), test.stored(id).LeaderStoreID)
-	re.Zero(m.GetAffinityGroupState(id).LeaderStoreID)
+	test.Error(err)
+	test.Equal(uint64(1), test.stored(id).LeaderStoreID)
+	test.Zero(test.GetAffinityGroupState(id).LeaderStoreID)
 	written, err := commit(2)
-	re.NoError(err)
-	re.Empty(written)
-	re.Equal(uint64(1), m.GetAffinityGroupState(id).LeaderStoreID)
+	test.NoError(err)
+	test.Empty(written)
+	test.Equal(uint64(1), test.GetAffinityGroupState(id).LeaderStoreID)
 	written, err = commit(2)
-	re.NoError(err)
-	re.Equal([]string{id}, written)
-	re.Equal(uint64(2), test.stored(id).LeaderStoreID)
-}
-
-type cancelTargetStorage struct {
-	endpoint.AffinityStorage
-	cancel       context.CancelFunc
-	beforeCommit bool
-	transactions int
-}
-
-func (s *cancelTargetStorage) RunInTxn(ctx context.Context, f func(kv.Txn) error) error {
-	s.transactions++
-	if s.beforeCommit {
-		s.cancel()
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	err := s.AffinityStorage.RunInTxn(ctx, f)
-	s.cancel()
-	return err
+	test.NoError(err)
+	test.Equal([]string{id}, written)
+	test.Equal(uint64(2), test.stored(id).LeaderStoreID)
 }
 
 func TestCommitBalanceTargetsCancellation(t *testing.T) {
@@ -336,28 +301,37 @@ func TestCommitBalanceTargetsCancellation(t *testing.T) {
 		beforeCommit bool
 	}{{"between transactions", false}, {"in transaction", true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
 			test := newTargetTest(t)
-			m, store := test.Manager, test.store
-			targets, snapshot := balanceTestTargets(test, etcdutil.MaxEtcdTxnOps+1)
-			first, last := targets[0].ID, targets[len(targets)-1].ID
+			targets, ids, snapshot := test.balanceTargets(etcdutil.MaxEtcdTxnOps + 1)
+			first, last := ids[0], ids[len(ids)-1]
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			wrapped := &cancelTargetStorage{AffinityStorage: store, cancel: cancel, beforeCommit: tc.beforeCommit}
-			m.storage = wrapped
-			written, err := m.CommitBalanceTargets(ctx, snapshot, targets)
-			re.ErrorIs(err, context.Canceled)
-			re.NoError(m.ctx.Err())
-			re.Equal(1, wrapped.transactions, "cancelled callers must not start another transaction")
+			transactions := 0
+			test.interceptTxns(func(txnCtx context.Context, apply func(kv.Txn) error) error {
+				transactions++
+				if tc.beforeCommit {
+					cancel()
+				}
+				if err := txnCtx.Err(); err != nil {
+					return err
+				}
+				err := test.store.RunInTxn(txnCtx, apply)
+				cancel()
+				return err
+			})
+			written, err := test.CommitBalanceTargets(ctx, snapshot, targets)
+			test.ErrorIs(err, context.Canceled)
+			test.NoError(test.ctx.Err())
+			test.Equal(1, transactions, "cancelled callers must not start another transaction")
 			if tc.beforeCommit {
-				re.Empty(written)
-				re.Zero(test.stored(first).LeaderStoreID)
+				test.Empty(written)
+				test.Zero(test.stored(first).LeaderStoreID)
 			} else {
-				re.Equal([]string{first}, written)
-				re.Equal(uint64(1), test.stored(first).LeaderStoreID)
-				re.Equal(uint64(1), m.GetAffinityGroupState(first).LeaderStoreID)
+				test.Equal([]string{first}, written)
+				test.Equal(uint64(1), test.stored(first).LeaderStoreID)
+				test.Equal(uint64(1), test.GetAffinityGroupState(first).LeaderStoreID)
 			}
-			re.Zero(test.stored(last).LeaderStoreID)
+			test.Zero(test.stored(last).LeaderStoreID)
 		})
 	}
 }
@@ -365,162 +339,149 @@ func TestCommitBalanceTargetsCancellation(t *testing.T) {
 func TestCommitBalanceTargetsWriterChunks(t *testing.T) {
 	for _, outcome := range []string{"success", "error", "partial", "cancel"} {
 		t.Run(outcome, func(t *testing.T) {
-			re := require.New(t)
 			test := newTargetTest(t)
-			m := test.Manager
-			targets, snapshot := balanceTestTargets(test, etcdutil.MaxEtcdTxnOps+1)
+			targets, allIDs, snapshot := test.balanceTargets(etcdutil.MaxEtcdTxnOps + 1)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			writeErr := errors.New("later chunk failed")
 			calls := 0
 			test.useWriter(func(gotCtx context.Context, batch []GroupTarget) (GroupTargetsResponse, error) {
-				re.Equal(ctx, gotCtx)
+				test.Equal(ctx, gotCtx)
 				calls++
-				re.Len(batch, []int{etcdutil.MaxEtcdTxnOps, 1}[calls-1])
-				ids := make([]string, len(batch))
+				chunkIDs := [][]string{allIDs[:etcdutil.MaxEtcdTxnOps], allIDs[etcdutil.MaxEtcdTxnOps:]}[calls-1]
+				test.Len(batch, len(chunkIDs))
 				for i, target := range batch {
-					ids[i] = target.Expected.ID
+					test.Equal(chunkIDs[i], target.Expected.ID)
 				}
 				if calls == 1 && outcome == "cancel" {
 					cancel()
 				}
 				if calls == 2 {
-					if outcome == "error" {
+					switch outcome {
+					case "error":
 						return GroupTargetsResponse{}, writeErr
-					}
-					if outcome == "partial" {
-						return GroupTargetsResponse{WrittenGroupIDs: ids}, writeErr
+					case "partial":
+						return GroupTargetsResponse{WrittenGroupIDs: chunkIDs}, writeErr
 					}
 				}
-				return GroupTargetsResponse{WrittenGroupIDs: ids}, nil
+				return GroupTargetsResponse{WrittenGroupIDs: chunkIDs}, nil
 			})
-			written, err := m.CommitBalanceTargets(ctx, snapshot, targets)
+			written, err := test.CommitBalanceTargets(ctx, snapshot, targets)
 			want := len(targets)
 			switch outcome {
 			case "success":
-				re.NoError(err)
+				test.NoError(err)
 			case "cancel":
-				re.ErrorIs(err, context.Canceled)
-				re.Equal(1, calls)
+				test.ErrorIs(err, context.Canceled)
+				test.Equal(1, calls)
 				want--
 			default:
-				re.ErrorIs(err, writeErr)
+				test.ErrorIs(err, writeErr)
 				if outcome == "error" {
 					want--
 				}
 			}
-			re.Len(written, want)
-			for i, id := range written {
-				re.Equal(targets[i].ID, id)
-			}
+			test.Equal(allIDs[:want], written)
 		})
 	}
 }
 
 func TestBalanceTargetWriterFailureMetrics(t *testing.T) {
-	for _, outcome := range []string{"error", "not-ready", "unsupported", "cancel"} {
-		t.Run(outcome, func(t *testing.T) {
-			re := require.New(t)
-			test := newTargetTest(t)
-			m := test.Manager
-			id := "_tidb_ks1_pt_100_p1"
-			re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id}}))
+	for _, tc := range []struct {
+		name    string
+		err     error
+		counted bool
+	}{
+		{"error", errors.New("failed request"), true},
+		{"not-ready", errors.Annotate(ErrTargetWriterNotReady, "no PD leader"), false},
+		{"unsupported", errors.Annotate(ErrTargetWriterUnsupported, "404 Not Found"), false},
+		{"cancel", context.Canceled, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test := newTargetTest(t, balanceTestGroupID)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
-				switch outcome {
-				case "not-ready":
-					return GroupTargetsResponse{}, errors.Annotate(ErrTargetWriterNotReady, "no PD leader")
-				case "unsupported":
-					return GroupTargetsResponse{}, errors.Annotate(ErrTargetWriterUnsupported, "404 Not Found")
-				case "cancel":
+				if tc.name == "cancel" {
 					cancel()
-					return GroupTargetsResponse{}, context.Canceled
-				default:
-					return GroupTargetsResponse{}, errors.New("failed request")
 				}
+				return GroupTargetsResponse{}, tc.err
 			})
 			before := testutil.ToFloat64(targetWriteFailureCounter)
-			target := test.target(id, 1, 1, 2)
-			_, err := m.CommitBalanceTargets(ctx, balanceTestSnapshot(m), []*Group{target.result()})
-			re.Error(err)
+			_, err := test.CommitBalanceTargets(ctx, test.balanceSnapshot(), []*Group{test.groupTarget(balanceTestGroupID, 1, 1, 2)})
+			test.Error(err)
 			want := before
-			if outcome == "error" {
+			if tc.counted {
 				want++
 			}
-			re.Equal(want, testutil.ToFloat64(targetWriteFailureCounter))
+			test.Equal(want, testutil.ToFloat64(targetWriteFailureCounter))
 		})
 	}
 }
 
 func TestUnpersistedTargetPolicyChangeAdvancesBalanceVersion(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		re := require.New(t)
 		test := newTargetTest(t)
-		m := test.Manager
-		const id = "_tidb_ks1_pt_100_p1"
-		const table TableID = "_tidb_ks1_pt_100"
-		r := keyutil.KeyRange{StartKey: balanceKey("a"), EndKey: balanceKey("b")}
-		re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{r}}}))
+		const id = balanceTestGroupID
+		ranges := testKeyRanges("a", "b")
+		test.NoError(test.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id, KeyRanges: ranges}}))
 		stored := test.stored(id)
 		stored.BalancePolicy = BalancePolicyFixed
-		m.SyncGroupFromEtcd(stored)
-		m.applyStoreConditions(nil)
+		test.SyncGroupFromEtcd(stored)
+		test.applyStoreConditions(nil)
 		test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
 			return GroupTargetsResponse{}, ErrTargetWriterUnsupported
 		})
-		region := generateRegionForTest(1, []uint64{1, 2, 3}, r)
-		m.ObserveAvailableRegion(region, m.GetAffinityGroupState(id))
+		region := generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0])
+		test.ObserveAvailableRegion(region, test.GetAffinityGroupState(id))
 		synctest.Wait()
-		_, aligned := m.GetAndCacheRegionAffinityGroupState(region)
-		re.True(aligned)
-		before := m.GetAffinityGroupState(id)
-		re.True(before.HasUnpersistedTarget())
-		re.Equal(PhaseStable, before.Phase)
-		re.Equal(1, before.RegionCount)
-		re.Equal(1, before.AffinityRegionCount)
-		version, exists := m.GetBalanceVersion(table)
-		re.True(exists)
+		_, aligned := test.GetAndCacheRegionAffinityGroupState(region)
+		test.True(aligned)
+		before := test.GetAffinityGroupState(id)
+		test.True(before.HasUnpersistedTarget())
+		test.Equal(PhaseStable, before.Phase)
+		test.Equal(1, before.RegionCount)
+		test.Equal(1, before.AffinityRegionCount)
+		getVersion := func() uint64 {
+			t.Helper()
+			v, exists := test.GetBalanceVersion(balanceTestTableID)
+			test.True(exists)
+			return v
+		}
+		version := getVersion()
 
 		stored.BalancePolicy = BalancePolicyAuto
-		m.SyncGroupFromEtcd(stored)
-		after := m.GetAffinityGroupState(id)
+		test.SyncGroupFromEtcd(stored)
+		after := test.GetAffinityGroupState(id)
 		want := *before
 		want.BalancePolicy = BalancePolicyAuto
-		re.Equal(want, *after)
-		next, exists := m.GetBalanceVersion(table)
-		re.True(exists)
-		re.Greater(next, version, "the balancer must wake an idle table after the policy change")
+		test.Equal(want, *after)
+		next := getVersion()
+		test.Greater(next, version, "the balancer must wake an idle table after the policy change")
 
-		m.SyncGroupFromEtcd(stored)
-		same, exists := m.GetBalanceVersion(table)
-		re.True(exists)
-		re.Equal(next, same)
-		m.SyncGroupFromEtcd(&after.Group)
-		re.False(m.GetAffinityGroupState(id).HasUnpersistedTarget())
-		confirmed, exists := m.GetBalanceVersion(table)
-		re.True(exists)
-		re.Greater(confirmed, same, "confirming the local target changes the expected stored group")
+		test.SyncGroupFromEtcd(stored)
+		test.Equal(next, getVersion())
+		test.SyncGroupFromEtcd(&after.Group)
+		test.False(test.GetAffinityGroupState(id).HasUnpersistedTarget())
+		confirmed := getVersion()
+		test.Greater(confirmed, next, "confirming the local target changes the expected stored group")
 
-		m.SyncGroupFromEtcdWithRevision(&after.Group, 10)
-		revised, exists := m.GetBalanceVersion(table)
-		re.True(exists)
-		re.Greater(revised, confirmed, "the stored revision changed with identical group data")
-		m.SyncGroupFromEtcdWithRevision(&after.Group, 10)
-		unchanged, exists := m.GetBalanceVersion(table)
-		re.True(exists)
-		re.Equal(revised, unchanged)
+		test.SyncGroupFromEtcdWithRevision(&after.Group, 10)
+		revised := getVersion()
+		test.Greater(revised, confirmed, "the stored revision changed with identical group data")
+		test.SyncGroupFromEtcdWithRevision(&after.Group, 10)
+		test.Equal(revised, getVersion())
 	})
 }
 
 func TestSkippedPersistOnlyWritePreservesBalanceConfirmation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		const id = "_tidb_ks1_pt_100_p1"
+		const id = balanceTestGroupID
 		test := newTargetTest(t, id)
 		test.SyncGroupFromEtcdWithRevision(test.stored(id), 10)
 		test.checkGroupsAvailability()
 		state := func() *GroupState { return test.GetAffinityGroupState(id) }
-		target := test.target(id, 1, 1, 2)
+		target := test.groupTarget(id, 1, 1, 2)
 		releaseSkipped := make(chan struct{})
 		defer close(releaseSkipped)
 		test.useWriter(func(_ context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
@@ -529,12 +490,12 @@ func TestSkippedPersistOnlyWritePreservesBalanceConfirmation(t *testing.T) {
 			case 1:
 				return GroupTargetsResponse{}, ErrTargetWriterUnsupported
 			case 2:
-				test.Equal(target.result(), targets[0].result())
+				test.Equal(target, targets[0].result())
 				test.Equal(int64(10), targets[0].ExpectedModRevision)
 				<-releaseSkipped
 				return GroupTargetsResponse{}, nil
 			default:
-				test.Equal(target.result(), targets[0].result())
+				test.Equal(target, targets[0].result())
 				return GroupTargetsResponse{
 					WrittenGroupIDs: []string{id}, WrittenRevisions: map[string]int64{id: 11},
 				}, nil
@@ -543,12 +504,12 @@ func TestSkippedPersistOnlyWritePreservesBalanceConfirmation(t *testing.T) {
 		test.observe(id, 1, 2)
 		local := state()
 		test.True(local.HasUnpersistedTarget())
-		test.Equal(*target.result(), local.Group)
+		test.Equal(*target, local.Group)
 
 		time.Sleep(time.Second)
 		test.observe(id, 1, 2)
 		test.Len(test.calls, 2)
-		written, err := test.CommitBalanceTargets(t.Context(), balanceTestSnapshot(test.Manager), []*Group{target.result()})
+		written, err := test.CommitBalanceTargets(t.Context(), test.balanceSnapshot(), []*Group{target})
 		test.NoError(err)
 		test.Equal([]string{id}, written)
 		test.Equal(int64(11), test.groups[id].confirmedRevision)
@@ -562,31 +523,28 @@ func TestSkippedPersistOnlyWritePreservesBalanceConfirmation(t *testing.T) {
 }
 
 func TestCommitBalanceTargetsSkipsEmptyAndIneligibleTargets(t *testing.T) {
-	for _, mode := range []string{"classic", "mcs"} {
-		t.Run(mode, func(t *testing.T) {
-			const id = "_tidb_ks1_pt_100_p1"
-			test := newTargetTest(t, id)
-			_, err := test.UpdateAffinityGroupPolicy(id, BalancePolicyFixed)
-			test.NoError(err)
-			if mode == "mcs" {
-				test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
-					t.Error("unexpected remote write")
-					return GroupTargetsResponse{}, nil
-				})
-			}
-
-			snapshot := balanceTestSnapshot(test.Manager)
-			test.True(snapshot.Group(id).BalancePolicy.IsFixed())
-			written, err := test.CommitBalanceTargets(t.Context(), snapshot, nil)
-			test.NoError(err)
-			test.Nil(written)
-			written, err = test.CommitBalanceTargets(t.Context(), snapshot, []*Group{
-				test.target(id, 1, 1, 2).result(),
-				{ID: "_tidb_ks1_pt_100_p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}},
+	const id = balanceTestGroupID
+	test := newTargetTest(t, id)
+	_, err := test.UpdateAffinityGroupPolicy(id, BalancePolicyFixed)
+	test.NoError(err)
+	snapshot := test.balanceSnapshot()
+	test.True(snapshot.Group(id).BalancePolicy.IsFixed())
+	ineligible := []*Group{
+		test.groupTarget(id, 1, 1, 2),
+		{ID: "_tidb_ks1_pt_100_p2", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}},
+	}
+	for _, mcs := range []bool{false, true} {
+		if mcs {
+			test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
+				t.Error("unexpected remote write")
+				return GroupTargetsResponse{}, nil
 			})
+		}
+		for _, targets := range [][]*Group{nil, ineligible} {
+			written, err := test.CommitBalanceTargets(t.Context(), snapshot, targets)
 			test.NoError(err)
 			test.Nil(written)
-			test.Zero(test.GetAffinityGroupState(id).LeaderStoreID)
-		})
+		}
+		test.Zero(test.GetAffinityGroupState(id).LeaderStoreID)
 	}
 }
