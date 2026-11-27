@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap/zapcore"
@@ -325,11 +326,22 @@ func TestTSOStreamMetricLabelsRemovedOnClose(t *testing.T) {
 				stream.WaitForClosed()
 			})
 
-			require.True(t, hasTSOStreamMetric(t, metrics.OngoingRequestCountGauge, stream.streamID))
+			require.NotNil(t, findTSOStreamGauge(t, metrics.OngoingRequestCountGauge, stream.streamID))
 			if receivedTSO {
 				result := make(chan error, 1)
+				gaugeChecked := make(chan struct{})
 				require.NoError(t, stream.processRequests(1, 2, 3, 1, time.Now(),
-					func(_ tsoRequestResult, _ uint32, err error) { result <- err }))
+					func(_ tsoRequestResult, _ uint32, err error) {
+						result <- err
+						// Keep the callback open until the receiving caller has checked the gauge.
+						select {
+						case <-gaugeChecked:
+						case <-ctx.Done():
+						}
+					}))
+				ongoing := findTSOStreamGauge(t, metrics.OngoingRequestCountGauge, stream.streamID)
+				require.NotNil(t, ongoing)
+				require.InDelta(t, 1, ongoing.GetValue(), 0)
 				inner.returnResult(10, 1, 1)
 				select {
 				case err := <-result:
@@ -337,20 +349,24 @@ func TestTSOStreamMetricLabelsRemovedOnClose(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("TSO response was not processed")
 				}
-				require.True(t, hasTSOStreamMetric(t, metrics.EstimateTSOLatencyGauge, stream.streamID))
+				ongoing = findTSOStreamGauge(t, metrics.OngoingRequestCountGauge, stream.streamID)
+				require.NotNil(t, ongoing)
+				require.Zero(t, ongoing.GetValue())
+				close(gaugeChecked)
+				require.NotNil(t, findTSOStreamGauge(t, metrics.EstimateTSOLatencyGauge, stream.streamID))
 			}
 
 			inner.stop()
 			stream.WaitForClosed()
 			if receivedTSO {
-				require.False(t, hasTSOStreamMetric(t, metrics.EstimateTSOLatencyGauge, stream.streamID))
+				require.Nil(t, findTSOStreamGauge(t, metrics.EstimateTSOLatencyGauge, stream.streamID))
 			}
-			require.False(t, hasTSOStreamMetric(t, metrics.OngoingRequestCountGauge, stream.streamID))
+			require.Nil(t, findTSOStreamGauge(t, metrics.OngoingRequestCountGauge, stream.streamID))
 		})
 	}
 }
 
-func hasTSOStreamMetric(t *testing.T, vector *prometheus.GaugeVec, streamID string) bool {
+func findTSOStreamGauge(t *testing.T, vector *prometheus.GaugeVec, streamID string) *dto.Gauge {
 	t.Helper()
 	registry := prometheus.NewRegistry()
 	require.NoError(t, registry.Register(vector))
@@ -360,12 +376,12 @@ func hasTSOStreamMetric(t *testing.T, vector *prometheus.GaugeVec, streamID stri
 		for _, metric := range family.GetMetric() {
 			for _, label := range metric.GetLabel() {
 				if label.GetName() == "stream" && label.GetValue() == streamID {
-					return true
+					return metric.GetGauge()
 				}
 			}
 		}
 	}
-	return false
+	return nil
 }
 
 func (s *testTSOStreamSuite) noResult(ch <-chan callbackInvocation) {
@@ -723,4 +739,21 @@ func BenchmarkTSOStreamSendRecv(b *testing.B) {
 		<-resCh
 	}
 	b.StopTimer()
+}
+
+func TestCleanupMetricInitializationRace(t *testing.T) {
+	inner := newMockTSOStreamImpl(t.Context(), resultModeManual)
+	stream := newTSOStream(t.Context(), mockStreamURL, inner)
+	// Closing with a pending request records a failed TSO request duration.
+	require.NoError(t, stream.processRequests(1, 1, 1, 1, time.Now(),
+		func(tsoRequestResult, uint32, error) {}))
+
+	registered := make(chan struct{})
+	go func() {
+		defer close(registered)
+		metrics.InitAndRegisterMetrics(nil)
+	}()
+	inner.stop()
+	stream.WaitForClosed()
+	<-registered
 }

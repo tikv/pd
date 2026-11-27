@@ -230,7 +230,6 @@ type tsoStream struct {
 	estimatedLatencyMicros atomic.Uint64
 
 	ongoingRequestCountGauge prometheus.Gauge
-	ongoingRequests          atomic.Int32
 }
 
 const (
@@ -310,6 +309,7 @@ func (s *tsoStream) processRequests(
 		reqKeyspaceGroupID: keyspaceGroupID,
 		callback:           callback,
 	}:
+		s.ongoingRequestCountGauge.Inc()
 	default:
 		s.state.Store(prevState)
 		return errors.New("unexpected channel full")
@@ -328,7 +328,6 @@ func (s *tsoStream) processRequests(
 		return nil
 	}
 	metrics.TSOBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
-	s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(1)))
 	return nil
 }
 
@@ -377,7 +376,6 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 			req.callback(tsoRequestResult{}, req.reqKeyspaceGroupID, errors.WithStack(finishWithErr))
 		}
 
-		s.ongoingRequests.Store(0)
 		s.ongoingRequestCountGauge.Set(0)
 		metrics.OngoingRequestCountGauge.DeleteLabelValues(s.streamID)
 		metrics.EstimateTSOLatencyGauge.DeleteLabelValues(s.streamID)
@@ -455,12 +453,11 @@ recvLoop:
 			break recvLoop
 		}
 
+		s.ongoingRequestCountGauge.Dec()
 		currentReq.callback(res, currentReq.reqKeyspaceGroupID, nil)
 		// After finishing the requests, unset these variables which will be checked in the defer block.
 		currentReq = batchedRequests{}
 		hasReq = false
-
-		s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(-1)))
 	}
 }
 

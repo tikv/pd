@@ -15,54 +15,26 @@
 package metrics
 
 import (
+	"maps"
 	"sync"
-	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	resourcegroupmetrics "github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
-// make sure register metrics only once
-var initialized atomic.Int32
+var registerOnce sync.Once
 
 func init() {
-	initMetrics(prometheus.Labels{})
+	initMetrics(nil)
 	initLabelValues()
-	initRegisteredConsumers()
 }
 
-var consumersInitializers = struct {
-	sync.Mutex
-	value []func()
-}{}
-
-// RegisterConsumer registers a consumer to be initialized when the metrics are (re)initialized
+// RegisterConsumer calls initConsumer immediately if it is non-nil.
+// Collectors are already initialized and are never replaced by registration.
 func RegisterConsumer(initConsumer func()) {
-	consumersInitializers.Lock()
-	defer consumersInitializers.Unlock()
-	consumersInitializers.value = append(consumersInitializers.value, initConsumer)
-	initConsumer()
-}
-
-func initRegisteredConsumers() {
-	consumersInitializers.Lock()
-	defer consumersInitializers.Unlock()
-	for _, initConsumer := range consumersInitializers.value {
+	if initConsumer != nil {
 		initConsumer()
-	}
-}
-
-// InitAndRegisterMetrics initializes and registers the metrics manually.
-func InitAndRegisterMetrics(constLabels prometheus.Labels) {
-	if initialized.CompareAndSwap(0, 1) {
-		// init metrics with constLabels
-		initMetrics(constLabels)
-		initLabelValues()
-		initRegisteredConsumers()
-		// register metrics
-		registerMetrics()
-		resourcegroupmetrics.InitAndRegisterMetrics(constLabels)
 	}
 }
 
@@ -434,20 +406,33 @@ func initLabelValues() {
 	QueryRegionBatchSizeByIDs = QueryRegionBatchSize.WithLabelValues("by_ids")
 }
 
-func registerMetrics() {
-	prometheus.MustRegister(cmdDuration)
-	prometheus.MustRegister(cmdFailedDuration)
-	prometheus.MustRegister(internalCmdDuration)
-	prometheus.MustRegister(internalCmdFailedDuration)
-	prometheus.MustRegister(requestDuration)
-	prometheus.MustRegister(TSOBestBatchSize)
-	prometheus.MustRegister(TSOBatchSize)
-	prometheus.MustRegister(TSORetryCount)
-	prometheus.MustRegister(TSOBatchSendLatency)
-	prometheus.MustRegister(RequestForwarded)
-	prometheus.MustRegister(EstimateTSOLatencyGauge)
-	prometheus.MustRegister(CircuitBreakerCounters)
-	prometheus.MustRegister(QueryRegionBestBatchSize)
-	prometheus.MustRegister(QueryRegionBatchSize)
-	prometheus.MustRegister(QueryRegionBatchSendLatency)
+// InitAndRegisterMetrics registers the process-wide PD client and resource group
+// metrics. The first call determines the constant labels. Applications should
+// call it once at startup before creating any PD client.
+func InitAndRegisterMetrics(constLabels prometheus.Labels) {
+	registerOnce.Do(func() {
+		reg := prometheus.DefaultRegisterer
+		if len(constLabels) > 0 {
+			reg = prometheus.WrapRegistererWith(maps.Clone(constLabels), reg)
+		}
+		reg.MustRegister(
+			cmdDuration,
+			cmdFailedDuration,
+			internalCmdDuration,
+			internalCmdFailedDuration,
+			requestDuration,
+			TSOBestBatchSize,
+			TSOBatchSize,
+			TSORetryCount,
+			TSOBatchSendLatency,
+			RequestForwarded,
+			OngoingRequestCountGauge,
+			EstimateTSOLatencyGauge,
+			CircuitBreakerCounters,
+			QueryRegionBestBatchSize,
+			QueryRegionBatchSize,
+			QueryRegionBatchSendLatency,
+		)
+		resourcegroupmetrics.InitAndRegisterMetrics(constLabels)
+	})
 }
