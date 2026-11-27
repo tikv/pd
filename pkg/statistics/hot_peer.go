@@ -185,6 +185,12 @@ func (stat *HotPeerStat) IsLeader() bool {
 	}
 }
 
+// MatchesPeer reports whether the read sample belongs to the given peer.
+// Stats without peer metadata retain the legacy store-level behavior.
+func (stat *HotPeerStat) MatchesPeer(peerID uint64) bool {
+	return stat.peerID == 0 || stat.peerID == peerID
+}
+
 // GetActionType returns the item action type.
 func (stat *HotPeerStat) GetActionType() utils.ActionType {
 	return stat.actionType

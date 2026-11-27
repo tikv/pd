@@ -87,7 +87,7 @@ func newTestRegion(id uint64) *core.RegionInfo {
 	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
 }
 
-func TestHotReadMovePeerUsesCurrentLeader(t *testing.T) {
+func TestHotReadMovePeerUsesCurrentPeer(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetEnablePlacementRules(false)
@@ -141,6 +141,19 @@ func TestHotReadMovePeerUsesCurrentLeader(t *testing.T) {
 			re.Contains(destinations, uint64(4))
 		})
 	}
+	t.Run("replaced follower", func(t *testing.T) {
+		re := require.New(t)
+		region := tc.GetRegion(1)
+		oldPeer := region.GetStorePeer(3)
+		replacement := &metapb.Peer{Id: oldPeer.GetId() + 1000, StoreId: 3}
+		tc.PutRegion(region.Clone(core.WithRemoveStorePeer(3), core.WithAddPeer(replacement)))
+		solver.regionCache = make(map[uint64]hotRegionSnapshot)
+
+		peer := solver.stLoadDetail[3].HotPeers[0]
+		current, fit := solver.getRegion(peer, 3)
+		re.Nil(current, "replaced peers must wait for refreshed statistics")
+		re.Nil(fit)
+	})
 }
 
 func TestHotScheduleIntervalBackoff(t *testing.T) {
