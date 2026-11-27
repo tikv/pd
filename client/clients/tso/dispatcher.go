@@ -57,7 +57,7 @@ type tsoServiceProvider interface {
 	getOption() *opt.Option
 	getServiceDiscovery() sd.ServiceDiscovery
 	getConnectionCtxMgr() *cctx.Manager[*tsoStream]
-	updateConnectionCtxs(ctx context.Context) bool
+	scheduleUpdateTSOConnectionCtxs()
 }
 
 const dispatcherCheckRPCConcurrencyInterval = time.Second * 5
@@ -252,10 +252,17 @@ tsoBatchLoop:
 			}
 			// Check stream and retry if necessary.
 			if stream == nil {
-				log.Info("[tso] tso stream is not ready")
-				if provider.updateConnectionCtxs(ctx) {
+				failpoint.InjectCall("beforeSubscribeTSOStreamUpdates")
+				// Subscribe before checking again: the background updater may publish a
+				// stream between the first lookup and this subscription.
+				updated := conCtxMgr.Updated()
+				if conCtxMgr.Size() > 0 {
 					continue streamChoosingLoop
 				}
+				log.Info("[tso] tso stream is not ready")
+				// The updater owns stream recovery. Keep waiting here so its work
+				// cannot delay this batch's timeout or cancellation.
+				provider.scheduleUpdateTSOConnectionCtxs()
 				timer := time.NewTimer(constants.RetryInterval)
 				select {
 				case <-ctx.Done():
@@ -271,6 +278,9 @@ tsoBatchLoop:
 					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(err))
 					timer.Stop()
 					continue tsoBatchLoop
+				case <-updated:
+					timer.Stop()
+					continue streamChoosingLoop
 				case <-timer.C:
 					timer.Stop()
 					continue streamChoosingLoop
@@ -281,6 +291,11 @@ tsoBatchLoop:
 				log.Info("[tso] tso stream is canceled", zap.String("stream-url", streamURL))
 				// Set `stream` to nil and remove this stream from the `connectionCtxs` due to being canceled.
 				conCtxMgr.Release(streamURL)
+				// Refresh the failed target before reconnecting unless discovery already
+				// knows a different leader, including for forwarded streams.
+				if ctx.Err() == nil && !stream.hasNewLeader(svcDiscovery.GetServingURL()) {
+					svcDiscovery.ScheduleCheckMemberChanged()
+				}
 				stream = nil
 				continue
 			default:
@@ -288,7 +303,7 @@ tsoBatchLoop:
 
 			// Check if any error has occurred on this stream when receiving asynchronously.
 			if err = stream.GetRecvError(); err != nil {
-				exit := !td.handleProcessRequestError(ctx, bo, conCtxMgr, streamURL, err)
+				exit := !td.handleProcessRequestError(ctx, bo, conCtxMgr, streamURL, stream, err)
 				stream = nil
 				if exit {
 					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(err))
@@ -370,7 +385,7 @@ tsoBatchLoop:
 			// reused in the next loop safely.
 			tsoBatchController = nil
 		} else {
-			exit := !td.handleProcessRequestError(ctx, bo, conCtxMgr, streamURL, err)
+			exit := !td.handleProcessRequestError(ctx, bo, conCtxMgr, streamURL, stream, err)
 			stream = nil
 			if exit {
 				return
@@ -386,6 +401,7 @@ func (td *tsoDispatcher) handleProcessRequestError(
 	bo *retry.Backoffer,
 	conCtxMgr *cctx.Manager[*tsoStream],
 	streamURL string,
+	stream *tsoStream,
 	err error,
 ) bool {
 	log.Error("[tso] getTS error after processing requests",
@@ -406,7 +422,13 @@ func (td *tsoDispatcher) handleProcessRequestError(
 	case errs.IsCalleeMismatch(err):
 		// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
 		svcDiscovery.RemoveClientConn(streamURL)
+		svcDiscovery.ScheduleCheckMemberChanged()
 	case errs.IsLeaderChange(err):
+		// A stream can fail after discovery has selected a new target leader.
+		if stream.hasNewLeader(svcDiscovery.GetServingURL()) {
+			svcDiscovery.ScheduleCheckMemberChanged()
+			break
+		}
 		// If the leader changed, we better call `CheckMemberChanged` blockingly to
 		// ensure the next round of TSO requests can be sent to the new leader.
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {

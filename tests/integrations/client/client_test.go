@@ -86,6 +86,81 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
+func TestMemberDiscoveryClientBurst(t *testing.T) {
+	const clientCount = 16
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 3)
+	re.NoError(err)
+	t.Cleanup(cluster.Destroy)
+	endpoints := runServer(re, cluster)
+
+	var recording atomic.Bool
+	var memberCalls atomic.Int32
+	intercept := func(ctx context.Context, method string, request, response any,
+		conn *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption,
+	) error {
+		if method == "/pdpb.PD/GetMembers" && recording.Load() {
+			memberCalls.Add(1)
+			// A slow healthy response must not trigger speculative queries to other endpoints.
+			timer := time.NewTimer(300 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return invoke(ctx, method, request, response, conn, opts...)
+	}
+
+	clients := make([]pd.Client, clientCount)
+	t.Cleanup(func() {
+		for _, client := range clients {
+			if client != nil {
+				client.Close()
+			}
+		}
+	})
+	previous := make([]uint64, clientCount)
+	for i := range clients {
+		clients[i], err = pd.NewClientWithContext(t.Context(), caller.TestComponent,
+			endpoints, pd.SecurityOption{}, opt.WithInitMetricsOption(false),
+			opt.WithGRPCDialOptions(grpc.WithChainUnaryInterceptor(intercept)))
+		re.NoError(err)
+		physical, logical, err := clients[i].GetTS(t.Context())
+		re.NoError(err)
+		re.Positive(physical)
+		previous[i] = tsoutil.ComposeTS(physical, logical)
+	}
+
+	start := make(chan struct{})
+	refreshErrors := make([]error, clientCount)
+	timestamps := make([]uint64, clientCount)
+	wg := &sync.WaitGroup{}
+	for i, client := range clients {
+		wg.Go(func() {
+			<-start
+			if refreshErrors[i] = client.GetServiceDiscovery().CheckMemberChanged(); refreshErrors[i] != nil {
+				return
+			}
+			physical, logical, err := client.GetTS(t.Context())
+			refreshErrors[i] = err
+			timestamps[i] = tsoutil.ComposeTS(physical, logical)
+		})
+	}
+	recording.Store(true)
+	close(start)
+	wg.Wait()
+	recording.Store(false)
+
+	re.Equal(int32(clientCount), memberCalls.Load(), "each client should issue one membership RPC")
+	for i, client := range clients {
+		re.NoError(refreshErrors[i])
+		re.Equal(cluster.GetLeaderServer().GetAddr(), client.GetServiceDiscovery().GetServingURL())
+		re.Greater(timestamps[i], previous[i], "timestamps must advance after the refresh")
+	}
+}
+
 func TestClientLeaderChange(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -313,6 +388,23 @@ func TestTSOFollowerProxy(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+
+	// Streams created before the transfer still target the old leader through followers.
+	oldLeader := cluster.WaitLeader()
+	re.NoError(cluster.GetServer(oldLeader).ResignLeaderWithRetry())
+	newLeader := cluster.WaitLeaderChange(oldLeader)
+	re.NotEmpty(newLeader)
+	waitLeader(re, cli2.GetServiceDiscovery(), cluster.GetServer(newLeader))
+	physical, logical, err := cli1.GetTS(ctx)
+	re.NoError(err)
+	lastTS := tsoutil.ComposeTS(physical, logical)
+	for i := range tsoRequestRound {
+		physical, logical, err = cli2.GetTS(ctx)
+		re.NoError(err, "follower proxy request %d after leader transfer", i)
+		ts := tsoutil.ComposeTS(physical, logical)
+		re.Greater(ts, lastTS)
+		lastTS = ts
+	}
 
 	followerServer := cluster.GetServer(cluster.GetFollower())
 	re.NoError(followerServer.Stop())

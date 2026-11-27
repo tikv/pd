@@ -163,7 +163,6 @@ func BuildForwardContext(ctx context.Context, url string) context.Context {
 }
 
 // GetForwardedHost returns the forwarded host in metadata.
-// Only used for test.
 func GetForwardedHost(ctx context.Context, f func(context.Context) (metadata.MD, bool)) string {
 	v, _ := getValueFromMetadata(ctx, ForwardMetadataKey, f)
 	return v

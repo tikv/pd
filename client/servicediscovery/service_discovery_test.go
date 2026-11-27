@@ -21,6 +21,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -30,11 +31,13 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -438,14 +441,8 @@ func TestGRPCDialOption(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
-	cli := &serviceDiscovery{
-		callbacks:         newServiceCallbacks(),
-		checkMembershipCh: make(chan struct{}, 1),
-		ctx:               ctx,
-		cancel:            cancel,
-		tlsCfg:            nil,
-		option:            opt.NewOption(),
-	}
+	cli := NewDefaultServiceDiscovery(ctx, cancel, nil, nil).(*serviceDiscovery)
+	defer cli.Close()
 	cli.urls.Store([]string{"tmp://test.url:5255"})
 	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()} //nolint:staticcheck
 	err := cli.updateMember()
@@ -464,4 +461,270 @@ func TestExecWithBackoffLimitsCalls(t *testing.T) {
 		re.Error(err)
 		re.Equal(max(maxRetryTimes, 1), calls)
 	}
+}
+
+type memberProbeTestServer struct {
+	pdpb.UnimplementedPDServer
+	getMembers func(context.Context) (*pdpb.GetMembersResponse, error)
+}
+
+func (s *memberProbeTestServer) GetMembers(ctx context.Context, _ *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	return s.getMembers(ctx)
+}
+
+func startMemberProbeTestServer(t *testing.T, getMembers func(context.Context) (*pdpb.GetMembersResponse, error)) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	pdpb.RegisterPDServer(server, &memberProbeTestServer{getMembers: getMembers})
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		server.Stop()
+		err := <-done
+		require.True(t, err == nil || errors.Is(err, grpc.ErrServerStopped), "%v", err)
+	})
+	return "http://" + listener.Addr().String()
+}
+
+func startMemberProbeTestLeader(t *testing.T) string {
+	t.Helper()
+	var response atomic.Pointer[pdpb.GetMembersResponse]
+	url := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
+		return response.Load(), nil
+	})
+	leader := &pdpb.Member{MemberId: 1, ClientUrls: []string{url}}
+	response.Store(&pdpb.GetMembersResponse{
+		Header: &pdpb.ResponseHeader{ClusterId: 42}, Members: []*pdpb.Member{leader}, Leader: leader,
+	})
+	return url
+}
+
+func newMemberProbeTestDiscovery(t *testing.T, urls []string, leaderURL string) *serviceDiscovery {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	cli := NewDefaultServiceDiscovery(ctx, cancel, urls, nil).(*serviceDiscovery)
+	cli.clusterID = 42
+	if leaderURL != "" {
+		cli.leader.Store(newPDServiceClient(leaderURL, leaderURL, nil, true))
+	}
+	t.Cleanup(func() {
+		cancel()
+		cli.Close()
+	})
+	return cli
+}
+
+func TestUpdateMemberEndpointSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		delay         time.Duration
+		timeout       bool
+		unavailable   bool
+		foreign       bool
+		missingLeader bool
+		probes        int32
+	}{
+		{name: "healthy", probes: 1},
+		{name: "slow-healthy", delay: 300 * time.Millisecond, probes: 1},
+		{name: "timeout", timeout: true, probes: 2},
+		{name: "unavailable", unavailable: true, probes: 2},
+		{name: "foreign-cluster", foreign: true, probes: 2},
+		{name: "missing-leader", missingLeader: true, probes: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			leaderURL := startMemberProbeTestLeader(t)
+			first := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+				if tc.timeout {
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
+				if tc.delay > 0 {
+					timer := time.NewTimer(tc.delay)
+					defer timer.Stop()
+					select {
+					case <-timer.C:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				}
+				if tc.unavailable {
+					return nil, status.Error(codes.Unavailable, "unavailable")
+				}
+				leader := &pdpb.Member{MemberId: 1, ClientUrls: []string{leaderURL}}
+				response := &pdpb.GetMembersResponse{
+					Header: &pdpb.ResponseHeader{ClusterId: 42}, Members: []*pdpb.Member{leader}, Leader: leader,
+				}
+				if tc.foreign {
+					response.Header.ClusterId = 99
+				} else if tc.missingLeader {
+					response.Leader = nil
+				}
+				return response, nil
+			})
+			unused := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
+				return nil, status.Error(codes.Unavailable, "unavailable")
+			})
+			cli := newMemberProbeTestDiscovery(t, []string{first, leaderURL, unused}, first)
+			var probes atomic.Int32
+			cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithUnaryInterceptor(func(
+				ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption,
+			) error {
+				probes.Add(1)
+				return invoke(ctx, method, req, reply, cc, opts...)
+			})}
+			start := time.Now()
+			require.NoError(t, cli.updateMember())
+			if tc.timeout {
+				require.GreaterOrEqual(t, time.Since(start), UpdateMemberTimeout)
+			}
+			require.Equal(t, leaderURL, cli.getLeaderURL())
+			cli.Close()
+			require.Equal(t, tc.probes, probes.Load(), "stop probing after the first valid response")
+		})
+	}
+}
+
+func TestUpdateMemberConcurrentRefreshAndClose(t *testing.T) {
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	var startOnce, cancelOnce sync.Once
+	blocked := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+		startOnce.Do(func() { close(started) })
+		<-ctx.Done()
+		cancelOnce.Do(func() { close(canceled) })
+		return nil, ctx.Err()
+	})
+	cli := newMemberProbeTestDiscovery(t, []string{blocked}, blocked)
+	finished := make(chan error, 2)
+	for range cap(finished) {
+		go func() { finished <- cli.updateMember() }()
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("the slow shared RPC was not reached")
+	}
+	cli.Close()
+	require.NoError(t, cli.ctx.Err(), "closing discovery must not cancel its owner's context")
+	for range cap(finished) {
+		select {
+		case err := <-finished:
+			require.Error(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("concurrent refresh did not exit after Close")
+		}
+	}
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel its outstanding membership probes")
+	}
+}
+
+func TestUpdateMemberSharedRPCSurvivesWaiterTimeout(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startOnce sync.Once
+	var calls atomic.Int32
+	var response atomic.Pointer[pdpb.GetMembersResponse]
+	leaderURL := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+		calls.Add(1)
+		startOnce.Do(func() { close(started) })
+		select {
+		case <-release:
+			return response.Load(), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+	leader := &pdpb.Member{MemberId: 1, ClientUrls: []string{leaderURL}}
+	response.Store(&pdpb.GetMembersResponse{
+		Header: &pdpb.ResponseHeader{ClusterId: 42}, Members: []*pdpb.Member{leader}, Leader: leader,
+	})
+	cli := newMemberProbeTestDiscovery(t, []string{leaderURL}, leaderURL)
+	finished := make(chan error, 1)
+	go func() { finished <- cli.updateMember() }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("the shared RPC was not reached")
+	}
+	// This waiter joins the blocked refresh, then times out without canceling
+	// the shared RPC owned by the refresh.
+	_, err := cli.getMembers(t.Context(), leaderURL, 50*time.Millisecond)
+	require.Error(t, err)
+	close(release)
+	select {
+	case err := <-finished:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("the refresh did not finish after releasing its shared RPC")
+	}
+	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestUpdateMemberCloseCancelsBlockingDial(t *testing.T) {
+	cli := newMemberProbeTestDiscovery(t, []string{"http://127.0.0.1:1"}, "")
+	started := make(chan struct{})
+	var once sync.Once
+	cli.option.GRPCDialOptions = []grpc.DialOption{
+		grpc.WithBlock(), //nolint:staticcheck
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			once.Do(func() { close(started) })
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}),
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- cli.updateMember() }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("blocking dial was not reached")
+	}
+	closed := make(chan struct{})
+	go func() {
+		cli.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(UpdateMemberTimeout / 4):
+		t.Fatal("Close waited for the connection timeout")
+	}
+	select {
+	case err := <-finished:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("membership refresh did not exit after Close")
+	}
+	require.NoError(t, cli.ctx.Err())
+}
+
+func TestUpdateMemberCancellationStopsEndpointProgression(t *testing.T) {
+	started := make(chan struct{})
+	blocked := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	var unusedCalls atomic.Int32
+	unused := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
+		unusedCalls.Add(1)
+		return nil, status.Error(codes.Unavailable, "unavailable")
+	})
+	cli := newMemberProbeTestDiscovery(t, []string{blocked, unused}, "")
+	finished := make(chan error, 1)
+	go func() { finished <- cli.updateMember() }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("membership refresh did not start")
+	}
+	cli.cancel()
+	require.Error(t, <-finished)
+	cli.Close()
+	require.Zero(t, unusedCalls.Load())
 }

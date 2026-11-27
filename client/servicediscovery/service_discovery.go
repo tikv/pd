@@ -454,6 +454,10 @@ type serviceDiscovery struct {
 	option *opt.Option
 
 	flight singleflight.Group
+
+	memberProbeMu     sync.RWMutex
+	memberProbeCtx    context.Context
+	memberProbeCancel context.CancelFunc
 }
 
 // NewDefaultServiceDiscovery returns a new default service discovery-based client.
@@ -474,6 +478,7 @@ func NewServiceDiscovery(
 	keyspaceID uint32,
 	urls []string, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
+	memberProbeCtx, memberProbeCancel := context.WithCancel(ctx)
 	pdsd := &serviceDiscovery{
 		checkMembershipCh:    make(chan struct{}, 1),
 		ctx:                  ctx,
@@ -486,6 +491,8 @@ func NewServiceDiscovery(
 		tlsCfg:               tlsCfg,
 		option:               option,
 		flight:               singleflight.Group{},
+		memberProbeCtx:       memberProbeCtx,
+		memberProbeCancel:    memberProbeCancel,
 	}
 	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
 	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
@@ -652,6 +659,10 @@ func (c *serviceDiscovery) Close() {
 	}
 	c.closeOnce.Do(func() {
 		log.Info("[pd] close service discovery client")
+		// Cancel before taking the write lock so blocked probes can release their read locks.
+		c.memberProbeCancel()
+		c.memberProbeMu.Lock()
+		defer c.memberProbeMu.Unlock()
 		c.clientConns.Range(func(key, cc any) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
 				log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
@@ -890,8 +901,10 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 }
 
 func (c *serviceDiscovery) updateMember() error {
+	// A slow healthy endpoint must not fan out membership RPCs during client bursts.
+	// Advance only after a response fails validation, an RPC fails, or its timeout expires.
 	for _, url := range c.GetServiceURLs() {
-		members, err := c.getMembers(c.ctx, url, UpdateMemberTimeout)
+		members, err := c.probeMember(url)
 		// Check the cluster ID.
 		updatedClusterID := members.GetHeader().GetClusterId()
 		if err == nil && updatedClusterID != c.clusterID {
@@ -920,6 +933,18 @@ func (c *serviceDiscovery) updateMember() error {
 		return c.updateServiceClient(members.GetMembers(), members.GetLeader())
 	}
 	return errs.ErrClientGetMember.FastGenByArgs()
+}
+
+func (c *serviceDiscovery) probeMember(url string) (*pdpb.GetMembersResponse, error) {
+	c.memberProbeMu.RLock()
+	defer c.memberProbeMu.RUnlock()
+	if c.memberProbeCtx.Err() != nil {
+		return nil, context.Canceled
+	}
+
+	// Close cancels this discovery's calls without canceling its owner's context.
+	// Each call keeps its own timeout when sharing a GetMembers RPC with another waiter.
+	return c.getMembers(c.memberProbeCtx, url, UpdateMemberTimeout)
 }
 
 func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {
@@ -961,7 +986,7 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cc, err := c.GetOrCreateGRPCConn(url)
+	cc, err := grpcutil.GetOrCreateGRPCConn(ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -1110,7 +1135,12 @@ func (c *serviceDiscovery) updateServiceClient(members []*pdpb.Member, leader *p
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *serviceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
+	return c.GetOrCreateGRPCConnWithContext(c.ctx, url)
+}
+
+// GetOrCreateGRPCConnWithContext bounds connection setup by the caller's context.
+func (c *serviceDiscovery) GetOrCreateGRPCConnWithContext(ctx context.Context, url string) (*grpc.ClientConn, error) {
+	return grpcutil.GetOrCreateGRPCConn(ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 }
 
 // RemoveClientConn removes and closes the grpc client connection of the given URL.

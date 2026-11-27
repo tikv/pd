@@ -26,6 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -37,6 +38,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 )
 
 // TSO Stream Builder Factory
@@ -208,6 +210,8 @@ type batchedRequests struct {
 // type.
 type tsoStream struct {
 	serverURL string
+	// leaderURL is the logical target, which differs from serverURL when forwarding.
+	leaderURL string
 	// The internal gRPC stream.
 	//   - `pdpb.PD_TsoClient` for a leader/follower in the PD cluster.
 	//   - `tsopb.TSO_TsoClient` for a primary/secondary in the TSO cluster.
@@ -248,11 +252,16 @@ const (
 
 func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
 	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))
+	leaderURL := grpcutil.GetForwardedHost(ctx, metadata.FromOutgoingContext)
+	if leaderURL == "" {
+		leaderURL = serverURL
+	}
 	// To make error handling in `tsoDispatcher` work, the internal `cancel` and external `cancel` is better to be
 	// distinguished.
 	ctx, cancel := context.WithCancel(ctx)
 	s := &tsoStream{
 		serverURL: serverURL,
+		leaderURL: leaderURL,
 		stream:    stream,
 		streamID:  streamID,
 
@@ -269,6 +278,11 @@ func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAda
 
 func (s *tsoStream) getServerURL() string {
 	return s.serverURL
+}
+
+func (s *tsoStream) hasNewLeader(leaderURL string) bool {
+	// gRPC targets omit the scheme carried by discovery and forwarding metadata.
+	return leaderURL != "" && tlsutil.TrimHTTPPrefix(leaderURL) != tlsutil.TrimHTTPPrefix(s.leaderURL)
 }
 
 // processRequests starts an RPC to get a batch of timestamps without waiting for the result. When the result is ready,
