@@ -128,6 +128,8 @@ var (
 	fullClusterWaitTimeout  = 300 * time.Second
 	clusterPollPeriod       = time.Second
 	clusterStopGraceTimeout = 3 * time.Second
+	clusterStopKillTimeout  = time.Second
+	clusterStopWaitTimeout  = time.Second
 	tiupProbeTimeout        = 30 * time.Second
 	tiupInstallTimeout      = 3 * time.Minute
 	killProcess             = syscall.Kill
@@ -170,6 +172,8 @@ type cluster struct {
 	pgid              int
 	launcherStartTime uint64
 	cmd               *exec.Cmd
+	cmdDone           chan struct{}
+	trackedProcs      map[int]procInfo
 }
 
 func newCluster(re *require.Assertions, tag, datadir, mode string, ins ...map[string]int) *cluster {
@@ -210,14 +214,20 @@ func (c *cluster) start() {
 
 func (c *cluster) restart() {
 	log.Info("start to restart", zap.String("tag", c.tag))
-	c.stop()
+	c.re.NoError(c.stopWithErr())
 	c.start()
 	log.Info("restart success")
 }
 
 func (c *cluster) stop() {
-	if c.pgid == 0 && c.cmd == nil {
-		return
+	if err := c.stopWithErr(); err != nil {
+		log.Warn("cluster stop did not complete cleanly", zap.String("tag", c.tag), zap.Error(err))
+	}
+}
+
+func (c *cluster) stopWithErr() error {
+	if c.pgid == 0 && c.cmd == nil && len(c.trackedProcs) == 0 {
+		return nil
 	}
 
 	pgid := c.pgid
@@ -229,7 +239,10 @@ func (c *cluster) stop() {
 	if err != nil {
 		log.Warn("failed to collect pids", zap.String("tag", c.tag), zap.Error(err))
 	}
-	tracked := make(map[int]procInfo)
+	tracked := make(map[int]procInfo, len(c.trackedProcs))
+	for pid, info := range c.trackedProcs {
+		tracked[pid] = info
+	}
 	owned := mergeOwnedProcs(tracked, procs, selectOwnedProcs(procs, c.datadir, pgid, launcherStartTime, selfPID))
 	hasGroupMembers := hasLivePGIDMembers(procs, pgid, launcherStartTime, selfPID)
 
@@ -274,36 +287,72 @@ func (c *cluster) stop() {
 	for _, p := range survivors {
 		_ = killProcess(p.pid, syscall.SIGKILL)
 	}
-	if len(survivors) > 0 || (pgid > 0 && hasGroupMembers) {
-		killDeadline := time.Now().Add(time.Second)
-		for time.Now().Before(killDeadline) {
+	procsExited := err == nil && len(survivors) == 0 && (pgid <= 0 || !hasGroupMembers)
+	var remainingProcs []procInfo
+	var remainingGroup bool
+	var lastPostErr error
+	if !procsExited {
+		killDeadline := time.Now().Add(clusterStopKillTimeout)
+		for {
 			postProcs, postErr := listProcessesFn()
-			if postErr == nil &&
-				!hasLiveMatchingProcs(postProcs, survivors) &&
-				!hasLivePGIDMembers(postProcs, pgid, launcherStartTime, selfPID) {
+			lastPostErr = postErr
+			if postErr == nil {
+				remainingProcs = mergeOwnedProcs(tracked, postProcs, selectOwnedProcs(postProcs, c.datadir, pgid, launcherStartTime, selfPID))
+				remainingGroup = hasLivePGIDMembers(postProcs, pgid, launcherStartTime, selfPID)
+				if len(remainingProcs) == 0 && !remainingGroup {
+					procsExited = true
+					break
+				}
+			}
+			if !time.Now().Before(killDeadline) {
 				break
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
+	if !procsExited {
+		// Keep pgid, launcherStartTime, cmd, and live trackedProcs intact so a subsequent
+		// stop() retries cleanup and POSIX keeps pgid reserved against kernel reuse.
+		if lastPostErr == nil {
+			nextTracked := make(map[int]procInfo, len(remainingProcs))
+			for _, p := range remainingProcs {
+				nextTracked[p.pid] = p
+			}
+			c.trackedProcs = nextTracked
+		} else {
+			c.trackedProcs = tracked
+		}
+		return fmt.Errorf(
+			"cluster %s still has owned processes after SIGKILL timeout (survivors=%d, livePGID=%t, scanErr=%v)",
+			c.tag, len(remainingProcs), remainingGroup, lastPostErr,
+		)
+	}
 
 	// Reap the launcher only after all PGID and per-PID signals and exit waits complete,
 	// keeping its PID/PGID reserved against kernel reuse throughout stop().
 	if cmd != nil {
-		done := make(chan struct{})
-		go func() {
-			_ = cmd.Wait()
-			close(done)
-		}()
+		if c.cmdDone == nil {
+			done := make(chan struct{})
+			go func() {
+				_ = cmd.Wait()
+				close(done)
+			}()
+			c.cmdDone = done
+		}
 		select {
-		case <-done:
-		case <-time.After(time.Second):
+		case <-c.cmdDone:
+		case <-time.After(clusterStopWaitTimeout):
+			c.trackedProcs = nil
+			return fmt.Errorf("cluster %s launcher pid %d was not reaped within %s", c.tag, pgid, clusterStopWaitTimeout)
 		}
 	}
 	c.pgid = 0
 	c.launcherStartTime = 0
 	c.cmd = nil
+	c.cmdDone = nil
+	c.trackedProcs = nil
 	log.Info("cluster stopped", zap.String("tag", c.tag))
+	return nil
 }
 
 func (c *cluster) pdEndpoints() []string {
@@ -314,6 +363,9 @@ func (c *cluster) pdEndpoints() []string {
 
 func (c *cluster) deploy() {
 	re := c.re
+	re.Zero(c.pgid, "cannot start cluster while previous instance is still tracked")
+	re.Nil(c.cmd, "cannot start cluster while previous launcher is still un-reaped")
+	re.Empty(c.trackedProcs, "cannot start cluster while previous owned processes remain tracked")
 	repoRoot := realClusterRepoRoot
 	if repoRoot == "" {
 		var err error
@@ -370,6 +422,8 @@ func (c *cluster) deploy() {
 	// cannot be reused by an unrelated process or process group before cleanup finishes.
 	c.pgid = cmd.Process.Pid
 	c.cmd = cmd
+	c.cmdDone = nil
+	c.trackedProcs = nil
 	c.launcherStartTime = readProcStartTimeFn(cmd.Process.Pid)
 }
 
