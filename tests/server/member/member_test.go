@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
@@ -38,8 +39,8 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -378,31 +379,43 @@ func TestResignLeaderWithRetry(t *testing.T) {
 }
 
 func TestCampaignLeaderFrequently(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
-	cluster, err := tests.NewTestCluster(ctx, 3)
-	defer cluster.Destroy()
-	re.NoError(err)
+	for _, tc := range []struct {
+		name    string
+		members int
+	}{
+		{name: "multiple-voters", members: 3},
+		{name: "single-voter-with-learner", members: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cluster, err := tests.NewTestCluster(t.Context(), tc.members)
+			re.NoError(err)
+			t.Cleanup(cluster.Destroy)
+			re.NoError(cluster.RunInitialServers())
+			// The first campaign succeeds locally.
+			leader := cluster.WaitLeader()
+			re.NotEmpty(leader)
+			if tc.members == 1 {
+				startEtcdLearner(t, cluster.GetLeaderServer())
+			}
 
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	// the 1st time campaign leader.
-	cluster.WaitLeader()
-	leader := cluster.GetLeader()
-	re.NotEmpty(cluster.GetLeader())
-
-	// need to prevent 3 times(including the above 1st time) campaign leader in 5 min.
-	for range 2 {
-		cluster.GetLeaderServer().ResetPDLeader()
-		re.NotEmpty(cluster.WaitLeader())
-		re.Equal(leader, cluster.GetLeader())
+			// Three campaigns within five minutes must not transfer leadership.
+			for range 2 {
+				cluster.GetLeaderServer().ResetPDLeader()
+				re.Equal(leader, cluster.WaitLeader())
+			}
+			// The fourth campaign hands off only when another voter exists.
+			cluster.GetLeaderServer().ResetPDLeader()
+			nextLeader := cluster.WaitLeader()
+			re.NotEmpty(nextLeader)
+			if tc.members == 1 {
+				re.Equal(leader, nextLeader)
+				re.Equal(1, cluster.GetLeaderServer().GetServer().GetMember().GetLeadership().GetCampaignTimesNum())
+			} else {
+				re.NotEqual(leader, nextLeader)
+			}
+		})
 	}
-	// check for the 4th time.
-	cluster.GetLeaderServer().ResetPDLeader()
-	re.NotEmpty(cluster.WaitLeader())
-	// PD leader should be different from before because etcd leader changed.
-	re.NotEmpty(cluster.GetLeader())
-	re.NotEqual(leader, cluster.GetLeader())
 }
 
 func TestCampaignHistoryResetsAfterEtcdTerm(t *testing.T) {
@@ -508,15 +521,18 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 			reached, release := make(chan struct{}), make(chan struct{})
 			resume := sync.OnceFunc(func() { close(release) })
 			var attempts atomic.Int32
+			leaseRenewed := make(chan bool, 1)
 			re.NoError(failpoint.EnableCall(reloadHook, func(id uint64) {
 				if id == oldLeader.GetServerID() {
-					if attempts.Add(1) == 1 {
+					attempt := attempts.Add(1)
+					if attempt == 1 {
 						close(reached)
 						<-release
-					} else if tc.expireLease && tc.members == 1 {
+					} else if attempt == 2 && tc.expireLease && tc.members == 1 {
 						// Recovery must renew its replacement lease during initialization.
 						time.Sleep(time.Duration(svr.GetConfig().LeaderLease+1) * time.Second)
-						re.False(svr.GetMember().GetLeadership().GetLease().IsExpired())
+						lease := svr.GetMember().GetLeadership().GetLease()
+						leaseRenewed <- lease != nil && !lease.IsExpired()
 					}
 				}
 			}))
@@ -566,14 +582,16 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 					t.Fatal("initialization did not reach metadata commit")
 				}
 			}
+			renewStopped := make(chan error, 1)
 			if tc.expireLease {
 				re.NoError(failpoint.Enable(renewHook, fmt.Sprintf(`return("leader election@%s")`, oldLeaderName)))
 				t.Cleanup(func() { re.NoError(failpoint.Disable(renewHook)) })
 				const withdrawnHook = "github.com/tikv/pd/pkg/member/afterMemberLeaderWithdrawn"
+				var stopRenew sync.Once
 				re.NoError(failpoint.EnableCall(withdrawnHook, func(id uint64) {
 					if id == oldLeader.GetServerID() {
 						// The old lease is fenced; stop injecting before a new Keep starts.
-						re.NoError(failpoint.Disable(renewHook))
+						stopRenew.Do(func() { renewStopped <- failpoint.Disable(renewHook) })
 					}
 				}))
 				t.Cleanup(func() { re.NoError(failpoint.Disable(withdrawnHook)) })
@@ -595,6 +613,22 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 			}
 			re.False(svr.IsServing(), "an initializing member must not serve PD requests")
 			resumeInitialization()
+			if tc.expireLease {
+				select {
+				case err := <-renewStopped:
+					re.NoError(err)
+				case <-time.After(30 * time.Second):
+					t.Fatal("lease withdrawal did not stop renewal failure injection")
+				}
+			}
+			if tc.expireLease && tc.members == 1 {
+				select {
+				case renewed := <-leaseRenewed:
+					re.True(renewed, "replacement lease must renew during initialization")
+				case <-time.After(30 * time.Second):
+					t.Fatal("replacement initialization did not report lease renewal")
+				}
+			}
 
 			// Observe the first recovered leader, so the existing transfer after
 			// several failed campaigns cannot hide a retry on the failed member.
@@ -622,39 +656,43 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 	}
 }
 
-func TestResignEtcdLeaderSkipsUnavailableMembers(t *testing.T) {
+func startEtcdLearner(t *testing.T, leader *tests.TestServer) {
+	t.Helper()
 	re := require.New(t)
-	cluster, err := tests.NewTestCluster(t.Context(), 3)
-	re.NoError(err)
-	t.Cleanup(cluster.Destroy)
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
-	leader := cluster.GetLeaderServer()
-	member := leader.GetServer().GetMember()
-	var offline, healthy *tests.TestServer
-	for _, server := range cluster.GetServers() {
-		if server == leader {
-			continue
-		}
-		if offline == nil {
-			offline = server
-		} else {
-			healthy = server
-		}
-	}
-	learnerURL := tempurl.Alloc()
+	cfg := etcdutil.NewTestEtcdConfig()
+	cfg.Dir = t.TempDir()
+	cfg.ClusterState = embed.ClusterStateFlagExisting
+	leaderCfg := leader.GetServer().GetMember().Etcd().Config()
+	cfg.InitialClusterToken = leaderCfg.InitialClusterToken
+	cfg.TickMs, cfg.ElectionMs = leaderCfg.TickMs, leaderCfg.ElectionMs
+	var added *clientv3.MemberAddResponse
 	testutil.Eventually(re, func() bool {
-		_, err := leader.GetEtcdClient().MemberAddAsLearner(t.Context(), []string{learnerURL})
+		var err error
+		added, err = leader.GetEtcdClient().MemberAddAsLearner(t.Context(), []string{cfg.AdvertisePeerUrls[0].String()})
 		return err == nil
 	})
-	re.NoError(offline.Stop())
-	var selected atomic.Uint64
-	const transferHook = "github.com/tikv/pd/pkg/member/beforeResignEtcdLeader"
-	re.NoError(failpoint.EnableCall(transferHook, func(_, target uint64) { selected.Store(target) }))
-	t.Cleanup(func() { re.NoError(failpoint.Disable(transferHook)) })
-	re.NoError(member.ResignEtcdLeader(t.Context(), leader.GetConfig().Name, ""))
-	re.Equal(healthy.GetServerID(), selected.Load())
-	testutil.Eventually(re, healthy.IsLeader)
+	var members []string
+	for _, member := range added.Members {
+		name := member.Name
+		if member.ID == added.Member.ID {
+			name = cfg.Name
+		}
+		for _, peerURL := range member.PeerURLs {
+			members = append(members, name+"="+peerURL)
+		}
+	}
+	cfg.InitialCluster = strings.Join(members, ",")
+	learner, err := embed.StartEtcd(cfg)
+	re.NoError(err)
+	t.Cleanup(learner.Close)
+	select {
+	case <-learner.Server.ReadyNotify():
+	case <-time.After(30 * time.Second):
+		t.Fatal("learner did not become ready")
+	}
+	re.True(learner.Server.IsLearner())
+	index := leader.GetServer().GetMember().Etcd().Server.CommittedIndex()
+	testutil.Eventually(re, func() bool { return learner.Server.AppliedIndex() >= index })
 }
 
 func TestResignEtcdLeaderDoesNotTransferSuccessor(t *testing.T) {

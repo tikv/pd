@@ -17,7 +17,6 @@ package member
 import (
 	"context"
 	"math/rand/v2"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,13 +25,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.etcd.io/etcd/client/pkg/v3/types"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/raft/v3/raftpb"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver"
-	"go.etcd.io/etcd/server/v3/etcdserver/api/rafthttp"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -238,11 +235,9 @@ func (m *Member) GetLastLeaderUpdatedTime() time.Time {
 // and make it become a PD leader.
 // leader should be changed when campaign leader frequently.
 func (m *Member) Campaign(ctx context.Context, leaseTimeout int64) error {
-	if m.etcd != nil {
-		if term := m.etcd.Server.Term(); term != m.campaignTerm {
-			m.leadership.ResetCampaignTimes()
-			m.campaignTerm = term
-		}
+	if term := m.etcd.Server.Term(); term != m.campaignTerm {
+		m.leadership.ResetCampaignTimes()
+		m.campaignTerm = term
 	}
 	m.leadership.AddCampaignTimes()
 	failpoint.Inject("skipCampaignLeaderCheck", func() {
@@ -451,45 +446,24 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	var etcdLeaderIDs []uint64
 	members := m.etcd.Server.Cluster().Members()
 
-	// Do nothing when I am the only member of cluster.
-	if len(members) == 1 && uint64(members[0].ID) == m.id && nextEtcdLeader == "" {
-		return nil
-	}
-
-	var peerClient *http.Client
-	probeCtx := ctx
-	if nextEtcdLeader == "" {
-		probeTimeout := time.Duration(m.etcd.Config().ElectionMs) * time.Millisecond
-		peerTransport, err := transport.NewTransport(m.etcd.Config().PeerTLSInfo, probeTimeout)
-		if err != nil {
-			return err
-		}
-		defer peerTransport.CloseIdleConnections()
-		var cancel context.CancelFunc
-		probeCtx, cancel = context.WithTimeout(ctx, probeTimeout)
-		defer cancel()
-		peerClient = &http.Client{Transport: peerTransport}
-	}
-	reachable := make([]bool, len(members))
-	var probes sync.WaitGroup
-	for i, member := range members {
-		if member.IsLearner && nextEtcdLeader == "" {
-			continue
-		}
-		if (nextEtcdLeader == "" && uint64(member.ID) != m.id) || (nextEtcdLeader != "" && member.Name == nextEtcdLeader) {
-			if nextEtcdLeader != "" {
-				reachable[i] = true
+	voters := 0
+	for _, member := range members {
+		if nextEtcdLeader == "" {
+			if member.IsLearner {
 				continue
 			}
-			// Probe the Raft peer endpoint: client URLs may use a separate network.
-			probes.Go(func() { reachable[i] = isEtcdPeerReachable(probeCtx, peerClient, member.PeerURLs) })
+			voters++
+			if uint64(member.ID) == m.id {
+				continue
+			}
+		} else if member.Name != nextEtcdLeader {
+			continue
 		}
+		etcdLeaderIDs = append(etcdLeaderIDs, uint64(member.ID))
 	}
-	probes.Wait()
-	for i, member := range members {
-		if reachable[i] {
-			etcdLeaderIDs = append(etcdLeaderIDs, uint64(member.ID))
-		}
+	// A learner cannot take over from the only voter.
+	if voters == 1 && len(etcdLeaderIDs) == 0 && nextEtcdLeader == "" {
+		return nil
 	}
 	if len(etcdLeaderIDs) == 0 {
 		return errors.New("no valid pd to transfer etcd leader")
@@ -515,31 +489,6 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 		return errs.ErrEtcdMoveLeader.Wrap(err).GenWithStackByCause()
 	}
 	return waitForEtcdLeader(moveCtx, m.etcd.Server, term, nextEtcdLeaderID, time.Duration(m.etcd.Config().TickMs)*time.Millisecond)
-}
-
-func isEtcdPeerReachable(ctx context.Context, client *http.Client, urls []string) bool {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var reachable atomic.Bool
-	var probes sync.WaitGroup
-	for _, url := range urls {
-		probes.Go(func() {
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+rafthttp.ProbingPrefix, http.NoBody)
-			if err != nil {
-				return
-			}
-			resp, err := client.Do(req)
-			if resp != nil {
-				resp.Body.Close()
-			}
-			if err == nil && resp.StatusCode == http.StatusOK {
-				reachable.Store(true)
-				cancel()
-			}
-		})
-	}
-	probes.Wait()
-	return reachable.Load()
 }
 
 func waitForEtcdLeader(ctx context.Context, status etcdserver.RaftStatusGetter, term, target uint64, interval time.Duration) error {
