@@ -266,6 +266,35 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 	re.NoError(err)
 }
 
+func TestGetAllStoresRetryOnLeaderChange(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	oldLeader := cluster.WaitLeader()
+	re.NotEmpty(oldLeader)
+
+	cli := setupCli(ctx, re, endpoints, opt.WithCustomTimeoutOption(5*time.Second))
+	defer cli.Close()
+	waitLeader(re, cli.GetServiceDiscovery(), cluster.GetServer(oldLeader))
+
+	_, err = cli.GetAllStores(ctx)
+	re.NoError(err)
+
+	// Trigger a leader change without manually refreshing the client's service discovery,
+	// then immediately call GetAllStores so it must retry until the new leader is discovered.
+	re.NoError(cluster.GetServer(oldLeader).ResignLeaderWithRetry())
+	newLeader := cluster.WaitLeaderChange(oldLeader)
+	re.NotEmpty(newLeader)
+
+	_, err = cli.GetAllStores(ctx)
+	re.NoError(err)
+	waitLeader(re, cli.GetServiceDiscovery(), cluster.GetServer(newLeader))
+}
+
 func TestTSOFollowerProxy(t *testing.T) {
 	as := assert.New(t)
 	re := require.New(t)

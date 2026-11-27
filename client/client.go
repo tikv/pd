@@ -26,6 +26,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -1104,6 +1105,13 @@ func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {
 	return store, nil
 }
 
+const (
+	// getAllStoresRetryInitialInterval is the initial backoff interval for retrying GetAllStores.
+	getAllStoresRetryInitialInterval = 50 * time.Millisecond
+	// getAllStoresRetryMaxInterval is the maximum backoff interval for retrying GetAllStores.
+	getAllStoresRetryMaxInterval = 200 * time.Millisecond
+)
+
 // GetAllStores implements the RPCClient interface.
 func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) ([]*metapb.Store, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
@@ -1126,24 +1134,107 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 	}
 
 	var (
-		resp *pdpb.GetAllStoresResponse
-		err  error
+		resp    *pdpb.GetAllStoresResponse
+		err     error
+		backoff = getAllStoresRetryInitialInterval
+		timer   *time.Timer
 	)
-	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{}, option)
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 
+	for {
+		resp, err = c.getAllStoresOnce(ctx, req, option)
+		if err == nil && resp.GetHeader().GetError() == nil {
+			return resp.GetStores(), nil
+		}
+
+		retryErr := err
+		if retryErr == nil {
+			retryErr = errors.New(resp.GetHeader().GetError().String())
+		}
+		if !isRetryableGetAllStoresError(retryErr) {
+			break
+		}
+		if ctx.Err() != nil {
+			if err == nil {
+				// respForErr only triggers member refresh on gRPC errors.
+				c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
+			}
+			err = status.FromContextError(ctx.Err()).Err()
+			resp = nil
+			break
+		}
+
+		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
+		log.Debug("[pd] get all stores failed, retrying", zap.Error(retryErr))
+
+		if timer == nil {
+			timer = time.NewTimer(backoff)
+		} else {
+			timer.Reset(backoff)
+		}
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+		if ctx.Err() != nil {
+			err = status.FromContextError(ctx.Err()).Err()
+			resp = nil
+			break
+		}
+		backoff = min(backoff*2, getAllStoresRetryMaxInterval)
+	}
+
+	return nil, c.respForErr(metrics.CmdFailedDurationGetAllStores, start, err, resp.GetHeader())
+}
+
+func (c *client) getAllStoresOnce(
+	ctx context.Context,
+	req *pdpb.GetAllStoresRequest,
+	option *opt.GetStoreOp,
+) (*pdpb.GetAllStoresResponse, error) {
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{}, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
+	conn := serviceClient.GetClientConn()
+	if conn == nil {
+		return nil, errs.ErrClientGetProtoClient
+	}
+	var (
+		resp *pdpb.GetAllStoresResponse
+		err  error
+	)
 	if isRouterServiceClient {
-		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetAllStores(cctx, req)
+		resp, err = routerpb.NewRouterClient(conn).GetAllStores(cctx, req)
 	} else {
-		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetAllStores(cctx, req)
+		resp, err = pdpb.NewPDClient(conn).GetAllStores(cctx, req)
 	}
+	if ctx.Err() == nil && serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		leaderClient := c.inner.serviceDiscovery.GetServiceClient()
+		if leaderClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		leaderConn := leaderClient.GetClientConn()
+		if leaderConn == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = pdpb.NewPDClient(leaderConn).GetAllStores(leaderClient.BuildGRPCTargetContext(ctx, true), req)
+	}
+	return resp, err
+}
 
-	if err = c.respForErr(metrics.CmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
-		return nil, err
+func isRetryableGetAllStoresError(err error) bool {
+	if err == nil {
+		return false
 	}
-	return resp.GetStores(), nil
+	return errs.ErrClientGetProtoClient.Equal(err) ||
+		errs.IsLeaderChange(err) ||
+		errs.IsCalleeMismatch(err) ||
+		errs.IsNetworkError(status.Code(err))
 }
 
 // UpdateGCSafePoint implements the RPCClient interface.
