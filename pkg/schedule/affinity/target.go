@@ -171,6 +171,7 @@ func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarge
 			if err := m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs); err != nil {
 				return nil
 			}
+			result.BalancePolicy = group.BalancePolicy
 			if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
 				return err
 			}

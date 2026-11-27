@@ -145,7 +145,11 @@ func TestTargetPolicyMismatchClassification(t *testing.T) {
 			reply, err := test.UpdateAffinityGroupTargets(t.Context(), []GroupTarget{target})
 			test.NoError(err)
 			test.Empty(reply.WrittenGroupIDs)
-			test.Equal(tc.wantMismatch, slices.Equal(reply.PolicyMismatchGroupIDs, []string{"g"}))
+			if tc.wantMismatch {
+				test.Equal([]string{"g"}, reply.PolicyMismatchGroupIDs)
+			} else {
+				test.Empty(reply.PolicyMismatchGroupIDs)
+			}
 			test.Zero(test.stored("g").LeaderStoreID)
 			test.Equal(tc.policy, test.GetAffinityGroupState("g").BalancePolicy)
 		})
@@ -153,6 +157,24 @@ func TestTargetPolicyMismatchClassification(t *testing.T) {
 }
 
 func TestClassicFirstWinKeepsCommittedPolicy(t *testing.T) {
+	t.Run("explicit auto", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			test := newTargetTest(t, "g")
+			test.storage = &lostReplyStorage{AffinityStorage: test.store, lose: true}
+			_, err := test.UpdateAffinityGroupPolicy("g", BalancePolicyAuto)
+			test.Error(err)
+			test.storage = test.store
+			before := test.GetAffinityGroupState("g")
+			test.Empty(before.BalancePolicy)
+			test.Equal(BalancePolicyAuto, test.stored("g").BalancePolicy)
+			test.ObserveAvailableRegion(targetRegion(1, 2), before)
+			state := test.GetAffinityGroupState("g")
+			test.Equal(BalancePolicyAuto, state.BalancePolicy)
+			test.Equal([]uint64{1, 2}, state.VoterStoreIDs)
+			test.Equal(state.Group, *test.stored("g"))
+		})
+	})
+
 	for _, hasTarget := range []bool{false, true} {
 		t.Run(fmt.Sprintf("has-target-%t", hasTarget), func(t *testing.T) {
 			test := newTargetTest(t, "g")
@@ -331,11 +353,20 @@ func TestAdminTargetUpdates(t *testing.T) {
 			test.observe("g", 2, 1, 3)
 			old := test.GetAffinityGroupState("g")
 			test.True(old.HasUnpersistedTarget())
+			state, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+			test.NoError(err)
+			test.Same(old.groupInfoPtr, state.groupInfoPtr)
+			test.False(state.HasUnpersistedTarget())
+
+			test.DegradeAffinityGroup("g")
+			test.observe("g", 2, 1, 3)
+			old = test.GetAffinityGroupState("g")
+			test.True(old.HasUnpersistedTarget())
 
 			recreated := *test.stored("g")
 			recreated.CreateTimestamp++
 			test.NoError(test.store.SaveAffinityGroup(test.store, "g", &recreated))
-			state, err := test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+			state, err = test.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
 			test.NoError(err)
 			test.NotSame(old.groupInfoPtr, state.groupInfoPtr)
 			test.Equal(recreated.CreateTimestamp, state.CreateTimestamp)
@@ -1518,12 +1549,13 @@ func TestPolicyUpdateOnEmptyTargetPreservesAndRevalidatesLocalTarget(t *testing.
 		coalesce   bool
 		queued     bool
 	}{
-		{name: "unset to fixed, reply first", newPolicy: BalancePolicyFixed, queued: true},
+		{name: "unset to fixed, reply first", newPolicy: BalancePolicyFixed},
 		{name: "unset to fixed, watch first", newPolicy: BalancePolicyFixed, watchFirst: true},
 		{name: "auto to fixed without revision", oldPolicy: BalancePolicyAuto, newPolicy: BalancePolicyFixed, noRevision: true},
 		{name: "fixed to auto", oldPolicy: BalancePolicyFixed, newPolicy: BalancePolicyAuto},
 		{name: "rejected on revalidation", newPolicy: BalancePolicyFixed, reject: true},
 		{name: "coalesced policy updates", oldPolicy: BalancePolicyAuto, newPolicy: BalancePolicyFixed, coalesce: true},
+		{name: "drops queued candidate on policy mismatch", newPolicy: BalancePolicyFixed, queued: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -1543,12 +1575,14 @@ func TestPolicyUpdateOnEmptyTargetPreservesAndRevalidatesLocalTarget(t *testing.
 				}
 				var replies []GroupTargetsResponse
 				var stateAfterWatch *GroupState
+				var queued []observedTarget
 				test.useWriter(func(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 					if len(test.calls) == 1 {
-						return GroupTargetsResponse{}, ErrTargetWriterUnsupported
-					}
-					if len(test.calls) == 2 && tc.queued {
+						if !tc.queued {
+							return GroupTargetsResponse{}, ErrTargetWriterUnsupported
+						}
 						test.ObserveAvailableRegion(targetRegion(3, 4), test.GetAffinityGroupState("g"))
+						queued = test.pendingTargets["g"]
 					}
 					if len(test.calls) == 3 {
 						stateAfterWatch = test.GetAffinityGroupState("g")
@@ -1560,6 +1594,24 @@ func TestPolicyUpdateOnEmptyTargetPreservesAndRevalidatesLocalTarget(t *testing.
 					}
 					return resp, err
 				})
+
+				if tc.queued {
+					_, err := pd.UpdateAffinityGroupPolicy("g", tc.newPolicy)
+					test.NoError(err)
+					store.revision++
+					test.observe("g", 1, 2)
+					test.Len(queued, 1)
+					test.Equal([]uint64{3, 4}, queued[0].target.VoterStoreIDs)
+					test.Equal([]string{"g"}, replies[0].PolicyMismatchGroupIDs)
+					test.Empty(test.pendingTargetIDs)
+					test.Empty(test.pendingTargets)
+					test.SyncGroupFromEtcdWithRevision(pd.stored("g"), 2)
+					test.observe("g", 2, 3)
+					test.Len(test.calls, 2)
+					test.Equal([]string{"g"}, replies[1].WrittenGroupIDs)
+					test.Equal([]uint64{2, 3}, pd.stored("g").VoterStoreIDs)
+					return
+				}
 
 				test.observe("g", 1, 2)
 				local := test.GetAffinityGroupState("g")

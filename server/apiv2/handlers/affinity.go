@@ -463,7 +463,7 @@ func UpdateAffinityGroupPolicy(c *gin.Context) {
 //	@Description	Each target commits independently, so an HTTP 500 on a later target leaves earlier commits in place.
 //	@Param			body	body	affinity.GroupTargetsRequest	true	"Targets with the groups they were decided from"
 //	@Produce		json
-//	@Success		200	{object}	affinity.GroupTargetsResponse	"IDs of groups whose targets were newly written or already stored with the requested peers"
+//	@Success		200	{object}	affinity.GroupTargetsResponse	"written_group_ids confirms new or already-stored targets, and policy_mismatch_group_ids identifies groups that need revalidation against the current policy"
 //	@Failure		400	{string}	string							"The input is invalid."
 //	@Failure		500	{string}	string							"PD server failed to proceed the request."
 //	@Router			/affinity-groups/targets [post]
