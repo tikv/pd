@@ -99,7 +99,7 @@ func (t *regionTree) GetCountByRange(startKey, endKey []byte) int {
 	// it returns 0 if startKey is nil.
 	item, startIndex := t.tree.GetWithIndex(start)
 	// if item is nil, it means that the startKey is not found in the tree, we need to check the previous item, avoid
-	// to the startKey in the previous iterm.
+	// to the startKey in the previous item.
 	// regions: [a c] [c f] [f h], startKey: b
 	// the first item is index 2 [c,f]
 	if item == nil {

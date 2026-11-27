@@ -549,7 +549,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 			if barrier.IsExpired(now) {
 				// Perform lazy delete to the expired GC barriers.
 				// WARNING: It might look like a reasonable optimization idea to perform the lazy-deletion in a lower
-				// frequency (instead of everytime checking it). However, it's UNSAFE considering the possibility of
+				// frequency (instead of checking every time it). However, it's UNSAFE considering the possibility of
 				// system clock drifts and PD leader changes, in which case an expired GC barrier may be back to
 				// not-expired state again. Once we regard a GC barrier as expired, it must be expired *strictly*,
 				// otherwise it may break the constraint that GC barriers must block the txn safe point from being

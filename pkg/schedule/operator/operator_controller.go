@@ -142,7 +142,7 @@ func (oc *Controller) GetCluster() *core.BasicCluster {
 	return oc.cluster
 }
 
-// GetHBStreams returns the heartbeat steams.
+// GetHBStreams returns the heartbeat streams.
 func (oc *Controller) GetHBStreams() *hbstream.HeartbeatStreams {
 	return oc.hbStreams
 }
@@ -283,7 +283,7 @@ func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 		return nil, true
 	}
 	op := opi.(*Operator)
-	// Check the operator lightly. It cant't dispatch the op for some scenario.
+	// Check the operator lightly. It can't dispatch the op for some scenario.
 	var reason CancelReasonType
 	r, reason = oc.checkOperatorLightly(op)
 	if len(reason) != 0 {
@@ -530,7 +530,7 @@ func (oc *Controller) checkOperatorLightly(op *Operator) (*core.RegionInfo, Canc
 
 	// It may be suitable for all kinds of operator but not merge-region.
 	// But to be cautions, it only takes effect on merge-region currently.
-	// If the version of epoch is changed, the region has been splitted or merged, and the key range has been changed.
+	// If the version of epoch is changed, the region has been split or merged, and the key range has been changed.
 	// The changing for conf_version of epoch doesn't modify the region key range, skip it.
 	if op.HasRelatedMergeRegion() && region.GetRegionEpoch().GetVersion() > op.RegionEpoch().GetVersion() {
 		operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
