@@ -26,21 +26,21 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
-// invalidGCStateError identifies a stored safe point or migration route that
-// must be repaired before the GC state can be loaded.
-type invalidGCStateError struct{ cause error }
+// keyspaceGCStateLoadError marks failures confined to a keyspace or its
+// migration source. Watch initialization and warmup can skip affected keyspaces.
+type keyspaceGCStateLoadError struct{ cause error }
 
-func (e *invalidGCStateError) Error() string { return e.cause.Error() }
-func (e *invalidGCStateError) Unwrap() error { return e.cause }
+func (e *keyspaceGCStateLoadError) Error() string { return e.cause.Error() }
+func (e *keyspaceGCStateLoadError) Unwrap() error { return e.cause }
 
 // Cause exposes the original error to github.com/pingcap/errors.
-func (e *invalidGCStateError) Cause() error { return e.cause }
+func (e *keyspaceGCStateLoadError) Cause() error { return e.cause }
 
 func canSkipKeyspaceGCState(id uint32, err error) bool {
 	if id == constant.NullKeyspaceID {
 		return false
 	}
-	_, ok := errors.AsType[*invalidGCStateError](err)
+	_, ok := errors.AsType[*keyspaceGCStateLoadError](err)
 	return ok
 }
 
@@ -50,7 +50,7 @@ func (m *GCStateManager) loadLocalSafePointPairs(ctx context.Context, ids []uint
 	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
 	for i := range pairs {
 		if decodeErr := pairs[i].Err; decodeErr != nil {
-			pairs[i].Err = &invalidGCStateError{decodeErr}
+			pairs[i].Err = &keyspaceGCStateLoadError{decodeErr}
 		}
 	}
 	return pairs, err
@@ -265,10 +265,10 @@ func (m *GCStateManager) finishGCStateFlight(ctx context.Context, generation *gc
 
 func validateStarterGCState(pair endpoint.GCSafePointReadResult) error {
 	if pair.TxnSafePointEmpty {
-		return &invalidGCStateError{fmt.Errorf("empty transaction safe point for keyspace %d", pair.KeyspaceID)}
+		return &keyspaceGCStateLoadError{fmt.Errorf("empty transaction safe point for keyspace %d", pair.KeyspaceID)}
 	}
 	if pair.GCSafePoint > pair.TxnSafePoint {
-		return &invalidGCStateError{fmt.Errorf("keyspace %d GC safe point %d exceeds transaction safe point %d", pair.KeyspaceID, pair.GCSafePoint, pair.TxnSafePoint)}
+		return &keyspaceGCStateLoadError{fmt.Errorf("keyspace %d GC safe point %d exceeds transaction safe point %d", pair.KeyspaceID, pair.GCSafePoint, pair.TxnSafePoint)}
 	}
 	return nil
 }

@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -284,24 +285,26 @@ func requireStarterGCWatchUpdates(t *testing.T, m *GCStateManager, healthy uint3
 	watcher, err := m.WatchGCStates(ctx, false)
 	re.NoError(err)
 	defer watcher.Close()
-	expectHealthy := func(wantG uint64) {
-		t.Helper()
-		for {
-			changes, err := watcher.RecvBatch(1)
-			re.NoError(err)
-			state := mustUpsert(t, changes[0])
-			if state.KeyspaceID == healthy {
-				re.Equal(uint64(100+healthy), state.TxnSafePoint)
-				re.Equal(wantG, state.GCSafePoint)
-				return
-			}
-			re.NotContains(skipped, state.KeyspaceID)
-		}
-	}
-	expectHealthy(80)
+	requireStarterGCWatchState(t, watcher, healthy, 80, skipped...)
 	_, _, err = m.AdvanceGCSafePoint(healthy, 90)
 	re.NoError(err)
-	expectHealthy(90)
+	requireStarterGCWatchState(t, watcher, healthy, 90, skipped...)
+}
+
+func requireStarterGCWatchState(t *testing.T, watcher *GCStateWatcher, id uint32, wantG uint64, skipped ...uint32) {
+	t.Helper()
+	re := require.New(t)
+	for {
+		changes, err := watcher.RecvBatch(1)
+		re.NoError(err)
+		state := mustUpsert(t, changes[0])
+		re.NotContains(skipped, state.KeyspaceID)
+		if state.KeyspaceID == id {
+			re.Equal(uint64(100+id), state.TxnSafePoint)
+			re.Equal(wantG, state.GCSafePoint)
+			return
+		}
+	}
 }
 
 func TestStarterGCWarmupSkipsInvalidKeyspace(t *testing.T) {
@@ -359,19 +362,60 @@ func TestStarterGCWatchAndWarmupKeepUnifiedScopeErrors(t *testing.T) {
 	re.Equal(uint64(120), cached.TxnSafePoint)
 }
 
-func TestStarterGCWatchReportsSourceReadFailure(t *testing.T) {
+func TestStarterGCWatchAndWarmupSkipUnavailableSource(t *testing.T) {
 	re := require.New(t)
-	m, dest, source, _ := newStarterGCAPIFixture(t, 1)
+	const pending, migrated uint32 = 1, 2
+	m, dest, source, cutoff := newStarterGCAPIFixture(t, 2)
+	_, _, err := m.AdvanceGCSafePoint(migrated, 80)
+	re.NoError(err)
 	group, _ := recordStarterGroups(t, m, dest, source)
-	group.beforeRead = func() error { return context.DeadlineExceeded }
+	var unavailable atomic.Bool
+	unavailable.Store(true)
+	group.beforeRead = func() error {
+		if unavailable.Load() {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}
+
+	// Start the leader with a cold cache while only the external source is down.
+	t.Cleanup(startStarterWarmup(m))
+	gcWarmupWait(t, m.activeGeneration.Load().warmup.finished)
+	_, ok := m.gcStateCache.load(pending)
+	re.False(ok)
+	cached, ok := m.gcStateCache.load(migrated)
+	re.True(ok)
+	re.Equal(uint64(102), cached.TxnSafePoint)
+	re.Equal(uint64(80), cached.GCSafePoint)
+
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	watcher, err := m.WatchGCStates(ctx, false)
 	re.NoError(err)
 	defer watcher.Close()
-	_, err = watcher.RecvBatch(1)
-	re.ErrorContains(err, "read meta-service group")
+	requireStarterGCWatchState(t, watcher, migrated, 80, pending)
+	_, _, err = m.AdvanceGCSafePoint(migrated, 90)
+	re.NoError(err)
+	requireStarterGCWatchState(t, watcher, migrated, 90, pending)
+
+	_, err = m.GetGCState(pending, true)
 	re.ErrorIs(err, context.DeadlineExceeded)
+	re.ErrorContains(err, `read meta-service group "group1"`)
+	re.NoError(ctx.Err())
+	value, revision := readStarterSafePoint(t, m, pending)
+	re.Equal(uint64(10), value)
+	re.LessOrEqual(revision, cutoff)
+
+	unavailable.Store(false)
+	state, err := m.GetGCState(pending, true)
+	re.NoError(err)
+	re.Equal(uint64(101), state.TxnSafePoint)
+	value, revision = readStarterSafePoint(t, m, pending)
+	re.Equal(uint64(101), value)
+	re.Greater(revision, cutoff)
+	_, _, err = m.AdvanceGCSafePoint(pending, 70)
+	re.NoError(err)
+	requireStarterGCWatchState(t, watcher, pending, 70)
 }
 
 func TestStarterGCWatchAndWarmupSkipKeyspacesWithInvalidGroupConfig(t *testing.T) {

@@ -110,6 +110,9 @@ func (m *GCStateManager) migrateStarterBatch(ctx context.Context, generation *gc
 	groups := make(map[string][]*migrationItem)
 	for i, item := range pending {
 		groupID, err := item.resolveSourceGroup(metaRows[i], m.migrationCutoff)
+		if err != nil {
+			err = &keyspaceGCStateLoadError{err}
+		}
 		item.err = err
 		groups[groupID] = append(groups[groupID], item)
 	}
@@ -237,7 +240,7 @@ func (item *migrationItem) resolveSourceGroup(row *mvccpb.KeyValue, cutoff int64
 		return "", nil
 	}
 	if !config.IsValidMetaServiceGroupID(groupID) {
-		return "", &invalidGCStateError{fmt.Errorf("invalid meta-service group %q for keyspace %d", groupID, id)}
+		return "", fmt.Errorf("invalid meta-service group %q for keyspace %d", groupID, id)
 	}
 	return groupID, nil
 }
@@ -255,13 +258,16 @@ func (m *GCStateManager) loadSourceTxnSafePoints(ctx context.Context, groupID st
 	client, configRevision, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, groupID)
 	if err != nil {
 		if errors.Is(err, errs.ErrUnknownMetaServiceGroup) || errors.Is(err, errs.ErrJSONUnmarshal) {
-			return 0, &invalidGCStateError{err}
+			return 0, &keyspaceGCStateLoadError{err}
 		}
 		return 0, err
 	}
 	rows, err := readStarterKeys(ctx, client, items, keypath.TxnSafePointPath)
 	if err != nil {
-		return 0, fmt.Errorf("read meta-service group %q: %w", groupID, err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return 0, ctxErr
+		}
+		return 0, &keyspaceGCStateLoadError{fmt.Errorf("read meta-service group %q: %w", groupID, err)}
 	}
 	for i, item := range items {
 		item.sourceTxnSafePoint = 0
@@ -269,7 +275,7 @@ func (m *GCStateManager) loadSourceTxnSafePoints(ctx context.Context, groupID st
 			value, err := strconv.ParseUint(string(rows[i].Value), 10, 64)
 			if err != nil {
 				msg := fmt.Sprintf("invalid transaction safe point for keyspace %d in meta-service group %q", item.localRead.KeyspaceID, groupID)
-				item.err = &invalidGCStateError{pingcaperrors.WithMessage(err, msg)}
+				item.err = &keyspaceGCStateLoadError{pingcaperrors.WithMessage(err, msg)}
 			}
 			item.sourceTxnSafePoint = value
 		}
@@ -332,7 +338,7 @@ func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcS
 			case current[i].Err != nil:
 				item.err = current[i].Err
 			case current[i].GCSafePoint > chosenT:
-				item.err = &invalidGCStateError{fmt.Errorf("keyspace %d GC safe point %d exceeds selected transaction safe point %d (local %d, frozen %d)", id, current[i].GCSafePoint, chosenT, localT, frozenT)}
+				item.err = &keyspaceGCStateLoadError{fmt.Errorf("keyspace %d GC safe point %d exceeds selected transaction safe point %d (local %d, frozen %d)", id, current[i].GCSafePoint, chosenT, localT, frozenT)}
 			default:
 				// Stamp even an equal T (or a verified zero) with a new revision.
 				if err := wb.SetTxnSafePoint(id, chosenT); err != nil {

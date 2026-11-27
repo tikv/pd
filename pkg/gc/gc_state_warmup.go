@@ -39,7 +39,7 @@ const (
 	gcStateWarmupMaxRetryDelay = 30 * time.Second
 )
 
-// A completed scope is done for this campaign, including one skipped for invalid data.
+// A scope stays completed for the rest of the campaign after it is loaded or skipped.
 // joined is polled by the fixed worker pool, never by per-scope goroutines.
 type gcStateWarmupScope struct {
 	completed  bool

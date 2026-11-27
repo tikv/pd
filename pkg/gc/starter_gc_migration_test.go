@@ -551,6 +551,7 @@ func TestStarterGCMigrationStaleScope(t *testing.T) {
 	require.ErrorIs(t, result.failed[1], errs.ErrGCOnInvalidKeyspace)
 	require.ErrorIs(t, result.failed[2], errs.ErrKeyspaceNotFound)
 	for _, id := range []uint32{1, 2} {
+		require.True(t, canSkipKeyspaceGCState(id, result.failed[id]))
 		_, cached := manager.gcStateCache.load(id)
 		require.False(t, cached)
 		_, revision := readStarterSafePoint(t, manager, id)
