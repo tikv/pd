@@ -1670,6 +1670,104 @@ exit 1
 				re.NoError(err)
 				re.Equal("installed", strings.TrimSpace(string(logData)))
 			})
+
+			t.Run("signal interruption kills child group, releases lock, and preserves cache", func(t *testing.T) {
+				if _, err := exec.LookPath("make"); err != nil {
+					t.Skip("make not found in PATH")
+				}
+				cases := []struct {
+					name       string
+					sig        syscall.Signal
+					lockTool   string
+					hangOnCall int
+				}{
+					{name: "SIGTERM_outer_flock_no_perl", sig: syscall.SIGTERM, lockTool: "flock", hangOnCall: 1},
+					{name: "SIGINT_locked_recheck_flock_no_perl", sig: syscall.SIGINT, lockTool: "flock", hangOnCall: 2},
+					{name: "SIGINT_locked_recheck_perl_fallback", sig: syscall.SIGINT, lockTool: "perl", hangOnCall: 2},
+				}
+				for _, tc := range cases {
+					t.Run(tc.name, func(t *testing.T) {
+						re := require.New(t)
+						if _, err := exec.LookPath(tc.lockTool); err != nil {
+							t.Skipf("%s not found in PATH", tc.lockTool)
+						}
+						makefileDir := writeRealClusterMakefileDir(t)
+						toolPath := buildMinimalToolPath(t, "make", "bash", "sh", "pwd", "go", tc.lockTool, "mkdir", "dirname", "basename", "rm", "cp", "chmod", "env", "which", "sleep", "printf")
+						stateDir := t.TempDir()
+						pidFile := filepath.Join(stateDir, "sig-hang.pid")
+						countFile := filepath.Join(stateDir, "call.count")
+						script := []byte(fmt.Sprintf(`#!/bin/sh
+if [ %d -gt 1 ] && [ ! -f %q ]; then
+	printf '1\n' > %q
+	exit 1
+fi
+sleep 30 &
+pid=$!
+printf '%%s\n%%s\n' "$$" "$pid" >> %q
+wait
+`, tc.hangOnCall, countFile, countFile, pidFile))
+						tiupHome, _, partialBin, installLog, _ := setupWithPayload(t, script)
+
+						cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+						cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+						cmd.Env = append(os.Environ(),
+							"PATH="+toolPath,
+							"TIUP_HOME="+tiupHome,
+							"TIUP_PROBE_TIMEOUT=10",
+						)
+						re.NoError(cmd.Start())
+						t.Cleanup(func() {
+							if cmd.Process != nil {
+								_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+							}
+						})
+
+						var childPIDs []int
+						re.Eventually(func() bool {
+							b, err := os.ReadFile(pidFile) //nolint:gosec
+							if err != nil {
+								return false
+							}
+							var pids []int
+							for line := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
+								line = strings.TrimSpace(line)
+								if line == "" {
+									continue
+								}
+								pid, err := strconv.Atoi(line)
+								if err != nil || pid <= 0 {
+									return false
+								}
+								pids = append(pids, pid)
+							}
+							if len(pids) < 2 {
+								return false
+							}
+							childPIDs = pids
+							return true
+						}, 5*time.Second, 20*time.Millisecond, "timed out waiting for probe script and sleep PIDs")
+
+						re.NoError(syscall.Kill(-cmd.Process.Pid, tc.sig))
+						done := make(chan error, 1)
+						go func() {
+							done <- cmd.Wait()
+						}()
+						select {
+						case err := <-done:
+							re.Error(err, "expected make tiup to fail after %s", tc.sig)
+						case <-time.After(5 * time.Second):
+							t.Fatalf("make tiup did not exit promptly after %s", tc.sig)
+						}
+
+						re.Eventually(func() bool {
+							return !slices.ContainsFunc(childPIDs, isProcessRunning)
+						}, 2*time.Second, 20*time.Millisecond, "probe process or sleep child remained alive after %s", tc.sig)
+						assertLockImmediatelyAvailable(re, tiupHome)
+						re.False(fileExists(installLog), "signal interruption must not trigger reinstall")
+						re.True(fileExists(partialBin), "signal interruption must preserve existing playground binary")
+					})
+				}
+			})
 		})
 
 		t.Run("make without perl rejects trailing-4096-byte truncated executable", func(t *testing.T) {

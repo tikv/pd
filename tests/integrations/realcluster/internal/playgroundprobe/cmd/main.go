@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/tikv/pd/tests/integrations/realcluster/internal/playgroundprobe"
@@ -39,9 +41,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "invalid TIUP_PROBE_TIMEOUT: %v\n", err)
 		os.Exit(2)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, cancel := context.WithTimeout(sigCtx, timeout)
 	usable := playgroundprobe.Check(ctx, os.Args[1], nil)
+	interrupted := sigCtx.Err() != nil
 	cancel()
+	stopSignals()
+	if interrupted {
+		os.Exit(130)
+	}
 	if usable {
 		fmt.Println("usable")
 		return
