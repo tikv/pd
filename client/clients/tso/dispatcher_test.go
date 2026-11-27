@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
@@ -561,10 +562,10 @@ func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
 					stream := newTSOStream(ctx, client.getLeaderURL(), newMockTSOStreamImpl(ctx, resultModeGenerated))
 					if tt.switchBack {
 						client.leaderURL.Store("other-leader")
-						client.notifyLeaderSwitched()
+						client.notifyRecoveryChanged()
 					}
 					client.leaderURL.Store(leaderURL)
-					client.notifyLeaderSwitched()
+					client.notifyRecoveryChanged()
 					return stream, nil
 				}
 				directBuilds++
@@ -609,7 +610,7 @@ func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
 					}
 					// Switch after the lookup reads its URL, before it registers a build.
 					client.leaderURL.Store(next)
-					client.notifyLeaderSwitched()
+					client.notifyRecoveryChanged()
 				}
 			}
 			t.Cleanup(func() {
@@ -783,7 +784,7 @@ func TestTSOLeaderChangeCancelsObsoleteBuild(t *testing.T) {
 		t.Fatal("the old stream build did not start")
 	}
 	client.leaderURL.Store("new-leader")
-	client.notifyLeaderSwitched()
+	client.notifyRecoveryChanged()
 	require.ErrorIs(t, obsolete.Err(), context.Canceled, "a leader change must cancel the obsolete stream build")
 	select {
 	case err := <-finished:
@@ -1335,7 +1336,7 @@ func TestDispatcherStreamRecoveryTimeout(t *testing.T) {
 						next = "leader-b"
 					}
 					client.leaderURL.Store(next)
-					client.notifyLeaderSwitched()
+					client.notifyRecoveryChanged()
 				} else if count == int32(tt.switches)+1 {
 					close(blocked)
 					select {
@@ -1343,7 +1344,7 @@ func TestDispatcherStreamRecoveryTimeout(t *testing.T) {
 					case <-release:
 					}
 					client.leaderURL.Store("leader-ready")
-					client.notifyLeaderSwitched()
+					client.notifyRecoveryChanged()
 				}
 			}
 			builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
@@ -1383,14 +1384,46 @@ func TestDispatcherStreamRecoveryTimeout(t *testing.T) {
 	}
 }
 
+type recoveryTestStream struct {
+	*mockTSOStreamImpl
+	logical *atomic.Int64
+}
+
+func (s *recoveryTestStream) Recv() (tsoRequestResult, error) {
+	result, err := s.mockTSOStreamImpl.Recv()
+	if err == nil {
+		result.logical = s.logical.Add(int64(result.count))
+	}
+	return result, err
+}
+
 type recoveryTestDiscovery struct {
 	*countingServiceDiscovery
-	ctx     context.Context
-	serving atomic.Value
-	getConn func(context.Context, string) (*grpc.ClientConn, error)
+	ctx       context.Context
+	serving   atomic.Value
+	members   atomic.Value
+	backups   atomic.Value
+	onMembers func()
+	getConn   func(context.Context, string) (*grpc.ClientConn, error)
 }
 
 func (s *recoveryTestDiscovery) GetServingURL() string { return s.serving.Load().(string) }
+
+func (s *recoveryTestDiscovery) GetServiceURLs() []string {
+	if members := s.members.Load(); members != nil {
+		return members.([]string)
+	}
+	return s.countingServiceDiscovery.GetServiceURLs()
+}
+
+func (s *recoveryTestDiscovery) GetBackupURLs() []string {
+	if backups := s.backups.Load(); backups != nil {
+		return backups.([]string)
+	}
+	return s.countingServiceDiscovery.GetBackupURLs()
+}
+
+func (s *recoveryTestDiscovery) AddMembersChangedCallback(cb func()) { s.onMembers = cb }
 
 func (s *recoveryTestDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
 	return s.GetOrCreateGRPCConnWithContext(s.ctx, url)
@@ -1402,20 +1435,33 @@ func (s *recoveryTestDiscovery) GetOrCreateGRPCConnWithContext(ctx context.Conte
 
 func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		proxy      bool
-		changeMode bool
-		blocked    string
+		name          string
+		proxy         bool
+		changeMode    bool
+		blocked       string
+		legacy        bool
+		switchBack    bool
+		changeMembers bool
+		published     bool
 	}{
 		{name: "enable-proxy-during-retry", changeMode: true, blocked: "retry"},
 		{name: "enable-proxy-during-build", changeMode: true, blocked: "build"},
 		{name: "disable-proxy-during-health", proxy: true, changeMode: true, blocked: "health"},
 		{name: "disable-proxy-during-build", proxy: true, changeMode: true, blocked: "build"},
 		{name: "new-leader-during-dial", blocked: "dial"},
+		{name: "legacy-discovery-new-leader-during-dial", blocked: "dial", legacy: true},
+		{name: "legacy-discovery-leader-switch-away-and-back", blocked: "dial", legacy: true, switchBack: true},
 		{name: "new-leader-during-proxy-build", proxy: true, blocked: "build"},
 		{name: "new-leader-during-forwarding-health", blocked: "health"},
 		{name: "new-leader-during-forwarding-build", blocked: "forward"},
 		{name: "new-leader-after-final-direct-attempt", blocked: "fallback"},
+		{name: "new-leader-has-independent-retry-budget", blocked: "mixed-budget"},
+		{name: "removed-follower-during-proxy-dial", proxy: true, blocked: "dial", changeMembers: true},
+		{name: "removed-follower-during-legacy-proxy-dial", proxy: true, blocked: "dial", changeMembers: true, legacy: true},
+		{name: "removed-follower-during-proxy-health", proxy: true, blocked: "health", changeMembers: true},
+		{name: "membership-change-preserves-published-stream", proxy: true, blocked: "health", changeMembers: true, published: true},
+		{name: "membership-change-during-proxy-build", proxy: true, blocked: "build", changeMembers: true},
+		{name: "removed-follower-during-forwarding-health", blocked: "fallback", changeMembers: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const oldLeader, newLeader, follower = "old-leader", "new-leader", "follower"
@@ -1423,6 +1469,9 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 			release := make(chan struct{})
 			releaseWait := sync.OnceFunc(func() { close(release) })
 			defer releaseWait()
+			legacyRelease, legacyReturned := make(chan struct{}), make(chan struct{})
+			releaseLegacy := sync.OnceFunc(func() { close(legacyRelease) })
+			defer releaseLegacy()
 			var startOnce sync.Once
 			var changed atomic.Bool
 			block := func(ctx context.Context) error {
@@ -1436,12 +1485,12 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 					grpc.WithUnaryInterceptor(func(ctx context.Context, _ string, _, reply any,
 						_ *grpc.ClientConn, _ grpc.UnaryInvoker, _ ...grpc.CallOption,
 					) error {
-						if url == follower && (tc.blocked == "fallback" || tc.blocked == "health" && !changed.Load()) {
+						if url == follower && (tc.blocked == "fallback" || tc.blocked == "mixed-budget" || tc.blocked == "health" && !changed.Load()) {
 							return block(ctx)
 						}
 						resp := reply.(*healthpb.HealthCheckResponse)
 						resp.Status = healthpb.HealthCheckResponse_SERVING
-						if url == oldLeader && (changed.Load() && !tc.changeMode || tc.changeMode && !tc.proxy) {
+						if url == oldLeader && (changed.Load() && !tc.changeMode && !tc.changeMembers || tc.changeMode && !tc.proxy) {
 							resp.Status = healthpb.HealthCheckResponse_NOT_SERVING
 						}
 						return nil
@@ -1459,19 +1508,39 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 			}}
 			svc.serving.Store(oldLeader)
 			svc.getConn = func(ctx context.Context, url string) (*grpc.ClientConn, error) {
-				if url == oldLeader && tc.blocked == "dial" && !changed.Load() {
-					return nil, block(ctx)
+				if (url == oldLeader && !tc.changeMembers || url == follower && tc.changeMembers) &&
+					tc.blocked == "dial" && !changed.Load() {
+					if tc.legacy {
+						defer close(legacyReturned)
+						startOnce.Do(func() { close(started) })
+						select {
+						case <-legacyRelease:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					} else {
+						return nil, block(ctx)
+					}
 				}
 				return svc.conns[url], nil
 			}
 			svc.onSchedule = func() {
 				if !changed.Load() && (tc.blocked == "retry" ||
-					tc.blocked == "fallback" && svc.scheduleCount.Load() == constants.MaxRetryTimes) {
+					tc.blocked == "fallback" && svc.scheduleCount.Load() == constants.MaxRetryTimes ||
+					tc.blocked == "mixed-budget" && svc.scheduleCount.Load() == constants.MaxRetryTimes-1) {
 					startOnce.Do(func() { close(started) })
 					<-release
 				}
 			}
 			var client *Cli
+			var logical atomic.Int64
+			var newAttempts atomic.Int32
+			newStream := func(ctx context.Context, url string) *tsoStream {
+				// Proxy streams share one timestamp allocator, as real servers do.
+				return newTSOStream(ctx, url, &recoveryTestStream{
+					mockTSOStreamImpl: newMockTSOStreamImpl(ctx, resultModeGenerated), logical: &logical,
+				})
+			}
 			builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
 				forwarded := grpcutil.GetForwardedHost(ctx, metadata.FromOutgoingContext) != ""
 				if !changed.Load() {
@@ -1480,14 +1549,27 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 					}
 					return nil, status.Error(codes.Unavailable, "old route unavailable")
 				}
-				return newTSOStream(ctx, client.getLeaderURL(), newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+				if tc.blocked == "mixed-budget" && newAttempts.Add(1) == 1 {
+					return nil, status.Error(codes.Unavailable, "transient new leader failure")
+				}
+				return newStream(ctx, client.getLeaderURL()), nil
 			})
 			option := opt.NewOption()
-			option.EnableForwarding = tc.blocked == "health" && !tc.proxy || tc.blocked == "forward" || tc.blocked == "fallback"
+			option.EnableForwarding = tc.blocked == "health" && !tc.proxy || tc.blocked == "forward" || tc.blocked == "fallback" || tc.blocked == "mixed-budget"
 			option.SetEnableTSOFollowerProxy(tc.proxy)
-			client = NewClient(t.Context(), option, svc, builder)
+			var discovery sd.ServiceDiscovery = svc
+			if tc.legacy {
+				// An opaque wrapper exposes only the original discovery interface.
+				discovery = struct{ sd.ServiceDiscovery }{svc}
+			}
+			client = NewClient(t.Context(), option, discovery, builder)
 			svc.ctx = client.ctx
 			client.leaderURL.Store(oldLeader)
+			if tc.published {
+				ctx, cancel := context.WithCancel(client.ctx)
+				stream := newStream(ctx, oldLeader)
+				require.True(t, client.conCtxMgr.Store(ctx, cancel, oldLeader, stream))
+			}
 			client.Setup()
 			t.Cleanup(client.Close)
 			select {
@@ -1496,20 +1578,110 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 				t.Fatal("recovery did not reach the blocked operation")
 			}
 			changed.Store(true)
-			if tc.changeMode {
+			if tc.changeMembers {
+				svc.members.Store([]string{oldLeader, newLeader})
+				svc.backups.Store([]string{newLeader})
+				svc.onMembers()
+			} else if tc.changeMode {
 				option.SetEnableTSOFollowerProxy(!tc.proxy)
 			} else {
 				svc.serving.Store(newLeader)
 				require.NoError(t, client.updateTSOLeaderURL(newLeader))
+				if tc.switchBack {
+					svc.serving.Store(oldLeader)
+					require.NoError(t, client.updateTSOLeaderURL(oldLeader))
+				}
 			}
 			releaseWait()
 			req := client.GetTSORequest(t.Context())
 			_, err := client.DispatchRequest(req)
 			require.NoError(t, err)
-			physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
+			timeout := constants.RetryInterval / 2
+			if tc.blocked == "mixed-budget" {
+				// Allow the configured retry interval after one real new-leader failure.
+				timeout = 2 * constants.RetryInterval
+			}
+			physical, _, err := req.waitTimeout(timeout)
 			require.NoError(t, err, "obsolete recovery must not delay a healthy route")
+			if tc.blocked == "mixed-budget" {
+				require.Equal(t, int32(2), newAttempts.Load())
+			}
 			require.Positive(t, physical)
+			if tc.published {
+				require.NoError(t, client.conCtxMgr.GetConnectionCtx(oldLeader).Ctx.Err())
+			}
+			if tc.legacy {
+				current := client.conCtxMgr.RandomlyPick()
+				require.NotNil(t, current)
+				releaseLegacy()
+				select {
+				case <-legacyReturned:
+				case <-time.After(time.Second):
+					t.Fatal("obsolete lookup did not return")
+				}
+				// A late connection must not replace the healthy stream or close
+				// discovery's connection. Verify another request before shutdown.
+				next := client.GetTSORequest(t.Context())
+				_, err = client.DispatchRequest(next)
+				require.NoError(t, err)
+				_, _, err = next.waitTimeout(constants.RetryInterval / 2)
+				require.NoError(t, err)
+				require.Same(t, current, client.conCtxMgr.GetConnectionCtx(current.StreamURL))
+				for _, conn := range svc.conns {
+					require.NotEqual(t, connectivity.Shutdown, conn.GetState())
+				}
+			}
 		})
+	}
+}
+
+func TestTSOLegacyDiscoveryLookupJoinsOnClose(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	releaseLookup := sync.OnceFunc(func() { close(release) })
+	svc := &countingServiceDiscovery{onGetConn: func(string) {
+		close(started)
+		<-release
+	}}
+	client := NewClient(t.Context(), opt.NewOption(), svc, nil)
+	client.dispatcher.Store(newTSODispatcher(client.ctx, client))
+	closeClient := sync.OnceFunc(client.Close)
+	t.Cleanup(closeClient)
+	t.Cleanup(releaseLookup)
+	ctx, cancel := context.WithCancel(client.ctx)
+	defer cancel()
+	lookupDone := make(chan error, 1)
+	go func() {
+		_, err := client.getOrCreateGRPCConn(ctx, "old-leader")
+		lookupDone <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("legacy lookup did not start")
+	}
+	cancel()
+	select {
+	case err := <-lookupDone:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not stop waiting for the legacy lookup")
+	}
+	closed := make(chan struct{})
+	go func() {
+		closeClient()
+		close(closed)
+	}()
+	<-client.ctx.Done()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while the legacy lookup was still running")
+	case <-time.After(constants.RetryInterval / 2):
+	}
+	releaseLookup()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not join the completed legacy lookup")
 	}
 }
 
@@ -1546,7 +1718,7 @@ func TestTSOConnectionUpdaterSwitchesProxyDuringLeaderChanges(t *testing.T) {
 				option.SetEnableTSOFollowerProxy(true)
 			}
 			client.leaderURL.Store(next)
-			client.notifyLeaderSwitched()
+			client.notifyRecoveryChanged()
 		}
 	}
 	builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
@@ -1569,7 +1741,7 @@ func TestTSOConnectionUpdaterSwitchesProxyDuringLeaderChanges(t *testing.T) {
 
 	client.conCtxMgr.ReleaseAll()
 	client.leaderURL.Store(directURL)
-	client.notifyLeaderSwitched()
+	client.notifyRecoveryChanged()
 	option.SetEnableTSOFollowerProxy(false)
 	select {
 	case <-directStarted:
