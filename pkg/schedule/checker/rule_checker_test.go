@@ -1876,6 +1876,127 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 	re.Nil(suite.rc.Check(region))
 }
 
+func (suite *ruleCheckerTestSuite) TestReplaceOfflineLeaderWithConstrainedVoters() {
+	tc := suite.cluster
+	for i, zone := range []string{"A", "B", "B", "A", "A"} {
+		tc.AddLabelsStore(uint64(i+1), 1, map[string]string{"zone": zone})
+	}
+	suite.Require().NoError(suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+			Role: placement.Leader, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}},
+		},
+		{
+			GroupID: placement.DefaultGroupID, ID: "voters",
+			Role: placement.Voter, Count: 2,
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"B"}}},
+		},
+	}))
+	tc.UpdateRegionCount(5, 300)
+	tc.SetStoreOffline(1)
+
+	for _, joint := range []bool{false, true} {
+		for _, pauseFirst := range []bool{false, true} {
+			suite.Run(fmt.Sprintf("joint=%t/pause-first=%t", joint, pauseFirst), func() {
+				re := suite.Require()
+				tc.SetEnableUseJointConsensus(joint)
+				tc.AddLabelsStore(4, 1, map[string]string{"zone": "A"})
+				target := uint64(4)
+				if pauseFirst {
+					tc.SetStoreEvictLeader(4, true)
+					target = 5
+				}
+				suite.rc.record = newRecord()
+				for _, regionID := range []uint64{1, 2} {
+					region := tc.AddLeaderRegion(regionID, 1, 2, 3)
+					re.True(suite.ruleManager.FitRegion(tc, region).IsSatisfied())
+					op := suite.rc.Check(region)
+					re.NotNil(op, "expected repair for region %d", regionID)
+					operatorutil.CheckTransferPeer(re, op, operator.OpReplica, 1, target)
+					var finalLeader uint64
+					for i := range op.Len() {
+						if step, ok := op.Step(i).(operator.TransferLeader); ok {
+							finalLeader = step.ToStore
+						}
+					}
+					re.Equal(target, finalLeader)
+				}
+			})
+		}
+	}
+}
+
+func (suite *ruleCheckerTestSuite) TestReplaceOfflineLeaderAvoidsPendingLeader() {
+	tc := suite.cluster
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "A"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "B"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "A"})
+	suite.Require().NoError(suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+			Role: placement.Leader, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"A"}}},
+		},
+		{
+			GroupID: placement.DefaultGroupID, ID: "voter-B",
+			Role: placement.Voter, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"B"}}},
+		},
+		{GroupID: placement.DefaultGroupID, ID: "voter", Role: placement.Voter, Count: 1},
+	}))
+	tc.SetStoreOffline(1)
+	suite.rc.record.incOfflineLeaderCount(1)
+	for _, joint := range []bool{false, true} {
+		for _, pendingStore := range []uint64{2, 3} {
+			suite.Run(fmt.Sprintf("joint=%t/pending=%d", joint, pendingStore), func() {
+				re := suite.Require()
+				tc.SetEnableUseJointConsensus(joint)
+				healthyStore := uint64(5) - pendingStore
+				tc.AddLabelsStore(healthyStore, 1, map[string]string{"zone": "B"})
+				tc.AddLabelsStore(pendingStore, 1, map[string]string{"zone": "A"})
+				region := tc.AddLeaderRegion(1, 1, 2, 3)
+				region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(pendingStore)}))
+				re.True(suite.ruleManager.FitRegion(tc, region).IsSatisfied())
+				op := suite.rc.Check(region)
+				operatorutil.CheckTransferPeer(re, op, operator.OpReplica, 1, 4)
+				var finalLeader uint64
+				for i := range op.Len() {
+					if step, ok := op.Step(i).(operator.TransferLeader); ok {
+						re.NotEqual(pendingStore, step.ToStore, "step %d of %s", i, op.String())
+						finalLeader = step.ToStore
+					}
+				}
+				re.Equal(uint64(4), finalLeader)
+			})
+		}
+	}
+
+	// A paused replacement can still accept the replica when a surviving peer can lead.
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "B"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "A"})
+	tc.SetStoreEvictLeader(4, true)
+	suite.rc.record = newRecord()
+	suite.rc.record.incOfflineLeaderCount(1)
+	for _, joint := range []bool{false, true} {
+		suite.Run(fmt.Sprintf("surviving-leader/joint=%t", joint), func() {
+			re := suite.Require()
+			tc.SetEnableUseJointConsensus(joint)
+			region := tc.AddLeaderRegion(1, 1, 2, 3)
+			op := suite.rc.Check(region)
+			re.NotNil(op)
+			operatorutil.CheckTransferPeer(re, op, operator.OpReplica, 1, 4)
+			var finalLeader uint64
+			for i := range op.Len() {
+				if step, ok := op.Step(i).(operator.TransferLeader); ok {
+					finalLeader = step.ToStore
+				}
+			}
+			re.Equal(uint64(3), finalLeader)
+		})
+	}
+}
+
 func (suite *ruleCheckerTestSuite) TestPreferAddTiFlashLearnerOverOfflinePeer() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
@@ -2875,4 +2996,358 @@ func TestRecorderRefreshLooksUpStoreIDNotCount(t *testing.T) {
 	rec.refresh(cluster)
 
 	re.Empty(rec.offlineLeaderCounter)
+}
+
+func TestRuleCheckerRetriesBetterLocationAfterRoleRejection(t *testing.T) {
+	for _, mode := range []string{"legacy", "joint"} {
+		for _, failure := range []string{"reject-leader", "paused"} {
+			t.Run(mode+"/"+failure, func(t *testing.T) {
+				re := require.New(t)
+				ctx := t.Context()
+				tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+				tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
+				tc.SetEnablePlacementRules(true)
+				tc.SetPlacementRulesCacheEnabled(true)
+				tc.SetEnableUseJointConsensus(mode == "joint")
+				tc.SetLabelProperty("reject-leader", "reject", "yes")
+				tc.AddLabelsStore(1, 100, map[string]string{"kind": "a", "zone": "z1"})
+				tc.AddLabelsStore(2, 20, map[string]string{"kind": "a", "zone": "z1", "reject": "yes"})
+				// Keep the other voter from moving so this exercises target retries and fit caching.
+				tc.SetStoreBusy(2, true)
+				tc.AddLabelsStore(3, 20, map[string]string{"kind": "c", "zone": "z1"})
+				badLabels := map[string]string{"kind": "a", "zone": "z2"}
+				if failure == "reject-leader" {
+					badLabels["reject"] = "yes"
+				}
+				tc.AddLabelsStore(4, 1, badLabels)
+				tc.AddLabelsStore(5, 10, map[string]string{"kind": "a", "zone": "z2"})
+				if failure == "paused" {
+					tc.SetStoreEvictLeader(4, true)
+				}
+				rm := tc.GetRuleManager()
+				re.NoError(rm.SetRules([]*placement.Rule{
+					{
+						GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+						Role: placement.Voter, Count: 2,
+						LabelConstraints: []placement.LabelConstraint{{Key: "kind", Op: placement.In, Values: []string{"a", "c"}}},
+						LocationLabels:   []string{"zone"},
+					},
+					{
+						GroupID: placement.DefaultGroupID, ID: "follower-c",
+						Role: placement.Follower, Count: 1,
+						LabelConstraints: []placement.LabelConstraint{{Key: "kind", Op: placement.In, Values: []string{"c"}}},
+					},
+				}))
+				region := tc.AddLeaderRegion(1, 1, 2, 3).Clone(core.WithIncConfVer(), core.WithIncVersion())
+				rc := NewRuleChecker(ctx, tc, rm, cache.NewIDTTL(ctx, time.Minute, 3*time.Minute))
+				fit := rm.FitRegionWithoutCache(tc, region)
+				re.True(fit.IsSatisfied())
+				tc.SetStoreEvictLeader(5, true)
+				for range 12 {
+					re.Nil(rc.Check(region))
+					re.False(rm.IsRegionFitCached(tc, region))
+					re.False(rc.pendingProcessedRegions.Exists(region.GetID()))
+				}
+				tc.SetStoreEvictLeader(5, false)
+				op := rc.Check(region)
+				re.NotNil(op)
+				operatorutil.CheckTransferPeer(re, op, operator.OpReplica, 1, 5)
+				var finalLeader uint64
+				for i := range op.Len() {
+					if step, ok := op.Step(i).(operator.TransferLeader); ok {
+						finalLeader = step.ToStore
+					}
+				}
+				re.Equal(uint64(5), finalLeader)
+			})
+		}
+	}
+}
+
+func TestRuleCheckerTriesAnotherLeaderAfterFollowerRoleRejection(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	tc.SetEnablePlacementRules(true)
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "a", "a": "yes"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "b", "a": "yes"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "a", "c": "yes"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "a"})
+	rm := tc.GetRuleManager()
+	re.NoError(rm.SetRules([]*placement.Rule{
+		{
+			GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+			Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"},
+		},
+		{
+			GroupID: placement.DefaultGroupID, ID: "follower-a", Index: 1,
+			Role: placement.Follower, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "a", Op: placement.In, Values: []string{"yes"}}},
+		},
+		{
+			GroupID: placement.DefaultGroupID, ID: "follower-c", Index: 2,
+			Role: placement.Follower, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "c", Op: placement.In, Values: []string{"yes"}}},
+		},
+	}))
+	leader := &metapb.Peer{Id: 11, StoreId: 1}
+	first := &metapb.Peer{Id: 13, StoreId: 3}
+	next := &metapb.Peer{Id: 14, StoreId: 4}
+	region := core.NewRegionInfo(&metapb.Region{
+		Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		Peers: []*metapb.Peer{first, leader, next, {Id: 12, StoreId: 2}},
+	}, leader)
+	tc.PutRegion(region)
+	fit := rm.FitRegionWithoutCache(tc, region)
+	re.False(fit.IsSatisfied())
+	followerFit := fit.GetRuleFit(leader.GetId())
+	re.Equal("follower-a", followerFit.Rule.ID)
+	re.Equal([]*metapb.Peer{leader}, followerFit.PeersWithDifferentRole)
+	checkRoles := placement.NewRoleChecker(tc, region.GetPeers(), rm.GetRulesForApplyRegion(region), false)
+	re.True(checkRoles.IsSatisfied(leader.GetStoreId()))
+	re.False(checkRoles.IsSatisfied(first.GetStoreId()))
+	re.True(checkRoles.IsSatisfied(next.GetStoreId()))
+	rc := NewRuleChecker(ctx, tc, rm, cache.NewIDTTL(ctx, time.Minute, 3*time.Minute))
+	re.True(rc.allowLeader(fit, first))
+	re.True(rc.allowLeader(fit, next))
+	_, err := operator.CreateTransferLeaderOperator("test", tc, region, first.GetStoreId(), nil, 0)
+	re.ErrorIs(err, operator.ErrTargetRole)
+	checked := rc.Check(region)
+	re.NotNil(checked)
+	re.Equal(next.GetStoreId(), checked.Step(0).(operator.TransferLeader).ToStore)
+	op, err := operator.CreateTransferLeaderOperator("probe-next", tc, region, next.GetStoreId(), nil, 0)
+	re.NoError(err)
+	re.Equal(next.GetStoreId(), op.Step(0).(operator.TransferLeader).ToStore)
+	re.True(rm.FitRegionWithoutCache(tc, region.Clone(core.WithReplaceLeaderStore(next.GetStoreId()))).IsSatisfied())
+	t.Logf("priority RegionFit reports follower role mismatch; source admits complete role assignment; first=%d is rejected, next=%d builds", first.GetStoreId(), next.GetStoreId())
+	for _, candidate := range []string{"current", "pending"} {
+		t.Run(candidate, func(t *testing.T) {
+			re := require.New(t)
+			other := region.GetStorePeer(2)
+			peers := []*metapb.Peer{first, leader, next, other}
+			var pending []*metapb.Peer
+			if candidate == "pending" {
+				peers = []*metapb.Peer{first, other, next, leader}
+				pending = []*metapb.Peer{other}
+			}
+			reordered := region.Clone(core.SetPeers(peers), core.WithPendingPeers(pending))
+			reorderedFit := rm.FitRegionWithoutCache(tc, reordered)
+			re.Equal("follower-a", reorderedFit.GetRuleFit(leader.GetId()).Rule.ID)
+			checked := rc.Check(reordered)
+			re.NotNil(checked)
+			re.Equal(next.GetStoreId(), checked.Step(0).(operator.TransferLeader).ToStore)
+		})
+	}
+}
+
+func TestRuleCheckerRetriesOfflineLeaderWithLooseFit(t *testing.T) {
+	for _, joint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("joint=%t", joint), func(t *testing.T) {
+			ctx := t.Context()
+			re := require.New(t)
+			tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
+			tc.SetEnablePlacementRules(true)
+			tc.SetEnableUseJointConsensus(joint)
+			tc.SetLabelProperty("reject-leader", "reject", "yes")
+			tc.AddLabelsStore(1, 100, map[string]string{"zone": "a", "a": "yes"})
+			tc.AddLabelsStore(2, 10, map[string]string{"zone": "b", "a": "yes", "reject": "yes"})
+			tc.AddLabelsStore(3, 10, map[string]string{"zone": "a", "c": "yes"})
+			tc.AddLabelsStore(4, 10, map[string]string{"zone": "a", "reject": "yes"})
+			tc.AddLabelsStore(5, 1, map[string]string{"zone": "a", "a": "yes", "reject": "yes"})
+			tc.AddLabelsStore(6, 10, map[string]string{"zone": "a", "a": "yes"})
+			rm := tc.GetRuleManager()
+			re.NoError(rm.SetRules([]*placement.Rule{
+				{
+					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+					Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"},
+				},
+				{
+					GroupID: placement.DefaultGroupID, ID: "follower-a", Index: 1,
+					Role: placement.Follower, Count: 1,
+					LabelConstraints: []placement.LabelConstraint{{Key: "a", Op: placement.In, Values: []string{"yes"}}},
+				},
+				{
+					GroupID: placement.DefaultGroupID, ID: "follower-c", Index: 2,
+					Role: placement.Follower, Count: 1,
+					LabelConstraints: []placement.LabelConstraint{{Key: "c", Op: placement.In, Values: []string{"yes"}}},
+				},
+			}))
+			leader := &metapb.Peer{Id: 11, StoreId: 1}
+			first := &metapb.Peer{Id: 13, StoreId: 3}
+			next := &metapb.Peer{Id: 14, StoreId: 4}
+			region := core.NewRegionInfo(&metapb.Region{
+				Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+				Peers: []*metapb.Peer{first, next, leader, {Id: 12, StoreId: 2}},
+			}, leader)
+			tc.PutRegion(region)
+			tc.SetStoreOffline(1)
+			rc := NewRuleChecker(ctx, tc, rm, cache.NewIDTTL(ctx, time.Minute, 3*time.Minute))
+			fit := rm.FitRegionWithoutCache(tc, region)
+			roles := placement.NewRoleChecker(tc, region.GetPeers(), rm.GetRulesForApplyRegion(region), false)
+			re.False(fit.IsSatisfied())
+			re.True(roles.IsSatisfied(1))
+			_, err := operator.CreateMovePeerOperator("test", tc, region, operator.OpReplica, 1, &metapb.Peer{StoreId: 5})
+			re.ErrorIs(err, operator.ErrTargetRole)
+			op := rc.Check(region)
+			re.NotNil(op)
+			operatorutil.CheckTransferPeer(re, op, operator.OpReplica, 1, 6)
+		})
+	}
+}
+
+func TestRuleCheckerTriesAnotherSourceAfterRoleRejection(t *testing.T) {
+	for _, joint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("joint=%t", joint), func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
+			tc.SetEnablePlacementRules(true)
+			tc.SetEnableUseJointConsensus(joint)
+			tc.SetLabelProperty("reject-leader", "reject", "yes")
+			tc.AddLabelsStore(1, 100, map[string]string{"kind": "a", "zone": "z1"})
+			tc.AddLabelsStore(2, 20, map[string]string{"kind": "a", "zone": "z1", "reject": "yes"})
+			tc.AddLabelsStore(3, 20, map[string]string{"kind": "c", "zone": "z1"})
+			tc.AddLabelsStore(4, 1, map[string]string{"kind": "a", "zone": "z2", "reject": "yes"})
+			rm := tc.GetRuleManager()
+			re.NoError(rm.SetRules([]*placement.Rule{
+				{
+					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+					Role: placement.Voter, Count: 2,
+					LabelConstraints: []placement.LabelConstraint{{Key: "kind", Op: placement.In, Values: []string{"a", "c"}}},
+					LocationLabels:   []string{"zone"},
+				},
+				{
+					GroupID: placement.DefaultGroupID, ID: "follower-c",
+					Role: placement.Follower, Count: 1,
+					LabelConstraints: []placement.LabelConstraint{{Key: "kind", Op: placement.In, Values: []string{"c"}}},
+				},
+			}))
+			region := tc.AddLeaderRegion(1, 1, 2, 3)
+			re.True(rm.FitRegionWithoutCache(tc, region).IsSatisfied())
+			_, err := operator.CreateMovePeerOperator("probe", tc, region, operator.OpReplica, 1, &metapb.Peer{StoreId: 4})
+			re.ErrorIs(err, operator.ErrTargetRole)
+
+			rc := NewRuleChecker(ctx, tc, rm, cache.NewIDTTL(ctx, time.Minute, 3*time.Minute))
+			op := rc.Check(region)
+			re.NotNil(op)
+			operatorutil.CheckTransferPeer(re, op, operator.OpReplica, 2, 4)
+			for i := range op.Len() {
+				_, transfersLeader := op.Step(i).(operator.TransferLeader)
+				re.False(transfersLeader)
+			}
+		})
+	}
+}
+
+func TestRuleCheckerRetriesLocationImprovementWithLooseFit(t *testing.T) {
+	for _, joint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("joint=%t", joint), func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
+			tc.SetEnablePlacementRules(true)
+			tc.SetEnableUseJointConsensus(joint)
+			tc.SetLabelProperty("reject-leader", "reject", "yes")
+			tc.AddLabelsStore(1, 100, map[string]string{"zone": "a"})
+			tc.AddLabelsStore(2, 20, map[string]string{"zone": "b", "c": "yes"})
+			tc.AddLabelsStore(3, 20, map[string]string{"zone": "a", "reject": "yes"})
+			tc.AddLabelsStore(4, 1, map[string]string{"zone": "c", "reject": "yes"})
+			tc.AddLabelsStore(5, 10, map[string]string{"zone": "c"})
+			rm := tc.GetRuleManager()
+			re.NoError(rm.SetRules([]*placement.Rule{
+				{
+					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+					Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"},
+				},
+				{
+					GroupID: placement.DefaultGroupID, ID: "follower-c", Index: 1,
+					Role: placement.Follower, Count: 1,
+					LabelConstraints: []placement.LabelConstraint{{Key: "c", Op: placement.In, Values: []string{"yes"}}},
+				},
+			}))
+			region := tc.AddLeaderRegion(1, 1, 2, 3)
+			fit := rm.FitRegionWithoutCache(tc, region)
+			re.False(fit.IsSatisfied())
+			re.Len(fit.RuleFits, 2)
+			re.True(fit.RuleFits[0].IsSatisfied())
+			re.Equal([]*metapb.Peer{region.GetStorePeer(1), region.GetStorePeer(2)}, fit.RuleFits[0].Peers)
+			re.Empty(fit.RuleFits[1].Peers)
+			roles := placement.NewRoleChecker(tc, region.GetPeers(), fit.GetRules(), false)
+			re.True(roles.IsSatisfied(1))
+
+			_, err := operator.CreateMovePeerOperator("probe-preferred", tc, region, operator.OpReplica, 1, &metapb.Peer{StoreId: 4})
+			re.ErrorIs(err, operator.ErrTargetRole)
+			op, err := operator.CreateMovePeerOperator("probe-next", tc, region, operator.OpReplica, 1, &metapb.Peer{StoreId: 5})
+			re.NoError(err)
+			operatorutil.CheckTransferPeer(re, op, operator.OpReplica, 1, 5)
+
+			rc := NewRuleChecker(ctx, tc, rm, cache.NewIDTTL(ctx, time.Minute, 3*time.Minute))
+			strategy := rc.strategy(region, fit.RuleFits[0].Rule, false)
+			source, target, _ := strategy.getBetterLocation(tc, region, fit, fit.RuleFits[0])
+			re.Equal(uint64(1), source)
+			re.Equal(uint64(4), target)
+			checked := rc.Check(region)
+			re.NotNil(checked)
+			operatorutil.CheckTransferPeer(re, checked, operator.OpReplica, 1, 5)
+		})
+	}
+}
+
+func TestRuleCheckerRetriesOfflineFollowerWithLooseFit(t *testing.T) {
+	for _, joint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("joint=%t", joint), func(t *testing.T) {
+			ctx := t.Context()
+			re := require.New(t)
+			tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
+			tc.SetEnablePlacementRules(true)
+			tc.SetEnableUseJointConsensus(joint)
+			tc.SetLabelProperty("reject-leader", "reject", "yes")
+			tc.AddLabelsStore(1, 100, map[string]string{"zone": "a", "a": "yes"})
+			tc.AddLabelsStore(2, 10, map[string]string{"zone": "b", "a": "yes"})
+			tc.AddLabelsStore(3, 10, map[string]string{"zone": "a", "c": "yes"})
+			tc.AddLabelsStore(4, 10, map[string]string{"zone": "a", "reject": "yes"})
+			tc.AddLabelsStore(5, 1, map[string]string{"zone": "b", "reject": "yes"})
+			tc.AddLabelsStore(6, 10, map[string]string{"zone": "b", "a": "yes"})
+			rm := tc.GetRuleManager()
+			re.NoError(rm.SetRules([]*placement.Rule{
+				{
+					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+					Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"},
+				},
+				{
+					GroupID: placement.DefaultGroupID, ID: "follower-a", Index: 1,
+					Role: placement.Follower, Count: 1,
+					LabelConstraints: []placement.LabelConstraint{{Key: "a", Op: placement.In, Values: []string{"yes"}}},
+				},
+				{
+					GroupID: placement.DefaultGroupID, ID: "follower-c", Index: 2,
+					Role: placement.Follower, Count: 1,
+					LabelConstraints: []placement.LabelConstraint{{Key: "c", Op: placement.In, Values: []string{"yes"}}},
+				},
+			}))
+			region := tc.AddLeaderRegion(1, 1, 2, 3, 4)
+			tc.SetStoreOffline(2)
+			fit := rm.FitRegionWithoutCache(tc, region)
+			re.False(fit.IsSatisfied())
+			re.Equal("follower-a", fit.GetRuleFit(region.GetStorePeer(1).GetId()).Rule.ID)
+			re.Equal(placement.Voter, fit.GetRuleFit(region.GetStorePeer(2).GetId()).Rule.Role)
+			roles := placement.NewRoleChecker(tc, region.GetPeers(), fit.GetRules(), false)
+			re.True(roles.IsSatisfied(1))
+
+			_, err := operator.CreateMovePeerOperator("probe-preferred", tc, region, operator.OpReplica, 2, &metapb.Peer{StoreId: 5})
+			re.ErrorIs(err, operator.ErrTargetRole)
+			op, err := operator.CreateMovePeerOperator("probe-next", tc, region, operator.OpReplica, 2, &metapb.Peer{StoreId: 6})
+			re.NoError(err)
+			operatorutil.CheckTransferPeer(re, op, operator.OpReplica, 2, 6)
+
+			rc := NewRuleChecker(ctx, tc, rm, cache.NewIDTTL(ctx, time.Minute, 3*time.Minute))
+			checked := rc.Check(region)
+			re.NotNil(checked)
+			operatorutil.CheckTransferPeer(re, checked, operator.OpReplica, 2, 6)
+		})
+	}
 }

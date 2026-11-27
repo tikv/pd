@@ -940,3 +940,61 @@ func newRegionInfoWithBytes(id uint64, startKey, endKey []byte) *core.RegionInfo
 		peer,
 	)
 }
+
+func TestMergeCheckerTriesOtherNeighborAfterRoleRejection(t *testing.T) {
+	for _, mode := range []string{"legacy", "joint"} {
+		t.Run(mode, func(t *testing.T) {
+			re := require.New(t)
+			ctx := t.Context()
+			tc := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
+			tc.SetEnablePlacementRules(true)
+			tc.SetEnableUseJointConsensus(mode == "joint")
+			tc.SetSplitMergeInterval(0)
+			tc.SetMaxMergeRegionSize(10)
+			tc.SetMaxMergeRegionKeys(10)
+			tc.AddLabelsStore(1, 1, map[string]string{"zone": "a"})
+			tc.AddLabelsStore(2, 1, map[string]string{"zone": "b"})
+			tc.AddLabelsStore(3, 1, map[string]string{"zone": "b"})
+			tc.AddLabelsStore(4, 1, map[string]string{"zone": "a"})
+			tc.SetStoreEvictLeader(4, true)
+			rm := tc.GetRuleManager()
+			re.NoError(rm.SetRules([]*placement.Rule{
+				{
+					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+					Role: placement.Leader, Count: 1,
+					LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"a"}}},
+				},
+				{
+					GroupID: placement.DefaultGroupID, ID: "voters-b",
+					Role: placement.Voter, Count: 2,
+					LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"b"}}},
+				},
+			}))
+			prev := newRegionInfo(1, "", "a", 3, 1, []uint64{11, 1}, []uint64{11, 1}, []uint64{12, 2}, []uint64{13, 3})
+			source := newRegionInfo(2, "a", "b", 1, 1, []uint64{21, 1}, []uint64{21, 1}, []uint64{22, 2}, []uint64{23, 3})
+			next := newRegionInfo(3, "b", "c", 2, 1, []uint64{34, 4}, []uint64{34, 4}, []uint64{32, 2}, []uint64{33, 3})
+			tc.PutRegion(prev)
+			tc.PutRegion(source)
+			tc.PutRegion(next)
+			mc := NewMergeChecker(ctx, tc, tc.GetCheckerConfig())
+			re.True(mc.checkTarget(source, prev))
+			re.True(mc.checkTarget(source, next))
+			tc.SetEnableOneWayMerge(false)
+			ops := mc.Check(source)
+			re.Len(ops, 2)
+			re.Equal(prev.GetID(), ops[1].RegionID())
+			tc.SetEnableOneWayMerge(true)
+			re.Empty(mc.Check(source))
+
+			// Once the preferred candidate can receive leadership, both modes use it.
+			tc.SetStoreEvictLeader(4, false)
+			for _, oneWay := range []bool{false, true} {
+				tc.SetEnableOneWayMerge(oneWay)
+				ops = mc.Check(source)
+				re.Len(ops, 2, "one-way=%t", oneWay)
+				re.Equal(next.GetID(), ops[1].RegionID())
+			}
+		})
+	}
+}

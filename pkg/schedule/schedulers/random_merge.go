@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"errors"
 	"math/rand/v2"
 
 	"github.com/pingcap/log"
@@ -87,28 +88,39 @@ func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 	}
 
 	other, target := cluster.GetAdjacentRegions(region)
-	if !cluster.GetSchedulerConfig().IsOneWayMergeEnabled() && ((rand.Int()%2 == 0 && other != nil) || target == nil) {
-		target = other
+	if cluster.GetSchedulerConfig().IsOneWayMergeEnabled() {
+		other = nil
+	} else if (rand.Int()%2 == 0 && other != nil) || target == nil {
+		target, other = other, target
 	}
 	if target == nil {
 		randomMergeNoTargetStoreCounter.Inc()
 		return nil, nil
 	}
 
-	if !allowMerge(cluster, region, target) {
-		randomMergeNotAllowedCounter.Inc()
-		return nil, nil
-	}
+	for _, candidate := range [2]*core.RegionInfo{target, other} {
+		if candidate == nil {
+			break
+		}
+		if !allowMerge(cluster, region, candidate) {
+			randomMergeNotAllowedCounter.Inc()
+			return nil, nil
+		}
 
-	ops, err := operator.CreateMergeRegionOperator(s.GetName(), cluster, region, target, operator.OpMerge)
-	if err != nil {
-		log.Debug("fail to create merge region operator", errs.ZapError(err))
-		return nil, nil
+		ops, err := operator.CreateMergeRegionOperator(s.GetName(), cluster, region, candidate, operator.OpMerge)
+		if err != nil {
+			log.Debug("fail to create merge region operator", errs.ZapError(err))
+			if errors.Is(err, operator.ErrTargetRole) {
+				continue
+			}
+			return nil, nil
+		}
+		ops[0].SetPriorityLevel(constant.Low)
+		ops[1].SetPriorityLevel(constant.Low)
+		ops[0].Counters = append(ops[0].Counters, randomMergeNewOperatorCounter)
+		return ops, nil
 	}
-	ops[0].SetPriorityLevel(constant.Low)
-	ops[1].SetPriorityLevel(constant.Low)
-	ops[0].Counters = append(ops[0].Counters, randomMergeNewOperatorCounter)
-	return ops, nil
+	return nil, nil
 }
 
 func allowMerge(cluster sche.SchedulerCluster, region, target *core.RegionInfo) bool {

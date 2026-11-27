@@ -15,6 +15,8 @@
 package schedulers
 
 import (
+	"errors"
+
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -93,22 +95,26 @@ func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*ope
 			}
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
-			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium}, f).
-				RandomPick()
-			if target == nil {
+			candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
+				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium}, f)
+			if candidates.Len() == 0 {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))
 				labelNoTargetCounter.Inc()
 				continue
 			}
 
-			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
-			if err != nil {
-				log.Debug("fail to create transfer label reject leader operator", errs.ZapError(err))
-				return nil, nil
+			for _, target := range candidates.Shuffle().Stores {
+				op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, target.GetID(), nil, operator.OpLeader)
+				if err != nil {
+					log.Debug("fail to create transfer label reject leader operator", errs.ZapError(err))
+					if errors.Is(err, operator.ErrTargetRole) {
+						continue
+					}
+					return nil, nil
+				}
+				op.Counters = append(op.Counters, labelNewOperatorCounter)
+				return []*operator.Operator{op}, nil
 			}
-			op.Counters = append(op.Counters, labelNewOperatorCounter)
-			return []*operator.Operator{op}, nil
 		}
 	}
 	labelNoRegionCounter.Inc()
