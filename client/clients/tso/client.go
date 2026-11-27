@@ -89,12 +89,12 @@ type Cli struct {
 	tsoStreamBuilderFactory
 	// leaderURL is the URL of the TSO leader.
 	leaderURL atomic.Value
-	// leaderSwitchedMu protects the leader notification and pending stream builds.
-	leaderSwitchedMu    sync.Mutex
-	leaderSwitchedCh    chan struct{}
-	pendingStreamBuilds map[context.Context]pendingStreamBuild
-	conCtxMgr           *cctx.Manager[*tsoStream]
-	updateConCtxsCh     chan struct{}
+	// leaderSwitchedMu protects the leader notification and the updater's pending stream build.
+	leaderSwitchedMu   sync.Mutex
+	leaderSwitchedCh   chan struct{}
+	pendingStreamBuild *pendingStreamBuild
+	conCtxMgr          *cctx.Manager[*tsoStream]
+	updateConCtxsCh    chan struct{}
 
 	// tsoReqPool is the pool to recycle `*tsoRequest`.
 	tsoReqPool *sync.Pool
@@ -257,35 +257,32 @@ func (c *Cli) notifyLeaderSwitched() {
 	c.leaderSwitchedMu.Lock()
 	defer c.leaderSwitchedMu.Unlock()
 	leaderURL := c.getLeaderURL()
-	for ctx, build := range c.pendingStreamBuilds {
-		if build.url != leaderURL || build.proxy != c.option.GetEnableTSOFollowerProxy() {
-			build.superseded = true
-			c.pendingStreamBuilds[ctx] = build
-			build.cancel()
-		}
+	if build := c.pendingStreamBuild; build != nil &&
+		(build.url != leaderURL || build.proxy != c.option.GetEnableTSOFollowerProxy()) {
+		build.superseded = true
+		build.cancel()
 	}
 	close(c.leaderSwitchedCh)
 	c.leaderSwitchedCh = make(chan struct{})
 }
 
-func (c *Cli) trackStreamBuild(ctx context.Context, cancel context.CancelFunc, url string, proxy bool) bool {
+func (c *Cli) trackStreamBuild(cancel context.CancelFunc, url string, proxy bool) *pendingStreamBuild {
 	c.leaderSwitchedMu.Lock()
 	defer c.leaderSwitchedMu.Unlock()
 	if c.getLeaderURL() != url || c.option.GetEnableTSOFollowerProxy() != proxy {
-		return false
+		return nil
 	}
-	if c.pendingStreamBuilds == nil {
-		c.pendingStreamBuilds = make(map[context.Context]pendingStreamBuild)
-	}
-	c.pendingStreamBuilds[ctx] = pendingStreamBuild{url: url, proxy: proxy, cancel: cancel}
-	return true
+	build := &pendingStreamBuild{url: url, proxy: proxy, cancel: cancel}
+	c.pendingStreamBuild = build
+	return build
 }
 
-func (c *Cli) finishStreamBuild(ctx context.Context) (valid, superseded bool) {
+func (c *Cli) finishStreamBuild(ctx context.Context, build *pendingStreamBuild) (valid, superseded bool) {
 	c.leaderSwitchedMu.Lock()
 	defer c.leaderSwitchedMu.Unlock()
-	build := c.pendingStreamBuilds[ctx]
-	delete(c.pendingStreamBuilds, ctx)
+	if c.pendingStreamBuild == build {
+		c.pendingStreamBuild = nil
+	}
 	superseded = build.superseded || c.getLeaderURL() != build.url || c.option.GetEnableTSOFollowerProxy() != build.proxy
 	return ctx.Err() == nil && !superseded, superseded
 }
@@ -440,13 +437,14 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		timer.Reset(constants.RetryInterval)
 		leaderSwitched := c.leaderSwitched()
 		cctx, cancel := context.WithCancel(ctx)
-		if !c.trackStreamBuild(cctx, cancel, c.getLeaderURL(), false) {
+		build := c.trackStreamBuild(cancel, c.getLeaderURL(), false)
+		if build == nil {
 			cancel()
 			continue
 		}
 		cc, url = c.getTSOLeaderClientConn(cctx)
 		if c.conCtxMgr.Exist(url) {
-			c.finishStreamBuild(cctx)
+			c.finishStreamBuild(cctx, build)
 			cancel()
 			// Just trigger the clean up of the stale connection contexts.
 			c.conCtxMgr.GC(func(curURL string) bool { return curURL != url })
@@ -455,7 +453,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		if cc != nil && cctx.Err() == nil {
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
 		}
-		valid, superseded := c.finishStreamBuild(cctx)
+		valid, superseded := c.finishStreamBuild(cctx, build)
 		if superseded {
 			cancel()
 			stream = nil
@@ -516,11 +514,12 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 
 	if networkErrNum == constants.MaxRetryTimes {
 		cctx, cancel := context.WithCancel(ctx)
-		if !c.trackStreamBuild(cctx, cancel, c.getLeaderURL(), false) {
+		build := c.trackStreamBuild(cancel, c.getLeaderURL(), false)
+		if build == nil {
 			cancel()
 			return nil
 		}
-		defer c.finishStreamBuild(cctx)
+		defer c.finishStreamBuild(cctx, build)
 		// encounter the network error
 		backupClientConn, backupURL := c.backupClientConn(cctx)
 		if backupClientConn != nil {
@@ -533,7 +532,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 			// create the follower stream
 			forwardCtx := grpcutil.BuildForwardContext(cctx, forwardedHost)
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(forwardCtx, cancel, c.option.Timeout)
-			valid, _ := c.finishStreamBuild(cctx)
+			valid, _ := c.finishStreamBuild(cctx, build)
 			if !valid {
 				cancel()
 				return err
@@ -621,12 +620,13 @@ func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
 		return errors.Errorf("cannot find the tso leader")
 	}
 	recoveryCtx, recoveryCancel := context.WithCancel(ctx)
-	if !c.trackStreamBuild(recoveryCtx, recoveryCancel, forwardedHost, true) {
+	build := c.trackStreamBuild(recoveryCancel, forwardedHost, true)
+	if build == nil {
 		recoveryCancel()
 		return nil
 	}
 	defer recoveryCancel()
-	defer c.finishStreamBuild(recoveryCtx)
+	defer c.finishStreamBuild(recoveryCtx, build)
 	tsoStreamBuilders := c.getAllTSOStreamBuilders(recoveryCtx)
 	if recoveryCtx.Err() != nil {
 		return recoveryCtx.Err()
