@@ -371,7 +371,7 @@ func TestGCStateWarmupConcurrencyAndForeground(t *testing.T) {
 			}()
 			gcWarmupWait(t, bookkeeping)
 			foreground := make(chan error, 1)
-			go func() { _, err := m.GetGCState(2, true); foreground <- err }()
+			go func() { _, err := m.GetGCState(context.Background(), 2, true); foreground <- err }()
 			select {
 			case err := <-foreground:
 				require.NoError(t, err)

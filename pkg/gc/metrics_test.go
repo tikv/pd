@@ -154,18 +154,18 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsKVLeaderColdRead() {
 	_, cached := s.manager.gcStateCache.load(2)
 	re.False(cached)
 	expected := GCState{KeyspaceID: 2, IsKeyspaceLevel: true, TxnSafePoint: 90, GCSafePoint: 70}
-	state, err := s.manager.GetGCState(2, true)
+	state, err := s.manager.GetGCState(context.Background(), 2, true)
 	re.NoError(err)
 	re.Equal(expected, state)
 
 	s.manager.OnNodeBecomesLeader()
 	wrapped.failReads = true
-	_, err = s.manager.GetGCState(2, true)
+	_, err = s.manager.GetGCState(context.Background(), 2, true)
 	re.ErrorContains(err, "invalid GC safe point batch response")
 	_, cached = s.manager.gcStateCache.load(2)
 	re.False(cached, "failed reads must not populate the cache")
 	wrapped.failReads = false
-	state, err = s.manager.GetGCState(2, true)
+	state, err = s.manager.GetGCState(context.Background(), 2, true)
 	re.NoError(err)
 	re.Equal(expected, state)
 }

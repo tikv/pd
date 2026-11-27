@@ -306,7 +306,7 @@ func TestLegacyGCModeRouting(t *testing.T) {
 		}
 		return wb.SetGCBarrier(42, endpoint.NewGCBarrier("legacy-barrier", 25, nil))
 	}))
-	state, err := m.GetGCState(42, false)
+	state, err := m.GetGCState(context.Background(), 42, false)
 	require.NoError(t, err)
 	require.Equal(t, uint64(20), state.TxnSafePoint)
 	require.Equal(t, uint64(15), state.GCSafePoint)
@@ -329,7 +329,7 @@ func TestLegacyGCModeRouting(t *testing.T) {
 	result, err := m.AdvanceTxnSafePoint(42, 22, time.Now())
 	require.NoError(t, err)
 	require.Equal(t, uint64(22), result.NewTxnSafePoint)
-	unified, err := m.GetGCState(constant.NullKeyspaceID, false)
+	unified, err := m.GetGCState(context.Background(), constant.NullKeyspaceID, false)
 	require.NoError(t, err)
 	require.Equal(t, uint64(100), unified.TxnSafePoint)
 	require.Equal(t, uint64(90), unified.GCSafePoint)
@@ -340,7 +340,7 @@ func TestLegacyGCModeRouting(t *testing.T) {
 	meta.Keyspace = &keyspacepb.KeyspaceMeta_Id{Id: 43}
 	meta.Name = "legacy-empty"
 	persistHistoricalGCKeyspace(t, storage, meta)
-	empty, err := m.GetGCState(43, false)
+	empty, err := m.GetGCState(context.Background(), 43, false)
 	require.NoError(t, err)
 	require.True(t, empty.IsKeyspaceLevel)
 	require.Zero(t, empty.TxnSafePoint)
@@ -492,7 +492,7 @@ func TestGCStateLeadershipClearsCacheBeforeEnablingReads(t *testing.T) {
 			}
 			writeSafePoint(100)
 			// Reads can populate the cache even while this manager is a follower.
-			state, err := manager.GetGCState(constant.NullKeyspaceID, true)
+			state, err := manager.GetGCState(context.Background(), constant.NullKeyspaceID, true)
 			re.NoError(err)
 			re.Equal(uint64(100), state.GCSafePoint)
 			// Another leader advances storage after the cached read.
@@ -790,7 +790,7 @@ func (c *gcStateCacheAccessCounters) snapshot() gcStateCacheAccessCounterSnapsho
 
 func (s *gcStateManagerTestSuite) checkTxnSafePoint(keyspaceID uint32, expectedTxnSafePoint uint64) {
 	re := s.Require()
-	state, err := s.manager.GetGCState(keyspaceID, true)
+	state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(expectedTxnSafePoint, state.TxnSafePoint)
 }
@@ -918,7 +918,7 @@ func (s *gcStateManagerTestSuite) TestAdvanceGCSafePointBasic() {
 	re := s.Require()
 
 	checkGCSafePoint := func(keyspaceID uint32, expectedGCSafePoint uint64) {
-		state, err := s.manager.GetGCState(keyspaceID, true)
+		state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 		re.NoError(err)
 		re.Equal(expectedGCSafePoint, state.GCSafePoint)
 	}
@@ -1073,7 +1073,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWit
 func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWithNewLoad() {
 	for _, keyspaceID := range s.keyspacePresets.manageable {
 		s.testCompatibleGCSafePointUpdateSequentiallyImpl(keyspaceID, func(keyspaceID uint32) (uint64, error) {
-			state, err := s.manager.GetGCState(keyspaceID, true)
+			state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 			if err != nil {
 				return 0, err
 			}
@@ -1257,7 +1257,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointRoundingTTL() 
 		re.NoError(err)
 		re.True(updated)
 
-		state, err := s.manager.GetGCState(keyspaceID, false)
+		state, err := s.manager.GetGCState(context.Background(), keyspaceID, false)
 		re.NoError(err)
 		re.Len(state.GCBarriers, 1)
 		re.Equal("svc1", state.GCBarriers[0].BarrierID)
@@ -1269,7 +1269,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointRoundingTTL() 
 		re.NoError(err)
 		re.True(updated)
 
-		state, err = s.manager.GetGCState(keyspaceID, false)
+		state, err = s.manager.GetGCState(context.Background(), keyspaceID, false)
 		re.NoError(err)
 		re.Len(state.GCBarriers, 1)
 		re.Equal("svc1", state.GCBarriers[0].BarrierID)
@@ -1281,7 +1281,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointRoundingTTL() 
 
 func (s *gcStateManagerTestSuite) getGCBarrier(keyspaceID uint32, barrierID string) *endpoint.GCBarrier {
 	re := s.Require()
-	state, err := s.manager.GetGCState(keyspaceID, false)
+	state, err := s.manager.GetGCState(context.Background(), keyspaceID, false)
 	re.NoError(err)
 	idx := slices.IndexFunc(state.GCBarriers, func(b *endpoint.GCBarrier) bool {
 		return b.BarrierID == barrierID
@@ -1294,7 +1294,7 @@ func (s *gcStateManagerTestSuite) getGCBarrier(keyspaceID uint32, barrierID stri
 
 func (s *gcStateManagerTestSuite) getAllGCBarriers(keyspaceID uint32) []*endpoint.GCBarrier {
 	re := s.Require()
-	state, err := s.manager.GetGCState(keyspaceID, false)
+	state, err := s.manager.GetGCState(context.Background(), keyspaceID, false)
 	re.NoError(err)
 	return state.GCBarriers
 }
@@ -2328,7 +2328,7 @@ func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
 	// Check all public methods that accepts keyspaceID are all correctly redirected.
 	testedFunc := []func(keyspaceID uint32) error{
 		func(keyspaceID uint32) error {
-			_, err1 := s.manager.GetGCState(keyspaceID, false)
+			_, err1 := s.manager.GetGCState(context.Background(), keyspaceID, false)
 			return errors.AddStack(err1)
 		},
 		func(keyspaceID uint32) error {
@@ -2393,6 +2393,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriers() {
 	now := time.Now().Truncate(time.Second)
 
 	state, barriers, err := s.manager.GetGCStateWithGlobalGCBarriers(
+		context.Background(),
 		constant.NullKeyspaceID,
 		true,
 	)
@@ -2429,6 +2430,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriers() {
 	re.NoError(err)
 
 	state, barriers, err = s.manager.GetGCStateWithGlobalGCBarriers(
+		context.Background(),
 		constant.NullKeyspaceID,
 		true,
 	)
@@ -2440,6 +2442,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriers() {
 	)
 
 	state, barriers, err = s.manager.GetGCStateWithGlobalGCBarriers(
+		context.Background(),
 		constant.NullKeyspaceID,
 		false,
 	)
@@ -2453,7 +2456,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriers() {
 
 	if !kerneltype.IsNextGen() {
 		state, barriers, err =
-			s.manager.GetGCStateWithGlobalGCBarriers(1, true)
+			s.manager.GetGCStateWithGlobalGCBarriers(context.Background(), 1, true)
 		re.NoError(err)
 		re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
 		re.ElementsMatch(
@@ -2465,13 +2468,14 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriers() {
 	s.manager.gcStateCache.remove(constant.NullKeyspaceID)
 	tracker := s.trackGCStateCacheAccessCounters()
 	_, _, err = s.manager.GetGCStateWithGlobalGCBarriers(
+		context.Background(),
 		constant.NullKeyspaceID,
 		true,
 	)
 	re.NoError(err)
 	re.Equal(gcStateCacheAccessCounterSnapshot{}, tracker.snapshot())
 
-	_, err = s.manager.GetGCState(constant.NullKeyspaceID, true)
+	_, err = s.manager.GetGCState(context.Background(), constant.NullKeyspaceID, true)
 	re.NoError(err)
 	re.Equal(1, tracker.snapshot().hit)
 	re.Zero(tracker.snapshot().miss)
@@ -2486,6 +2490,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersReturnsNoPar
 
 	state, barriers, err :=
 		s.manager.GetGCStateWithGlobalGCBarriers(
+			context.Background(),
 			constant.NullKeyspaceID,
 			true,
 		)
@@ -2494,42 +2499,32 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersReturnsNoPar
 	re.Nil(barriers)
 }
 
-func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersRejectsRevisionConflict() {
+func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersReturnsConsistentSnapshot() {
 	re := s.Require()
-	ctx := context.Background()
-	now := time.Now().Truncate(time.Second)
-	_, err := s.manager.SetGlobalGCBarrier(
-		ctx,
-		"snapshot",
-		gcTestTS(100),
-		time.Hour,
-		now,
-	)
-	re.NoError(err)
+	ctx := s.T().Context()
+	id := constant.NullKeyspaceID
+	writeSnapshot := func(ts uint64) {
+		re.NoError(s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+			if err := wb.SetTxnSafePoint(id, ts); err != nil {
+				return err
+			}
+			return wb.SetGlobalGCBarrier(endpoint.NewGlobalGCBarrier("snapshot", ts, nil))
+		}))
+	}
+	before, after := gcTestTS(100), gcTestTS(200)
+	writeSnapshot(before)
 
-	failpointName :=
-		"github.com/tikv/pd/pkg/gc/" +
-			"getGCStateWithGlobalGCBarriersAfterRead"
+	const hook = "github.com/tikv/pd/pkg/gc/getGCStateWithGlobalGCBarriersAfterRead"
 	readDone := make(chan struct{})
 	continueRead := make(chan struct{})
-	var (
-		readDoneOnce sync.Once
-		releaseOnce  sync.Once
-		enabled      = true
-	)
-	re.NoError(failpoint.EnableCall(failpointName, func() {
-		readDoneOnce.Do(func() {
-			close(readDone)
-		})
+	release := sync.OnceFunc(func() { close(continueRead) })
+	re.NoError(failpoint.EnableCall(hook, sync.OnceFunc(func() {
+		close(readDone)
 		<-continueRead
-	}))
+	})))
 	defer func() {
-		releaseOnce.Do(func() {
-			close(continueRead)
-		})
-		if enabled {
-			re.NoError(failpoint.Disable(failpointName))
-		}
+		release()
+		re.NoError(failpoint.Disable(hook))
 	}()
 
 	type result struct {
@@ -2537,70 +2532,49 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersRejectsRevis
 		barriers []*endpoint.GlobalGCBarrier
 		err      error
 	}
-	resultCh := make(chan result, 1)
+	read := make(chan result, 1)
 	go func() {
-		state, barriers, err :=
-			s.manager.GetGCStateWithGlobalGCBarriers(
-				constant.NullKeyspaceID,
-				true,
-			)
-		resultCh <- result{
-			state:    state,
-			barriers: barriers,
-			err:      err,
-		}
+		state, barriers, err := s.manager.GetGCStateWithGlobalGCBarriers(ctx, id, true)
+		read <- result{state: state, barriers: barriers, err: err}
 	}()
+	gcWarmupWait(s.T(), readDone)
 
+	// A separate GC writer can commit directly to etcd while this PD holds its local read lock.
+	writeSnapshot(after)
+	release()
 	select {
-	case <-readDone:
+	case first := <-read:
+		re.NoError(first.err)
+		re.Len(first.barriers, 1)
+		re.Equal(before, first.state.TxnSafePoint)
+		re.Equal(before, first.barriers[0].BarrierTS)
 	case <-time.After(5 * time.Second):
-		re.FailNow(
-			"combined GC state read did not reach the failpoint",
-		)
+		s.T().Fatal("combined GC state read did not return")
 	}
 
-	otherManager := NewGCStateManager(
-		s.provider,
-		s.manager.cfg,
-		s.manager.keyspaceManager,
-		nil,
-	)
-	s.T().Cleanup(otherManager.CloseBarrierMetrics)
-	stopOtherManager := otherManager.OnNodeBecomesLeader()
-	defer stopOtherManager()
-	_, err = otherManager.SetGlobalGCBarrier(
-		ctx,
-		"snapshot",
-		gcTestTS(200),
-		time.Hour,
-		now,
-	)
-	re.NoError(err)
-
-	releaseOnce.Do(func() {
-		close(continueRead)
-	})
-	var first result
-	select {
-	case first = <-resultCh:
-	case <-time.After(5 * time.Second):
-		re.FailNow("combined GC state read did not return")
-	}
-	re.True(errors.ErrorEqual(first.err, errs.ErrEtcdTxnConflict))
-	re.Equal(GCState{}, first.state)
-	re.Nil(first.barriers)
-
-	re.NoError(failpoint.Disable(failpointName))
-	enabled = false
-
-	_, barriers, err :=
-		s.manager.GetGCStateWithGlobalGCBarriers(
-			constant.NullKeyspaceID,
-			true,
-		)
+	state, barriers, err := s.manager.GetGCStateWithGlobalGCBarriers(ctx, id, true)
 	re.NoError(err)
 	re.Len(barriers, 1)
-	re.Equal(gcTestTS(200), barriers[0].BarrierTS)
+	re.Equal(after, state.TxnSafePoint)
+	re.Equal(after, barriers[0].BarrierTS)
+}
+
+func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersCanceledBeforeCacheFill() {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(s.T().Context())
+	defer cancel()
+	id := constant.NullKeyspaceID
+	s.manager.gcStateCache.remove(id)
+	const hook = "github.com/tikv/pd/pkg/gc/getGCStateWithGlobalGCBarriersAfterRead"
+	re.NoError(failpoint.EnableCall(hook, cancel))
+	defer func() { re.NoError(failpoint.Disable(hook)) }()
+
+	state, barriers, err := s.manager.GetGCStateWithGlobalGCBarriers(ctx, id, true)
+	re.ErrorIs(err, context.Canceled)
+	re.Empty(state)
+	re.Nil(barriers)
+	_, cached := s.manager.gcStateCache.load(id)
+	re.False(cached)
 }
 
 func (s *gcStateManagerTestSuite) TestGetGCState() {
@@ -2615,7 +2589,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 			if slices.Contains(s.keyspacePresets.manageable, keyspaceID) {
 				re.Equal(keyspaceID, state.KeyspaceID)
 
-				s, err := s.manager.GetGCState(keyspaceID, false)
+				s, err := s.manager.GetGCState(context.Background(), keyspaceID, false)
 				re.NoError(err)
 				re.Equal(s, state)
 			} else {
@@ -2627,7 +2601,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	}
 
 	for _, keyspaceID := range s.keyspacePresets.manageable {
-		state, err := s.manager.GetGCState(keyspaceID, false)
+		state, err := s.manager.GetGCState(context.Background(), keyspaceID, false)
 		re.NoError(err)
 		re.Equal(keyspaceID, state.KeyspaceID)
 		if keyspaceID == constant.NullKeyspaceID {
@@ -2641,7 +2615,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	}
 
 	for _, keyspaceID := range slices.Concat(s.keyspacePresets.unmanageable, s.keyspacePresets.nullSynonyms) {
-		state, err := s.manager.GetGCState(keyspaceID, false)
+		state, err := s.manager.GetGCState(context.Background(), keyspaceID, false)
 		re.NoError(err)
 		re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
 		re.False(state.IsKeyspaceLevel)
@@ -2651,7 +2625,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	}
 
 	for _, keyspaceID := range s.keyspacePresets.notExisting {
-		_, err := s.manager.GetGCState(keyspaceID, false)
+		_, err := s.manager.GetGCState(context.Background(), keyspaceID, false)
 		re.Error(err)
 		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	}
@@ -2678,7 +2652,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	_, err = s.manager.SetGCBarrier(2, "b3", 60, time.Duration(math.MaxInt64), now)
 	re.NoError(err)
 
-	state, err := s.manager.GetGCState(constant.NullKeyspaceID, false)
+	state, err := s.manager.GetGCState(context.Background(), constant.NullKeyspaceID, false)
 	re.NoError(err)
 	re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
 	re.False(state.IsKeyspaceLevel)
@@ -2689,7 +2663,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 		endpoint.NewGCBarrier("b2", 25, new(now.Add(time.Hour*2))),
 	}, state.GCBarriers)
 
-	state, err = s.manager.GetGCState(2, false)
+	state, err = s.manager.GetGCState(context.Background(), 2, false)
 	re.NoError(err)
 	re.Equal(uint32(2), state.KeyspaceID)
 	re.True(state.IsKeyspaceLevel)
@@ -2701,7 +2675,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	}, state.GCBarriers)
 
 	// Check excluding GC barriers
-	state, err = s.manager.GetGCState(2, true)
+	state, err = s.manager.GetGCState(context.Background(), 2, true)
 	re.NoError(err)
 	re.Equal(uint32(2), state.KeyspaceID)
 	re.True(state.IsKeyspaceLevel)
@@ -2825,7 +2799,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateCacheMissConcurrent() {
 	for range concurrency {
 		go func() {
 			defer wg.Done()
-			state, err := s.manager.GetGCState(keyspaceID, true)
+			state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 			results <- result{state: state, err: err}
 		}()
 	}
@@ -2873,7 +2847,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateCacheHitConcurrent() {
 	const keyspaceID = uint32(2)
 	// Warm the cache once. Every concurrent request below should then stay on
 	// the read-lock-protected fast path and avoid both slow hits and storage reads.
-	expected, err := s.manager.GetGCState(keyspaceID, true)
+	expected, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 
 	before := tracker.snapshot()
@@ -2889,7 +2863,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateCacheHitConcurrent() {
 	for range concurrency {
 		go func() {
 			defer wg.Done()
-			state, err := s.manager.GetGCState(keyspaceID, true)
+			state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 			results <- result{state: state, err: err}
 		}()
 	}
@@ -2920,7 +2894,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateReadFailureDoesNotPopulateCache(
 	// into the cache.
 	re.NoError(s.storage.Save(keypath.TxnSafePointPath(keyspaceID), "invalid-txn-safe-point"))
 
-	_, err := s.manager.GetGCState(keyspaceID, true)
+	_, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.Error(err)
 	re.Contains(err.Error(), "invalid syntax")
 	_, ok := s.manager.gcStateCache.load(keyspaceID)
@@ -2935,7 +2909,7 @@ func (s *gcStateManagerTestSuite) TestGetGCStateReadFailureDoesNotPopulateCache(
 
 	// After repairing storage, GetGCState must go back to storage again instead
 	// of returning a stale/empty cached value from the previous failed attempt.
-	state, err := s.manager.GetGCState(keyspaceID, true)
+	state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(uint64(123), state.TxnSafePoint)
 	re.Empty(state.GCBarriers)
@@ -2976,7 +2950,7 @@ func (s *gcStateManagerTestSuite) TestDeleteGCBarrierWithoutCacheTriggersFreshRe
 
 	// Since no cache exists, the first excludeGCBarriers read after deletion
 	// must miss and reload the safe points from storage.
-	state, err := s.manager.GetGCState(keyspaceID, true)
+	state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(uint64(20), state.TxnSafePoint)
 
@@ -2998,7 +2972,7 @@ func (s *gcStateManagerTestSuite) TestDeleteGCBarrierKeepsWarmSafePointCacheUsab
 	_, err = s.manager.SetGCBarrier(keyspaceID, "b1", 30, time.Hour, now)
 	re.NoError(err)
 
-	_, err = s.manager.GetGCState(keyspaceID, true)
+	_, err = s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 
 	// The cache only stores safe points. Deleting a barrier does not change
@@ -3011,7 +2985,7 @@ func (s *gcStateManagerTestSuite) TestDeleteGCBarrierKeepsWarmSafePointCacheUsab
 	re.True(ok)
 	re.Equal(uint64(20), cachedState.TxnSafePoint)
 
-	state, err := s.manager.GetGCState(keyspaceID, true)
+	state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(uint64(20), state.TxnSafePoint)
 
@@ -3030,7 +3004,7 @@ func (s *gcStateManagerTestSuite) TestAdvanceGCSafePointUpdatesWarmCache() {
 	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 50, time.Now())
 	re.NoError(err)
 
-	state, err := s.manager.GetGCState(keyspaceID, true)
+	state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(uint64(0), state.GCSafePoint)
 
@@ -3040,7 +3014,7 @@ func (s *gcStateManagerTestSuite) TestAdvanceGCSafePointUpdatesWarmCache() {
 	re.Equal(uint64(0), oldGCSafePoint)
 	re.Equal(uint64(40), newGCSafePoint)
 
-	state, err = s.manager.GetGCState(keyspaceID, true)
+	state, err = s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(uint64(40), state.GCSafePoint)
 
@@ -3063,7 +3037,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSmallerTargetKe
 	_, _, err = s.manager.AdvanceGCSafePoint(keyspaceID, 40)
 	re.NoError(err)
 
-	state, err := s.manager.GetGCState(keyspaceID, true)
+	state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(uint64(50), state.TxnSafePoint)
 	re.Equal(uint64(40), state.GCSafePoint)
@@ -3079,7 +3053,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSmallerTargetKe
 	re.Equal(uint64(50), cachedState.TxnSafePoint)
 	re.Equal(uint64(40), cachedState.GCSafePoint)
 
-	state, err = s.manager.GetGCState(keyspaceID, true)
+	state, err = s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(uint64(50), state.TxnSafePoint)
 	re.Equal(uint64(40), state.GCSafePoint)
@@ -3103,7 +3077,7 @@ func (s *gcStateManagerTestSuite) TestSetGCBarrierKeepsWarmSafePointCacheUsable(
 	_, _, err = s.manager.AdvanceGCSafePoint(keyspaceID, 10)
 	re.NoError(err)
 
-	state, err := s.manager.GetGCState(keyspaceID, true)
+	state, err := s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(uint64(25), state.TxnSafePoint)
 	re.Equal(uint64(10), state.GCSafePoint)
@@ -3114,7 +3088,7 @@ func (s *gcStateManagerTestSuite) TestSetGCBarrierKeepsWarmSafePointCacheUsable(
 	_, err = s.manager.SetGCBarrier(keyspaceID, "b1", 30, time.Hour, now)
 	re.NoError(err)
 
-	state, err = s.manager.GetGCState(keyspaceID, true)
+	state, err = s.manager.GetGCState(context.Background(), keyspaceID, true)
 	re.NoError(err)
 	re.Equal(uint64(25), state.TxnSafePoint)
 	re.Equal(uint64(10), state.GCSafePoint)
@@ -3126,7 +3100,7 @@ func (s *gcStateManagerTestSuite) TestSetGCBarrierKeepsWarmSafePointCacheUsable(
 
 	// A full read still sees the barrier from storage, showing that the cache
 	// remains intentionally limited to safe points.
-	state, err = s.manager.GetGCState(keyspaceID, false)
+	state, err = s.manager.GetGCState(context.Background(), keyspaceID, false)
 	re.NoError(err)
 	re.Equal([]*endpoint.GCBarrier{
 		endpoint.NewGCBarrier("b1", 30, new(now.Add(time.Hour))),
@@ -3195,7 +3169,7 @@ func (s *gcStateManagerTestSuite) testDowngradeCompatibility(keyspaceID uint32) 
 	re.Equal(uint64(25), s.getLegacyGCWorkerServiceSafePoint(keyspaceID).SafePoint)
 
 	// Not visible by GetGCStates or GetAllKeyspacesGCStates.
-	gcState, err := s.manager.GetGCState(keyspaceID, false)
+	gcState, err := s.manager.GetGCState(context.Background(), keyspaceID, false)
 	re.NoError(err)
 	re.Empty(gcState.GCBarriers)
 	allGCStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), false)
@@ -3205,7 +3179,7 @@ func (s *gcStateManagerTestSuite) testDowngradeCompatibility(keyspaceID uint32) 
 	// And it works correctly when there are other valid GC barriers.
 	_, err = s.manager.SetGCBarrier(keyspaceID, "b1", 40, time.Hour, now)
 	re.NoError(err)
-	gcState, err = s.manager.GetGCState(keyspaceID, false)
+	gcState, err = s.manager.GetGCState(context.Background(), keyspaceID, false)
 	re.NoError(err)
 	re.Len(gcState.GCBarriers, 1)
 	re.Equal("b1", gcState.GCBarriers[0].BarrierID)
@@ -3651,7 +3625,7 @@ func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCoun
 	if parallelism == 0 {
 		for b.Loop() {
 			keyspaceID := rand.Uint32N(uint32(keyspacesCount)) + 1
-			_, err := gcStateManager.GetGCState(keyspaceID, excludeGCBarriers)
+			_, err := gcStateManager.GetGCState(b.Context(), keyspaceID, excludeGCBarriers)
 			re.NoError(err)
 		}
 	} else {
@@ -3660,7 +3634,7 @@ func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCoun
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				keyspaceID := rand.Uint32N(uint32(keyspacesCount)) + 1
-				_, err := gcStateManager.GetGCState(keyspaceID, excludeGCBarriers)
+				_, err := gcStateManager.GetGCState(b.Context(), keyspaceID, excludeGCBarriers)
 				re.NoError(err)
 			}
 		})

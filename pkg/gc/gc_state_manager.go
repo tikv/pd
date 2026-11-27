@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"slices"
 	"sync/atomic"
 	"time"
 
@@ -151,6 +150,20 @@ func (c *gcStateCache) store(keyspaceID uint32, entry gcStateCacheEntry) {
 	shard.gcStateCache[keyspaceID] = entry
 }
 
+func (c *gcStateCache) storeWithContext(ctx context.Context, keyspaceID uint32, entry gcStateCacheEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	shard := c.getShard(keyspaceID)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	shard.gcStateCache[keyspaceID] = entry
+	return nil
+}
+
 func (c *gcStateCache) remove(keyspaceID uint32) {
 	shard := c.getShard(keyspaceID)
 	shard.mu.Lock()
@@ -269,11 +282,21 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 // string only for diagnostic purposes (it returns "<null_keyspace>" for NullKeyspaceID). DO NOT use it as the key for
 // identifying a keyspace.
 func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (uint32, string, error) {
+	return redirectGCKeyspace(keyspaceID, isUserAPI, m.keyspaceManager.LoadKeyspaceByID)
+}
+
+func (m *GCStateManager) redirectKeyspaceForRead(ctx context.Context, keyspaceID uint32) (uint32, string, error) {
+	return redirectGCKeyspace(keyspaceID, true, func(id uint32) (*keyspacepb.KeyspaceMeta, error) {
+		return m.keyspaceManager.LoadKeyspaceByIDWithContext(ctx, id)
+	})
+}
+
+func redirectGCKeyspace(keyspaceID uint32, isUserAPI bool, loadMeta func(uint32) (*keyspacepb.KeyspaceMeta, error)) (uint32, string, error) {
 	// Regard IDs outside the valid range as NullKeyspace, including NullKeyspaceID itself.
 	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
 		return constant.NullKeyspaceID, "<null_keyspace>", nil
 	}
-	meta, err := m.keyspaceManager.LoadKeyspaceByID(keyspaceID)
+	meta, err := loadMeta(keyspaceID)
 	if err != nil {
 		return 0, "", err
 	}
@@ -922,9 +945,15 @@ func (m *GCStateManager) getGCStateImpl(ctx context.Context, keyspaceID uint32, 
 	useCache := excludeGCBarriers
 	failpoint.Inject("getGCStateSkipCache", func() { useCache = false })
 	if generation := m.activeGeneration.Load(); useCache && generation != nil {
+		if err := ctx.Err(); err != nil {
+			return GCState{}, err
+		}
 		if cachedGCState, ok := m.gcStateCache.load(keyspaceID); ok && m.activeGeneration.Load() == generation {
 			failpoint.InjectCall("getGCStateCacheAccess", "hit")
 			gcStateCacheAccessHitCounter.Inc()
+			if err := ctx.Err(); err != nil {
+				return GCState{}, err
+			}
 			return GCState{
 				KeyspaceID:      keyspaceID,
 				IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
@@ -942,6 +971,13 @@ func (m *GCStateManager) getGCStateImplSlow(ctx context.Context, keyspaceID uint
 	// not blocked while tests pin the request at the slow-path boundary.
 	failpoint.InjectCall("getGCStateBeforeSlowPath")
 
+	if generation := m.activeGeneration.Load(); excludeGCBarriers && generation != nil {
+		return m.loadGCState(ctx, generation, keyspaceID)
+	}
+	if err := ctx.Err(); err != nil {
+		return GCState{}, err
+	}
+
 	m.mu.RLock()
 	if generation := m.activeGeneration.Load(); excludeGCBarriers && generation != nil {
 		m.mu.RUnlock()
@@ -952,86 +988,54 @@ func (m *GCStateManager) getGCStateImplSlow(ctx context.Context, keyspaceID uint
 	failpoint.InjectCall("getGCStateCacheAccess", "miss")
 	gcStateCacheAccessMissCounter.Inc()
 
-	var result GCState
-	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		var err1 error
-		result, err1 = m.getGCStateInTransaction(keyspaceID, excludeGCBarriers, wb)
-		return err1
-	})
-	if err != nil {
-		return GCState{}, err
-	}
-
-	// Update cache on successfully load GC states from IO.
-	// Note that we don't update cache when excludeGCBarriers is set to false. The reason is that, when
-	// excludeGCBarrier is set and the code executes to here, it must be because that there was a cache miss; but if
-	// it's not set, as it won't go through the cache, here it's likely that the cache is actually valid, and updating
-	// it causes unnecessary overhead and locking.
-	if excludeGCBarriers {
-		m.gcStateCache.store(keyspaceID, gcStateCacheEntry{
-			TxnSafePoint: result.TxnSafePoint,
-			GCSafePoint:  result.GCSafePoint,
-		})
-	}
-
-	return result, nil
+	state, _, err := m.getGCStateSnapshotLocked(ctx, keyspaceID, excludeGCBarriers, false)
+	return state, err
 }
 
-// getGCStateInTransaction gets all properties in GC states within a context of gcMetaStorage.RunInGCStateTransaction.
-// This read only and won't write anything to the GCStateWriteBatch. It still receives a write batch to ensure
-// it's running in a in-transaction context.
-// The parameter `keyspaceID` is expected to be either the NullKeyspaceID or the ID of a keyspace that has
-// keyspace-level GC enabled. Otherwise, the result would be undefined.
-func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, excludeGCBarriers bool, _ *endpoint.GCStateWriteBatch) (GCState, error) {
-	result := GCState{
-		KeyspaceID: keyspaceID,
-	}
-	if keyspaceID != constant.NullKeyspaceID {
-		// Assuming the parameter `keyspaceID` is either the NullKeyspaceID or the ID of a keyspace that has
-		// keyspace-level GC enabled. So once the keyspaceID is not NullKeyspaceID, `IsKeyspaceLevel` must be true.
-		result.IsKeyspaceLevel = true
-	}
-
-	var err error
-	result.TxnSafePoint, err = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
+// getGCStateSnapshotLocked reads the effective GC scope while the caller holds m.mu for reading.
+func (m *GCStateManager) getGCStateSnapshotLocked(ctx context.Context, keyspaceID uint32, excludeGCBarriers, includeGlobalGCBarriers bool) (GCState, []*endpoint.GlobalGCBarrier, error) {
+	snapshot, err := m.gcMetaStorage.LoadGCStateSnapshot(ctx, keyspaceID, !excludeGCBarriers, includeGlobalGCBarriers)
 	if err != nil {
-		return GCState{}, err
+		return GCState{}, nil, err
+	}
+	if includeGlobalGCBarriers {
+		failpoint.InjectCall("getGCStateWithGlobalGCBarriersAfterRead")
 	}
 
-	result.GCSafePoint, err = m.gcMetaStorage.LoadGCSafePoint(keyspaceID)
-	if err != nil {
-		return GCState{}, err
-	}
-
-	if !excludeGCBarriers {
-		result.GCBarriers, err = m.gcMetaStorage.LoadAllGCBarriers(keyspaceID)
-		if err != nil {
-			return GCState{}, err
+	// Local-barrier reads bypass the cache. Preserve cache fills for the reads
+	// that asked for safe points without local barriers.
+	if excludeGCBarriers {
+		if err := m.gcStateCache.storeWithContext(ctx, keyspaceID, gcStateCacheEntry{
+			TxnSafePoint: snapshot.TxnSafePoint,
+			GCSafePoint:  snapshot.GCSafePoint,
+		}); err != nil {
+			return GCState{}, nil, err
 		}
-
-		// Remove GC barrier whose barrierID is "gc_worker", which is only exists for providing compatibility with the old
-		// versions.
-		result.GCBarriers = slices.DeleteFunc(result.GCBarriers, func(b *endpoint.GCBarrier) bool {
-			return b.BarrierID == keypath.GCWorkerServiceSafePointID
-		})
+	} else if err := ctx.Err(); err != nil {
+		return GCState{}, nil, err
 	}
-
-	return result, nil
+	return GCState{
+		KeyspaceID:      keyspaceID,
+		IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
+		TxnSafePoint:    snapshot.TxnSafePoint,
+		GCSafePoint:     snapshot.GCSafePoint,
+		GCBarriers:      snapshot.GCBarriers,
+	}, snapshot.GlobalGCBarriers, nil
 }
 
 // GetGCState returns the GC state of the given keyspace.
 //
 // When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 // the NullKeyspace.
-func (m *GCStateManager) GetGCState(keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
-	keyspaceID, keyspaceName, err := m.redirectKeyspace(keyspaceID, true)
+func (m *GCStateManager) GetGCState(ctx context.Context, keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
+	keyspaceID, keyspaceName, err := m.redirectKeyspaceForRead(ctx, keyspaceID)
 	if err != nil {
 		return GCState{}, err
 	}
 
-	gcState, err := m.getGCStateImpl(context.Background(), keyspaceID, excludeGCBarriers)
+	gcState, err := m.getGCStateImpl(ctx, keyspaceID, excludeGCBarriers)
 
-	if err != nil {
+	if err != nil && ctx.Err() == nil {
 		log.Error("failed to get GC state", zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("keyspace-name", keyspaceName), zap.Bool("exclude-gc-barriers", excludeGCBarriers), zap.Error(err))
 	}
@@ -1040,49 +1044,28 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32, excludeGCBarriers bool) (
 }
 
 // GetGCStateWithGlobalGCBarriers gets one keyspace's GC state and every global
-// GC barrier from one revision-validated storage transaction.
-func (m *GCStateManager) GetGCStateWithGlobalGCBarriers(keyspaceID uint32, excludeGCBarriers bool) (GCState, []*endpoint.GlobalGCBarrier, error) {
-	keyspaceID, keyspaceName, err := m.redirectKeyspace(keyspaceID, true)
+// GC barrier from one storage snapshot.
+func (m *GCStateManager) GetGCStateWithGlobalGCBarriers(ctx context.Context, keyspaceID uint32, excludeGCBarriers bool) (GCState, []*endpoint.GlobalGCBarrier, error) {
+	keyspaceID, keyspaceName, err := m.redirectKeyspaceForRead(ctx, keyspaceID)
 	if err != nil {
+		return GCState{}, nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return GCState{}, nil, err
 	}
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var (
-		state          GCState
-		globalBarriers []*endpoint.GlobalGCBarrier
-	)
-	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		var err1 error
-		state, err1 = m.getGCStateInTransaction(keyspaceID, excludeGCBarriers, wb)
-		if err1 != nil {
-			return err1
-		}
-		globalBarriers, err1 = m.gcMetaStorage.LoadAllGlobalGCBarriers()
-		if err1 != nil {
-			return err1
-		}
-		failpoint.InjectCall("getGCStateWithGlobalGCBarriersAfterRead")
-		return nil
-	})
-	if err != nil {
+	state, globalBarriers, err := m.getGCStateSnapshotLocked(ctx, keyspaceID, excludeGCBarriers, true)
+	if err != nil && ctx.Err() == nil {
 		log.Error("failed to get GC state with global GC barriers",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("keyspace-name", keyspaceName),
 			zap.Bool("exclude-gc-barriers", excludeGCBarriers),
 			zap.Error(err))
-		return GCState{}, nil, err
 	}
-
-	if excludeGCBarriers {
-		m.gcStateCache.store(keyspaceID, gcStateCacheEntry{
-			TxnSafePoint: state.TxnSafePoint,
-			GCSafePoint:  state.GCSafePoint,
-		})
-	}
-	return state, globalBarriers, nil
+	return state, globalBarriers, err
 }
 
 // GetAllKeyspacesGCStates returns the GC state of all keyspaces.

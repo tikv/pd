@@ -1274,6 +1274,38 @@ func TestLoadKeyspaceByIDWithRevision(t *testing.T) {
 	re.Nil(loaded)
 }
 
+type cancelingKeyspaceMetaStorage struct {
+	endpoint.KeyspaceStorage
+	meta   *keyspacepb.KeyspaceMeta
+	cancel context.CancelFunc
+}
+
+func (s *cancelingKeyspaceMetaStorage) RunInTxn(_ context.Context, read func(kv.Txn) error) error {
+	err := read(nil)
+	s.cancel()
+	return err
+}
+
+func (s *cancelingKeyspaceMetaStorage) LoadKeyspaceMeta(kv.Txn, uint32) (*keyspacepb.KeyspaceMeta, error) {
+	return s.meta, nil
+}
+
+func TestLoadKeyspaceByIDWithContextSkipsEndpointAttachmentAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	meta := &keyspacepb.KeyspaceMeta{Config: map[string]string{MetaServiceGroupIDKey: "group1"}}
+	manager := &Manager{
+		ctx:   t.Context(),
+		store: &cancelingKeyspaceMetaStorage{meta: meta, cancel: cancel},
+		mgm:   &MetaServiceGroupManager{metaServiceGroups: map[string]string{"group1": "http://127.0.0.1:2379"}},
+	}
+
+	loaded, err := manager.LoadKeyspaceByIDWithContext(ctx, 1)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, loaded)
+	require.NotContains(t, meta.Config, MetaServiceGroupAddressesKey)
+}
+
 type revisionedKeyspaceStorage struct {
 	endpoint.KeyspaceStorage
 	load func(context.Context, uint32) (*keyspacepb.KeyspaceMeta, int64, error)

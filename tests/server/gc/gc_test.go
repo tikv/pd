@@ -22,6 +22,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -48,6 +49,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -433,7 +436,7 @@ func TestLegacyServiceSafePointBarrierTTL(t *testing.T) {
 				duration := time.Duration(ttl) * time.Second
 				earliestExpiry := time.Now().Add(duration)
 				update("cdc", globalTS, ttl)
-				state, err := leader.GetServer().GetGCStateManager().GetGCState(tc.keyspaceID, false)
+				state, err := leader.GetServer().GetGCStateManager().GetGCState(ctx, tc.keyspaceID, false)
 				re.NoError(err)
 				re.Len(state.GCBarriers, 1)
 				barrier := state.GCBarriers[0]
@@ -1242,6 +1245,46 @@ func TestGetGCStateSlowPathReadsLatestStateIfLeaderLostBeforeRead(t *testing.T) 
 	re.NoError(res.err)
 	re.Nil(res.resp.GetHeader().GetError())
 	re.Equal(uint64(20), res.resp.GetGcState().GetTxnSafePoint())
+}
+
+func TestGCReadRequestContextAtAPIEntryPoints(t *testing.T) {
+	leader := newWatchGCStatesCluster(t, 1, true).GetLeaderServer()
+	svr := leader.GetServer()
+	grpcServer := &server.GrpcServer{Server: svr}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	expired, stop := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer stop()
+	req := &pdpb.GetGCStateRequest{
+		Header:        testutil.NewRequestHeader(leader.GetClusterID()),
+		KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID),
+	}
+	resp, err := grpcServer.GetGCState(ctx, req)
+	require.Nil(t, resp)
+	require.Equal(t, codes.Canceled, status.Code(err))
+	req.IncludeGlobalGcBarriers = true
+	resp, err = grpcServer.GetGCState(expired, req)
+	require.Nil(t, resp)
+	require.Equal(t, codes.DeadlineExceeded, status.Code(err))
+
+	v1, _, err := api.NewHandler(t.Context(), svr)
+	require.NoError(t, err)
+	v2, _, err := apiv2.NewV2Handler(t.Context(), svr)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		path    string
+		handler http.Handler
+	}{
+		{path: "/pd/api/v1/gc/safepoint", handler: v1},
+		{path: fmt.Sprintf("/pd/api/v2/gc/safepoint/%d", constant.NullKeyspaceID), handler: v2},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			tc.handler.ServeHTTP(recorder, httptest.NewRequestWithContext(ctx, http.MethodGet, tc.path, nil))
+			require.Equal(t, http.StatusInternalServerError, recorder.Code)
+			require.Contains(t, recorder.Body.String(), context.Canceled.Error())
+		})
+	}
 }
 
 func TestGCReadApplicationErrorsRemainInHeader(t *testing.T) {
