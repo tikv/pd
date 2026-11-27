@@ -457,6 +457,7 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	}
 
 	var peerClient *http.Client
+	probeCtx := ctx
 	if nextEtcdLeader == "" {
 		probeTimeout := time.Duration(m.etcd.Config().ElectionMs) * time.Millisecond
 		peerTransport, err := transport.NewTransport(m.etcd.Config().PeerTLSInfo, probeTimeout)
@@ -464,17 +465,29 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 			return err
 		}
 		defer peerTransport.CloseIdleConnections()
-		peerClient = &http.Client{Transport: peerTransport, Timeout: probeTimeout}
+		var cancel context.CancelFunc
+		probeCtx, cancel = context.WithTimeout(ctx, probeTimeout)
+		defer cancel()
+		peerClient = &http.Client{Transport: peerTransport}
 	}
-	for _, member := range members {
+	reachable := make([]bool, len(members))
+	var probes sync.WaitGroup
+	for i, member := range members {
 		if member.IsLearner && nextEtcdLeader == "" {
 			continue
 		}
 		if (nextEtcdLeader == "" && uint64(member.ID) != m.id) || (nextEtcdLeader != "" && member.Name == nextEtcdLeader) {
-			// Probe the Raft peer endpoint: client URLs may use a separate network.
-			if nextEtcdLeader == "" && !isEtcdPeerConnected(ctx, peerClient, member.PeerURLs) {
+			if nextEtcdLeader != "" {
+				reachable[i] = true
 				continue
 			}
+			// Probe the Raft peer endpoint: client URLs may use a separate network.
+			probes.Go(func() { reachable[i] = isEtcdPeerReachable(probeCtx, peerClient, member.PeerURLs) })
+		}
+	}
+	probes.Wait()
+	for i, member := range members {
+		if reachable[i] {
 			etcdLeaderIDs = append(etcdLeaderIDs, uint64(member.ID))
 		}
 	}
@@ -504,21 +517,29 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	return waitForEtcdLeader(moveCtx, m.etcd.Server, term, nextEtcdLeaderID, time.Duration(m.etcd.Config().TickMs)*time.Millisecond)
 }
 
-func isEtcdPeerConnected(ctx context.Context, client *http.Client, urls []string) bool {
+func isEtcdPeerReachable(ctx context.Context, client *http.Client, urls []string) bool {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var reachable atomic.Bool
+	var probes sync.WaitGroup
 	for _, url := range urls {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+rafthttp.ProbingPrefix, http.NoBody)
-		if err != nil {
-			continue
-		}
-		resp, err := client.Do(req)
-		if resp != nil {
-			resp.Body.Close()
-		}
-		if err == nil && resp.StatusCode == http.StatusOK {
-			return true
-		}
+		probes.Go(func() {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+rafthttp.ProbingPrefix, http.NoBody)
+			if err != nil {
+				return
+			}
+			resp, err := client.Do(req)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			if err == nil && resp.StatusCode == http.StatusOK {
+				reachable.Store(true)
+				cancel()
+			}
+		})
 	}
-	return false
+	probes.Wait()
+	return reachable.Load()
 }
 
 func waitForEtcdLeader(ctx context.Context, status etcdserver.RaftStatusGetter, term, target uint64, interval time.Duration) error {

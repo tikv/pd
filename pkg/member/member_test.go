@@ -29,10 +29,19 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-func TestIsEtcdPeerConnected(t *testing.T) {
+func TestIsEtcdPeerReachable(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	re := require.New(t)
+	slowReached := make(chan struct{})
+	var waitForSlow atomic.Bool
 	peer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if waitForSlow.Load() {
+			select {
+			case <-slowReached:
+			case <-r.Context().Done():
+				return
+			}
+		}
 		re.Equal("/raft/probing", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -40,11 +49,21 @@ func TestIsEtcdPeerConnected(t *testing.T) {
 	client := peer.Client()
 	defer client.CloseIdleConnections()
 	client.Timeout = time.Second
-	re.True(isEtcdPeerConnected(t.Context(), client, []string{"invalid://peer", peer.URL}))
-	re.False(isEtcdPeerConnected(t.Context(), client, nil))
+	re.True(isEtcdPeerReachable(t.Context(), client, []string{"invalid://peer", peer.URL}))
+	re.False(isEtcdPeerReachable(t.Context(), client, nil))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	re.False(isEtcdPeerConnected(ctx, client, []string{peer.URL}))
+	re.False(isEtcdPeerReachable(ctx, client, []string{peer.URL}))
+	slowPeer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(slowReached)
+		<-r.Context().Done()
+	}))
+	defer slowPeer.Close()
+	probeCtx, cancelProbe := context.WithTimeout(t.Context(), time.Second)
+	defer cancelProbe()
+	waitForSlow.Store(true)
+	re.True(isEtcdPeerReachable(probeCtx, client, []string{slowPeer.URL, peer.URL}))
+	re.NoError(probeCtx.Err(), "a slow URL must not delay a reachable alternate")
 }
 
 func TestWaitForEtcdLeader(t *testing.T) {
