@@ -345,7 +345,7 @@ func TestFirstWinStoreConditions(t *testing.T) {
 		test.Equal(groupDegraded, test.groups["empty"].GetAvailability())
 		test.checkGroupsAvailability()
 		test.True(state("loaded").AffinitySchedulingAllowed)
-		test.True(state("empty").AffinitySchedulingAllowed)
+		test.False(state("empty").AffinitySchedulingAllowed, "the confirmed write waits for the watcher")
 
 		test.ExpireAffinityGroup("loaded")
 		test.applyStoreConditions(map[uint64]storeCondition{2: storeBusy})
@@ -457,6 +457,11 @@ func TestFirstWinSkippedGroupDoesNotBlockPatrol(t *testing.T) {
 		for patrol := range 3 {
 			start := firstPatrol.Add(time.Duration(patrol) * time.Second)
 			before := len(test.calls)
+			expected := want
+			if patrol > 0 {
+				// b and c are confirmed and still waiting for the watcher.
+				expected = want[:len(skipped)]
+			}
 			test.observe(first, 1, 2)
 			for _, id := range skipped[1:] {
 				test.ObserveAvailableRegion(region, test.GetAffinityGroupState(id))
@@ -469,8 +474,8 @@ func TestFirstWinSkippedGroupDoesNotBlockPatrol(t *testing.T) {
 			synctest.Wait()
 
 			test.Equal(start, time.Now(), "the queued groups drain without waiting for a cooldown")
-			test.Equal([]string{"b", "c"}, written[patrol*2:])
-			test.Equal(want, test.calls[before:])
+			test.Equal([]string{"b", "c"}, written)
+			test.Equal(expected, test.calls[before:])
 			test.Zero(pd.stored(first).LeaderStoreID)
 			test.Equal(b.result(), pd.stored("b"))
 			test.Equal(c.result(), pd.stored("c"))
@@ -479,7 +484,7 @@ func TestFirstWinSkippedGroupDoesNotBlockPatrol(t *testing.T) {
 			for _, target := range []GroupTarget{want[0], b, c} {
 				test.observe(target.Expected.ID, target.VoterStoreIDs...)
 			}
-			test.Len(test.calls, before+len(want), "reobserved groups are still in cooldown")
+			test.Len(test.calls, before+len(expected), "reobserved groups are cooling down or awaiting the watcher")
 			time.Sleep(time.Millisecond)
 		}
 		test.Equal(failures+float64(3*len(skipped)), testutil.ToFloat64(targetWriteFailureCounter))
@@ -631,6 +636,219 @@ func TestFirstWinRecoversStoredTargetAfterWriteAttempt(t *testing.T) {
 				test.observe("g", 1, 2)
 				test.Equal(scenario.recovered, test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
 				test.Len(test.calls, 1, "local recovery does not write to PD")
+			})
+		})
+	}
+}
+
+func TestFirstWinRetainsStoredTargetInPatrolOrder(t *testing.T) {
+	for _, scenario := range []struct {
+		name         string
+		secondBefore bool
+		secondAfter  bool
+		dropQueued   bool
+		fullQueue    bool
+		replyErr     error
+		stayExpired  bool
+	}{
+		{name: "skipped"},
+		{name: "stored before second", secondAfter: true},
+		{name: "stored after second", secondBefore: true},
+		{name: "writer not ready", secondBefore: true, replyErr: fmt.Errorf("PD leader is not found: %w", ErrTargetWriterNotReady)},
+		{name: "HTTP 500", secondBefore: true, replyErr: errors.New("500 Internal Server Error"), stayExpired: true},
+		{name: "unavailable queued candidate", dropQueued: true},
+		{name: "full queue", fullQueue: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				test := newTargetTest(t, "g", "h")
+				initial := test.target("g", 1, 1, 2)
+				stored := initial.result()
+				test.SyncGroupFromEtcdWithRevision(stored, 1)
+				test.checkGroupsAvailability()
+				test.ExpireAffinityGroup("g")
+				release := make(chan struct{})
+				defer close(release)
+				test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
+					if len(test.calls) == 1 {
+						<-release
+					}
+					return nil, scenario.replyErr
+				})
+
+				first, second := test.target("g", 2, 2, 3), test.target("g", 3, 3, 4)
+				first.ExpectedModRevision, second.ExpectedModRevision = 1, 1
+				want := []GroupTarget{first}
+				if scenario.dropQueued {
+					want = []GroupTarget{test.target("h", 1, 1, 2)}
+					test.observe("h", 1, 2)
+				}
+				test.observe("g", 2, 3)
+				if scenario.secondBefore {
+					test.observe("g", 3, 4)
+				}
+				unavailable := map[uint64]storeCondition{3: storeDown}
+				if scenario.fullQueue {
+					stores := test.storeSetInformer.(*core.StoresInfo)
+					for i := range maxPendingTargetsPerGroup {
+						id := uint64(i + 5)
+						stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, NodeState: metapb.NodeState_Serving},
+							core.SetLastHeartbeatTS(time.Now())))
+						test.observe("g", id, 1)
+						unavailable[id] = storeDown
+					}
+				}
+				test.observe("g", 1, 2)
+				if scenario.secondAfter {
+					test.observe("g", 3, 4)
+				}
+				if scenario.dropQueued || scenario.fullQueue {
+					test.applyStoreConditions(unavailable)
+				}
+				test.False(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+				test.Equal(want, test.calls)
+				release <- struct{}{}
+				synctest.Wait()
+
+				if scenario.secondBefore && scenario.replyErr == nil {
+					test.False(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+					test.callsMu.Lock()
+					calls := slices.Clone(test.calls)
+					test.callsMu.Unlock()
+					test.Equal(want, calls, "the earlier candidate must wait for the cooldown")
+					synctest.Sleep(time.Second)
+					synctest.Wait()
+					want = append(want, second)
+				}
+				recovered := test.GetAffinityGroupState("g")
+				test.Equal(!scenario.stayExpired, recovered.AffinitySchedulingAllowed)
+				test.False(recovered.HasUnpersistedTarget())
+				test.Equal(*stored, recovered.Group)
+				synctest.Sleep(time.Second)
+				synctest.Wait()
+				test.Equal(want, test.calls)
+			})
+		})
+	}
+}
+
+func TestFirstWinStoreRecoveryWaitsForReconciliation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pd := newTargetTest(t, "g")
+		pd.write([]string{"g"}, pd.target("g", 1, 1, 2))
+		test := newTargetTestWithStorage(t, t.Context(), pd.store)
+		test.checkGroupsAvailability()
+		test.applyStoreConditions(map[uint64]storeCondition{1: storeBusy})
+		test.Equal(groupDegraded, test.groups["g"].GetAvailability())
+		test.useWriter(pd.UpdateAffinityGroupTargets)
+
+		test.observe("g", 2, 1)
+		persisted := pd.stored("g")
+		test.Equal(uint64(2), persisted.LeaderStoreID)
+		test.checkGroupsAvailability()
+		test.Equal(groupDegraded, test.groups["g"].GetAvailability())
+		test.Equal(uint64(1), test.GetAffinityGroupState("g").LeaderStoreID)
+
+		test.SyncGroupFromEtcdWithRevision(persisted, 2)
+		test.True(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+		test.Equal(uint64(2), test.GetAffinityGroupState("g").LeaderStoreID)
+	})
+}
+
+func TestFirstWinConfirmationWaitsForReconciliation(t *testing.T) {
+	for _, mode := range []string{"new revision", "changed peers without revision", "replacement", "local update"} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				test := newTargetTest(t, "g")
+				initial := test.target("g", 1, 1, 2)
+				stored := initial.result()
+				test.SyncGroupFromEtcdWithRevision(stored, 1)
+				test.checkGroupsAvailability()
+				test.ExpireAffinityGroup("g")
+				test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
+					if len(test.calls) == 1 {
+						return []string{"g"}, nil
+					}
+					return nil, nil
+				})
+				test.observe("g", 2, 3)
+				synctest.Sleep(time.Second + time.Millisecond)
+				test.SyncGroupFromEtcd(stored)
+				test.SyncGroupFromEtcdWithRevision(stored, 1)
+				test.ExpireAffinityGroup("g") // Availability can change without reconciling metadata.
+
+				test.observe("g", 3, 4)
+				test.observe("g", 1, 2)
+				test.False(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+				test.Len(test.calls, 1, "PD already confirmed a write for this group revision")
+
+				persisted := test.calls[0].result()
+				switch mode {
+				case "new revision":
+					test.SyncGroupFromEtcdWithRevision(persisted, 2)
+				case "changed peers without revision":
+					test.SyncGroupFromEtcd(persisted)
+				case "replacement":
+					persisted.CreateTimestamp++
+					test.SyncGroupFromEtcdWithRevision(persisted, 2)
+				case "local update":
+					_, err := test.UpdateAffinityGroupPeers("g", persisted.LeaderStoreID, persisted.VoterStoreIDs)
+					test.NoError(err)
+				}
+				test.ExpireAffinityGroup("g")
+				test.observe("g", 2, 3)
+				test.True(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+				test.Len(test.calls, 1, "the reconciled target recovers locally")
+			})
+		})
+	}
+}
+
+func TestFirstWinDoesNotRestoreTargetWithPurgedVoter(t *testing.T) {
+	for _, mode := range []string{"same target replay", "reassert stored target", "changed target", "skipped persistence"} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				test := newTargetTest(t, "g")
+				initial := test.target("g", 1, 1, 2)
+				stored := initial.result()
+				test.SyncGroupFromEtcdWithRevision(stored, 1)
+				test.checkGroupsAvailability()
+				stores := test.storeSetInformer.(*core.StoresInfo)
+				stores.PutStore(stores.GetStore(2).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
+				test.checkGroupsAvailability()
+				test.Equal(groupExpired, test.groups["g"].GetAvailability())
+				test.Equal(storeRemoved, test.unavailableStores[2])
+				if mode == "reassert stored target" || mode == "skipped persistence" {
+					test.useWriter(func(context.Context, []GroupTarget) ([]string, error) {
+						if len(test.calls) == 1 {
+							return nil, ErrTargetWriterUnsupported
+						}
+						return nil, nil
+					})
+					test.observe("g", 3, 4)
+					test.True(test.GetAffinityGroupState("g").HasUnpersistedTarget())
+				}
+				stores.DeleteStore(stores.GetStore(2))
+				test.checkGroupsAvailability()
+				test.NotContains(test.unavailableStores, uint64(2))
+
+				switch mode {
+				case "changed target":
+					stored.LeaderStoreID = 2
+					test.SyncGroupFromEtcdWithRevision(stored, 2)
+				case "skipped persistence":
+					synctest.Sleep(time.Second)
+					test.observe("g", 3, 4)
+					test.Len(test.calls, 2)
+				default:
+					test.SyncGroupFromEtcdWithRevision(stored, 2)
+				}
+				reverted := test.GetAffinityGroupState("g")
+				test.Equal(*stored, reverted.Group)
+				test.False(reverted.HasUnpersistedTarget())
+				test.False(reverted.AffinitySchedulingAllowed)
+				test.True(reverted.RegularSchedulingAllowed)
+				test.Equal(groupExpired, test.groups["g"].GetAvailability())
 			})
 		})
 	}

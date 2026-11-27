@@ -244,7 +244,7 @@ func (m *Manager) applyStoreScan(unavailableStores map[uint64]storeCondition, ge
 		availability := groupInfo.GetAvailability()
 		if availability != groupExpired {
 			newAvailability := calcGroupAvailability(unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
-			if availability != newAvailability {
+			if availability != newAvailability && (!groupInfo.lastSentWritten || newAvailability != groupAvailable) {
 				m.updateGroupAvailabilityLocked(groupInfo.ID, newAvailability)
 				availability = newAvailability
 				groupChanged = true

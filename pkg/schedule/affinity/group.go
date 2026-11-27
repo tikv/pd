@@ -183,11 +183,13 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
-	// Manager.targetWriteMutex protects the per-group cooldown, the last
-	// candidate sent, and whether PD confirmed it.
+	// Manager.targetWriteMutex protects the per-group cooldown and last
+	// candidate sent.
 	lastSentTarget  *observedTarget
-	lastSentWritten bool
 	targetSendAfter time.Time
+	// Manager.RWMutex protects the confirmation, which stays set until
+	// metadata reconciliation even if availability or range changes advance AffinityVer.
+	lastSentWritten bool
 	// persistedGroup holds the last stored group while Group holds a local target.
 	// It is nil when Group itself holds the stored target.
 	persistedGroup *Group

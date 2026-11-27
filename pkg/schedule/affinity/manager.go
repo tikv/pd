@@ -55,13 +55,11 @@ type regionCache struct {
 // Manager is the manager of all affinity information.
 type Manager struct {
 	// RWMutex protects only in-memory data. (Does not include auxiliary data needed for meta updates, such as keyRanges)
-	// It can be acquired on its own or while already holding metaMutex,
-	// but metaMutex must never be acquired while RWMutex is held to avoid deadlocks.
+	// When nested, acquire locks in this order: metaMutex, targetWriteMutex, RWMutex.
 	syncutil.RWMutex
 	// metaMutex protects both in-memory and storage metadata.
 	// Metadata updates typically hold metaMutex for the whole operation,
 	// and may acquire RWMutex only for the final in-memory update.
-	// The only strict rule is that metaMutex must not be taken inside RWMutex.
 	metaMutex syncutil.Mutex
 
 	ctx              context.Context
@@ -244,12 +242,27 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 func (m *Manager) setTargetAvailabilityLocked(groupInfo *runtimeGroupInfo) {
 	availability := groupDegraded
 	if m.storeConditionsKnown {
-		availability = calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
+		availability = groupExpired
+		if m.allVotersExist(groupInfo.VoterStoreIDs) {
+			availability = calcGroupAvailability(m.unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
+		}
 	}
 	groupInfo.resetTargetAvailability(availability)
 }
 
+// allVotersExist also catches stores whose tombstones have already been purged.
+func (m *Manager) allVotersExist(voterStoreIDs []uint64) bool {
+	for _, id := range voterStoreIDs {
+		if m.storeSetInformer.GetStore(id) == nil {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	m.targetWriteMutex.Lock()
+	defer m.targetWriteMutex.Unlock()
 	m.Lock()
 	defer m.Unlock()
 
@@ -258,6 +271,8 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
+	groupInfo.lastSentWritten = false
+	delete(m.sendingTargets, groupID)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	groupInfo.persistedGroup = nil
@@ -623,8 +638,15 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 		}
 	}
 
+	m.targetWriteMutex.Lock()
+	defer m.targetWriteMutex.Unlock()
 	m.Lock()
 	defer m.Unlock()
+	if exists {
+		// An accepted watch event supersedes both confirmed and in-flight writes.
+		existingGroup.lastSentWritten = false
+		delete(m.sendingTargets, group.ID)
+	}
 	switch {
 	case !exists:
 		m.initGroupLocked(group)
@@ -635,6 +657,7 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 	default:
 		changed := m.syncGroupTargetLocked(existingGroup, group)
 		if !changed && matchesStored && existingGroup.IsExpired() && m.storeConditionsKnown &&
+			m.allVotersExist(existingGroup.VoterStoreIDs) &&
 			calcGroupAvailability(m.unavailableStores, existingGroup.LeaderStoreID, existingGroup.VoterStoreIDs) == groupAvailable {
 			// A newer write can restore a healthy target after the group has expired.
 			m.setTargetAvailabilityLocked(existingGroup)

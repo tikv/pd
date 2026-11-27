@@ -426,7 +426,7 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 			result := observation.target.result()
 			matchesStored := sameStoredGroup(&observation.target.Expected, result)
 			if !group.AffinitySchedulingAllowed && (matchesStored || sameStoredGroup(&group.Group, result)) {
-				m.recoverLocalObservedTarget(&observation)
+				m.recoverLocalObservedTarget(&observation, matchesStored)
 			}
 			if !matchesStored {
 				m.sendObservedTarget(observation)
