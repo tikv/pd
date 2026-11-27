@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -259,9 +260,7 @@ func (c *cluster) stopWithErr() error {
 		log.Warn("failed to collect pids", zap.String("tag", c.tag), zap.Error(err))
 	}
 	tracked := make(map[int]procInfo, len(c.trackedProcs))
-	for pid, info := range c.trackedProcs {
-		tracked[pid] = info
-	}
+	maps.Copy(tracked, c.trackedProcs)
 	owned := mergeOwnedProcs(tracked, procs, selectOwnedProcs(procs, c.datadir, pgid, launcherStartTime, selfPID))
 	hasGroupMembers := hasLivePGIDMembers(procs, pgid, launcherStartTime, selfPID)
 	exitTargets := make([]procInfo, 0, len(c.pendingExitProcs)+len(owned))
