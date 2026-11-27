@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	goerrors "errors"
 	"fmt"
 	"maps"
 	"math"
@@ -2163,6 +2164,14 @@ func (s *Server) campaignLeader() {
 	createRaftClusterStart := time.Now()
 	if err := s.createRaftCluster(); err != nil {
 		resetLeaderOnce.Do(resetLeader)
+		// A slow etcd leader can win the election with an already expired local
+		// lease. Let a peer take over instead of repeating initialization on the
+		// same member while the other PD members wait for etcd leadership.
+		if goerrors.Is(err, errs.ErrNotLeader) && s.member.GetEtcdLeader() == s.member.ID() {
+			if err := s.member.ResignEtcdLeader(s.serverLoopCtx, s.Name(), ""); err != nil {
+				log.Warn("failed to transfer etcd leadership after losing leadership during initialization", errs.ZapError(err))
+			}
+		}
 		log.Warn("failed to create raft cluster", errs.ZapError(err), zap.Duration("cost", time.Since(createRaftClusterStart)))
 		return
 	}

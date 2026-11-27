@@ -58,6 +58,7 @@ require (
 	go.etcd.io/etcd/api/v3 v3.5.33
 	go.etcd.io/etcd/client/pkg/v3 v3.5.33
 	go.etcd.io/etcd/client/v3 v3.5.33
+	go.etcd.io/etcd/raft/v3 v3.5.15
 	go.etcd.io/etcd/server/v3 v3.5.15
 	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.11.0
@@ -226,7 +227,6 @@ require (
 	go.etcd.io/bbolt v1.3.10 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.15 // indirect
 	go.etcd.io/etcd/pkg/v3 v3.5.15 // indirect
-	go.etcd.io/etcd/raft/v3 v3.5.15 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.46.0 // indirect
 	go.opentelemetry.io/otel v1.45.0 // indirect

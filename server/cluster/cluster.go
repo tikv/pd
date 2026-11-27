@@ -425,6 +425,10 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	resignOnFailure := sync.OnceFunc(func() {
 		if !bootstrap {
+			// Classify lease loss before Resign clears the captured lease.
+			if errorspkg.Is(err, errs.ErrEtcdTxnConflict) && !c.member.IsLeaseValid(lease) {
+				err = errs.ErrNotLeader
+			}
 			// Bootstrap does not own the leadership, but an election may already
 			// be serving embedded TSO. Resign before any failure log or cleanup.
 			c.member.Resign()
@@ -470,7 +474,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	if c.opt.IsPlacementRulesEnabled() {
 		ruleInitStart := time.Now()
-		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
 			resignOnFailure()
 			log.Warn("failed to initialize placement rules", errs.ZapError(err), zap.Duration("cost", time.Since(ruleInitStart)))

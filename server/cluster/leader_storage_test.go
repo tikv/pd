@@ -30,14 +30,14 @@ import (
 )
 
 func TestLeaderKVTermFence(t *testing.T) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	const key = "/test-leader-metadata"
 	for _, operation := range []string{"save", "remove", "transaction"} {
 		for _, state := range []string{"live", "withdrawn", "lease replaced at commit"} {
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				re := require.New(t)
-				m := member.NewMember(nil, client, 1)
+				m := member.NewMember(servers[0], client, uint64(servers[0].Server.ID()))
 				m.InitMemberInfo("", "", "leader")
 				re.NoError(m.Campaign(t.Context(), 30))
 				t.Cleanup(m.Resign)
@@ -100,9 +100,9 @@ func TestLeaderKVTermFence(t *testing.T) {
 
 func TestLeaderContextCanceledBeforeLeaseReset(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
-	m := member.NewMember(nil, client, 1)
+	m := member.NewMember(servers[0], client, uint64(servers[0].Server.ID()))
 	m.InitMemberInfo("", "", "leader")
 	re.NoError(m.Campaign(t.Context(), 30))
 	defer m.Resign()
