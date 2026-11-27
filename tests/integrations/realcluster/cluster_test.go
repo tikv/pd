@@ -608,6 +608,32 @@ func TestHelperFakeServer(_ *testing.T) {
 	time.Sleep(30 * time.Second)
 }
 
+func TestHelperExecParent(t *testing.T) {
+	if os.Getenv("PD_TEST_HELPER_EXEC_PARENT") != "1" {
+		return
+	}
+	pidFile := os.Getenv("PD_TEST_HELPER_CHILD_PID_FILE")
+	if pidFile == "" {
+		t.Fatal("missing PD_TEST_HELPER_CHILD_PID_FILE")
+	}
+	triggerR := os.NewFile(3, "trigger")
+	holdR := os.NewFile(4, "hold")
+	defer func() {
+		_ = triggerR.Close()
+		_ = holdR.Close()
+	}()
+	script := `trap "" TERM; printf "%d\n" "$$" > "$1.tmp" && mv "$1.tmp" "$1"; read _; exec cat <&3`
+	child := exec.Command("sh", "-c", script, "sh", pidFile) //nolint:gosec
+	child.Stdin = triggerR
+	child.ExtraFiles = []*os.File{holdR}
+	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := child.Start(); err != nil {
+		t.Fatalf("failed to start exec child: %v", err)
+	}
+	// Block until terminated by SIGTERM from stopWithErr(); exiting leaves child reparented to PID 1.
+	select {}
+}
+
 func TestClusterIsolationWithIdenticalTagDifferentTiUPHome(t *testing.T) {
 	runCase := func(t *testing.T, spacedPaths bool, procReader func() ([]procInfo, error), startTimeReader func(int) uint64) {
 		re := require.New(t)
@@ -2665,6 +2691,236 @@ exit 1
 		re.NoError(c.stopWithErr())
 		re.Zero(c.pgid)
 		re.Empty(c.pendingExitProcs)
+	})
+
+	t.Run("handles independent-group helper exec argv change during launcher exit", func(t *testing.T) {
+		runExecCase := func(t *testing.T, usePSFallback bool) {
+			re := require.New(t)
+			origKill := killProcess
+			origList := listProcessesFn
+			origGrace := clusterStopGraceTimeout
+			origKillTimeout := clusterStopKillTimeout
+			origWaitTimeout := clusterStopWaitTimeout
+			t.Cleanup(func() {
+				killProcess = origKill
+				listProcessesFn = origList
+				clusterStopGraceTimeout = origGrace
+				clusterStopKillTimeout = origKillTimeout
+				clusterStopWaitTimeout = origWaitTimeout
+			})
+			clusterStopGraceTimeout = 100 * time.Millisecond
+			clusterStopKillTimeout = 80 * time.Millisecond
+			clusterStopWaitTimeout = 2 * time.Second
+
+			execPath, err := os.Executable()
+			re.NoError(err)
+			pidFile := filepath.Join(t.TempDir(), "exec-child.pid")
+
+			triggerR, triggerW, err := os.Pipe()
+			re.NoError(err)
+			holdR, holdW, err := os.Pipe()
+			re.NoError(err)
+			var triggerOnce, holdOnce sync.Once
+			closeTrigger := func() { triggerOnce.Do(func() { _ = triggerW.Close() }) }
+			closeHold := func() { holdOnce.Do(func() { _ = holdW.Close() }) }
+
+			launcher := exec.Command(execPath, "-test.run=^TestHelperExecParent$") //nolint:gosec
+			launcher.Env = append(os.Environ(),
+				"PD_TEST_HELPER_EXEC_PARENT=1",
+				"PD_TEST_HELPER_CHILD_PID_FILE="+pidFile,
+			)
+			launcher.ExtraFiles = []*os.File{triggerR, holdR}
+			launcher.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			re.NoError(launcher.Start())
+			_ = triggerR.Close()
+			_ = holdR.Close()
+			launcherPID := launcher.Process.Pid
+
+			var childPID int
+			t.Cleanup(func() {
+				closeTrigger()
+				closeHold()
+				if childPID > 0 && isProcessRunning(childPID) {
+					_ = syscall.Kill(childPID, syscall.SIGKILL)
+				}
+				if launcherPID > 0 && isProcessRunning(launcherPID) {
+					_ = syscall.Kill(-launcherPID, syscall.SIGKILL)
+				}
+			})
+
+			re.Eventually(func() bool {
+				b, readErr := os.ReadFile(pidFile) //nolint:gosec
+				if readErr != nil {
+					return false
+				}
+				pid, parseErr := strconv.Atoi(strings.TrimSpace(string(b)))
+				if parseErr != nil || pid <= 0 {
+					return false
+				}
+				childPID = pid
+				return isProcessRunning(childPID)
+			}, 5*time.Second, 20*time.Millisecond)
+
+			baseList := listProcesses
+			launcherStart := readProcStartTime(launcherPID)
+			if usePSFallback {
+				baseList = listProcessesFromPS
+				launcherStart = 0
+			} else if launcherStart == 0 {
+				t.Skip("kernel proc startTime unavailable on this platform")
+			}
+
+			// Wait until the process snapshot shows the child attached to launcher in its own PGID.
+			re.Eventually(func() bool {
+				procs, listErr := baseList()
+				if listErr != nil {
+					return false
+				}
+				for _, p := range procs {
+					if p.pid == childPID && p.ppid == launcherPID && p.pgid == childPID && len(p.args) > 0 {
+						return true
+					}
+				}
+				return false
+			}, 5*time.Second, 20*time.Millisecond)
+
+			var mu sync.Mutex
+			var calls []signalCall
+			var triggeredExec bool
+			var waitedForExec bool
+			killProcess = func(pid int, sig syscall.Signal) error {
+				mu.Lock()
+				calls = append(calls, signalCall{pid: pid, sig: sig})
+				if pid == childPID && sig == syscall.SIGTERM {
+					triggeredExec = true
+					closeTrigger()
+				}
+				mu.Unlock()
+				return origKill(pid, sig)
+			}
+			listProcessesFn = func() ([]procInfo, error) {
+				mu.Lock()
+				shouldWait := triggeredExec && !waitedForExec
+				mu.Unlock()
+				if shouldWait {
+					// Wait deterministically for the real helper to finish `exec cat` and for
+					// the launcher to exit so the scan observes the post-exec argv change.
+					deadline := time.Now().Add(2 * time.Second)
+					for time.Now().Before(deadline) {
+						procs, listErr := baseList()
+						if listErr != nil {
+							return nil, listErr
+						}
+						var sawCat, launcherAlive bool
+						for _, p := range procs {
+							if p.pid == launcherPID && p.state != 'Z' && p.state != 'X' {
+								launcherAlive = true
+							}
+							if p.pid == childPID && p.state != 'Z' && p.state != 'X' && len(p.args) > 0 && filepath.Base(p.args[0]) == "cat" {
+								sawCat = true
+							}
+						}
+						if sawCat && !launcherAlive {
+							mu.Lock()
+							waitedForExec = true
+							mu.Unlock()
+							return procs, nil
+						}
+						time.Sleep(15 * time.Millisecond)
+					}
+					mu.Lock()
+					waitedForExec = true
+					mu.Unlock()
+				}
+				return baseList()
+			}
+
+			fakeT := &failNowSpyT{}
+			c := &cluster{
+				re:                require.New(fakeT),
+				tag:               "exec_argv_change_test",
+				datadir:           filepath.Join(t.TempDir(), "exec_argv_change_test"),
+				pgid:              launcherPID,
+				launcherStartTime: launcherStart,
+				cmd:               launcher,
+			}
+			t.Cleanup(func() {
+				closeHold()
+				if c.cmdDone != nil {
+					<-c.cmdDone
+				} else if c.cmd != nil {
+					_ = syscall.Kill(-launcherPID, syscall.SIGKILL)
+					_ = c.cmd.Wait()
+				}
+			})
+
+			if usePSFallback {
+				// On ps fallback (startTime == 0), the exec'd helper changed argv from sh to cat
+				// while keeping PID and PGID: stopWithErr must keep it in pendingExitProcs and
+				// block restart without sending an unverified SIGKILL.
+				stopErr := c.stopWithErr()
+				re.Error(stopErr)
+				re.Contains(stopErr.Error(), "after SIGKILL timeout")
+				re.Equal(launcherPID, c.pgid)
+				re.NotEmpty(c.pendingExitProcs)
+				re.True(isProcessRunning(childPID), "post-exec helper must remain alive without unverified SIGKILL")
+
+				re.PanicsWithValue(errFailNowSpy, func() {
+					c.restart()
+				})
+				re.True(fakeT.failed)
+				re.Contains(fakeT.lastMsg, "after SIGKILL timeout")
+				re.NotContains(fakeT.lastMsg, "cannot start cluster")
+				re.Equal(launcherPID, c.pgid)
+
+				mu.Lock()
+				recorded := append([]signalCall(nil), calls...)
+				mu.Unlock()
+				for _, call := range recorded {
+					re.False(call.pid == childPID && call.sig == syscall.SIGKILL,
+						"must not send unverified SIGKILL to reparented ps-fallback helper after exec")
+				}
+
+				// Once cat receives EOF and exits, retry stopWithErr reaps launcher and clears state.
+				closeHold()
+				re.Eventually(func() bool {
+					return !isProcessRunning(childPID)
+				}, 2*time.Second, 20*time.Millisecond)
+				re.NoError(c.stopWithErr())
+				re.Zero(c.pgid)
+				re.Nil(c.cmd)
+				re.Empty(c.pendingExitProcs)
+				return
+			}
+
+			// With kernel startTime available, PID + startTime still proves identity after exec
+			// so stopWithErr sends SIGKILL, terminates cat, and clears state cleanly.
+			re.NoError(c.stopWithErr())
+			re.Zero(c.pgid)
+			re.Nil(c.cmd)
+			re.Empty(c.trackedProcs)
+			re.Empty(c.pendingExitProcs)
+			re.Eventually(func() bool {
+				return !isProcessRunning(childPID)
+			}, 2*time.Second, 20*time.Millisecond)
+			mu.Lock()
+			recorded := append([]signalCall(nil), calls...)
+			mu.Unlock()
+			var sawChildKill bool
+			for _, call := range recorded {
+				if call.pid == childPID && call.sig == syscall.SIGKILL {
+					sawChildKill = true
+				}
+			}
+			re.True(sawChildKill, "expected SIGKILL for post-exec helper verified by kernel startTime")
+		}
+
+		t.Run("ps_fallback", func(t *testing.T) {
+			runExecCase(t, true)
+		})
+		t.Run("default", func(t *testing.T) {
+			runExecCase(t, false)
+		})
 	})
 }
 

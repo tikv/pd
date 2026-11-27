@@ -21,7 +21,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -564,17 +563,19 @@ func hasConfirmedProcIdentity(prev, cur procInfo) bool {
 		prev.startTime == cur.startTime
 }
 
-func sameProcIdentity(prev, cur procInfo) bool {
+// isPendingExitProcAlive reports whether cur could still be the previously observed process
+// prev for exit-confirmation purposes. Unlike hasConfirmedProcIdentity (which authorizes signals),
+// when kernel startTime is unavailable (ps fallback) a live process with the same PID and PGID
+// remains exit-unconfirmed even if exec changed its argv, so stop/restart stays blocked without
+// sending unverified signals.
+func isPendingExitProcAlive(prev, cur procInfo) bool {
 	if prev.pid != cur.pid || cur.state == 'Z' || cur.state == 'X' {
 		return false
 	}
 	if prev.startTime > 0 && cur.startTime > 0 {
 		return prev.startTime == cur.startTime
 	}
-	if prev.startTime > 0 || cur.startTime > 0 {
-		return false
-	}
-	return prev.pgid == cur.pgid && slices.Equal(prev.args, cur.args)
+	return prev.pgid == cur.pgid
 }
 
 func mergeOwnedProcs(tracked map[int]procInfo, currentProcs, freshOwned []procInfo) []procInfo {
@@ -624,11 +625,15 @@ func filterLiveMatchingProcs(procs, targets []procInfo) []procInfo {
 			continue
 		}
 		cur, ok := byPID[target.pid]
-		if !ok || !sameProcIdentity(target, cur) {
+		if !ok || !isPendingExitProcAlive(target, cur) {
 			continue
 		}
 		seen[target.pid] = struct{}{}
-		alive = append(alive, cur)
+		if target.startTime > 0 && cur.startTime == 0 {
+			alive = append(alive, target)
+		} else {
+			alive = append(alive, cur)
+		}
 	}
 	return alive
 }
