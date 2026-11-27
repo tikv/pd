@@ -1426,7 +1426,7 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 		{name: "removed-follower-during-proxy-health", proxy: true, blocked: "health", changeMembers: true},
 		{name: "membership-change-preserves-published-stream", proxy: true, blocked: "health", changeMembers: true, published: true},
 		{name: "membership-change-during-proxy-build", proxy: true, blocked: "build", changeMembers: true},
-		{name: "removed-follower-during-forwarding-health", blocked: "fallback", changeMembers: true},
+		{name: "removed-follower-during-forwarding-health", blocked: "health", changeMembers: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const oldLeader, newLeader, follower = "old-leader", "new-leader", "follower"
