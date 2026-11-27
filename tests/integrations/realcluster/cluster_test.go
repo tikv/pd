@@ -2788,6 +2788,7 @@ exit 1
 			var calls []signalCall
 			var triggeredExec bool
 			var waitedForExec bool
+			var execWaitTimedOut bool
 			killProcess = func(pid int, sig syscall.Signal) error {
 				mu.Lock()
 				calls = append(calls, signalCall{pid: pid, sig: sig})
@@ -2830,9 +2831,20 @@ exit 1
 					}
 					mu.Lock()
 					waitedForExec = true
+					execWaitTimedOut = true
 					mu.Unlock()
 				}
 				return baseList()
+			}
+
+			// The cases below only prove the post-exec identity check when the scan inside
+			// stopWithErr really observed the helper after `exec cat`.
+			requireExecObserved := func() {
+				mu.Lock()
+				defer mu.Unlock()
+				re.True(triggeredExec, "stopWithErr did not send SIGTERM to the helper")
+				re.True(waitedForExec, "the process scan never waited for the helper to exec into cat")
+				re.False(execWaitTimedOut, "helper did not exec into cat within 2s, so the scan never observed the post-exec argv")
 			}
 
 			fakeT := &failNowSpyT{}
@@ -2859,6 +2871,7 @@ exit 1
 				// while keeping PID and PGID: stopWithErr must keep it in pendingExitProcs and
 				// block restart without sending an unverified SIGKILL.
 				stopErr := c.stopWithErr()
+				requireExecObserved()
 				re.Error(stopErr)
 				re.Contains(stopErr.Error(), "after SIGKILL timeout")
 				re.Equal(launcherPID, c.pgid)
@@ -2895,7 +2908,9 @@ exit 1
 
 			// With kernel startTime available, PID + startTime still proves identity after exec
 			// so stopWithErr sends SIGKILL, terminates cat, and clears state cleanly.
-			re.NoError(c.stopWithErr())
+			stopErr := c.stopWithErr()
+			requireExecObserved()
+			re.NoError(stopErr)
 			re.Zero(c.pgid)
 			re.Nil(c.cmd)
 			re.Empty(c.trackedProcs)
