@@ -18,6 +18,8 @@ import (
 	"context"
 	"io"
 	"math"
+	"os"
+	"os/exec"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -348,6 +350,89 @@ func TestTSOStreamMetricLabelsRemovedOnClose(t *testing.T) {
 			require.False(t, hasTSOStreamMetric(t, metrics.OngoingRequestCountGauge, stream.streamID))
 		})
 	}
+}
+
+func TestTSOStreamMetricsAcrossFirstInitialization(t *testing.T) {
+	const subprocessEnv = "PD_TSO_METRICS_INIT_TEST_CHILD"
+	if os.Getenv(subprocessEnv) == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		// #nosec G204 G702 -- only executes the current test binary with a fixed test name.
+		command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTSOStreamMetricsAcrossFirstInitialization$")
+		command.Env = append(os.Environ(), subprocessEnv+"=1")
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, string(output))
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	inner := newMockTSOStreamImpl(ctx, resultModeManual)
+	stream := newTSOStream(ctx, mockStreamURL, inner)
+	oldOngoingGauge := metrics.OngoingRequestCountGauge
+	oldLatencyGauge := metrics.EstimateTSOLatencyGauge
+	var otherStream *tsoStream
+	t.Cleanup(func() {
+		cancel()
+		stream.WaitForClosed()
+		if otherStream != nil {
+			otherStream.WaitForClosed()
+		}
+	})
+
+	require.True(t, hasTSOStreamMetric(t, oldOngoingGauge, stream.streamID))
+	result := make(chan error, 1)
+	require.NoError(t, stream.processRequests(1, 2, 3, 1, time.Now(),
+		func(_ tsoRequestResult, _ uint32, err error) { result <- err }))
+	inner.returnResult(10, 1, 1)
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("TSO response was not processed")
+	}
+	require.True(t, hasTSOStreamMetric(t, oldLatencyGauge, stream.streamID))
+
+	// A second stream can be constructed while the first metrics registration
+	// replaces the package-level vectors.
+	otherInner := newMockTSOStreamImpl(ctx, resultModeManual)
+	otherStreamCh := make(chan *tsoStream, 1)
+	go func() {
+		otherStreamCh <- newTSOStream(ctx, mockStreamURL, otherInner)
+	}()
+	metrics.InitAndRegisterMetrics(nil)
+	otherStream = <-otherStreamCh
+	newOngoingGauge := metrics.OngoingRequestCountGauge
+	newLatencyGauge := metrics.EstimateTSOLatencyGauge
+	require.NotSame(t, oldOngoingGauge, newOngoingGauge)
+	require.NotSame(t, oldLatencyGauge, newLatencyGauge)
+	require.True(t,
+		(otherStream.ongoingRequestCountGaugeVec == oldOngoingGauge &&
+			otherStream.estimateTSOLatencyGaugeVec == oldLatencyGauge) ||
+			(otherStream.ongoingRequestCountGaugeVec == newOngoingGauge &&
+				otherStream.estimateTSOLatencyGaugeVec == newLatencyGauge),
+		"TSO stream captured vectors from different initialization generations")
+
+	require.NoError(t, stream.processRequests(1, 2, 3, 1, time.Now(),
+		func(_ tsoRequestResult, _ uint32, err error) { result <- err }))
+	inner.returnResult(11, 1, 1)
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("TSO response after metrics registration was not processed")
+	}
+	require.False(t, hasTSOStreamMetric(t, oldLatencyGauge, stream.streamID))
+	require.True(t, hasTSOStreamMetric(t, newLatencyGauge, stream.streamID))
+
+	inner.stop()
+	otherInner.stop()
+	stream.WaitForClosed()
+	otherStream.WaitForClosed()
+	require.False(t, hasTSOStreamMetric(t, oldOngoingGauge, stream.streamID))
+	require.False(t, hasTSOStreamMetric(t, oldOngoingGauge, otherStream.streamID))
+	require.False(t, hasTSOStreamMetric(t, newOngoingGauge, otherStream.streamID))
+	require.False(t, hasTSOStreamMetric(t, oldLatencyGauge, stream.streamID))
+	require.False(t, hasTSOStreamMetric(t, newLatencyGauge, stream.streamID))
 }
 
 func hasTSOStreamMetric(t *testing.T, vector *prometheus.GaugeVec, streamID string) bool {

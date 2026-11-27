@@ -229,8 +229,11 @@ type tsoStream struct {
 
 	estimatedLatencyMicros atomic.Uint64
 
-	ongoingRequestCountGauge prometheus.Gauge
-	ongoingRequests          atomic.Int32
+	ongoingRequestCountGaugeVec *prometheus.GaugeVec
+	estimateTSOLatencyGaugeVec  *prometheus.GaugeVec
+	ongoingRequestCountGauge    prometheus.Gauge
+	estimateTSOLatencyGauge     prometheus.Gauge
+	ongoingRequests             atomic.Int32
 }
 
 const (
@@ -248,6 +251,8 @@ const (
 
 func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
 	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))
+	// Keep the ongoing-request vector so teardown deletes from the same vector as the child gauge.
+	ongoingGaugeVec, latencyGaugeVec := metrics.GetTSOStreamMetrics()
 	// To make error handling in `tsoDispatcher` work, the internal `cancel` and external `cancel` is better to be
 	// distinguished.
 	ctx, cancel := context.WithCancel(ctx)
@@ -260,7 +265,9 @@ func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAda
 
 		cancel: cancel,
 
-		ongoingRequestCountGauge: metrics.OngoingRequestCountGauge.WithLabelValues(streamID),
+		ongoingRequestCountGaugeVec: ongoingGaugeVec,
+		estimateTSOLatencyGaugeVec:  latencyGaugeVec,
+		ongoingRequestCountGauge:    ongoingGaugeVec.WithLabelValues(streamID),
 	}
 	s.wg.Add(1)
 	go s.recvLoop(ctx)
@@ -379,8 +386,8 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 
 		s.ongoingRequests.Store(0)
 		s.ongoingRequestCountGauge.Set(0)
-		metrics.OngoingRequestCountGauge.DeleteLabelValues(s.streamID)
-		metrics.EstimateTSOLatencyGauge.DeleteLabelValues(s.streamID)
+		s.ongoingRequestCountGaugeVec.DeleteLabelValues(s.streamID)
+		s.estimateTSOLatencyGaugeVec.DeleteLabelValues(s.streamID)
 		s.wg.Done()
 	}()
 
@@ -402,7 +409,17 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		micros := math.Exp(filteredValue)
 		s.estimatedLatencyMicros.Store(uint64(micros))
 		// Update the metrics in seconds.
-		metrics.EstimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
+		_, currentLatencyGaugeVec := metrics.GetTSOStreamMetrics()
+		if currentLatencyGaugeVec != s.estimateTSOLatencyGaugeVec {
+			// Registration replaces the vectors. Move latency samples to the registered generation.
+			s.estimateTSOLatencyGaugeVec.DeleteLabelValues(s.streamID)
+			s.estimateTSOLatencyGaugeVec = currentLatencyGaugeVec
+			s.estimateTSOLatencyGauge = nil
+		}
+		if s.estimateTSOLatencyGauge == nil {
+			s.estimateTSOLatencyGauge = s.estimateTSOLatencyGaugeVec.WithLabelValues(s.streamID)
+		}
+		s.estimateTSOLatencyGauge.Set(micros * 1e-6)
 	}
 
 recvLoop:

@@ -26,6 +26,19 @@ import (
 // make sure register metrics only once
 var initialized atomic.Int32
 
+type tsoStreamMetricVectors struct {
+	ongoingRequestCount *prometheus.GaugeVec
+	estimateTSOLatency  *prometheus.GaugeVec
+}
+
+var currentTSOStreamMetrics atomic.Pointer[tsoStreamMetricVectors]
+
+// GetTSOStreamMetrics atomically loads the current pair of TSO stream metric vectors.
+func GetTSOStreamMetrics() (ongoingRequestCount, estimateTSOLatency *prometheus.GaugeVec) {
+	vectors := currentTSOStreamMetrics.Load()
+	return vectors.ongoingRequestCount, vectors.estimateTSOLatency
+}
+
 func init() {
 	initMetrics(prometheus.Labels{})
 	initLabelValues()
@@ -252,6 +265,11 @@ func initMetrics(constLabels prometheus.Labels) {
 			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 13),
 			Help:        "query region batch send latency",
 		})
+
+	currentTSOStreamMetrics.Store(&tsoStreamMetricVectors{
+		ongoingRequestCount: OngoingRequestCountGauge,
+		estimateTSOLatency:  EstimateTSOLatencyGauge,
+	})
 }
 
 // CmdDurationXXX and CmdFailedDurationXXX are the durations of the client commands.
