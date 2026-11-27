@@ -1903,9 +1903,25 @@ wait
 	})
 }
 
+// unsignaledContext never closes Done, reproducing a lookup that receives both
+// results before observing an expired deadline. A past deadline with a nil err
+// models a deadline timer that has not fired yet.
+type unsignaledContext struct {
+	context.Context
+	deadline time.Time
+	err      error
+}
+
+func (c unsignaledContext) Deadline() (time.Time, bool) {
+	return c.deadline, !c.deadline.IsZero()
+}
+
+func (c unsignaledContext) Err() error { return c.err }
+
 func TestPlaygroundLookupBound(t *testing.T) {
 	// Each lookup body runs for `tiup --binary playground` with PG_BIN, PID_FILE,
-	// and COUNT_FILE exported; it records the PIDs that must not outlive a timeout.
+	// COUNT_FILE, and INSTALL_LOG exported; it records the PIDs that must not
+	// outlive a timeout.
 	const hangLookup = `sleep 30 &
 printf '%s\n%s\n' "$$" "$!" >> "$PID_FILE"
 wait
@@ -1916,23 +1932,36 @@ exit 0`
 sh -c 'echo $$ >> "$PID_FILE"; exec sleep ` + seconds + `' &
 exit 0`
 	}
+	// TiUP exits normally with a non-zero code until the component is installed.
+	missingUntilInstalled := func(code int) string {
+		return fmt.Sprintf("if [ -f \"$INSTALL_LOG\" ]; then\n  echo \"$PG_BIN\"\n  exit 0\nfi\nexit %d", code)
+	}
+	const (
+		wantReuse   = "reuse"
+		wantInstall = "install"
+		wantTimeout = "timeout"
+		wantFailed  = "failed"
+	)
 	cases := []struct {
-		name         string
-		lookup       string
-		timeout      time.Duration
-		makeTimeout  string
-		wantTimedOut bool
+		name        string
+		lookup      string
+		timeout     time.Duration
+		makeTimeout string
+		want        string
 	}{
-		{name: "hang_before_lock", lookup: hangLookup, timeout: 300 * time.Millisecond, makeTimeout: "0.3", wantTimedOut: true},
+		{name: "hang_before_lock", lookup: hangLookup, timeout: 300 * time.Millisecond, makeTimeout: "0.3", want: wantTimeout},
 		{
-			name:         "hang_under_lock",
-			lookup:       "if [ ! -f \"$COUNT_FILE\" ]; then\n  : > \"$COUNT_FILE\"\n  exit 1\nfi\n" + hangLookup,
-			timeout:      300 * time.Millisecond,
-			makeTimeout:  "0.3",
-			wantTimedOut: true,
+			name:        "hang_under_lock",
+			lookup:      "if [ ! -f \"$COUNT_FILE\" ]; then\n  : > \"$COUNT_FILE\"\n  exit 1\nfi\n" + hangLookup,
+			timeout:     300 * time.Millisecond,
+			makeTimeout: "0.3",
+			want:        wantTimeout,
 		},
-		{name: "child_holds_pipe_within_bound", lookup: childHoldsPipe("0.6"), timeout: 2 * time.Second, makeTimeout: "2"},
-		{name: "child_holds_pipe_past_bound", lookup: childHoldsPipe("30"), timeout: 300 * time.Millisecond, makeTimeout: "0.3", wantTimedOut: true},
+		{name: "child_holds_pipe_within_bound", lookup: childHoldsPipe("0.6"), timeout: 2 * time.Second, makeTimeout: "2", want: wantReuse},
+		{name: "child_holds_pipe_past_bound", lookup: childHoldsPipe("30"), timeout: 300 * time.Millisecond, makeTimeout: "0.3", want: wantTimeout},
+		{name: "missing_component_exit_1_installs", lookup: missingUntilInstalled(1), timeout: 2 * time.Second, makeTimeout: "2", want: wantInstall},
+		{name: "missing_component_exit_42_installs", lookup: missingUntilInstalled(42), timeout: 2 * time.Second, makeTimeout: "2", want: wantInstall},
+		{name: "tiup_killed_by_signal", lookup: "kill -TERM $$\nexit 1", timeout: 2 * time.Second, makeTimeout: "2", want: wantFailed},
 	}
 
 	setup := func(t *testing.T, lookup string) (tiupHome, fakeTiUP, pgBin, pidFile, installLog string) {
@@ -1950,7 +1979,7 @@ exit 0`
 		installLog = filepath.Join(stateDir, "install.log")
 		fakeTiUP = filepath.Join(tiupHome, "bin", "tiup")
 		script := fmt.Sprintf(`#!/bin/sh
-export PG_BIN=%q PID_FILE=%q COUNT_FILE=%q
+export PG_BIN=%q PID_FILE=%q COUNT_FILE=%q INSTALL_LOG=%q
 if [ "$1" = "--version" ]; then
   echo "1.16.4 tiup"
   exit 0
@@ -1959,13 +1988,23 @@ if [ "$1" = "--binary" ] && [ "$2" = "playground" ]; then
 %s
 fi
 if [ "$1" = "install" ]; then
-  echo "installed" >> %q
+  echo "installed" >> "$INSTALL_LOG"
+  exit 0
 fi
 exit 1
-`, pgBin, pidFile, filepath.Join(stateDir, "lookup.count"), lookup, installLog)
+`, pgBin, pidFile, filepath.Join(stateDir, "lookup.count"), installLog, lookup)
 		re.NoError(os.WriteFile(fakeTiUP, []byte(script), 0600))
 		re.NoError(os.Chmod(fakeTiUP, 0700)) //nolint:gosec
 		return tiupHome, fakeTiUP, pgBin, pidFile, installLog
+	}
+	assertInstalls := func(re *require.Assertions, installLog string, want int) {
+		if want == 0 {
+			re.False(fileExists(installLog), "lookup must not trigger install")
+			return
+		}
+		b, err := os.ReadFile(installLog) //nolint:gosec
+		re.NoError(err)
+		re.Len(strings.Fields(string(b)), want)
 	}
 	assertTimedOutLookupCleanedUp := func(re *require.Assertions, tiupHome, pidFile string) {
 		b, err := os.ReadFile(pidFile) //nolint:gosec
@@ -2000,6 +2039,30 @@ exit 1
 		re.False(fileExists(installLog))
 	})
 
+	t.Run("go/deadline_observed_after_completion", func(t *testing.T) {
+		_, fakeTiUP, pgBin, _, _ := setup(t, "echo \"$PG_BIN\"\nexit 0")
+		for _, c := range []struct {
+			name    string
+			ctx     unsignaledContext
+			wantErr error
+		}{
+			{name: "deadline_passed_err_nil", ctx: unsignaledContext{Context: context.Background(), deadline: time.Now().Add(-time.Millisecond)}, wantErr: context.DeadlineExceeded},
+			{name: "err_set", ctx: unsignaledContext{Context: context.Background(), err: context.DeadlineExceeded}, wantErr: context.DeadlineExceeded},
+			{name: "canceled", ctx: unsignaledContext{Context: context.Background(), err: context.Canceled}, wantErr: context.Canceled},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				re := require.New(t)
+				binPath, err := playgroundprobe.LookupBinary(c.ctx, fakeTiUP, nil)
+				re.ErrorIs(err, c.wantErr)
+				re.Empty(binPath, "output received after the deadline must not be accepted")
+			})
+		}
+		// Positive control: the same lookup within its deadline returns the path.
+		binPath, err := playgroundprobe.LookupBinary(unsignaledContext{Context: context.Background(), deadline: time.Now().Add(time.Minute)}, fakeTiUP, nil)
+		require.NoError(t, err)
+		require.Equal(t, pgBin, binPath)
+	})
+
 	for _, tc := range cases {
 		t.Run("go/"+tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -2019,21 +2082,31 @@ exit 1
 				ensurePlaygroundInstalledWithTiUPHome(require.New(rec), fakeTiUP, tiupHome)
 			}()
 			re.Less(time.Since(start), tc.timeout+3*time.Second)
-			re.False(fileExists(installLog), "lookup must not trigger install")
-			if !tc.wantTimedOut {
+			switch tc.want {
+			case wantReuse, wantInstall:
 				re.Empty(rec.err)
 				binPath, err := probePlaygroundBinaryWithTiUPHome(fakeTiUP, tiupHome)
 				re.NoError(err)
 				re.Equal(pgBin, binPath)
-				return
-			}
-			re.Contains(rec.err, fmt.Sprintf("tiup playground lookup timed out after %s", tc.timeout))
-			assertTimedOutLookupCleanedUp(re, tiupHome, pidFile)
-			if tc.name == "child_holds_pipe_past_bound" {
-				binPath, err := probePlaygroundBinaryWithTiUPHome(fakeTiUP, tiupHome)
-				re.ErrorIs(err, context.DeadlineExceeded)
-				re.Empty(binPath, "output from a timed-out lookup must not be accepted")
+				if tc.want == wantInstall {
+					assertInstalls(re, installLog, 1)
+				} else {
+					assertInstalls(re, installLog, 0)
+				}
+			case wantFailed:
+				re.Contains(rec.err, "tiup playground lookup failed")
+				re.Contains(rec.err, "signal: terminated")
+				assertInstalls(re, installLog, 0)
+			case wantTimeout:
+				re.Contains(rec.err, fmt.Sprintf("tiup playground lookup timed out after %s", tc.timeout))
+				assertInstalls(re, installLog, 0)
 				assertTimedOutLookupCleanedUp(re, tiupHome, pidFile)
+				if tc.name == "child_holds_pipe_past_bound" {
+					binPath, err := probePlaygroundBinaryWithTiUPHome(fakeTiUP, tiupHome)
+					re.ErrorIs(err, context.DeadlineExceeded)
+					re.Empty(binPath, "output from a timed-out lookup must not be accepted")
+					assertTimedOutLookupCleanedUp(re, tiupHome, pidFile)
+				}
 			}
 		})
 
@@ -2060,16 +2133,28 @@ exit 1
 			)
 			out, err := cmd.CombinedOutput()
 			re.NoError(ctx.Err(), "make tiup was still waiting on tiup --binary playground, output:\n%s", string(out))
-			re.False(fileExists(installLog), "lookup must not trigger install, output:\n%s", string(out))
-			if !tc.wantTimedOut {
+			switch tc.want {
+			case wantReuse:
 				re.NoError(err, "make tiup failed to reuse the installed playground, output:\n%s", string(out))
 				re.Contains(string(out), "tiup already installed")
-				return
+				assertInstalls(re, installLog, 0)
+			case wantInstall:
+				re.NoError(err, "make tiup failed to install the missing playground, output:\n%s", string(out))
+				re.Contains(string(out), "Installing tiup playground...")
+				assertInstalls(re, installLog, 1)
+			case wantFailed:
+				re.Error(err, "expected make tiup to fail when tiup --binary playground is killed, output:\n%s", string(out))
+				re.Contains(string(out), "tiup playground lookup failed")
+				re.Contains(string(out), "signal: terminated")
+				re.Contains(string(out), "failed to look up tiup playground binary via "+fakeTiUP)
+				assertInstalls(re, installLog, 0)
+			case wantTimeout:
+				re.Error(err, "expected make tiup to fail when tiup --binary playground does not finish, output:\n%s", string(out))
+				re.Contains(string(out), "tiup playground lookup timed out after "+tc.timeout.String())
+				re.Contains(string(out), "failed to look up tiup playground binary via "+fakeTiUP)
+				assertInstalls(re, installLog, 0)
+				assertTimedOutLookupCleanedUp(re, tiupHome, pidFile)
 			}
-			re.Error(err, "expected make tiup to fail when tiup --binary playground does not finish, output:\n%s", string(out))
-			re.Contains(string(out), "tiup playground lookup timed out after "+tc.timeout.String())
-			re.Contains(string(out), "failed to look up tiup playground binary via "+fakeTiUP)
-			assertTimedOutLookupCleanedUp(re, tiupHome, pidFile)
 		})
 	}
 }

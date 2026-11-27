@@ -83,8 +83,9 @@ func RunVersionCheck(ctx context.Context, binPath string, env []string) error {
 // and returns the reported playground binary path. TiUP must both exit and close
 // its output before ctx is done; otherwise the entire process group is killed,
 // any output is discarded, and an error wrapping ctx's error is returned. A
-// non-zero TiUP exit means that playground is not installed and returns an empty
-// path; any other execution or I/O failure returns an error.
+// normal non-zero TiUP exit means that playground is not installed and returns
+// an empty path; termination by a signal and any other execution or I/O failure
+// return an error.
 func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, error) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -121,6 +122,23 @@ func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, er
 		read    readResult
 		waitErr error
 	)
+	timedOut := func() (string, error) {
+		// Killing the group also reaches children that outlived the leader
+		// and still hold the output pipe.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = r.Close()
+		if waitDone != nil {
+			<-waitDone
+		}
+		if readDone != nil {
+			<-readDone
+		}
+		cause := ctx.Err()
+		if cause == nil {
+			cause = context.DeadlineExceeded
+		}
+		return "", fmt.Errorf("%s --binary playground did not finish: %w", tiupBin, cause)
+	}
 	for readDone != nil || waitDone != nil {
 		select {
 		case read = <-readDone:
@@ -128,24 +146,22 @@ func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, er
 		case waitErr = <-waitDone:
 			waitDone = nil
 		case <-ctx.Done():
-			// Killing the group also reaches children that outlived the
-			// leader and still hold the output pipe.
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			_ = r.Close()
-			if waitDone != nil {
-				<-waitDone
-			}
-			if readDone != nil {
-				<-readDone
-			}
-			return "", fmt.Errorf("%s --binary playground did not finish: %w", tiupBin, ctx.Err())
+			return timedOut()
 		}
+	}
+	// select chooses randomly among ready cases, and ctx's deadline timer may
+	// not have fired yet, so both results may have been received after the
+	// deadline passed. Compare against the deadline directly as well.
+	if deadline, ok := ctx.Deadline(); ctx.Err() != nil || (ok && !time.Now().Before(deadline)) {
+		return timedOut()
 	}
 	if read.err != nil {
 		return "", fmt.Errorf("read %s --binary playground output: %w", tiupBin, read.err)
 	}
 	if waitErr != nil {
-		if _, ok := errors.AsType[*exec.ExitError](waitErr); ok {
+		// Only a normal non-zero exit means TiUP reported a missing component;
+		// termination by a signal is a lookup failure.
+		if exitErr, ok := errors.AsType[*exec.ExitError](waitErr); ok && exitErr.Exited() {
 			return "", nil
 		}
 		return "", fmt.Errorf("%s --binary playground: %w", tiupBin, waitErr)
