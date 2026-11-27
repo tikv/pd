@@ -164,7 +164,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 		re.Equal(uint32(i+1), loaded.GetId())
 		checkCreateRequest(re, request, loaded)
 
-		loaded, err = manager.LoadKeyspaceByID(created.GetId())
+		loaded, err = manager.LoadKeyspaceByID(suite.T().Context(), created.GetId())
 		re.NoError(err)
 		re.Equal(loaded.Name, request.Name)
 		checkCreateRequest(re, request, loaded)
@@ -279,11 +279,11 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceByID() {
 		re.Equal(strconv.Itoa(id), created.Name)
 		checkCreateByIDRequest(re, request, created)
 
-		loaded, err := manager.LoadKeyspaceByID(*request.ID)
+		loaded, err := manager.LoadKeyspaceByID(suite.T().Context(), *request.ID)
 		re.NoError(err)
 		checkCreateByIDRequest(re, request, loaded)
 
-		loaded, err = manager.LoadKeyspaceByID(created.GetId())
+		loaded, err = manager.LoadKeyspaceByID(suite.T().Context(), created.GetId())
 		re.NoError(err)
 		checkCreateByIDRequest(re, request, loaded)
 	}
@@ -1084,7 +1084,7 @@ func (suite *keyspaceTestSuite) TestGCBarrierRemovalInvalidationAfterCommit() {
 		calls++
 		m.metaLock.Lock(id)
 		defer m.metaLock.Unlock(id)
-		_, err := m.LoadKeyspaceByID(id)
+		_, err := m.LoadKeyspaceByID(suite.T().Context(), id)
 		re.Error(err)
 		// A group operation takes the group lock, detecting lock-order regression.
 		_, err = m.kgm.GetKeyspaceGroups(101, 1)
@@ -1272,6 +1272,80 @@ func TestLoadKeyspaceByIDWithRevision(t *testing.T) {
 	loaded, _, err = manager.LoadKeyspaceByIDWithRevision(ctx, 2)
 	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	re.Nil(loaded)
+}
+
+type keyspaceMetaStorageWithCommitHook struct {
+	endpoint.KeyspaceStorage
+	meta   *keyspacepb.KeyspaceMeta
+	commit func() error
+}
+
+func (s *keyspaceMetaStorageWithCommitHook) RunInTxn(_ context.Context, read func(kv.Txn) error) error {
+	if err := read(nil); err != nil {
+		return err
+	}
+	return s.commit()
+}
+
+func (s *keyspaceMetaStorageWithCommitHook) LoadKeyspaceMeta(kv.Txn, uint32) (*keyspacepb.KeyspaceMeta, error) {
+	return s.meta, nil
+}
+
+func TestLoadKeyspaceByIDSkipsEndpointAttachmentAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	meta := &keyspacepb.KeyspaceMeta{Config: map[string]string{MetaServiceGroupIDKey: "group1"}}
+	manager := &Manager{
+		ctx: t.Context(),
+		store: &keyspaceMetaStorageWithCommitHook{
+			meta: meta,
+			commit: func() error {
+				cancel()
+				return nil
+			},
+		},
+		mgm: &MetaServiceGroupManager{metaServiceGroups: map[string]string{"group1": "http://127.0.0.1:2379"}},
+	}
+
+	loaded, err := manager.LoadKeyspaceByID(ctx, 1)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, loaded)
+	require.NotContains(t, meta.Config, MetaServiceGroupAddressesKey)
+}
+
+func TestKeyspaceStateLookupUsesMetadataAfterTxnConflict(t *testing.T) {
+	const id = 1
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id},
+		Name:     "enabled-keyspace",
+		State:    keyspacepb.KeyspaceState_ENABLED,
+		Config:   map[string]string{MetaServiceGroupIDKey: "group1"},
+	}
+	manager := &Manager{
+		ctx: t.Context(),
+		store: &keyspaceMetaStorageWithCommitHook{
+			meta:   meta,
+			commit: func() error { return errs.ErrEtcdTxnConflict.FastGenByArgs() },
+		},
+		mgm:   &MetaServiceGroupManager{metaServiceGroups: map[string]string{"group1": "http://127.0.0.1:2379"}},
+		cache: NewCache(),
+	}
+
+	loaded, err := manager.LoadKeyspaceByID(t.Context(), id)
+	require.ErrorIs(t, err, errs.ErrEtcdTxnConflict)
+	require.Nil(t, loaded)
+
+	state, err := manager.GetKeyspaceStateByID(id)
+	require.NoError(t, err)
+	require.Equal(t, keyspacepb.KeyspaceState_ENABLED, state)
+	cachedState, ok := manager.keyspaceStateLookup.Load(uint32(id))
+	require.True(t, ok)
+	require.Equal(t, keyspacepb.KeyspaceState_ENABLED, cachedState)
+	cached, ok := manager.cache.getKeyspaceByID(id)
+	require.True(t, ok)
+	require.Equal(t, meta.GetName(), cached.name)
+	require.Equal(t, keyspacepb.KeyspaceState_ENABLED, cached.state)
+	require.NotContains(t, meta.Config, MetaServiceGroupAddressesKey)
 }
 
 type revisionedKeyspaceStorage struct {
@@ -1519,7 +1593,7 @@ func (suite *keyspaceTestSuite) TestGCConfigCreationPolicy() {
 					}
 					re.NoError(err)
 					re.Equal(mode, meta.Config[GCManagementType])
-					loaded, err := suite.manager.LoadKeyspaceByID(meta.GetId())
+					loaded, err := suite.manager.LoadKeyspaceByID(suite.T().Context(), meta.GetId())
 					re.NoError(err)
 					re.Equal(meta.Config, loaded.Config)
 					if !byID {
@@ -1635,7 +1709,7 @@ func (suite *keyspaceTestSuite) TestGCConfigReadsAndStateChangesPreserveHistory(
 		byName, err := suite.manager.LoadKeyspace(meta.Name)
 		re.NoError(err)
 		re.Equal(meta.Config, byName.Config)
-		byID, err := suite.manager.LoadKeyspaceByID(meta.GetId())
+		byID, err := suite.manager.LoadKeyspaceByID(suite.T().Context(), meta.GetId())
 		re.NoError(err)
 		re.Equal(meta.Config, byID.Config)
 		_, err = suite.manager.UpdateKeyspaceState(meta.Name, keyspacepb.KeyspaceState_DISABLED, 1)
@@ -1652,7 +1726,7 @@ func (suite *keyspaceTestSuite) TestGCConfigReservedAndPreallocatedDefaults() {
 	if kerneltype.IsNextGen() {
 		mode = KeyspaceLevelGC
 	}
-	reserved, err := suite.manager.LoadKeyspaceByID(GetBootstrapKeyspaceID())
+	reserved, err := suite.manager.LoadKeyspaceByID(suite.T().Context(), GetBootstrapKeyspaceID())
 	re.NoError(err)
 	re.Equal(mode, reserved.Config[GCManagementType])
 	delete(reserved.Config, GCManagementType)
@@ -1660,7 +1734,7 @@ func (suite *keyspaceTestSuite) TestGCConfigReservedAndPreallocatedDefaults() {
 	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error { return suite.manager.store.SaveKeyspaceMeta(txn, reserved) }))
 	suite.manager.config.(*mockConfig).PreAlloc = []string{"gc_preallocated"}
 	re.NoError(suite.manager.Bootstrap())
-	loaded, err := suite.manager.LoadKeyspaceByID(reserved.GetId())
+	loaded, err := suite.manager.LoadKeyspaceByID(suite.T().Context(), reserved.GetId())
 	re.NoError(err)
 	re.Equal(reserved.Config, loaded.Config, "restart must retain existing reserved metadata")
 	re.Eventually(func() bool {

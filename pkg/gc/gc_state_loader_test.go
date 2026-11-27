@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -85,7 +86,7 @@ func TestGCStateLoadConcurrent(t *testing.T) {
 	results := make(chan GCState, 16)
 	failures := make(chan error, 16)
 	for range 16 {
-		go func() { state, err := m.GetGCState(2, true); results <- state; failures <- err }()
+		go func() { state, err := m.GetGCState(context.Background(), 2, true); results <- state; failures <- err }()
 	}
 	select {
 	case <-entered:
@@ -649,10 +650,10 @@ func TestGCStateLoadWaiterCancellationAndOverlap(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	owner := make(chan error, 1)
-	go func() { _, err := m.getGCStateImpl(ctx, 2, true); owner <- err }()
+	go func() { _, err := m.GetGCState(ctx, 2, true); owner <- err }()
 	<-entered
 	waiter := make(chan error, 1)
-	go func() { _, err := m.getGCStateImpl(context.Background(), 2, true); waiter <- err }()
+	go func() { _, err := m.GetGCState(t.Context(), 2, true); waiter <- err }()
 	require.Equal(t, uint32(2), <-joined)
 	cancel()
 	require.ErrorIs(t, <-owner, context.Canceled)
@@ -668,6 +669,148 @@ func TestGCStateLoadWaiterCancellationAndOverlap(t *testing.T) {
 	unblock()
 	require.NoError(t, <-waiter)
 	require.Equal(t, int32(1), reads.Load())
+}
+
+func TestGCStateLoadWaiterCancellationWhileManagerLocked(t *testing.T) {
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		return invoke(ctx, method, req, reply, cc, opts...)
+	})
+	const hook = "github.com/tikv/pd/pkg/gc/beforeGCStateLoadManagerLock"
+	started := make(chan struct{})
+	require.NoError(t, failpoint.EnableCall(hook, sync.OnceFunc(func() { close(started) })))
+	defer func() { require.NoError(t, failpoint.Disable(hook)) }()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	m.mu.Lock()
+	unlock := sync.OnceFunc(m.mu.Unlock)
+	defer unlock()
+	result := make(chan error, 1)
+	go func() { _, err := m.GetGCState(ctx, constant.NullKeyspaceID, true); result <- err }()
+	gcWarmupWait(t, started)
+	cancel()
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("request cancellation waited for the loader's manager lock")
+	}
+	unlock()
+	// The leader-owned load can still fill the cache after its only waiter leaves.
+	require.Eventually(t, func() bool {
+		_, ok := m.gcStateCache.load(constant.NullKeyspaceID)
+		return ok
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestGetGCStateCancelsKeyspaceMetadataReadOnCacheHit(t *testing.T) {
+	const id = 2
+	var block atomic.Bool
+	entered := make(chan struct{})
+	exited := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if read, ok := req.(*etcdserverpb.RangeRequest); ok && block.Load() && string(read.Key) == keypath.KeyspaceMetaPath(id) {
+			close(entered)
+			defer close(exited)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-release:
+			}
+		}
+		return invoke(ctx, method, req, reply, cc, opts...)
+	})
+	m.gcStateCache.store(id, gcStateCacheEntry{TxnSafePoint: 100, GCSafePoint: 50})
+	block.Store(true)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	type result struct {
+		state GCState
+		err   error
+	}
+	read := make(chan result, 1)
+	go func() {
+		state, err := m.GetGCState(ctx, id, true)
+		read <- result{state: state, err: err}
+	}()
+	gcWarmupWait(t, entered)
+	cancel()
+	gcWarmupWait(t, exited)
+	select {
+	case got := <-read:
+		require.ErrorIs(t, got.err, context.Canceled)
+		require.Empty(t, got.state)
+	case <-time.After(5 * time.Second):
+		t.Fatal("request did not return when the metadata read was canceled")
+	}
+}
+
+func TestGetGCStateCancelsDedicatedSnapshotAndReleasesReadLock(t *testing.T) {
+	id := constant.NullKeyspaceID
+	entered := make(chan struct{})
+	storageErr := make(chan error, 1)
+	release := make(chan struct{})
+	defer close(release)
+	m := newGCStateLoaderManager(t, func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		txn, ok := req.(*etcdserverpb.TxnRequest)
+		if ok && len(txn.Compare) == 0 && len(txn.Success) == 4 && string(txn.Success[0].GetRequestRange().GetKey()) == keypath.TxnSafePointPath(id) {
+			close(entered)
+			select {
+			case <-ctx.Done():
+				storageErr <- ctx.Err()
+				return ctx.Err()
+			case <-release:
+			}
+		}
+		return invoke(ctx, method, req, reply, cc, opts...)
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	type result struct {
+		state    GCState
+		barriers []*endpoint.GlobalGCBarrier
+		err      error
+	}
+	read := make(chan result, 1)
+	go func() {
+		state, barriers, err := m.GetGCStateWithGlobalGCBarriers(ctx, id, false)
+		read <- result{state: state, barriers: barriers, err: err}
+	}()
+	gcWarmupWait(t, entered)
+
+	writerStarted := make(chan struct{})
+	write := make(chan error, 1)
+	go func() {
+		close(writerStarted)
+		_, err := m.SetGCBarrier(id, "after-cancel", gcTestTS(100), time.Hour, time.Now())
+		write <- err
+	}()
+	gcWarmupWait(t, writerStarted)
+	cancel()
+	select {
+	case err := <-storageErr:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("snapshot storage transaction did not observe request cancellation")
+	}
+	select {
+	case got := <-read:
+		require.ErrorIs(t, got.err, context.Canceled)
+		require.Empty(t, got.state)
+		require.Nil(t, got.barriers)
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled snapshot request did not return")
+	}
+	select {
+	case err := <-write:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("writer did not finish after cancellation released the read lock")
+	}
 }
 
 func TestGCStateLoadFailureWakesJoinedReaders(t *testing.T) {
@@ -1280,7 +1423,7 @@ func TestGCStateLeadershipResetDisablesFastReads(t *testing.T) {
 	require.Zero(t, safePoint)
 	states := make(chan GCState, 1)
 	failures := make(chan error, 1)
-	go func() { state, err := m.GetGCState(2, true); states <- state; failures <- err }()
+	go func() { state, err := m.GetGCState(context.Background(), 2, true); states <- state; failures <- err }()
 	select {
 	case state := <-states:
 		t.Fatalf("read returned during cache reset: %+v", state)

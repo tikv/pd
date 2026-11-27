@@ -198,7 +198,7 @@ func LoadKeyspaceByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
 		return
 	}
-	meta, err := manager.LoadKeyspaceByID(uint32(id))
+	meta, err := manager.LoadKeyspaceByID(c.Request.Context(), uint32(id))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return

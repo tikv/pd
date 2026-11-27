@@ -762,14 +762,33 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 	return meta, err
 }
 
-// LoadKeyspaceByID returns the keyspace specified by id.
-// It returns error if loading or unmarshalling met error or if keyspace does not exist.
-func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
+// LoadKeyspaceByID loads the keyspace specified by id using the caller's context.
+// It returns metadata only after the storage transaction succeeds.
+func (manager *Manager) LoadKeyspaceByID(ctx context.Context, spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
+	ctx, cancel := manager.newLoadContext(ctx)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	meta, err := manager.loadKeyspaceMetaByID(ctx, spaceID)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	if manager.mgm != nil && meta != nil {
+		manager.mgm.AttachEndpoints(meta.GetConfig())
+	}
+	return meta, nil
+}
+
+func (manager *Manager) loadKeyspaceMetaByID(ctx context.Context, spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
 	var (
 		meta *keyspacepb.KeyspaceMeta
 		err  error
 	)
-	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	err = manager.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		meta, err = manager.store.LoadKeyspaceMeta(txn, spaceID)
 		if err != nil {
 			return err
@@ -779,22 +798,13 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		}
 		return nil
 	})
-	if manager.mgm != nil && meta != nil {
-		manager.mgm.AttachEndpoints(meta.GetConfig())
-	}
 	return meta, err
 }
 
 // LoadKeyspaceByIDWithRevision returns the keyspace and the modification revision of its persisted metadata.
 func (manager *Manager) LoadKeyspaceByIDWithRevision(ctx context.Context, spaceID uint32) (*keyspacepb.KeyspaceMeta, int64, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(manager.ctx, cancel)
-	defer func() { stop(); cancel() }()
-	// AfterFunc dispatches asynchronously for an already-canceled manager.
-	// Reflect that cancellation before passing the context to storage.
-	if manager.ctx.Err() != nil {
-		cancel()
-	}
+	ctx, cancel := manager.newLoadContext(ctx)
+	defer cancel()
 	meta, revision, err := manager.store.LoadKeyspaceMetaWithRevision(ctx, spaceID)
 	if err != nil {
 		return nil, 0, err
@@ -806,6 +816,17 @@ func (manager *Manager) LoadKeyspaceByIDWithRevision(ctx context.Context, spaceI
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
 	return meta, revision, nil
+}
+
+func (manager *Manager) newLoadContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(manager.ctx, cancel)
+	// AfterFunc dispatches asynchronously for an already-canceled manager.
+	// Reflect that cancellation before passing the context to storage.
+	if manager.ctx.Err() != nil {
+		cancel()
+	}
+	return ctx, func() { stop(); cancel() }
 }
 
 // Mutation represents a single operation to be applied on keyspace config.
@@ -1371,7 +1392,7 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	}
 	var loadedName string
 	// If the keyspace name is not in the cache, try to get it from the storage.
-	meta, err := manager.LoadKeyspaceByID(id)
+	meta, err := manager.LoadKeyspaceByID(manager.ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -1396,9 +1417,8 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 		return state.(keyspacepb.KeyspaceState), nil
 	}
 	var loadedState keyspacepb.KeyspaceState
-	// If the keyspace state is not in the cache, try to get it from the storage.
-	meta, err := manager.LoadKeyspaceByID(id)
-	// Only check wether the keyspace meta is nil, ensure the returned state is as latest as possible.
+	meta, err := manager.loadKeyspaceMetaByID(manager.ctx, id)
+	// Use the state we read even if the read transaction's final validation failed.
 	if meta == nil {
 		return keyspacepb.KeyspaceState_DISABLED, err
 	}

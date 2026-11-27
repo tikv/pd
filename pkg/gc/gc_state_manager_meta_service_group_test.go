@@ -54,7 +54,7 @@ func newMetaServiceGroupGCFixture(t *testing.T) (*endpoint.StorageEndpoint, *GCS
 	storage, _, manager, clean, cancel := newGCStateManagerForTest(t, opt)
 	t.Cleanup(clean)
 	t.Cleanup(cancel)
-	meta, err := manager.keyspaceManager.LoadKeyspaceByID(1)
+	meta, err := manager.keyspaceManager.LoadKeyspaceByID(t.Context(), 1)
 	re.NoError(err)
 	re.Equal("group1", meta.Config[keyspace.MetaServiceGroupIDKey])
 	return storage, manager, groupClient, servers[0].Close
@@ -569,7 +569,7 @@ func TestMetaServiceGroupMinStartTSLocalFallback(t *testing.T) {
 			if id == 2 {
 				op = keyspace.OpPut
 			}
-			meta, err := manager.keyspaceManager.LoadKeyspaceByID(id)
+			meta, err := manager.keyspaceManager.LoadKeyspaceByID(t.Context(), id)
 			re.NoError(err)
 			_, err = manager.keyspaceManager.UpdateKeyspaceConfig(meta.Name, []*keyspace.Mutation{{Op: op, Key: keyspace.MetaServiceGroupIDKey, Value: ""}})
 			re.NoError(err)
