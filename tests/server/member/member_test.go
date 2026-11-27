@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -404,6 +405,39 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	re.NotEqual(leader, cluster.GetLeader())
 }
 
+func TestCampaignHistoryResetsAfterEtcdTerm(t *testing.T) {
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 3)
+	re.NoError(err)
+	t.Cleanup(cluster.Destroy)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	oldLeader := cluster.GetLeaderServer()
+	member := oldLeader.GetServer().GetMember()
+	term := member.Etcd().Server.Term()
+	// Keep enough history to force another handoff unless the new term clears it.
+	for range 3 {
+		member.GetLeadership().AddCampaignTimes()
+	}
+	const campaignHook = "github.com/tikv/pd/server/leaderLoopCheckAgain"
+	re.NoError(failpoint.Enable(campaignHook, fmt.Sprintf(`return("%d")`, oldLeader.GetServerID())))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(campaignHook)) })
+	var peer *tests.TestServer
+	for _, server := range cluster.GetServers() {
+		if server != oldLeader {
+			peer = server
+			break
+		}
+	}
+	re.NoError(oldLeader.MoveEtcdLeader(oldLeader.GetServerID(), peer.GetServerID()))
+	testutil.Eventually(re, peer.IsLeader)
+	re.NoError(peer.MoveEtcdLeader(peer.GetServerID(), oldLeader.GetServerID()))
+	testutil.Eventually(re, func() bool { return member.Etcd().Server.Term() > term })
+	re.NoError(failpoint.Disable(campaignHook))
+	testutil.Eventually(re, oldLeader.IsLeader)
+	re.Equal(1, member.GetLeadership().GetCampaignTimesNum())
+}
+
 func TestGrantLeaseFailed(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -470,13 +504,20 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 			// the etcd lease alive while its local deadline expires, as can happen
 			// when a slow election finishes before the first renewal response.
 			const reloadHook = "github.com/tikv/pd/server/beforeLeaderReloadConfig"
+			const renewHook = "github.com/tikv/pd/pkg/election/keepAliveFailed"
 			reached, release := make(chan struct{}), make(chan struct{})
 			resume := sync.OnceFunc(func() { close(release) })
 			var attempts atomic.Int32
 			re.NoError(failpoint.EnableCall(reloadHook, func(id uint64) {
-				if id == oldLeader.GetServerID() && attempts.Add(1) == 1 {
-					close(reached)
-					<-release
+				if id == oldLeader.GetServerID() {
+					if attempts.Add(1) == 1 {
+						close(reached)
+						<-release
+					} else if tc.expireLease && tc.members == 1 {
+						// Recovery must renew its replacement lease during initialization.
+						time.Sleep(time.Duration(svr.GetConfig().LeaderLease+1) * time.Second)
+						re.False(svr.GetMember().GetLeadership().GetLease().IsExpired())
+					}
 				}
 			}))
 			t.Cleanup(func() {
@@ -526,9 +567,16 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 				}
 			}
 			if tc.expireLease {
-				const renewHook = "github.com/tikv/pd/pkg/election/keepAliveFailed"
 				re.NoError(failpoint.Enable(renewHook, fmt.Sprintf(`return("leader election@%s")`, oldLeaderName)))
 				t.Cleanup(func() { re.NoError(failpoint.Disable(renewHook)) })
+				const withdrawnHook = "github.com/tikv/pd/pkg/member/afterMemberLeaderWithdrawn"
+				re.NoError(failpoint.EnableCall(withdrawnHook, func(id uint64) {
+					if id == oldLeader.GetServerID() {
+						// The old lease is fenced; stop injecting before a new Keep starts.
+						re.NoError(failpoint.Disable(renewHook))
+					}
+				}))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(withdrawnHook)) })
 				testutil.Eventually(re, lease.IsExpired, testutil.WithWaitFor(15*time.Second))
 				if tc.commitAt != "" {
 					_, err := svr.GetClient().Revoke(t.Context(), lease.GetID())
@@ -572,6 +620,41 @@ func TestPDInitializationFailureTransfersEtcdLeader(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResignEtcdLeaderSkipsUnavailableMembers(t *testing.T) {
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 3)
+	re.NoError(err)
+	t.Cleanup(cluster.Destroy)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	member := leader.GetServer().GetMember()
+	var offline, healthy *tests.TestServer
+	for _, server := range cluster.GetServers() {
+		if server == leader {
+			continue
+		}
+		if offline == nil {
+			offline = server
+		} else {
+			healthy = server
+		}
+	}
+	learnerURL := tempurl.Alloc()
+	testutil.Eventually(re, func() bool {
+		_, err := leader.GetEtcdClient().MemberAddAsLearner(t.Context(), []string{learnerURL})
+		return err == nil
+	})
+	re.NoError(offline.Stop())
+	var selected atomic.Uint64
+	const transferHook = "github.com/tikv/pd/pkg/member/beforeResignEtcdLeader"
+	re.NoError(failpoint.EnableCall(transferHook, func(_, target uint64) { selected.Store(target) }))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(transferHook)) })
+	re.NoError(member.ResignEtcdLeader(t.Context(), leader.GetConfig().Name, ""))
+	re.Equal(healthy.GetServerID(), selected.Load())
+	testutil.Eventually(re, healthy.IsLeader)
 }
 
 func TestResignEtcdLeaderDoesNotTransferSuccessor(t *testing.T) {

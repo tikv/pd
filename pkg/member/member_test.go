@@ -16,6 +16,8 @@ package member
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +28,24 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 )
+
+func TestIsEtcdPeerConnected(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	re := require.New(t)
+	peer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		re.Equal("/raft/probing", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer peer.Close()
+	client := peer.Client()
+	defer client.CloseIdleConnections()
+	client.Timeout = time.Second
+	re.True(isEtcdPeerConnected(t.Context(), client, []string{"invalid://peer", peer.URL}))
+	re.False(isEtcdPeerConnected(t.Context(), client, nil))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	re.False(isEtcdPeerConnected(ctx, client, []string{peer.URL}))
+}
 
 func TestWaitForEtcdLeader(t *testing.T) {
 	defer goleak.VerifyNone(t)
