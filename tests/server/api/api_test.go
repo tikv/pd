@@ -35,10 +35,12 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	mconfig "github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
@@ -128,7 +130,10 @@ func (suite *middlewareTestSuite) SetupSuite() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3)
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		// TestAuditLocalLogBackend checks the request body in the audit log.
+		conf.Security.RedactInfoLog = logutil.RedactInfoLogOFF
+	})
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
@@ -806,7 +811,10 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		b, err := os.ReadFile(fname)
+		return err == nil && strings.Contains(string(b), "/pd/api/v1/regions")
+	})
 	b, err := os.ReadFile(fname)
 	re.NoError(err)
 	l := string(b)
@@ -1177,7 +1185,10 @@ func TestRemovingProgress(t *testing.T) {
 	sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete, http.StatusOK)
 	sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete, http.StatusOK)
 
-	time.Sleep(100 * time.Millisecond) // wait for the removing progress to be created
+	testutil.Eventually(re, func() bool {
+		_, err := leader.GetRaftCluster().GetProgressByAction("removing")
+		return err == nil
+	})
 	// size is not changed.
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
 	var p api.Progress
@@ -1299,7 +1310,19 @@ func (suite *forwardTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/enableAddServerNameHeader", `return`))
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, serverName string) {
+		// Leave Type empty so no cloud metering writer starts while exercising config GET endpoints.
+		conf.Metering = mconfig.MeteringConfig{
+			Region: "cn-beijing",
+			Bucket: "metering",
+			TOS: &mconfig.MeteringTOSConfig{
+				AssumeRoleARN:   "trn:iam::1:role/" + serverName,
+				AccessKey:       "test-ak-" + serverName,
+				SecretAccessKey: "test-sk-" + serverName,
+				SessionToken:    "test-token-" + serverName,
+			},
+		}
+	})
 	suite.env.PDCount = 3
 	suite.env.RunFunc(func(cluster *tests.TestCluster) {
 		suite.leader = cluster.GetLeaderServer().GetServer()
@@ -1375,25 +1398,57 @@ func (suite *forwardTestSuite) checkGetRequest(_ *tests.TestCluster) {
 	}
 }
 
-func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
+func (suite *forwardTestSuite) checkConfig(cluster *tests.TestCluster) {
 	re := suite.Require()
-	followerURL := suite.follower.GetAddr() + "/pd/api/v1/config"
-	followerName := suite.follower.GetConfig().Name
+	leader := cluster.GetLeaderServer().GetServer()
+	var follower *server.Server
+	for _, svr := range cluster.GetServers() {
+		if svr.GetAddr() != leader.GetAddr() {
+			follower = svr.GetServer()
+			break
+		}
+	}
+	re.NotNil(follower)
+
+	followerURL := follower.GetAddr() + "/pd/api/v1/config"
+	followerName := follower.GetConfig().Name
 	// Test local config
 	var followerCfg config.Config
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, followerURL, &followerCfg,
 		testutil.StatusOK(re))
 	re.NoError(err)
-	re.Equal(suite.follower.GetConfig().ClientUrls, followerCfg.ClientUrls)
-	re.NotEqual(suite.leader.GetConfig().ClientUrls, followerCfg.ClientUrls)
-	re.Equal(suite.follower.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
-	re.NotEqual(suite.leader.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
-	re.Equal(suite.follower.GetConfig().Name, followerCfg.Name)
-	re.NotEqual(suite.leader.GetConfig().Name, followerCfg.Name)
-	re.Equal(suite.follower.GetConfig().PeerUrls, followerCfg.PeerUrls)
-	re.NotEqual(suite.leader.GetConfig().PeerUrls, followerCfg.PeerUrls)
+	re.Equal(follower.GetConfig().ClientUrls, followerCfg.ClientUrls)
+	re.NotEqual(leader.GetConfig().ClientUrls, followerCfg.ClientUrls)
+	re.Equal(follower.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
+	re.NotEqual(leader.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
+	re.Equal(follower.GetConfig().Name, followerCfg.Name)
+	re.NotEqual(leader.GetConfig().Name, followerCfg.Name)
+	re.Equal(follower.GetConfig().PeerUrls, followerCfg.PeerUrls)
+	re.NotEqual(leader.GetConfig().PeerUrls, followerCfg.PeerUrls)
+	assertRedactedTOS := func(name string, got, live *mconfig.MeteringTOSConfig) {
+		const redactedValue = "***REDACTED***"
+		re.NotNil(got)
+		re.Equal("trn:iam::1:role/"+name, got.AssumeRoleARN)
+		re.Equal(redactedValue, got.AccessKey)
+		re.Equal(redactedValue, got.SecretAccessKey)
+		re.Equal(redactedValue, got.SessionToken)
+		re.NotNil(live)
+		re.Equal("test-ak-"+name, live.AccessKey)
+		re.Equal("test-sk-"+name, live.SecretAccessKey)
+		re.Equal("test-token-"+name, live.SessionToken)
+	}
+	assertRedactedTOS(followerName, followerCfg.Metering.TOS, follower.GetConfig().Metering.TOS)
+
+	// Test leader config GET redaction
+	leaderURL := leader.GetAddr() + "/pd/api/v1/config"
+	leaderName := leader.GetConfig().Name
+	var leaderCfg config.Config
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, leaderURL, &leaderCfg,
+		testutil.StatusOK(re))
+	re.NoError(err)
+	assertRedactedTOS(leaderName, leaderCfg.Metering.TOS, leader.GetConfig().Metering.TOS)
+
 	// Test sync config
-	leaderURL := suite.leader.GetAddr() + "/pd/api/v1/config"
 	reqData, err := json.Marshal(map[string]any{
 		"max-replicas": 4,
 	})

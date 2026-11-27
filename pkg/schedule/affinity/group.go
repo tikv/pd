@@ -15,17 +15,23 @@
 package affinity
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 // groupAvailability is an enum that represents the Group’s availability lifecycle.
@@ -71,6 +77,7 @@ type Phase string
 const (
 	// PhasePending indicates that the Group is still determining the StoreIDs.
 	// If the Group has no KeyRanges, it remains in PhasePending forever.
+	// Overlapping key ranges also keep a group pending until the conflict is repaired.
 	PhasePending = Phase("pending")
 	// PhasePreparing indicates that the Group is scheduling Regions according to the required Peers.
 	PhasePreparing = Phase("preparing")
@@ -82,6 +89,9 @@ const (
 // Valid id must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
 // numbers (0-9), hyphens (-), and underscores (_).
 var idRegexp = regexp.MustCompile("^[-A-Za-z0-9_]{1,64}$")
+
+// TiDB owns this namespace. Other applications may still use custom IDs.
+var tidbKeyspaceIDRegexp = regexp.MustCompile(`^_tidb_ks(0|[1-9][0-9]*)_(?:t_([1-9][0-9]*)|pt_([1-9][0-9]*)_p([1-9][0-9]*)|tg_([1-9][0-9]*)(?:_i(0|[1-9][0-9]*))?)$`)
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
@@ -122,10 +132,18 @@ type GroupState struct {
 	AffinityRegionCount int `json:"affinity_region_count"`
 
 	// affinityVer is used to mark the version of the cache.
-	affinityVer uint64
+	affinityVer   uint64
+	rangeConflict bool
 	// groupInfoPtr is a pointer to the original information.
 	// It is used only for pointer comparison and should not access any internal data.
 	groupInfoPtr *runtimeGroupInfo
+}
+
+// MatchesTarget reports whether both states describe the same version and peer
+// placement of an affinity group.
+func (g *GroupState) MatchesTarget(other *GroupState) bool {
+	return g.ID == other.ID && g.groupInfoPtr == other.groupInfoPtr && g.affinityVer == other.affinityVer &&
+		g.LeaderStoreID == other.LeaderStoreID && slices.Equal(g.VoterStoreIDs, other.VoterStoreIDs)
 }
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
@@ -155,8 +173,8 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
-	// availability must be used together with degradedExpiredAt. Therefore, GetAvailability and SetAvailability must
-	// always be used to read or modify them, and availability must not be accessed directly.
+	// Use GetAvailability, SetAvailability, and resetTargetAvailability to access availability
+	// together with degradedExpiredAt.
 	availability groupAvailability
 	// degradedExpiredAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
 	degradedExpiredAt uint64
@@ -171,6 +189,8 @@ type runtimeGroupInfo struct {
 	LabelRule *labeler.LabelRule
 	// RangeCount counts how many KeyRanges exist in the Label.
 	RangeCount int
+	// rangeConflict disables affinity for the entire group until its ranges no longer overlap.
+	rangeConflict bool
 }
 
 // newGroupState creates a GroupState from the given runtimeGroupInfo.
@@ -199,6 +219,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		RegionCount:               len(g.Regions),
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
+		rangeConflict:             g.rangeConflict,
 		groupInfoPtr:              g,
 	}
 }
@@ -257,18 +278,29 @@ func (g *runtimeGroupInfo) SetAvailability(newAvailability groupAvailability) {
 	}
 }
 
+// resetTargetAvailability sets the initial availability for a new or replaced target,
+// starting a fresh degradation window only when the target starts degraded.
+func (g *runtimeGroupInfo) resetTargetAvailability(availability groupAvailability) {
+	g.availability = availability
+	if availability == groupDegraded {
+		g.degradedExpiredAt = newDegradedExpiredAtFromNow()
+	} else {
+		g.degradedExpiredAt = 0
+	}
+}
+
 func newDegradedExpiredAtFromNow() uint64 {
 	return uint64(time.Now().Unix()) + defaultDegradedExpirationSeconds
 }
 
 // IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
 func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
-	return g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
+	return !g.rangeConflict && g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
 }
 
 // IsRegularSchedulingAllowed indicates whether balance scheduling is allowed.
 func (g *runtimeGroupInfo) IsRegularSchedulingAllowed() bool {
-	return g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
+	return g.rangeConflict || g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
 }
 
 // AdjustGroup validates the group and sets default values.
@@ -308,10 +340,90 @@ type GroupKeyRanges struct {
 	GroupID   string
 }
 
-// ValidateGroupID checks the ID format.
+// ValidateGroupID checks the ID format and requires keyspace-aware TiDB IDs in NextGen.
+// It is checked where requests enter PD. Stored groups are loaded and synced
+// without it, so that the overlap checks keep seeing their ranges.
 func ValidateGroupID(id string) error {
-	if idRegexp.MatchString(id) {
+	_, _, err := parseGroupID(id)
+	return err
+}
+
+// ValidateExistingGroupID checks the character set and length of a stored group ID.
+// It permits IDs persisted before NextGen required keyspace-aware TiDB IDs.
+func ValidateExistingGroupID(id string) error {
+	if !idRegexp.MatchString(id) {
+		return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+	}
+	return nil
+}
+
+func parseGroupID(id string) (uint32, bool, error) {
+	if err := ValidateExistingGroupID(id); err != nil {
+		return 0, false, err
+	}
+	if !kerneltype.IsNextGen() {
+		return 0, false, nil
+	}
+	if strings.HasPrefix(id, "_tidb_t_") || strings.HasPrefix(id, "_tidb_pt_") || strings.HasPrefix(id, "_tidb_tg_") {
+		return 0, false, errs.ErrAffinityGroupContent.FastGenByArgs("nextgen requires keyspace-aware TiDB affinity group IDs; use a keyspace-aware TiDB or pd-ctl --keyspace-id")
+	}
+	if !strings.HasPrefix(id, "_tidb_ks") {
+		return 0, false, nil
+	}
+	parts := tidbKeyspaceIDRegexp.FindStringSubmatch(id)
+	if parts == nil {
+		return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+	}
+	keyspaceID, err := strconv.ParseUint(parts[1], 10, 24)
+	if err != nil {
+		return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+	}
+	for _, objectID := range parts[2:] {
+		if objectID != "" {
+			if _, err := strconv.ParseInt(objectID, 10, 64); err != nil {
+				return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+			}
+		}
+	}
+	return uint32(keyspaceID), true, nil
+}
+
+func validateGroupKeyRanges(group GroupKeyRanges) error {
+	keyspaceID, scoped, err := parseGroupID(group.GroupID)
+	if err != nil {
+		return err
+	}
+	return validateKeyspaceRanges(group, keyspaceID, scoped)
+}
+
+func validateKeyspaceRanges(group GroupKeyRanges, keyspaceID uint32, scoped bool) error {
+	if !kerneltype.IsNextGen() || len(group.KeyRanges) == 0 {
 		return nil
 	}
-	return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+	if !scoped {
+		startKey := group.KeyRanges[0].StartKey
+		if len(startKey) < codec.EncodedKeyspacePrefixLen || startKey[0] != codec.TxnKeyspaceModePrefix {
+			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s key ranges must belong to one transaction keyspace", group.GroupID))
+		}
+		keyspaceID = uint32(startKey[1])<<16 | uint32(startKey[2])<<8 | uint32(startKey[3])
+		boundary := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
+		if keyspaceID > 0 && bytes.Compare(startKey, boundary[:]) < 0 {
+			keyspaceID--
+		}
+	}
+	if keyspaceID > constant.MaxValidKeyspaceID {
+		return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s has an invalid keyspace ID", group.GroupID))
+	}
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, keyspaceID+1)
+	// PD receives memcomparable region boundaries. The exclusive upper bound
+	// may be the next keyspace boundary, including the fencepost for the last ID.
+	for _, kr := range group.KeyRanges {
+		if len(kr.StartKey) < codec.EncodedKeyspacePrefixLen || kr.StartKey[0] != codec.TxnKeyspaceModePrefix ||
+			len(kr.EndKey) == 0 || bytes.Compare(kr.StartKey, lower[:]) < 0 ||
+			bytes.Compare(kr.StartKey, kr.EndKey) >= 0 || bytes.Compare(kr.EndKey, upper[:]) > 0 {
+			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("affinity group %s key ranges must belong to transaction keyspace %d", group.GroupID, keyspaceID))
+		}
+	}
+	return nil
 }

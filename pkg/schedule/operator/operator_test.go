@@ -442,6 +442,23 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 	}
 }
 
+func (suite *operatorTestSuite) TestLimitTimeout() {
+	re := suite.Require()
+	step := SplitRegion{StartKey: []byte("a"), EndKey: []byte("z")}
+	for _, size := range []int64{1, 1315} {
+		op := NewOperator("split", "split", 1, &metapb.RegionEpoch{}, OpSplit, size, step)
+		original := op.timeout
+		op.LimitTimeout(5 * time.Minute)
+		re.Equal(min(original, 5*time.Minute), op.timeout)
+		re.Equal(size, op.ApproximateSize)
+		re.True(op.Start())
+		op.SetStatusReachTime(STARTED, time.Now().Add(-6*time.Minute))
+		op.currentStep.Store(int32(op.Len()))
+		re.False(op.CheckTimeout())
+		re.Equal(SUCCESS, op.Status())
+	}
+}
+
 func (suite *operatorTestSuite) TestStart() {
 	re := suite.Require()
 	steps := []OpStep{
@@ -657,7 +674,6 @@ func (suite *operatorTestSuite) TestRecord() {
 	re := suite.Require()
 	operator := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
 	now := time.Now()
-	time.Sleep(time.Second)
 	ob := operator.Record(now)
 	re.Equal(now, ob.FinishTime)
 	re.Greater(ob.duration.Seconds(), time.Second.Seconds())

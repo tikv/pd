@@ -115,7 +115,7 @@ func (h *pprofHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// dump config all
-	config := h.svr.GetConfig()
+	config := server.RedactedConfig(h.svr.GetConfig())
 	js, err := json.Marshal(config)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("json marshal config info fail: %v", err))

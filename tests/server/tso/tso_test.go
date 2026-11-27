@@ -16,6 +16,8 @@ package tso_test
 
 import (
 	"context"
+	"io"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,8 +29,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -166,6 +170,130 @@ func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoReques
 
 func (s *tsoTestSuite) TestLogicalOverflow() {
 	s.env.RunTestInNonMicroserviceEnv(s.checkLogicalOverflow)
+}
+
+func (s *tsoTestSuite) TestForwardedInvalidCountIsolation() {
+	s.env.RunTestInNonMicroserviceEnv(func(cluster *tests.TestCluster) {
+		re := s.Require()
+		leader := cluster.GetLeaderServer()
+		var follower *tests.TestServer
+		for name, server := range cluster.GetServers() {
+			if name != cluster.GetLeader() {
+				follower = server
+				break
+			}
+		}
+		re.NotNil(follower)
+		client, conn := testutil.MustNewGrpcClient(re, follower.GetAddr())
+		defer conn.Close()
+		ctx, cancel := context.WithTimeout(s.T().Context(), 10*time.Second)
+		defer cancel()
+		ctx = grpcutil.BuildForwardContext(ctx, leader.GetAddr())
+		valid, err := client.Tso(ctx)
+		re.NoError(err)
+		defer func() { re.NoError(valid.CloseSend()) }()
+		request := &pdpb.TsoRequest{Header: testutil.NewRequestHeader(leader.GetClusterID()), Count: 1}
+		re.NoError(valid.Send(request))
+		previous, err := valid.Recv()
+		re.NoError(err)
+		checkAndReturnTimestampResponse(re, request, previous)
+
+		for _, count := range []uint32{0, 1 << 18, math.MaxUint32} {
+			invalidCtx, invalidCancel := context.WithCancel(ctx)
+			invalid, err := client.Tso(invalidCtx)
+			re.NoError(err)
+			re.NoError(invalid.Send(&pdpb.TsoRequest{Header: request.Header, Count: count}))
+			_, err = invalid.Recv()
+			invalidCancel()
+			re.ErrorContains(err, "tso count")
+
+			for _, closeSend := range []bool{false, true} {
+				pipelineCtx, pipelineCancel := context.WithCancel(ctx)
+				pipeline, err := client.Tso(pipelineCtx)
+				re.NoError(err)
+				// Establish the forwarding context before pipelining the invalid
+				// request with another message or EOF. Neither may hide its error.
+				re.NoError(pipeline.Send(request))
+				_, err = pipeline.Recv()
+				re.NoError(err)
+				re.NoError(pipeline.Send(&pdpb.TsoRequest{Header: request.Header, Count: count}))
+				if closeSend {
+					re.NoError(pipeline.CloseSend())
+				} else {
+					err = pipeline.Send(request)
+					re.True(err == nil || err == io.EOF)
+				}
+				_, err = pipeline.Recv()
+				pipelineCancel()
+				re.ErrorContains(err, "tso count")
+			}
+
+			// Keep using the same valid stream after the other stream is rejected.
+			re.NoError(valid.Send(request))
+			response, err := valid.Recv()
+			re.NoError(err)
+			checkAndReturnTimestampResponse(re, request, response)
+			re.Greater(tsoutil.GenerateTS(response.GetTimestamp()), tsoutil.GenerateTS(previous.GetTimestamp()))
+			previous = response
+		}
+	})
+}
+
+func (s *tsoTestSuite) TestInvalidCount() {
+	s.env.RunTest(func(cluster *tests.TestCluster) {
+		re := s.Require()
+		leader := cluster.GetLeaderServer()
+		if leader.GetServer().IsServiceIndependent(constant.TSOServiceName) {
+			tsoCluster, err := tests.NewTestTSOCluster(s.T().Context(), 1, leader.GetAddr())
+			re.NoError(err)
+			defer tsoCluster.Destroy()
+			tsoCluster.WaitForDefaultPrimaryServing(re)
+			testutil.Eventually(re, func() bool {
+				_, ready := leader.GetServer().GetServicePrimaryAddr(s.T().Context(), constant.TSOServiceName)
+				return ready
+			})
+		}
+		var invalidAllocations atomic.Int64
+		const beforeGenerate = "github.com/tikv/pd/pkg/tso/beforeGenerateTSO"
+		re.NoError(failpoint.EnableCall(beforeGenerate, func(_ int64, _ *int64, count int64) {
+			if count >= 1<<18 {
+				invalidAllocations.Add(1)
+			}
+		}))
+		defer func() { re.NoError(failpoint.Disable(beforeGenerate)) }()
+		client, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+		defer conn.Close()
+		validCtx, validCancel := context.WithTimeout(s.T().Context(), 10*time.Second)
+		defer validCancel()
+		valid, err := client.Tso(validCtx)
+		re.NoError(err)
+		request := &pdpb.TsoRequest{Header: testutil.NewRequestHeader(leader.GetClusterID()), Count: 1}
+		re.NoError(valid.Send(request))
+		previous, err := valid.Recv()
+		re.NoError(err)
+		checkAndReturnTimestampResponse(re, request, previous)
+		for _, count := range []uint32{0, 1 << 18, 1<<18 + 1, math.MaxUint32} {
+			ctx, cancel := context.WithTimeout(s.T().Context(), 10*time.Second)
+			stream, err := client.Tso(ctx)
+			re.NoError(err)
+			re.NoError(stream.Send(&pdpb.TsoRequest{Header: testutil.NewRequestHeader(leader.GetClusterID()), Count: count}))
+			_, err = stream.Recv()
+			re.Error(err)
+			re.Contains(err.Error(), "tso count")
+			cancel()
+
+			// Invalid counts must not close the delegate connection shared with
+			// an established healthy stream in independent TSO service mode.
+			re.NoError(valid.Send(request))
+			response, err := valid.Recv()
+			re.NoError(err)
+			checkAndReturnTimestampResponse(re, request, response)
+			re.Greater(tsoutil.GenerateTS(response.GetTimestamp()), tsoutil.GenerateTS(previous.GetTimestamp()))
+			previous = response
+		}
+		re.Zero(invalidAllocations.Load())
+		re.NoError(valid.CloseSend())
+	})
 }
 
 func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {

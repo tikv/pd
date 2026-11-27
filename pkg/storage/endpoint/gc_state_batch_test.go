@@ -35,13 +35,19 @@ import (
 )
 
 func newGCBatchTestStorage(t *testing.T, interceptor grpc.UnaryClientInterceptor) *StorageEndpoint {
+	client := newTestEtcdClientWithInterceptor(t, interceptor)
+	return NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+}
+
+func newTestEtcdClientWithInterceptor(t *testing.T, interceptor grpc.UnaryClientInterceptor) *clientv3.Client {
+	t.Helper()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
 		ClientCfgModifier: func(config *clientv3.Config) {
 			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(interceptor))
 		},
 	})
 	t.Cleanup(clean)
-	return NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	return client
 }
 
 func TestLoadGCSafePointPairs(t *testing.T) {

@@ -18,9 +18,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"net/http"
 	"os"
 	"slices"
 	"sort"
@@ -50,6 +52,7 @@ import (
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/constants"
+	clierrs "github.com/tikv/pd/client/errs"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -394,7 +397,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
 	re.NoError(err)
 	defer tsoCluster.Destroy()
-	time.Sleep(100 * time.Millisecond)
+	tsoCluster.WaitForDefaultPrimaryServing(re)
 	cli := utils.SetupClientWithKeyspaceID(ctx, re, constants.DefaultKeyspaceID, strings.Split(backendEndpoints, ","))
 	re.NotNil(cli)
 	defer cli.Close()
@@ -564,13 +567,13 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwardin
 	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
-	time.Sleep(200 * time.Millisecond)
+	waitServiceClientAvailability(re, cli.GetServiceDiscovery(), "", false)
 	r, err := cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
 	re.NotNil(r)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1"))
-	time.Sleep(200 * time.Millisecond)
+	waitServiceClientAvailability(re, cli.GetServiceDiscovery(), "", true)
 	r, err = cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
 	re.NotNil(r)
@@ -581,10 +584,10 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
 	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
@@ -597,8 +600,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	})
 
 	lastTS = checkTS(re, cli, lastTS)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
-	time.Sleep(2 * time.Second)
+	waitForTSOLeaderStreamRecovery(re)
 	checkTS(re, cli, lastTS)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/responseNil", "return(true)"))
@@ -616,10 +618,10 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding2(
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
 	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
 	defer cli.Close()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
@@ -637,8 +639,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding2(
 	re.NotEmpty(suite.cluster.WaitLeaderChange(oldLeaderName))
 	lastTS = checkTS(re, cli, lastTS)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
-	time.Sleep(5 * time.Second)
+	waitForTSOLeaderStreamRecovery(re)
 	checkTS(re, cli, lastTS)
 }
 
@@ -793,7 +794,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	// because we can't check whether this request is processed by followers from response,
 	// we can disable forward and make network problem for leader.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
-	time.Sleep(150 * time.Millisecond)
+	waitServiceClientAvailability(re, cli.GetServiceDiscovery(), leader.GetAddr(), false)
 	cnt = 0
 	for range 100 {
 		resp, err := cli.GetRegion(ctx, []byte("a"), opt.WithAllowFollowerHandle())
@@ -808,7 +809,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	// make network problem for follower.
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
-	time.Sleep(100 * time.Millisecond)
+	waitServiceClientAvailability(re, cli.GetServiceDiscovery(), follower.GetAddr(), false)
 	cnt = 0
 	for range 100 {
 		resp, err := cli.GetRegion(ctx, []byte("a"), opt.WithAllowFollowerHandle())
@@ -836,7 +837,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	// test after being healthy
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable", "return(true)"))
-	time.Sleep(100 * time.Millisecond)
+	waitServiceClientAvailability(re, cli.GetServiceDiscovery(), leader.GetAddr(), false)
 	cnt = 0
 	for range 100 {
 		resp, err := cli.GetRegion(ctx, []byte("a"), opt.WithAllowFollowerHandle())
@@ -943,7 +944,8 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	re.NotEmpty(leaderName)
 	leader := cluster.GetServer(leaderName)
 	re.NoError(leader.BootstrapCluster())
-	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
+	// Keep the temporary values alive through configuration writes and leader transfer.
+	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=300", leader.GetAddr())
 	postData, err := json.Marshal(map[string]any{
 		"schedule.max-snapshot-count":             999,
 		"schedule.enable-location-replacement":    false,
@@ -958,8 +960,11 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	})
 	re.NoError(err)
 	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
-	resp.Body.Close()
 	re.NoError(err)
+	defer func() {
+		re.NoError(resp.Body.Close())
+	}()
+	re.Equal(http.StatusOK, resp.StatusCode)
 	testutil.Eventually(re, func() bool {
 		options := leader.GetPersistOptions()
 		return options != nil &&
@@ -998,7 +1003,6 @@ func TestCloseClient(t *testing.T) {
 	endpoints := runServer(re, cluster)
 	cli := setupCli(ctx, re, endpoints)
 	ts := cli.GetTSAsync(context.TODO())
-	time.Sleep(time.Second)
 	cli.Close()
 	physical, logical, err := ts.Wait()
 	if err == nil {
@@ -1279,6 +1283,7 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	re := suite.Require()
 	cluster := suite.srv.GetRaftCluster()
 	re.NotNil(cluster)
+	storeCount := len(stores)
 	// Use stores[3]: this test destructively transitions it through
 	// offline -> tombstone, and stores[0..2] are the ones other tests in
 	// this suite heartbeat regions through (peers[0..2]) and expect to
@@ -1299,8 +1304,7 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 
 	actualStores, err := suite.client.GetAllStores(context.Background())
 	re.NoError(err)
-	re.Len(actualStores, len(stores))
-	stores = actualStores
+	re.Len(actualStores, storeCount)
 
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId(), false)
@@ -1316,9 +1320,9 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 
 	// Should return offline stores.
 	contains := false
-	stores, err = suite.client.GetAllStores(context.Background())
+	actualStores, err = suite.client.GetAllStores(context.Background())
 	re.NoError(err)
-	for _, store := range stores {
+	for _, store := range actualStores {
 		if store.GetId() == offlineStore.GetId() {
 			contains = true
 			re.Equal(offlineStore, store)
@@ -1341,9 +1345,9 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	}
 	// Should return tombstone stores.
 	contains = false
-	stores, err = suite.client.GetAllStores(context.Background())
+	actualStores, err = suite.client.GetAllStores(context.Background())
 	re.NoError(err)
-	for _, store := range stores {
+	for _, store := range actualStores {
 		if store.GetId() == physicallyDestroyedStoreID {
 			contains = true
 			re.NotEqual(metapb.StoreState_Up, store.GetState())
@@ -1353,14 +1357,15 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	re.True(contains)
 
 	// Should not return tombstone stores.
-	stores, err = suite.client.GetAllStores(context.Background(), opt.WithExcludeTombstone())
+	// Bury the store explicitly so this check does not depend on the background job.
+	re.NoError(cluster.BuryStore(physicallyDestroyedStoreID, false))
+	actualStores, err = suite.client.GetAllStores(context.Background(), opt.WithExcludeTombstone())
 	re.NoError(err)
-	for _, store := range stores {
-		if store.GetId() == physicallyDestroyedStoreID {
-			re.Equal(metapb.StoreState_Offline, store.GetState())
-			re.True(store.PhysicallyDestroyed)
-		}
+	re.Len(actualStores, storeCount-1)
+	for _, store := range actualStores {
+		re.NotEqual(physicallyDestroyedStoreID, store.GetId())
 	}
+	re.Len(stores, storeCount)
 }
 
 func (suite *clientStatelessTestSuite) TestScatterRegion() {
@@ -1451,7 +1456,7 @@ func TestWatch(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 
-	key := "test"
+	key := "resource_group/meta_storage_test"
 	resp, err := client.Get(ctx, []byte(key))
 	re.NoError(err)
 	rev := resp.GetHeader().GetRevision()
@@ -1500,7 +1505,7 @@ func TestPutGet(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 
-	key := []byte("test")
+	key := []byte("/tidb/br-stream/meta_storage_test")
 	putResp, err := client.Put(context.Background(), key, []byte("1"))
 	re.NoError(err)
 	re.Empty(putResp.GetPrevKv())
@@ -1534,7 +1539,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 	s := cluster.GetLeaderServer()
-	watchPrefix := "watch_test"
+	watchPrefix := "resource_group/meta_storage_watch_test"
 	defer func() {
 		_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+"test")
 		re.NoError(err)
@@ -1917,10 +1922,15 @@ func TestCircuitBreaker(t *testing.T) {
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
-	// wait cooldown
-	time.Sleep(time.Second)
+	var region *router.Region
+	testutil.Eventually(re, func() bool {
+		region, err = cli.GetRegion(ctx, []byte("a"))
+		return !errors.Is(err, clierrs.ErrCircuitBreakerOpen)
+	})
+	re.NoError(err)
+	re.NotNil(region)
 
-	for range 10 {
+	for range 9 {
 		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
@@ -2016,11 +2026,12 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	re.Contains(err.Error(), "circuit breaker is open")
 
 	fname := testutil.InitTempFileLogger(t, "info")
-	// wait for cooldown
-	time.Sleep(time.Second)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
-	// trigger circuit breaker state to be half open
-	_, err = cli.GetRegion(ctx, []byte("a"))
+	// The first request admitted after cooldown enters the half-open state.
+	testutil.Eventually(re, func() bool {
+		_, err = cli.GetRegion(ctx, []byte("a"))
+		return !errors.Is(err, clierrs.ErrCircuitBreakerOpen)
+	})
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		b, err := os.ReadFile(fname)
@@ -2354,7 +2365,7 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 
 func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 	re := s.Require()
-	ks1, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks1, err := tests.CreateKeyspaceWithHistoricalGCMode(s.ctx, s.srv, &keyspace.CreateKeyspaceRequest{
 		Name:       "ks1",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),
@@ -2362,7 +2373,7 @@ func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 	re.NoError(err)
 	re.Equal(uint32(1), ks1.GetId())
 
-	ks2, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks2, err := tests.CreateKeyspaceWithHistoricalGCMode(s.ctx, s.srv, &keyspace.CreateKeyspaceRequest{
 		Name:       "ks2",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),
@@ -2553,9 +2564,11 @@ func (s *clientStatefulTestSuite) TestGCBarriers() {
 		re.GreaterOrEqual(b.TTL, time.Second)
 		re.LessOrEqual(b.TTL, 3*time.Second)
 		s.waitForGCBarrierExpiring(re, b, b.TTL)
-		// After the returned GCBarrierInfo is expired, the server might be still keeping it due to its rounding
-		// behavior. Wait another 1 second.
-		time.Sleep(time.Second)
+		// Check the server's rounded expiration before attempting to advance the safe point.
+		testutil.Eventually(re, func() bool {
+			barrier, err := s.srv.GetStorage().GetGCStateProvider().LoadGCBarrier(keyspaceID, "b2")
+			return err == nil && (barrier == nil || barrier.IsExpired(time.Now()))
+		})
 
 		res, err = c.AdvanceTxnSafePoint(ctx, 25)
 		re.NoError(err)
@@ -2623,15 +2636,15 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 		re.NoError(err)
 		re.Empty(barriers)
 	}
-	_, err := s.srv.GetGCStateManager().SetGlobalGCBarrier(
+	expired, err := s.srv.GetGCStateManager().SetGlobalGCBarrier(
 		ctx,
 		"expired",
-		1,
+		0,
 		time.Second,
 		time.Now().Add(-2*time.Second),
 	)
 	re.NoError(err)
-	expectedExpired := []barrierIDAndTS{{id: "expired", ts: 1}}
+	expectedExpired := []barrierIDAndTS{{id: "expired", ts: expired.BarrierTS}}
 	for _, cli := range clients {
 		state, err := cli.GetGCState(ctx, gc.ExcludeGlobalGCBarriers(false))
 		re.NoError(err)
@@ -2654,75 +2667,70 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	_, err = getCli().DeleteGlobalGCBarrier(ctx, "expired")
 	re.NoError(err)
 
-	b, err := getCli().SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
+	b, err := getCli().SetGlobalGCBarrier(ctx, "b1", 0, math.MaxInt64)
 	re.NoError(err)
 	re.Equal("b1", b.BarrierID)
-	re.Equal(uint64(10), b.BarrierTS)
+	floor := b.BarrierTS
+	re.NotZero(floor)
 	re.Equal(int64(math.MaxInt64), int64(b.TTL))
-	s.checkGlobalGCBarrier(re, "b1", 10)
+	s.checkGlobalGCBarrier(re, "b1", floor)
 
 	// Allows advancing to a value below the global GC barrier.
 	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
 		c := s.client.GetGCInternalController(keyspaceID)
-		res, err := c.AdvanceTxnSafePoint(ctx, 5)
+		res, err := c.AdvanceTxnSafePoint(ctx, floor-1)
 		re.NoError(err)
-		re.Equal(uint64(5), res.NewTxnSafePoint)
+		re.Equal(floor-1, res.NewTxnSafePoint)
 		re.Empty(res.BlockerDescription)
-		s.checkTxnSafePoint(re, keyspaceID, 5)
+		s.checkTxnSafePoint(re, keyspaceID, floor-1)
 
 		// Blocks on the global GC barrier when trying to advance over it.
-		res, err = c.AdvanceTxnSafePoint(ctx, 11)
+		res, err = c.AdvanceTxnSafePoint(ctx, floor+1)
 		re.NoError(err)
-		re.Equal(uint64(5), res.OldTxnSafePoint)
-		re.Equal(uint64(11), res.Target)
-		re.Equal(uint64(10), res.NewTxnSafePoint)
+		re.Equal(floor-1, res.OldTxnSafePoint)
+		re.Equal(floor+1, res.Target)
+		re.Equal(floor, res.NewTxnSafePoint)
 		re.Contains(res.BlockerDescription, "b1")
-		s.checkTxnSafePoint(re, keyspaceID, 10)
+		s.checkTxnSafePoint(re, keyspaceID, floor)
 	}
 
-	// After deleting the GC barrier, the txn safe point can be resumed to going forward.
+	// Delete returns the barrier that was protecting these scopes.
 	b, err = getCli().DeleteGlobalGCBarrier(ctx, "b1")
 	re.NoError(err)
 	re.Equal("b1", b.BarrierID)
-	re.Equal(uint64(10), b.BarrierTS)
+	re.Equal(floor, b.BarrierTS)
 	re.Equal(int64(math.MaxInt64), int64(b.TTL))
 	s.checkGlobalGCBarrier(re, "b1", 0)
 
-	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
-		c := s.client.GetGCInternalController(keyspaceID)
-		res, err := c.AdvanceTxnSafePoint(ctx, 11)
-		re.NoError(err)
-		re.Equal(uint64(11), res.NewTxnSafePoint)
-		re.Empty(res.BlockerDescription)
-		s.checkTxnSafePoint(re, keyspaceID, 11)
-	}
-
-	b, err = getCli().SetGlobalGCBarrier(ctx, "b1", 15, math.MaxInt64)
+	// With the last barrier gone, create a new one from the current TSO windows.
+	b, err = getCli().SetGlobalGCBarrier(ctx, "b1", 0, math.MaxInt64)
 	re.NoError(err)
 	re.Equal("b1", b.BarrierID)
-	re.Equal(uint64(15), b.BarrierTS)
+	re.GreaterOrEqual(b.BarrierTS, floor)
+	floor = b.BarrierTS
 	re.Equal(int64(math.MaxInt64), int64(b.TTL))
 
 	// Allows advancing to exactly the same value as the global GC barrier, without reporting the blocker.
 	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
 		c := s.client.GetGCInternalController(keyspaceID)
-		res, err := c.AdvanceTxnSafePoint(ctx, 15)
+		res, err := c.AdvanceTxnSafePoint(ctx, floor)
 		re.NoError(err)
-		re.Equal(uint64(15), res.NewTxnSafePoint)
+		re.Equal(floor, res.NewTxnSafePoint)
 		re.Empty(res.BlockerDescription)
-		s.checkTxnSafePoint(re, keyspaceID, 15)
+		s.checkTxnSafePoint(re, keyspaceID, floor)
 	}
 
 	// When multiple GC barrier exists, it blocks on the minimum one.
-	_, err = getCli().SetGlobalGCBarrier(ctx, "b1", 22, math.MaxInt64)
+	lower, higher := floor+1, floor+2
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", lower, math.MaxInt64)
 	re.NoError(err)
-	s.checkGlobalGCBarrier(re, "b1", 22)
-	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", 20, math.MaxInt64)
+	s.checkGlobalGCBarrier(re, "b2", lower)
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b1", higher, math.MaxInt64)
 	re.NoError(err)
-	s.checkGlobalGCBarrier(re, "b2", 20)
+	s.checkGlobalGCBarrier(re, "b1", higher)
 	expectedBarriers := []barrierIDAndTS{
-		{id: "b1", ts: 22},
-		{id: "b2", ts: 20},
+		{id: "b1", ts: higher},
+		{id: "b2", ts: lower},
 	}
 	for _, cli := range clients {
 		state, err := cli.GetGCState(ctx, gc.ExcludeGlobalGCBarriers(false))
@@ -2733,7 +2741,7 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 		re.Equal(expectedBarriers, sortedBarrierIDsAndTS(barriers))
 	}
 
-	_, err = clients[1].SetGCBarrier(ctx, "local-observer", 24, math.MaxInt64)
+	_, err = clients[1].SetGCBarrier(ctx, "local-observer", higher+2, math.MaxInt64)
 	re.NoError(err)
 	state, err := clients[1].GetGCState(
 		ctx,
@@ -2767,18 +2775,18 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 
 	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
 		c := s.client.GetGCInternalController(keyspaceID)
-		res, err := c.AdvanceTxnSafePoint(ctx, 25)
+		res, err := c.AdvanceTxnSafePoint(ctx, higher+1)
 		re.NoError(err)
-		re.Equal(uint64(15), res.OldTxnSafePoint)
-		re.Equal(uint64(25), res.Target)
-		re.Equal(uint64(20), res.NewTxnSafePoint)
+		re.Equal(floor, res.OldTxnSafePoint)
+		re.Equal(higher+1, res.Target)
+		re.Equal(lower, res.NewTxnSafePoint)
 		re.Contains(res.BlockerDescription, "b2")
-		s.checkTxnSafePoint(re, keyspaceID, 20)
+		s.checkTxnSafePoint(re, keyspaceID, lower)
 	}
 
 	// Test expiring GC barrier.
-	b, err = getCli().SetGlobalGCBarrier(ctx, "b2", 20, time.Second)
-	s.checkGlobalGCBarrier(re, "b2", 20)
+	b, err = getCli().SetGlobalGCBarrier(ctx, "b2", lower, time.Second)
+	s.checkGlobalGCBarrier(re, "b2", lower)
 	re.NoError(err)
 	re.False(b.IsExpired())
 	// Considering the rounding-up behaviors, the actual TTL might be slightly greater.
@@ -2788,43 +2796,55 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 		testutil.WithWaitFor(b.TTL+time.Second),
 		testutil.WithTickInterval(50*time.Millisecond))
 
-	// After the returned GlobalGCBarrierInfo is expired, the server might be still keeping it due to its rounding
-	// behavior. Wait another 1 second.
-	time.Sleep(time.Second)
+	// Check the server's rounded expiration before attempting to advance the safe point.
+	testutil.Eventually(re, func() bool {
+		barrier, err := s.srv.GetStorage().GetGCStateProvider().LoadGlobalGCBarrier("b2")
+		return err == nil && (barrier == nil || barrier.IsExpired(time.Now()))
+	})
 
 	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
 		c := s.client.GetGCInternalController(keyspaceID)
-		res, err := c.AdvanceTxnSafePoint(ctx, 25)
+		res, err := c.AdvanceTxnSafePoint(ctx, higher+1)
 		re.NoError(err)
-		re.Equal(uint64(20), res.OldTxnSafePoint)
-		re.Equal(uint64(25), res.Target)
-		re.Equal(uint64(22), res.NewTxnSafePoint)
+		re.Equal(lower, res.OldTxnSafePoint)
+		re.Equal(higher+1, res.Target)
+		re.Equal(higher, res.NewTxnSafePoint)
 		re.Contains(res.BlockerDescription, "b1")
-		s.checkTxnSafePoint(re, keyspaceID, 22)
+		s.checkTxnSafePoint(re, keyspaceID, higher)
 	}
 
 	s.checkGlobalGCBarrier(re, "b2", 0)
 
-	// Unable to set global GC barrier to earlier ts than txn safe point.
-	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", 21, math.MaxInt64)
+	// Reject a new ID below the remaining active minimum.
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", higher-1, math.MaxInt64)
 	re.Error(err)
-	re.Contains(err.Error(), "ErrGlobalGCBarrierTSBehindTxnSafePoint")
+	re.Contains(err.Error(), "ErrGlobalGCBarrierTSUnsafe")
 	s.checkGlobalGCBarrier(re, "b2", 0)
 
-	// Unable to modify an existing GC barrier to earlier ts than txn safe point.
-	_, err = getCli().SetGlobalGCBarrier(ctx, "b1", 21, math.MaxInt64)
+	// The remaining ID also participates when checking its own update.
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b1", higher-1, math.MaxInt64)
 	re.Error(err)
-	re.Contains(err.Error(), "ErrGlobalGCBarrierTSBehindTxnSafePoint")
+	re.Contains(err.Error(), "ErrGlobalGCBarrierTSUnsafe")
 
 	// The existing global GC barrier remains unchanged.
-	s.checkGlobalGCBarrier(re, "b1", 22)
+	s.checkGlobalGCBarrier(re, "b1", higher)
+
+	_, err = getCli().DeleteGlobalGCBarrier(ctx, "b1")
+	re.NoError(err)
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, higher+1)
+		re.NoError(err)
+		re.Equal(higher+1, res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+	}
 }
 
 func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re := s.Require()
 	ctx := context.Background()
 	s.prepareKeyspacesForGCTest()
-	ks3, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	ks3, err := tests.CreateKeyspaceWithHistoricalGCMode(s.ctx, s.srv, &keyspace.CreateKeyspaceRequest{
 		Name:       "ks3",
 		Config:     map[string]string{keyspace.GCManagementType: keyspace.UnifiedGC},
 		CreateTime: time.Now().Unix(),
@@ -2834,7 +2854,7 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 
 	// Modify some GC states and verify TestGetAllKeyspaceGCStates gets the correct result.
 	cli := s.client.GetGCStatesClient(constants.NullKeyspaceID)
-	_, err = cli.SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
+	first, err := cli.SetGlobalGCBarrier(ctx, "b1", 0, math.MaxInt64)
 	re.NoError(err)
 	res, err := cli.GetAllKeyspacesGCStates(ctx)
 	re.NoError(err)
@@ -2848,10 +2868,10 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.NoError(err)
 	re.Len(globalGCBarriers, 1)
 	re.Equal("b1", globalGCBarriers[0].BarrierID)
-	re.Equal(uint64(10), globalGCBarriers[0].BarrierTS)
+	re.Equal(first.BarrierTS, globalGCBarriers[0].BarrierTS)
 	re.Equal(time.Duration(math.MaxInt64), globalGCBarriers[0].TTL)
 
-	_, err = cli.SetGlobalGCBarrier(ctx, "b2", 12, 2*time.Second)
+	_, err = cli.SetGlobalGCBarrier(ctx, "b2", first.BarrierTS+1, 2*time.Second)
 	re.NoError(err)
 	res, err = cli.GetAllKeyspacesGCStates(ctx, gc.ExcludeGlobalGCBarriers(false))
 	re.NoError(err)
@@ -2859,7 +2879,7 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.NoError(err)
 	re.Len(globalGCBarriers, 2)
 	re.Equal("b2", globalGCBarriers[1].BarrierID)
-	re.Equal(uint64(12), globalGCBarriers[1].BarrierTS)
+	re.Equal(first.BarrierTS+1, globalGCBarriers[1].BarrierTS)
 	// Returned TTL is rounded to seconds, so it can be exactly 1s here.
 	re.GreaterOrEqual(globalGCBarriers[1].TTL, time.Second)
 	re.LessOrEqual(globalGCBarriers[1].TTL, 2*time.Second)
@@ -3001,5 +3021,42 @@ func createHeartbeatRequest(startKey []byte, endKey []byte) *pdpb.RegionHeartbea
 		Header: newHeader(),
 		Region: region,
 		Leader: peers[0],
+	}
+}
+
+func waitServiceClientAvailability(re *require.Assertions, discovery sd.ServiceDiscovery, addr string, available bool) {
+	testutil.Eventually(re, func() bool {
+		clients := discovery.GetAllServiceClients()
+		if len(clients) == 0 {
+			return false
+		}
+		found := false
+		for _, client := range clients {
+			if addr != "" && client.GetURL() != addr {
+				continue
+			}
+			found = true
+			if client.Available() != available {
+				return false
+			}
+		}
+		return found
+	})
+}
+
+func waitForTSOLeaderStreamRecovery(re *require.Assertions) {
+	recovered := make(chan struct{})
+	notify := sync.OnceFunc(func() { close(recovered) })
+	const backgroundHook = "github.com/tikv/pd/client/clients/tso/notifyAfterBackgroundStoreTSOLeaderStream"
+	re.NoError(failpoint.EnableCall(backgroundHook, notify))
+	defer func() { re.NoError(failpoint.Disable(backgroundHook)) }()
+	const recoveryHook = "github.com/tikv/pd/client/clients/tso/afterTSOLeaderStreamRecovery"
+	re.NoError(failpoint.EnableCall(recoveryHook, notify))
+	defer func() { re.NoError(failpoint.Disable(recoveryHook)) }()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
+	select {
+	case <-recovered:
+	case <-time.After(20 * time.Second):
+		re.FailNow("TSO client did not recover its direct leader stream")
 	}
 }

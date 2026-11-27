@@ -16,9 +16,12 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -26,13 +29,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -58,6 +66,138 @@ func (suite *affinityHandlerTestSuite) SetupSuite() {
 
 func (suite *affinityHandlerTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityAuditActions() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		re.Equal("?", logutil.RedactString("private-group"))
+		logFile := testutil.InitTempFileLogger(suite.T(), "info")
+		mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"private-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x05})}}},
+			},
+		})
+		mustBatchDeleteAffinityGroups(re, leader.GetAddr(), &handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{"private-group"}, Force: true})
+		data, err := os.ReadFile(logFile)
+		re.NoError(err)
+		re.Equal(1, strings.Count(string(data), "ServiceLabel:CreateAffinityGroups,"))
+		re.Equal(1, strings.Count(string(data), "ServiceLabel:DeleteAffinityGroups,"))
+		for line := range strings.SplitSeq(string(data), "\n") {
+			if strings.Contains(line, "audit log") {
+				re.NotContains(line, "private-group")
+			}
+		}
+	})
+}
+
+func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		manager, err := leader.GetServer().GetAffinityManager()
+		re.NoError(err)
+		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+		re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+		legacy := []string{"_tidb_t_1001", "_tidb_pt_1001_p3", "_tidb_tg_100"}
+		defer func() {
+			re.NoError(manager.DeleteAffinityGroups(legacy, true))
+			re.NoError(failpoint.Disable(modeFlag))
+		}()
+		for _, id := range legacy {
+			re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: id}}))
+		}
+		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+		url := getAffinityGroupURL(leader.GetAddr())
+		for _, id := range legacy {
+			for _, req := range []struct{ method, path, body string }{
+				{http.MethodPost, "", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
+				{http.MethodPost, "?skip_exist_check=true", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
+				{http.MethodPatch, "", fmt.Sprintf(`{"add":[{"id":"%s","ranges":[]}]}`, id)},
+				{http.MethodPut, "/" + id, `{"leader_store_id":1,"voter_store_ids":[1]}`},
+			} {
+				httpReq, err := http.NewRequest(req.method, url+req.path, strings.NewReader(req.body))
+				re.NoError(err)
+				httpReq.Header.Set("Content-Type", "application/json")
+				resp, err := tests.TestDialClient.Do(httpReq)
+				re.NoError(err)
+				body, err := io.ReadAll(resp.Body)
+				re.NoError(err)
+				re.NoError(resp.Body.Close())
+				re.Equal(http.StatusBadRequest, resp.StatusCode, "%s %s: %s", req.method, req.path, body)
+				re.Contains(string(body), "pd-ctl --keyspace-id")
+				re.Len(manager.GetAllAffinityGroupStates(), len(legacy))
+				re.True(manager.IsGroupExist(id))
+			}
+		}
+		for i, id := range legacy {
+			re.Equal(id, mustGetAffinityGroup(re, leader.GetAddr(), id).ID)
+			filtered, _, ok := tryGetAffinityGroups(url + "?ids=" + id)
+			re.True(ok)
+			re.Contains(filtered.AffinityGroups, id)
+			switch i {
+			case 0:
+				mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
+			case 1:
+				mustBatchDeleteAffinityGroups(re, leader.GetAddr(), &handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{id}, Force: true})
+			default:
+				// Empty legacy groups also support ordinary deletion in NextGen.
+				mustDeleteAffinityGroup(re, leader.GetAddr(), id, false)
+			}
+			re.False(manager.IsGroupExist(id))
+		}
+		// A scoped table group uses the keyspace encoded in its ID.
+		for _, id := range []string{"_tidb_ks42_t_1001", "_tidb_ks42_tg_100"} {
+			lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 42)
+			upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 43)
+			ranges := []handlers.AffinityKeyRange{{StartKey: lower[:], EndKey: upper[:]}}
+			mustCreateAffinityGroups(re, leader.GetAddr(), &handlers.CreateAffinityGroupsRequest{
+				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{id: {Ranges: ranges}},
+			})
+			outside := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 44)
+			status, message := doBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
+				Add: []handlers.GroupRangesModification{{ID: id, Ranges: []handlers.AffinityKeyRange{{StartKey: upper[:], EndKey: outside[:]}}}},
+			})
+			re.Equal(http.StatusBadRequest, status)
+			re.Contains(message, "transaction keyspace 42")
+			re.Equal(1, manager.GetAffinityGroupState(id).RangeCount)
+			mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
+		}
+	})
+}
+
+func (suite *affinityHandlerTestSuite) TestRemoveLegacyHalfUnboundedRanges() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		manager, err := leader.GetServer().GetAffinityManager()
+		re.NoError(err)
+		key := func(table int64) []byte {
+			return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), codec.GenerateTableKey(table)...))
+		}
+		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
+		for i, legacy := range []keyutil.KeyRange{{EndKey: key(100)}, {StartKey: key(300)}} {
+			id := fmt.Sprintf("legacy-half-%d", i)
+			valid := keyutil.KeyRange{StartKey: key(200), EndKey: key(201)}
+			re.NoError(failpoint.Enable(modeFlag, "return(false)"))
+			re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{legacy, valid}}}))
+			re.NoError(failpoint.Disable(modeFlag))
+			before := manager.GetAffinityGroupState(id)
+			ranges := []handlers.AffinityKeyRange{{StartKey: legacy.StartKey, EndKey: legacy.EndKey}}
+			status, _ := doBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
+				Add: []handlers.GroupRangesModification{{ID: id, Ranges: ranges}},
+			})
+			re.Equal(http.StatusBadRequest, status)
+			resp := mustBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
+				Remove: []handlers.GroupRangesModification{{ID: id, Ranges: ranges}},
+			})
+			re.Equal(1, resp.AffinityGroups[id].RangeCount)
+			re.Equal(before.CreateTimestamp, resp.AffinityGroups[id].CreateTimestamp)
+			re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
+		}
+	})
 }
 
 func (suite *affinityHandlerTestSuite) TearDownTest() {
@@ -92,6 +232,13 @@ func (suite *affinityHandlerTestSuite) TearDownTest() {
 }
 
 // Helper functions for affinity group API calls
+
+func affinityTestKey(raw []byte) []byte {
+	if kerneltype.IsNextGen() && len(raw) > 0 {
+		return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), raw...))
+	}
+	return raw
+}
 
 func getAffinityGroupURL(serverAddr string, paths ...string) string {
 	var builder strings.Builder
@@ -358,8 +505,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		// Create two non-overlapping groups.
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
-				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
+				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x10}), EndKey: affinityTestKey([]byte{0x20})}}},
 			},
 		}
 		createResp := mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -370,7 +517,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		// Creating an overlapping group should be rejected.
 		overlapReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-overlap": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x05}, EndKey: []byte{0x0f}}}},
+				"group-overlap": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x05}), EndKey: affinityTestKey([]byte{0x0f})}}},
 			},
 		}
 		statusCode, _ := doCreateAffinityGroups(re, serverAddr, &overlapReq)
@@ -396,10 +543,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		// Batch modify ranges: add one to group-1 and remove the only one from group-2.
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Add: []handlers.GroupRangesModification{
-				{ID: "group-1", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				{ID: "group-1", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x20}), EndKey: affinityTestKey([]byte{0x30})}}},
 			},
 			Remove: []handlers.GroupRangesModification{
-				{ID: "group-2", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+				{ID: "group-2", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x10}), EndKey: affinityTestKey([]byte{0x20})}}},
 			},
 		}
 		patchResp := mustBatchModifyAffinityGroups(re, serverAddr, &patchReq)
@@ -430,10 +577,11 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		leader := cluster.GetLeaderServer()
 		serverAddr := leader.GetAddr()
 
-		// Create a group without peer placement; range covers the default region.
+		// Create a group without peer placement.
+		kr := handlers.AffinityKeyRange{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"first-win": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{}, EndKey: []byte{}}}},
+				"first-win": {Ranges: []handlers.AffinityKeyRange{kr}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -451,8 +599,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		region := core.NewRegionInfo(
 			&metapb.Region{
 				Id:       100,
-				StartKey: []byte(""),
-				EndKey:   []byte("ffff"),
+				StartKey: kr.StartKey,
+				EndKey:   kr.EndKey,
 				Peers:    []*metapb.Peer{{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter}},
 			},
 			&metapb.Peer{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
@@ -484,7 +632,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityRemoveOnlyPatch() {
 
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"remove-only": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x02}}}},
+				"remove-only": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x02})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -492,7 +640,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityRemoveOnlyPatch() {
 		// Remove the only range.
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Remove: []handlers.GroupRangesModification{
-				{ID: "remove-only", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x02}}}},
+				{ID: "remove-only", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x02})}}},
 			},
 		}
 		mustBatchModifyAffinityGroups(re, serverAddr, &patchReq)
@@ -513,17 +661,17 @@ func (suite *affinityHandlerTestSuite) TestAffinityBatchModifySameGroupInAddAndR
 
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"patch-success": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x05}}}},
+				"patch-success": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x05})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
 
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Remove: []handlers.GroupRangesModification{
-				{ID: "patch-success", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x05}}}},
+				{ID: "patch-success", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x05})}}},
 			},
 			Add: []handlers.GroupRangesModification{
-				{ID: "patch-success", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+				{ID: "patch-success", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x10}), EndKey: affinityTestKey([]byte{0x20})}}},
 			},
 		}
 		statusCode, errorMsg := doBatchModifyAffinityGroups(re, serverAddr, &patchReq)
@@ -542,7 +690,7 @@ func (suite *affinityHandlerTestSuite) TestUpdatePeersLeaderNotInVoters() {
 		// Prepare group.
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"mismatch": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
+				"mismatch": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x00}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -575,7 +723,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 		// Illegal group ID.
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"bad id": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
+				"bad id": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x00}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		statusCode, _ = doCreateAffinityGroups(re, serverAddr, &createReq)
@@ -584,7 +732,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 		// Create a valid group for follow-up checks.
 		createReq = handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"ok": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
+				"ok": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x00}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -624,7 +772,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 
 		// Batch modify referencing non-existent group.
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
-			Add: []handlers.GroupRangesModification{{ID: "ghost", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}}},
+			Add: []handlers.GroupRangesModification{{ID: "ghost", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x10}), EndKey: affinityTestKey([]byte{0x20})}}}},
 		}
 		statusCode, _ = doBatchModifyAffinityGroups(re, serverAddr, &patchReq)
 		re.Equal(http.StatusNotFound, statusCode)
@@ -653,7 +801,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() 
 		// Create a group successfully.
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"test-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"test-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -669,6 +817,53 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() 
 	})
 }
 
+func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateDuplicateJSONMembers() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		url := getAffinityGroupURL(leader.GetAddr())
+		input := func(start, end string) []byte {
+			data, err := json.Marshal(handlers.CreateAffinityGroupInput{
+				Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte(start)), EndKey: affinityTestKey([]byte(end))}},
+			})
+			re.NoError(err)
+			return data
+		}
+		first, second := input("a", "b"), input("c", "d")
+		start := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("a")))
+		end := base64.StdEncoding.EncodeToString(affinityTestKey([]byte("b")))
+		duplicateBound := fmt.Appendf(nil, `{"affinity_groups":{"g1":{"ranges":[{"start_key":%q,"start_key":%q,"end_key":%q}]}}}`, start, start, end)
+		for _, tc := range []struct {
+			name string
+			body []byte
+		}{
+			{"affinity_groups", fmt.Appendf(nil, `{"affinity_groups":{"g1":%s},"affinity_groups":{"g2":%s}}`, first, second)},
+			{"g1", fmt.Appendf(nil, `{"affinity_groups":{"g1":%s,"g2":%s,"g1":%s}}`, first, second, first)},
+			{"start_key", duplicateBound},
+		} {
+			for _, suffix := range []string{"", "?skip_exist_check=true"} {
+				var message string
+				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url+suffix, tc.body,
+					testutil.Status(re, http.StatusBadRequest), testutil.ExtractJSON(re, &message)))
+				re.Contains(message, "ErrAffinityGroupContent")
+				re.Contains(message, tc.name)
+			}
+		}
+		re.Empty(mustGetAllAffinityGroups(re, leader.GetAddr()).AffinityGroups)
+		re.NoError(leader.GetServer().GetStorage().LoadAllAffinityGroups(func(id, _ string) {
+			suite.T().Errorf("rejected request stored affinity group %s", id)
+		}))
+
+		var created handlers.AffinityGroupsResponse
+		body := fmt.Appendf(nil, `{"affinity_groups":{"g1":%s,"G1":%s}}`, first, second)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, body,
+			testutil.Status(re, http.StatusOK), testutil.ExtractJSON(re, &created)))
+		re.Len(created.AffinityGroups, 2)
+		re.Contains(created.AffinityGroups, "g1")
+		re.Contains(created.AffinityGroups, "G1")
+	})
+}
+
 // TestAffinityGroupCreateSkipExistCheck verifies skip_exist_check ignores existing groups.
 func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
@@ -679,7 +874,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
 		// Create a baseline group.
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"existing": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"existing": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -687,8 +882,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
 		// Create another group while including the existing one.
 		createReq = handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"existing": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
-				"new":      {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				"existing": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
+				"new":      {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x20}), EndKey: affinityTestKey([]byte{0x30})}}},
 			},
 		}
 		data, err := json.Marshal(createReq)
@@ -713,7 +908,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheckInva
 
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		data, err := json.Marshal(createReq)
@@ -734,7 +929,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityInvalidKeyRanges() {
 		// Test StartKey > EndKey
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"invalid-range": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x01}}}},
+				"invalid-range": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x10}), EndKey: affinityTestKey([]byte{0x01})}}},
 			},
 		}
 		statusCode, errorMsg := doCreateAffinityGroups(re, serverAddr, &createReq)
@@ -744,32 +939,46 @@ func (suite *affinityHandlerTestSuite) TestAffinityInvalidKeyRanges() {
 		// Test StartKey == EndKey
 		createReq = handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"equal-keys": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x01}}}},
+				"equal-keys": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x01})}}},
 			},
 		}
 		statusCode, errorMsg = doCreateAffinityGroups(re, serverAddr, &createReq)
 		re.Equal(http.StatusBadRequest, statusCode)
 		re.Contains(errorMsg, "start_key must be less than end_key")
+	})
+}
 
-		// Test only StartKey provided
-		createReq = handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"only-start": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{}}}},
-			},
-		}
-		statusCode, errorMsg = doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
-		re.Contains(errorMsg, "key range must have both start_key and end_key")
+func (suite *affinityHandlerTestSuite) TestAffinityOpenEndedKeyRanges() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		key := affinityTestKey([]byte{0x61})
 
-		// Test only EndKey provided
-		createReq = handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"only-end": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{}, EndKey: []byte{0x10}}}},
-			},
+		for _, tc := range []struct {
+			groupID  string
+			keyRange handlers.AffinityKeyRange
+		}{
+			{"only-start", handlers.AffinityKeyRange{StartKey: key}},
+			{"only-end", handlers.AffinityKeyRange{EndKey: key}},
+			{"whole", handlers.AffinityKeyRange{}},
+		} {
+			status, message := doCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+					tc.groupID: {Ranges: []handlers.AffinityKeyRange{tc.keyRange}},
+				},
+			})
+			if kerneltype.IsNextGen() {
+				re.Equal(http.StatusBadRequest, status)
+				if tc.groupID == "whole" {
+					re.Contains(message, "transaction keyspace")
+				} else {
+					re.Contains(message, "key range must have both start_key and end_key")
+				}
+				continue
+			}
+			re.Equal(http.StatusOK, status, message)
+			mustDeleteAffinityGroup(re, serverAddr, tc.groupID, true)
 		}
-		statusCode, errorMsg = doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
-		re.Contains(errorMsg, "key range must have both start_key and end_key")
 	})
 }
 
@@ -794,7 +1003,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityInvalidGroupIDs() {
 		for _, tc := range testCases {
 			createReq := handlers.CreateAffinityGroupsRequest{
 				AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-					tc.groupID: {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+					tc.groupID: {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 				},
 			}
 			statusCode, _ := doCreateAffinityGroups(re, serverAddr, &createReq)
@@ -805,7 +1014,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityInvalidGroupIDs() {
 		validLongID := "a12345678901234567890123456789012345678901234567890123456789012"
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				validLongID: {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				validLongID: {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -822,7 +1031,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityUpdatePeersDuplicateStores() 
 		// Create a group first
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"test-dup": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"test-dup": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -849,7 +1058,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityForceParameterVariants() {
 		// Create a group with ranges
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"force-test": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"force-test": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -877,23 +1086,72 @@ func (suite *affinityHandlerTestSuite) TestAffinityGetInvalidGroupID() {
 	})
 }
 
-// TestAffinityListWithIDs verifies listing affinity groups with ids filter.
-func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
+// TestAffinityListFilters verifies that a prefix selects groups and can be combined with IDs.
+func (suite *affinityHandlerTestSuite) TestAffinityListFilters() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"prefix-1":  {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
+				"prefix-10": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x20}), EndKey: affinityTestKey([]byte{0x30})}}},
+				"other-1":   {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x40}), EndKey: affinityTestKey([]byte{0x50})}}},
+			},
+		})
+		url := getAffinityGroupURL(serverAddr)
+		waitForAffinityGroups(re, url+"?ids=prefix-1&ids=other-1&ids=missing", "prefix-1", "other-1")
+		waitForAffinityGroups(re, url+"?prefix=prefix-", "prefix-1", "prefix-10")
+		waitForAffinityGroups(re, url+"?prefix=prefix-&ids=prefix-10&ids=other-1", "prefix-10")
+		resp, err := apiutil.GetJSON(tests.TestDialClient, url+"?prefix=bad%20prefix", nil)
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+// TestAffinityForceDeleteLeftoverLabelRule verifies that a forced delete removes
+// a label rule whose group no longer exists, through both delete APIs.
+func (suite *affinityHandlerTestSuite) TestAffinityForceDeleteLeftoverLabelRule() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		serverAddr := leader.GetAddr()
-
-		createReq := handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
-				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
-				"group-3": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x40}, EndKey: []byte{0x50}}}},
-			},
+		regionLabeler := leader.GetRaftCluster().GetRegionLabeler()
+		storedRuleIDs := func() []string {
+			var ids []string
+			re.NoError(leader.GetServer().GetStorage().LoadRegionRules(func(k, _ string) {
+				ids = append(ids, k)
+			}))
+			return ids
 		}
-		mustCreateAffinityGroups(re, serverAddr, &createReq)
+		// A rule left without its group, as a creation request that failed after
+		// committing the transaction with the label rules leaves it.
+		putLeftover := func(groupID string, start, end byte) {
+			re.NoError(regionLabeler.SetLabelRule(affinity.MakeLabelRule(affinity.GroupKeyRanges{
+				GroupID:   groupID,
+				KeyRanges: []keyutil.KeyRange{{StartKey: affinityTestKey([]byte{start}), EndKey: affinityTestKey([]byte{end})}},
+			})))
+			re.Contains(storedRuleIDs(), affinity.GetLabelRuleID(groupID))
+		}
 
-		waitForAffinityGroups(re, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", "group-1", "group-3")
+		for _, id := range []string{"leftover-single", "_tidb_t_9999"} {
+			putLeftover(id, 0x01, 0x02)
+			status, message := doDeleteAffinityGroup(re, serverAddr, id, false)
+			re.Equal(http.StatusNotFound, status, message)
+			ruleID := affinity.GetLabelRuleID(id)
+			re.NotNil(regionLabeler.GetLabelRule(ruleID))
+			for range 2 {
+				if id == "leftover-single" {
+					status, message = doDeleteAffinityGroup(re, serverAddr, id, true)
+				} else {
+					status, message = doBatchDeleteAffinityGroups(re, serverAddr,
+						&handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{id}, Force: true})
+				}
+				re.Equal(http.StatusOK, status, message)
+				re.Nil(regionLabeler.GetLabelRule(ruleID))
+				re.NotContains(storedRuleIDs(), ruleID)
+			}
+		}
 	})
 }
 
@@ -906,7 +1164,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithInvalidIDs() {
 
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -926,8 +1184,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithEmptyID() {
 
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
-				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
+				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x20}), EndKey: affinityTestKey([]byte{0x30})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -968,7 +1226,7 @@ func (suite *affinityHandlerTestSuite) TestBatchDeleteWithInvalidIDs() {
 		// Create a valid group
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"valid-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"valid-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -994,7 +1252,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyInvalidGroupID() {
 		// Try to add ranges to a group with invalid ID
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Add: []handlers.GroupRangesModification{
-				{ID: "bad@id", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				{ID: "bad@id", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		statusCode, errorMsg := doBatchModifyAffinityGroups(re, serverAddr, &patchReq)
@@ -1013,7 +1271,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyEmptyRanges() {
 		// Create a valid group
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"test-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"test-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -1030,34 +1288,34 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyEmptyRanges() {
 	})
 }
 
-// TestBatchModifyAddOnly tests batch modify with only add operations.
-func (suite *affinityHandlerTestSuite) TestBatchModifyAddOnly() {
+func (suite *affinityHandlerTestSuite) TestBatchModifyRequestOrder() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
-		serverAddr := leader.GetAddr()
-
-		// Create a group
-		createReq := handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"add-only": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
-			},
+		manager, err := leader.GetServer().GetAffinityManager()
+		re.NoError(err)
+		addr := leader.GetAddr()
+		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "z"}, {GroupID: "a"}}))
+		op := func(id, start, end string) handlers.GroupRangesModification {
+			return handlers.GroupRangesModification{ID: id, Ranges: []handlers.AffinityKeyRange{{
+				StartKey: affinityTestKey([]byte(start)), EndKey: affinityTestKey([]byte(end)),
+			}}}
 		}
-		mustCreateAffinityGroups(re, serverAddr, &createReq)
-
-		// Add more ranges (no remove)
-		patchReq := handlers.BatchModifyAffinityGroupsRequest{
-			Add: []handlers.GroupRangesModification{
-				{ID: "add-only", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
-			},
+		ranges := []handlers.GroupRangesModification{op("z", "a", "b"), op("a", "c", "d"), op("z", "e", "f")}
+		added := mustBatchModifyAffinityGroups(re, addr, &handlers.BatchModifyAffinityGroupsRequest{Add: ranges})
+		re.Equal(2, added.AffinityGroups["z"].RangeCount)
+		re.Equal(1, added.AffinityGroups["a"].RangeCount)
+		for _, ids := range [][2]string{{"z", "a"}, {"a", "z"}} {
+			remove := []handlers.GroupRangesModification{op(ids[0], "g", "h"), op(ids[1], "i", "j")}
+			for range 8 {
+				status, message := doBatchModifyAffinityGroups(re, addr, &handlers.BatchModifyAffinityGroupsRequest{Remove: remove})
+				re.Equal(http.StatusNotFound, status)
+				re.Contains(message, "affinity group "+ids[0]+" not found")
+			}
 		}
-		mustBatchModifyAffinityGroups(re, serverAddr, &patchReq)
-
-		// Verify the group now has 2 ranges
-		testutil.Eventually(re, func() bool {
-			state := mustGetAffinityGroup(re, serverAddr, "add-only")
-			return state.RangeCount == 2
-		})
+		removed := mustBatchModifyAffinityGroups(re, addr, &handlers.BatchModifyAffinityGroupsRequest{Remove: ranges})
+		re.Zero(removed.AffinityGroups["z"].RangeCount)
+		re.Zero(removed.AffinityGroups["a"].RangeCount)
 	})
 }
 
@@ -1071,7 +1329,7 @@ func (suite *affinityHandlerTestSuite) TestBatchDeleteWithForce() {
 		// Create a group with ranges
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"force-delete": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"force-delete": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -1124,7 +1382,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentGroup() {
 		// Create a baseline group to verify it's not affected
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"baseline": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"baseline": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -1132,7 +1390,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentGroup() {
 		// Try to remove ranges from a non-existent group
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Remove: []handlers.GroupRangesModification{
-				{ID: "non-existent-group", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+				{ID: "non-existent-group", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x10}), EndKey: affinityTestKey([]byte{0x20})}}},
 			},
 		}
 		statusCode, errorMsg := doBatchModifyAffinityGroups(re, serverAddr, &patchReq)
@@ -1178,8 +1436,8 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyOverlappingRanges() {
 		// Create two groups with non-overlapping ranges
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
-				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
+				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x20}), EndKey: affinityTestKey([]byte{0x30})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -1187,7 +1445,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyOverlappingRanges() {
 		// Try to add overlapping range to group-2 (overlaps with group-1's range)
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Add: []handlers.GroupRangesModification{
-				{ID: "group-2", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x05}, EndKey: []byte{0x15}}}},
+				{ID: "group-2", Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x05}), EndKey: affinityTestKey([]byte{0x15})}}},
 			},
 		}
 		statusCode, errorMsg := doBatchModifyAffinityGroups(re, serverAddr, &patchReq)
@@ -1217,7 +1475,7 @@ func (suite *affinityHandlerTestSuite) TestUpdatePeersMissingRequiredFields() {
 		// Create a group first
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"test-peers": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"test-peers": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -1252,7 +1510,7 @@ func (suite *affinityHandlerTestSuite) TestBatchDeleteNonExistentGroup() {
 		// Create a baseline group to verify it's not affected
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"existing": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"existing": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -1287,7 +1545,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 		// Create a group with a specific range
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				id: {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				id: {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x01}), EndKey: affinityTestKey([]byte{0x10})}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -1295,7 +1553,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 		// Try to remove a range that the group doesn't contain
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Remove: []handlers.GroupRangesModification{
-				{ID: id, Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				{ID: id, Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte{0x20}), EndKey: affinityTestKey([]byte{0x30})}}},
 			},
 		}
 		statusCode, errorMsg := doBatchModifyAffinityGroups(re, serverAddr, &patchReq)
@@ -1310,32 +1568,74 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 	})
 }
 
-// TestAffinityForwardedHeader verifies microservice forwarding sets the header and returns the scheduling response.
+func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDQueriesMCS() {
+	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
+
+		urls := []string{
+			cluster.GetSchedulingPrimaryServer().GetAddr() + "/scheduling/api/v1/affinity-groups",
+			getAffinityGroupURL(cluster.GetLeaderServer().GetAddr()),
+		}
+		for _, url := range urls {
+			for _, id := range []string{"_tidb_t_123", "_tidb_pt_123_p456", "_tidb_ks42_t_123"} {
+				re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url+"/"+id, nil, testutil.Status(re, http.StatusNotFound)))
+				var result handlers.AffinityGroupsResponse
+				re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url+"?ids="+id, &result))
+				re.Empty(result.AffinityGroups)
+			}
+		}
+	})
+}
+
+// TestAffinityForwardedHeader verifies scheduling responses and audit metrics on forwarded reads.
 func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
+		initialAudit := leader.GetServer().GetAuditConfig()
+		defer func() { re.NoError(leader.GetServer().SetAuditConfig(*initialAudit)) }()
 		serverAddr := leader.GetAddr()
-
-		// Create a group to ensure GET succeeds.
-		createReq := handlers.CreateAffinityGroupsRequest{
+		mustCreateAffinityGroups(re, serverAddr, &handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"header-check": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"forwarded-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte("a")), EndKey: affinityTestKey([]byte("b"))}}},
+				"other":       {Ranges: []handlers.AffinityKeyRange{{StartKey: affinityTestKey([]byte("c")), EndKey: affinityTestKey([]byte("d"))}}},
 			},
-		}
-		mustCreateAffinityGroups(re, serverAddr, &createReq)
-
-		var result handlers.AffinityGroupsResponse
-		testutil.Eventually(re, func() bool {
-			var header http.Header
-			var ok bool
-			result, header, ok = tryGetAffinityGroups(getAffinityGroupURL(serverAddr))
-			if !ok || header.Get(apiutil.XForwardedToMicroserviceHeader) != "true" {
-				return false
-			}
-			_, ok = result.AffinityGroups["header-check"]
-			return ok
 		})
-		re.Contains(result.AffinityGroups, "header-check")
+		for _, tc := range []struct {
+			query string
+			count int
+		}{{"", 2}, {"?prefix=forwarded-", 1}} {
+			testutil.Eventually(re, func() bool {
+				result, header, ok := tryGetAffinityGroups(getAffinityGroupURL(serverAddr) + tc.query)
+				return ok && header.Get(apiutil.XForwardedToMicroserviceHeader) == "true" &&
+					len(result.AffinityGroups) == tc.count && result.AffinityGroups["forwarded-1"] != nil
+			})
+		}
+		for _, enabled := range []bool{false, true, false} {
+			re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+			for _, tc := range []struct{ path, service string }{
+				{getAffinityGroupURL(serverAddr), "GetAllAffinityGroups"},
+				{getAffinityGroupURL(serverAddr, "forwarded-1"), "GetAffinityGroup"},
+			} {
+				before := auditMetricCounts(re)
+				response, err := tests.TestDialClient.Get(tc.path)
+				re.NoError(err)
+				re.NoError(response.Body.Close())
+				re.Equal(http.StatusOK, response.StatusCode)
+				re.Equal("true", response.Header.Get(apiutil.XForwardedToMicroserviceHeader))
+				after := auditMetricCounts(re)
+				increment := float64(0)
+				if enabled {
+					increment = 1
+				}
+				for _, family := range []string{"pd_service_audit_requests_total", "pd_service_audit_handling_seconds"} {
+					key := family + ":" + tc.service
+					re.Equal(increment, after[key]-before[key], key)
+				}
+			}
+		}
 	})
 }

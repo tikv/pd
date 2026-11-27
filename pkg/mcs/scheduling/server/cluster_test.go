@@ -29,7 +29,7 @@ import (
 
 func TestRegionHeartbeatRefreshesReadLeaderBeforeStoreHeartbeat(t *testing.T) {
 	re := require.New(t)
-	_, cluster, _ := newTestSchedulingServiceForSplit(t)
+	_, cluster, _ := newTestSchedulingServiceForSplit(t, false)
 	region := newAffinitySplitTestRegion().Clone(core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
 	for range 5 {

@@ -15,19 +15,30 @@
 package handlers
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptrace"
+	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -38,6 +49,113 @@ type maintenanceTestSuite struct {
 
 func TestMaintenanceTestSuite(t *testing.T) {
 	suite.Run(t, new(maintenanceTestSuite))
+}
+
+func TestMaintenanceAuditBodyReadError(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) {
+		cfg.Security.RedactInfoLog = logutil.RedactInfoLogOFF
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	u, err := url.Parse(leader.GetAddr())
+	re.NoError(err)
+	for _, enabled := range []bool{false, true} {
+		re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+		conn, err := net.Dial("tcp", u.Host)
+		re.NoError(err)
+		re.NoError(conn.SetDeadline(time.Now().Add(10 * time.Second)))
+		_, err = fmt.Fprintf(conn, "PUT /pd/api/v2/maintenance/backup/truncated HTTP/1.1\r\nHost: %s\r\nContent-Length: 20\r\nConnection: close\r\n\r\nshort", u.Host)
+		re.NoError(err)
+		re.NoError(conn.(*net.TCPConn).CloseWrite())
+		resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodPut})
+		re.NoError(err)
+		data, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		re.NoError(resp.Body.Close())
+		re.NoError(conn.Close())
+		re.Equal(http.StatusInternalServerError, resp.StatusCode, "audit=%t: %s", enabled, data)
+		store := leader.GetServer().GetStorage()
+		task, err := store.LoadMaintenanceTask("backup")
+		re.NoError(err)
+		re.Nil(task)
+		lock, err := store.Load(keypath.MaintenanceTaskPath(endpoint.MaintenanceLockName))
+		re.NoError(err)
+		re.Empty(lock)
+
+		description := strings.Repeat("complete description;", 1024)
+		request, err := http.NewRequest(http.MethodPut, leader.GetAddr()+"/pd/api/v2/maintenance/backup/complete", strings.NewReader(description))
+		re.NoError(err)
+		response, err := tests.TestDialClient.Do(request)
+		re.NoError(err)
+		re.NoError(response.Body.Close())
+		re.Equal(http.StatusOK, response.StatusCode)
+		task, err = store.LoadMaintenanceTask("backup")
+		re.NoError(err)
+		re.NotNil(task)
+		re.Equal(description, task.Description)
+		ok, _, err := store.TryDeleteMaintenanceTaskAtomic(ctx, "backup", "complete")
+		re.NoError(err)
+		re.True(ok)
+	}
+}
+
+func TestMaintenanceAuditFollower(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := cluster.GetLeaderServer()
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(follower)
+	logFile := testutil.InitTempFileLogger(t, "info")
+	for _, allowLocal := range []bool{false, true} {
+		for _, enabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("follower-local=%t/audit=%t", allowLocal, enabled), func(t *testing.T) {
+				re := require.New(t)
+				re.NoError(leader.GetServer().SetAuditConfig(config.AuditConfig{EnableAudit: enabled}))
+				// Like API v1, each receiver uses its own in-memory audit switch.
+				follower.GetServer().GetServiceMiddlewarePersistOptions().SetAuditConfig(&config.AuditConfig{EnableAudit: !enabled})
+				before, err := os.ReadFile(logFile)
+				re.NoError(err)
+				var peer string
+				trace := &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) { peer = info.Conn.LocalAddr().String() }}
+				request, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodDelete, follower.GetAddr()+"/pd/api/v2/maintenance/backup/missing", http.NoBody)
+				re.NoError(err)
+				request.Header.Set(apiutil.XForwardedForHeader, "203.0.113.99")
+				if allowLocal {
+					request.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+				}
+				response, err := tests.TestDialClient.Do(request)
+				re.NoError(err)
+				re.NoError(response.Body.Close())
+				re.Equal(http.StatusNotFound, response.StatusCode)
+				expected := 0
+				if !enabled && allowLocal {
+					expected++
+				}
+				if enabled && !allowLocal {
+					expected++ // The leader uses its own switch for the forwarded request.
+				}
+				data, err := os.ReadFile(logFile)
+				re.NoError(err)
+				entries := string(data[len(before):])
+				re.Equal(expected, strings.Count(entries, "ServiceLabel:DeleteMaintenanceTask,"))
+				if !enabled && allowLocal {
+					re.Contains(entries, peer, "the ingress connection must remain observable despite a forged forwarding header")
+				}
+				re.Equal(leaderName, cluster.GetLeader())
+			})
+		}
+	}
 }
 
 func (suite *maintenanceTestSuite) SetupSuite() {

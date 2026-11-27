@@ -26,6 +26,7 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
@@ -117,7 +118,7 @@ func TestGCState(t *testing.T) {
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
-	keyspaceLevel, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
+	keyspaceLevel, err := pdTests.CreateKeyspaceWithHistoricalGCMode(ctx, leaderServer.GetServer(),
 		&keyspace.CreateKeyspaceRequest{
 			Name: "gc_state_ks_level",
 			Config: map[string]string{
@@ -133,10 +134,7 @@ func TestGCState(t *testing.T) {
 	if !kerneltype.IsNextGen() {
 		unified, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
 			&keyspace.CreateKeyspaceRequest{
-				Name: "gc_state_unified",
-				Config: map[string]string{
-					keyspace.GCManagementType: keyspace.UnifiedGC,
-				},
+				Name:       "gc_state_unified",
 				CreateTime: time.Now().Unix(),
 			},
 		)
@@ -198,30 +196,21 @@ func TestGCState(t *testing.T) {
 	)
 	re.NoError(err)
 
-	_, err = manager.SetGlobalGCBarrier(
-		ctx,
-		"z-global",
-		320,
-		time.Duration(math.MaxInt64),
-		now,
-	)
-	re.NoError(err)
-	_, err = manager.SetGlobalGCBarrier(
-		ctx,
-		"a-global",
-		310,
-		time.Duration(math.MaxInt64),
-		now,
-	)
-	re.NoError(err)
-	_, err = manager.SetGlobalGCBarrier(
-		ctx,
-		"expired-global",
-		330,
-		time.Hour,
-		now.Add(-2*time.Hour),
-	)
-	re.NoError(err)
+	// Seed the global records, including the expired one, for the read-only command.
+	provider := leaderServer.GetServer().GetStorage().GetGCStateProvider()
+	re.NoError(provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		expiredAt := now.Add(-time.Hour)
+		for _, barrier := range []*endpoint.GlobalGCBarrier{
+			endpoint.NewGlobalGCBarrier("z-global", 320, nil),
+			endpoint.NewGlobalGCBarrier("a-global", 310, nil),
+			endpoint.NewGlobalGCBarrier("expired-global", 330, &expiredAt),
+		} {
+			if err := wb.SetGlobalGCBarrier(barrier); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
 
 	pdAddr := cluster.GetConfig().GetClientURL()
 	keyspaceLevelIDString := strconv.FormatUint(uint64(keyspaceLevelID), 10)

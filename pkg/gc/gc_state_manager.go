@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -191,12 +192,13 @@ type GCStateManager struct {
 	// concurrent operations happen on a single PD leader) it doesn't need to cause conflicts in etcd transactions
 	// layer. It can be more efficient and avoid failures due to transaction conflict in most cases.
 	// The etcd transactions is still necessary considering the possibility of rare cases like PD leader changes.
-	mu              syncutil.RWMutex
-	gcMetaStorage   endpoint.GCStateProvider
-	cfg             config.PDServerConfig
-	getConfig       func() *config.PDServerConfig
-	keyspaceManager *keyspace.Manager
-	barrierMetrics  *barrierMetrics
+	mu                      syncutil.RWMutex
+	gcMetaStorage           endpoint.GCStateProvider
+	cfg                     config.PDServerConfig
+	getConfig               func() *config.PDServerConfig
+	keyspaceManager         *keyspace.Manager
+	metaServiceGroupManager *keyspace.MetaServiceGroupManager
+	barrierMetrics          *barrierMetrics
 
 	// A read/write - update cache procedure must be done while holding the outer mutex `GCStateManager.mu`.
 	// A read-only operation can be done on gcStateCache directly without locking `GCStateManager.mu`.
@@ -217,11 +219,12 @@ type GCStateManager struct {
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
-func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig, keyspaceManager *keyspace.Manager) *GCStateManager {
+func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig, keyspaceManager *keyspace.Manager, metaServiceGroupManager *keyspace.MetaServiceGroupManager) *GCStateManager {
 	m := &GCStateManager{
 		gcMetaStorage:                    store,
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
+		metaServiceGroupManager:          metaServiceGroupManager,
 		gcStateCache:                     newGCStateCache(),
 		watchers:                         make(map[uint64]*GCStateWatcher),
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
@@ -266,27 +269,47 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 // string only for diagnostic purposes (it returns "<null_keyspace>" for NullKeyspaceID). DO NOT use it as the key for
 // identifying a keyspace.
 func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (uint32, string, error) {
-	// Regard it as NullKeyspaceID if the given one is invalid (exceeds the valid range of keyspace id), no matter
-	// whether it exactly matches the NullKeyspaceID.
+	// Regard IDs outside the valid range as NullKeyspace, including NullKeyspaceID itself.
 	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
 		return constant.NullKeyspaceID, "<null_keyspace>", nil
 	}
-
-	keyspaceMeta, err := m.keyspaceManager.LoadKeyspaceByID(keyspaceID)
+	meta, err := m.keyspaceManager.LoadKeyspaceByID(keyspaceID)
 	if err != nil {
 		return 0, "", err
 	}
-	if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
+	return gcKeyspaceScope(keyspaceID, meta, isUserAPI)
+}
+
+// txnSafePointKeyspace retains the original metadata identity even when the effective GC scope is NullKeyspace.
+type txnSafePointKeyspace struct {
+	sourceID uint32
+	meta     *keyspacepb.KeyspaceMeta
+	revision int64
+}
+
+func (m *GCStateManager) loadTxnSafePointKeyspace(ctx context.Context, keyspaceID uint32, isUserAPI bool) (uint32, string, txnSafePointKeyspace, error) {
+	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
+		return constant.NullKeyspaceID, "<null_keyspace>", txnSafePointKeyspace{}, nil
+	}
+	meta, revision, err := m.keyspaceManager.LoadKeyspaceByIDWithRevision(ctx, keyspaceID)
+	if err != nil {
+		return 0, "", txnSafePointKeyspace{}, err
+	}
+	id, name, err := gcKeyspaceScope(keyspaceID, meta, isUserAPI)
+	return id, name, txnSafePointKeyspace{sourceID: keyspaceID, meta: meta, revision: revision}, err
+}
+
+func gcKeyspaceScope(keyspaceID uint32, meta *keyspacepb.KeyspaceMeta, isUserAPI bool) (uint32, string, error) {
+	if keyspace.EffectiveGCManagementType(meta.Config) != keyspace.KeyspaceLevelGC {
 		if isUserAPI {
 			// The user API is expected to always work. Operate on the state of unified GC instead.
 			return constant.NullKeyspaceID, "<null_keyspace>", nil
 		}
 		// Internal API should never be called on keyspaces without keyspace level GC. They won't perform any active
 		// GC operation and will be managed by the unified GC.
-		return 0, "", errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(keyspaceMeta.GetName(), keyspaceID)
+		return 0, "", errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(meta.GetName(), keyspaceID)
 	}
-
-	return keyspaceID, keyspaceMeta.GetName(), nil
+	return keyspaceID, meta.GetName(), nil
 }
 
 // CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
@@ -417,6 +440,8 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 }
 
 // AdvanceTxnSafePoint tries to advance the txn safe point to the given target.
+// The caller must ensure that target does not exceed a timestamp already issued
+// by the TSO for this GC scope.
 //
 // Returns a struct AdvanceTxnSafePointResult, which contains the old txn safe point, the target, and the new
 // txn safe point it finally made it to advance to. If there's something blocking the txn safe point from being
@@ -433,22 +458,33 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
 	defer observation.logWarnings()
-	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, false)
+	ctx := context.Background()
+	keyspaceID, keyspaceNameForDiag, keyspaceMeta, err := m.loadTxnSafePointKeyspace(ctx, keyspaceID, false)
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
+	return m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, target, now)
+}
+
+// advanceTxnSafePointImpl prepares external reports before acquiring the GC mutex, then advances the checked keyspace.
+// Local reports are read inside the transaction so queued requests use the latest local state.
+func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, keyspaceMeta txnSafePointKeyspace, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
+	failpoint.InjectCall("txnSafePointKeyspaceLoaded")
+	var externalMinStartTS *minStartTSInfo
+	groupID := keyspaceMeta.meta.GetConfig()[keyspace.MetaServiceGroupIDKey]
+	if keyspaceID != constant.NullKeyspaceID && groupID != "" {
+		var err error
+		externalMinStartTS, err = m.prepareExternalMinStartTSReport(ctx, keyspaceID, groupID)
+		if err != nil {
+			return AdvanceTxnSafePointResult{}, err
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.advanceTxnSafePointImpl(ctx, keyspaceID, target, now)
-}
-
-// advanceTxnSafePointImpl is the internal implementation of AdvanceTxnSafePoint, assuming keyspaceID has been checked
-// and the mutex has been acquired.
-func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	// Marks whether it's needed to provide the compatibility for old versions.
 	//
 	// In old versions, every time TiDB performs GC, it updates the service safe point of "gc_worker" new txn safe
@@ -471,6 +507,19 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	)
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		if keyspaceMeta.meta != nil {
+			if err := wb.ExpectKeyspaceMetaRevision(keyspaceMeta.sourceID, keyspaceMeta.revision); err != nil {
+				return err
+			}
+		}
+		if externalMinStartTS != nil {
+			if err := wb.ExpectConfigRevision(externalMinStartTS.configRevision); err != nil {
+				return err
+			}
+			if err := wb.ExpectTxnSafePointRevision(keyspaceID, externalMinStartTS.scopeRevision); err != nil {
+				return err
+			}
+		}
 		var err1 error
 		oldTxnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 		if err1 != nil {
@@ -520,11 +569,17 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		}
 
 		// Compatible with old TiDB nodes that use TiDBMinStartTS to block GC.
-		ownerKey, minStartTS, err1 := m.gcMetaStorage.CompatibleLoadTiDBMinStartTS(keyspaceID)
-		if err1 != nil {
-			return err1
+		var ownerKey string
+		var minStartTS uint64
+		if externalMinStartTS != nil {
+			ownerKey, minStartTS = externalMinStartTS.minStartTSOwner, externalMinStartTS.minStartTS
+		} else {
+			ownerKey, minStartTS, err1 = m.gcMetaStorage.CompatibleLoadTiDBMinStartTS(keyspaceID)
+			if err1 != nil {
+				return err1
+			}
+			failpoint.InjectCall("txnSafePointMinStartTSLoaded")
 		}
-
 		if minStartTS != 0 && len(ownerKey) != 0 && minStartTS < minBlocker {
 			// Note that txn safe point is defined inclusive: snapshots that exactly equals to the txn safe point are
 			// considered valid.
@@ -563,6 +618,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 				return err1
 			}
 		}
+		// Keep the Put for successful no-ops too: its revision invalidates older prepared reports.
 		return wb.SetTxnSafePoint(keyspaceID, newTxnSafePoint)
 	})
 	if err != nil {
@@ -623,6 +679,47 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	}
 	m.logAdvancingTxnSafePoint(ctx, keyspaceID, result, minBlocker, downgradeCompatibleMode)
 	return result, nil
+}
+
+// minStartTSInfo binds a pre-read min-start-ts report to its config and GC scope revisions.
+// Zero revisions guard missing persisted keys and remain part of the commit conditions.
+type minStartTSInfo struct {
+	scopeRevision   int64
+	configRevision  int64
+	minStartTSOwner string
+	minStartTS      uint64
+}
+
+// prepareExternalMinStartTSReport performs external report I/O without holding the GC mutex.
+// The scope revision and all GC writes use PD storage.
+func (m *GCStateManager) prepareExternalMinStartTSReport(ctx context.Context, keyspaceID uint32, groupID string) (*minStartTSInfo, error) {
+	revision, err := m.gcMetaStorage.LoadTxnSafePointRevision(ctx, keyspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if !config.IsValidMetaServiceGroupID(groupID) {
+		return nil, fmt.Errorf("invalid meta-service group ID %q", groupID)
+	}
+	if m.metaServiceGroupManager == nil {
+		return nil, fmt.Errorf("meta-service group manager unavailable for group %s", groupID)
+	}
+	client, configRevision, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	// This provider borrows the cached client and is used only for this read.
+	provider := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil).GetGCStateProvider()
+	ownerKey, minStartTS, err := provider.CompatibleLoadTiDBMinStartTS(keyspaceID)
+	if err != nil {
+		return nil, err
+	}
+	failpoint.InjectCall("txnSafePointMinStartTSLoaded")
+	return &minStartTSInfo{
+		scopeRevision:   revision,
+		configRevision:  configRevision,
+		minStartTSOwner: ownerKey,
+		minStartTS:      minStartTS,
+	}, nil
 }
 
 func (*GCStateManager) logAdvancingTxnSafePoint(ctx context.Context, keyspaceID uint32, result AdvanceTxnSafePointResult, minBlocker uint64, downgradeCompatibleMode bool) {
@@ -1115,7 +1212,7 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 		// the function, but it makes sure keyspaces that changed from keyspace-level GC to unified GC, the invalidated
 		// cached GC states (if any) are always overwritten by the unified GC ones.
 
-		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
+		if keyspace.EffectiveGCManagementType(keyspaceMeta.Config) != keyspace.KeyspaceLevelGC {
 			gcState := GCState{
 				KeyspaceID:      keyspaceMeta.GetId(),
 				IsKeyspaceLevel: false,
@@ -1155,7 +1252,7 @@ func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier,
 // and GC barriers. The behaviors are mapped as follows:
 //
 //   - The service safe point with service ID "gc_worker" is mapped to the txn safe point.
-//   - The service safe point with service ID "native_br" is mapped to global GC barrier.
+//   - The "native_br" service safe point is supported on keyspaces with independent GC.
 //   - The service safe point with other service IDs are mapped to GC barriers with barrier IDs equal to the given
 //     service IDs.
 //
@@ -1174,32 +1271,41 @@ func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier,
 //     the minimal service safe point. Returns a simulated service safe point whose serviceID starts with
 //     "tidb_min_start_ts_" to simulate the minimal service safe point. It may actually be either a GC barrier or
 //     a *TiDB min start ts*.
-//  2. If the given serviceID is "native_br" and keyspaceID is NullKeyspaceID, it is mapped to global GC barriers.
-//     Otherwise if serviceID is "native_br" on other keyspaces, it internally calls SetGCBarrier or DeleteGCBarrier.
-//  3. If the given serviceID is anything else, it internally calls SetGCBarrier or DeleteGCBarrier, depending on
+//  2. If "native_br" resolves to NullKeyspace, the operation returns an error.
+//  3. For all other requests, it internally calls SetGCBarrier or DeleteGCBarrier, depending on
 //     whether the `ttl` is positive or not. As the txn safe point is always less or equal to any GC barriers, we
 //     simulate the case that the service safe point of "gc_worker" is the minimal one, and return a service safe point
 //     with the service ID equals to "gc_worker".
+//
+// Pass zero for now to use the PD host clock.
 func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	observation := &barrierObservation{generation: m.barrierMetrics.generation()}
 	defer observation.logWarnings()
-	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
+	ctx := context.Background()
+	var keyspaceNameForDiag string
+	var keyspaceMeta txnSafePointKeyspace
+	if serviceID == keypath.GCWorkerServiceSafePointID {
+		keyspaceID, keyspaceNameForDiag, keyspaceMeta, err = m.loadTxnSafePointKeyspace(ctx, keyspaceID, true)
+	} else {
+		keyspaceID, keyspaceNameForDiag, err = m.redirectKeyspace(keyspaceID, true)
+	}
 	if err != nil {
 		return nil, false, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 	ctx = context.WithValue(ctx, barrierObservationKey{}, observation)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	switch {
-	case serviceID == keypath.GCWorkerServiceSafePointID:
+	if serviceID == keypath.NativeBRServiceSafePointID && keyspaceID == constant.NullKeyspaceID {
+		return nil, false, errors.New("native_br cannot update a global GC barrier through UpdateServiceSafePointV2")
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if serviceID == keypath.GCWorkerServiceSafePointID {
 		if ttl != math.MaxInt64 {
 			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
 		}
-
-		res, err := m.advanceTxnSafePointImpl(ctx, keyspaceID, newServiceSafePoint, now)
+		res, err := m.advanceTxnSafePointImpl(ctx, keyspaceID, keyspaceMeta, newServiceSafePoint, now)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1216,59 +1322,58 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 				SafePoint: newServiceSafePoint,
 			}
 		}
-		updated = res.OldTxnSafePoint != res.NewTxnSafePoint
-	case serviceID == keypath.NativeBRServiceSafePointID && keyspaceID == constant.NullKeyspaceID:
-		if ttl > 0 {
-			_, err = m.setGlobalGCBarrierImpl(context.Background(), serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
-		} else {
-			_, err = m.deleteGlobalGCBarrierImpl(context.Background(), serviceID)
-		}
-		if err != nil && !errors.Is(err, errs.ErrGlobalGCBarrierTSBehindTxnSafePoint) {
-			return nil, false, err
-		}
-		// The atomicity between setting/deleting GC barrier and loading the txn safe point is not guaranteed here.
-		// It doesn't matter much whether it's atomic, but it's important to ensure LoadTxnSafePoint happens *AFTER*
-		// setting/deleting global GC barrier.
-		var txnSafePoint uint64
-		err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-			var err1 error
-			txnSafePoint, _, _, err1 = m.getMaxTxnSafePointAmongAllKeyspaces(wb)
-			return err1
-		})
-		if err != nil {
-			return nil, false, err
-		}
-		minServiceSafePoint = &endpoint.ServiceSafePoint{
-			ServiceID: keypath.GCWorkerServiceSafePointID,
-			ExpiredAt: math.MaxInt64,
-			SafePoint: txnSafePoint,
-		}
-		updated = ttl > 0 && txnSafePoint <= newServiceSafePoint
-	default:
-		if ttl > 0 {
-			_, err = m.setGCBarrierImpl(ctx, keyspaceID, serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
-		} else {
-			_, err = m.deleteGCBarrierImpl(ctx, keyspaceID, serviceID)
-		}
-
-		if err != nil && !errors.Is(err, errs.ErrGCBarrierTSBehindTxnSafePoint) {
-			return nil, false, err
-		}
-		// The atomicity between setting/deleting GC barrier and loading the txn safe point is not guaranteed here.
-		// It doesn't matter much whether it's atomic, but it's important to ensure LoadTxnSafePoint happens *AFTER*
-		// setting/deleting GC barrier.
-		txnSafePoint, err := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
-		if err != nil {
-			return nil, false, err
-		}
-		minServiceSafePoint = &endpoint.ServiceSafePoint{
-			ServiceID: keypath.GCWorkerServiceSafePointID,
-			ExpiredAt: math.MaxInt64,
-			SafePoint: txnSafePoint,
-		}
-		updated = ttl > 0 && txnSafePoint <= newServiceSafePoint
+		return minServiceSafePoint, res.OldTxnSafePoint != res.NewTxnSafePoint, nil
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ttl > 0 {
+		_, err = m.setGCBarrierImpl(ctx, keyspaceID, serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
+	} else {
+		_, err = m.deleteGCBarrierImpl(ctx, keyspaceID, serviceID)
+	}
+	if err != nil && !errors.Is(err, errs.ErrGCBarrierTSBehindTxnSafePoint) {
+		return nil, false, err
+	}
+	// The legacy response reports the txn safe point observed after setting or deleting the barrier.
+	txnSafePoint, err := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
+	if err != nil {
+		return nil, false, err
+	}
+	minServiceSafePoint = &endpoint.ServiceSafePoint{
+		ServiceID: keypath.GCWorkerServiceSafePointID,
+		ExpiredAt: math.MaxInt64,
+		SafePoint: txnSafePoint,
+	}
+	updated = ttl > 0 && txnSafePoint <= newServiceSafePoint
 	return minServiceSafePoint, updated, nil
+}
+
+// UpdateServiceSafePointV1 handles the legacy UpdateServiceGCSafePoint RPC.
+// For "native_br", a positive TTL sets the global barrier and returns its stored timestamp.
+// If an explicit timestamp is too low, it returns the minimum accepted timestamp so the client can retry.
+// A non-positive TTL deletes the barrier and returns zero. Other services use the NullKeyspace GC scope.
+func (m *GCStateManager) UpdateServiceSafePointV1(ctx context.Context, serviceID string, ts uint64, ttl int64, now time.Time) (*endpoint.ServiceSafePoint, bool, error) {
+	if serviceID != keypath.NativeBRServiceSafePointID {
+		return m.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, ts, ttl, now)
+	}
+	minimum := &endpoint.ServiceSafePoint{ServiceID: keypath.GCWorkerServiceSafePointID, ExpiredAt: math.MaxInt64}
+	if ttl <= 0 {
+		if _, err := m.DeleteGlobalGCBarrier(ctx, serviceID); err != nil {
+			return nil, false, err
+		}
+		return minimum, false, nil
+	}
+	barrier, err := m.SetGlobalGCBarrier(ctx, serviceID, ts, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
+	if err != nil {
+		rejection, ok := errors.AsType[*globalGCBarrierTSUnsafeError](err)
+		if !ok {
+			return nil, false, err
+		}
+		minimum.SafePoint = rejection.floor
+		return minimum, false, nil
+	}
+	minimum.SafePoint = barrier.BarrierTS
+	return minimum, true, nil
 }
 
 // AdvanceTxnSafePointResult represents the result of an invocation of GCStateManager.AdvanceTxnSafePoint.
@@ -1303,116 +1408,125 @@ type GCState struct {
 // Once a global GC barrier is set, it will block the txn safe point from being advanced over the barrierTS,
 // until the global GC barrier is expired (defined by ttl) or manually deleted (by calling DeleteGlobalGCBarrier).
 //
-// When this method is called on an existing global GC barrier, it updates the barrierTS and ttl of the existing global
-// GC barrier and the expiration time will become the current time plus the ttl.
-// This means that calling this method on an existing global GC barrier can extend its lifetime arbitrarily.
+// Updating an existing global GC barrier sets its barrierTS and refreshes its TTL.
 //
-// Passing non-positive value to ttl is not allowed. Passing `time.Duration(math.MaxInt64)` to ttl indicates that the
-// GC barrier should never expire. The ttl might be rounded up, and the actual ttl is guaranteed no less than the
-// specified duration.
+// The TTL must be positive. A TTL of time.Duration(math.MaxInt64) means the barrier never expires.
+// A finite TTL starts at the time PD uses to check existing barriers for expiration in the successful
+// admission attempt. PD adds the TTL to that time and rounds the expiration up to a whole second.
+// The TTL can elapse while PD reads the TSO windows or commits the barrier.
 //
 // The barrierID must be non-empty.
 //
-// The given barrierTS must be greater than or equal to the current txn safe point of all keyspaces,
-// otherwise an error will be returned.
+// A zero barrierTS selects the smallest active global barrier TS, including an active record with this ID.
+// With no active barriers, PD uses the greater of the persisted TSO window bound and the unified GC txn
+// safe point. An explicit barrierTS must meet the same threshold. A successful call returns the stored record.
 //
-// When this function executes successfully, its result is never nil.
+// Pass zero for now to sample the current time during each admission attempt. A supplied time is used as-is.
 func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GlobalGCBarrier, error) {
 	if ttl <= 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("ttl", ttl)
 	}
-	// Disallow empty barrierID
 	if len(barrierID) == 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	failpoint.InjectCall("beforeSetGlobalGCBarrierLock")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.setGlobalGCBarrierImpl(ctx, barrierID, barrierTS, ttl, now)
-}
-
-// getMaxTxnSafePointAmongAllKeyspaces must be called inside a transaction,
-// The WriteBatch parameter in function signature is deliberate to the call safe, do not pass nil.
-func (m *GCStateManager) getMaxTxnSafePointAmongAllKeyspaces(_ *endpoint.GCStateWriteBatch) (maxTxnSafePoint uint64, keyspaceName string, keyspaceID uint32, err error) {
-	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
-	for {
-		keyspaceMeta, ok, err2 := keyspaceIterator.Next()
-		if err2 != nil {
-			err = err2
-			return
+	// A concurrent GC writer on another PD invalidates the entire admission decision.
+	const maxAttempts = 3
+	var err error
+	for range maxAttempts {
+		if err = ctx.Err(); err != nil {
+			return nil, err
 		}
-		if !ok {
+		var barrier *endpoint.GlobalGCBarrier
+		barrier, err = m.setGlobalGCBarrierImpl(ctx, barrierID, barrierTS, ttl, now)
+		if err == nil {
+			return barrier, nil
+		}
+		if !errors.Is(err, errs.ErrEtcdTxnConflict) {
 			break
 		}
-
-		if keyspaceMeta.State != keyspacepb.KeyspaceState_ENABLED {
-			continue
-		}
-		txnSafePoint, err2 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceMeta.GetId())
-		if err2 != nil {
-			err = err2
-			return
-		}
-		if txnSafePoint > maxTxnSafePoint {
-			maxTxnSafePoint = txnSafePoint
-			keyspaceName = keyspaceMeta.Name
-			keyspaceID = keyspaceMeta.GetId()
-		}
 	}
-	// NOTE, allKeyspaces by LoadRangeKeyspace() do not contain the null keyspace!
-	txnSafePoint, err3 := m.gcMetaStorage.LoadTxnSafePoint(constant.NullKeyspaceID)
-	if err3 != nil {
-		err = err3
-		return
-	}
-	if txnSafePoint > maxTxnSafePoint {
-		maxTxnSafePoint = txnSafePoint
-		keyspaceName = ""
-		keyspaceID = constant.NullKeyspaceID
-	}
-	return
+	log.Error("failed to set global GC barrier", zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", barrierTS),
+		zap.Duration("ttl", ttl), zap.Error(err))
+	return nil, err
 }
 
-func (m *GCStateManager) setGlobalGCBarrierImpl(_ context.Context, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GlobalGCBarrier, error) {
-	var expirationTime *time.Time = nil
-	if ttl < time.Duration(math.MaxInt64) {
-		t := now.Add(ttl)
-		expirationTime = &t
-	}
-	newBarrier := endpoint.NewGlobalGCBarrier(barrierID, barrierTS, expirationTime)
+func (m *GCStateManager) setGlobalGCBarrierImpl(ctx context.Context, barrierID string, requestedTS uint64, ttl time.Duration, suppliedTime time.Time) (*endpoint.GlobalGCBarrier, error) {
+	var newBarrier *endpoint.GlobalGCBarrier
+	var rejectedFloor uint64
+	admissionTime := suppliedTime
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		// Make sure global barrier ts is ahead of txn safe point of all keyspaces.
-		maxTxnSafePoint, keyspaceName, keyspaceID, err := m.getMaxTxnSafePointAmongAllKeyspaces(wb)
+		barriers, err := m.gcMetaStorage.LoadAllGlobalGCBarriers()
 		if err != nil {
 			return err
 		}
-		if barrierTS < maxTxnSafePoint {
-			if keyspaceID == constant.NullKeyspaceID {
-				return errs.ErrGlobalGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, maxTxnSafePoint, "<null_keyspace>")
-			}
-			return errs.ErrGlobalGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, maxTxnSafePoint, fmt.Sprintf("{ name: %q, id: %d }", keyspaceName, keyspaceID))
+		if admissionTime.IsZero() {
+			admissionTime = time.Now()
 		}
-		err1 := wb.SetGlobalGCBarrier(newBarrier)
-		return err1
+		var minimum *endpoint.GlobalGCBarrier
+		for _, barrier := range barriers {
+			if !barrier.IsExpired(admissionTime) && (minimum == nil || barrier.BarrierTS < minimum.BarrierTS) {
+				minimum = barrier
+			}
+		}
+		var floor uint64
+		if minimum != nil {
+			floor = minimum.BarrierTS
+		} else {
+			floor, err = m.gcMetaStorage.LoadGlobalGCBarrierTSFloor(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		selectedTS := requestedTS
+		if requestedTS == 0 {
+			selectedTS = floor
+		} else if requestedTS < floor {
+			// Validate the read-only transaction's revision before reporting this threshold.
+			rejectedFloor = floor
+			return nil
+		}
+		var expiresAt *time.Time
+		if ttl < time.Duration(math.MaxInt64) {
+			expiration := admissionTime.Add(ttl)
+			expiresAt = &expiration
+		}
+		newBarrier = endpoint.NewGlobalGCBarrier(barrierID, selectedTS, expiresAt)
+		return wb.SetGlobalGCBarrier(newBarrier)
 	})
 	if err != nil {
-		log.Error("failed to set global GC barrier",
-			zap.String("barrier-id", barrierID),
-			zap.Uint64("barrier-ts", barrierTS),
-			zap.Duration("ttl", ttl), zap.Error(err))
 		return nil, err
 	}
-	log.Info("global GC barrier set",
-		zap.String("barrier-id", barrierID),
-		zap.Uint64("barrier-ts", barrierTS),
-		zap.Duration("ttl", ttl),
-		zap.Stringer("new-gc-barrier", newBarrier))
-
-	m.barrierMetrics.updateMetrics(barrierMetricScope{global: true}, &endpoint.GCBarrier{BarrierID: newBarrier.BarrierID, BarrierTS: newBarrier.BarrierTS, ExpirationTime: newBarrier.ExpirationTime.Time}, now)
-
+	if rejectedFloor > 0 {
+		return nil, &globalGCBarrierTSUnsafeError{
+			error: errs.ErrGlobalGCBarrierTSUnsafe.GenWithStackByArgs(requestedTS, rejectedFloor),
+			floor: rejectedFloor,
+		}
+	}
+	log.Info("global GC barrier set", zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", newBarrier.BarrierTS),
+		zap.Duration("ttl", ttl), zap.Stringer("new-gc-barrier", newBarrier))
+	m.barrierMetrics.updateMetrics(barrierMetricScope{global: true}, &endpoint.GCBarrier{BarrierID: newBarrier.BarrierID, BarrierTS: newBarrier.BarrierTS, ExpirationTime: newBarrier.ExpirationTime.Time}, admissionTime)
 	return newBarrier, nil
 }
+
+// globalGCBarrierTSUnsafeError carries the committed admission floor for the legacy native_br response.
+type globalGCBarrierTSUnsafeError struct {
+	error
+	floor uint64
+}
+
+func (e *globalGCBarrierTSUnsafeError) Unwrap() error { return e.error }
 
 // DeleteGlobalGCBarrier deletes a global GC barrier by the given barrierID.
 // Returns the information of the deleted GC barrier, or nil if the barrier does not exist.

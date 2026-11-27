@@ -17,6 +17,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -55,7 +56,57 @@ const (
 	batchSearchSize = 128
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
+	// MaxBatchSplitCount bounds per-region allocations and bookkeeping, including
+	// requests with few peers whose encoded responses would allow more splits.
+	// This is a work budget, independent of the TSO logical capacity.
+	// ValidateBatchSplitRequest also applies a peer-dependent response size limit.
+	MaxBatchSplitCount = 1 << 17
+	// MaxBatchSplitResponseSize bounds the encoded response and the region/peer
+	// ID work needed to construct it. Forwarding RPCs must accept this size.
+	// It accommodates MaxBatchSplitCount splits with the default three peers,
+	// even when every ID needs its maximum encoded width.
+	// Clients must also configure a receive limit of at least this size. The Go
+	// gRPC default and older PD forwarders may still limit responses to 4 MiB;
+	// upgrade forwarding PD nodes before issuing larger batches through them.
+	MaxBatchSplitResponseSize = 8 * units.MiB
 )
+
+// Derive fixed wire sizes once from generated messages. Validation only sizes
+// the variable packed payload and length prefixes, without allocating slices.
+var (
+	batchSplitHeaderSize = (&pdpb.AskBatchSplitResponse{Header: &pdpb.ResponseHeader{ClusterId: math.MaxUint64}}).Size()
+	splitRegionIDSize    = (&pdpb.SplitID{NewRegionId: math.MaxUint64}).Size()
+	// A packed field consists of its tag, length prefix, and payload.
+	splitPeerIDsTagSize = (&pdpb.SplitID{NewPeerIds: []uint64{math.MaxUint64}}).Size() - proto.SizeVarint(binary.MaxVarintLen64) - binary.MaxVarintLen64
+	// An empty SplitID contributes only its tag and a zero-length prefix.
+	splitEntryTagSize = (&pdpb.AskBatchSplitResponse{Ids: []*pdpb.SplitID{{}}}).Size() - proto.SizeVarint(0)
+)
+
+// ValidateBatchSplitRequest bounds response construction using the requested peer count.
+func ValidateBatchSplitRequest(splitCount uint32, region *metapb.Region) error {
+	if splitCount > MaxBatchSplitCount {
+		return errors.Errorf("split count %d exceeds maximum %d", splitCount, MaxBatchSplitCount)
+	}
+	if splitCount == 0 {
+		return nil
+	}
+	peers := len(region.GetPeers())
+	if peers > MaxBatchSplitResponseSize/binary.MaxVarintLen64 {
+		return errors.Errorf("split response exceeds maximum %d bytes", MaxBatchSplitResponseSize)
+	}
+	// IDs are unknown until allocation, so budget their maximum varint width.
+	splitSize := splitRegionIDSize
+	if peers > 0 {
+		peerIDsSize := peers * binary.MaxVarintLen64
+		splitSize += splitPeerIDsTagSize + proto.SizeVarint(uint64(peerIDsSize)) + peerIDsSize
+	}
+	entrySize := splitEntryTagSize + proto.SizeVarint(uint64(splitSize)) + splitSize
+	if uint64(splitCount) > uint64((MaxBatchSplitResponseSize-batchSplitHeaderSize)/entrySize) {
+		return errors.Errorf("split response exceeds maximum %d bytes", MaxBatchSplitResponseSize)
+	}
+
+	return nil
+}
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
@@ -678,9 +729,7 @@ func (r *RegionInfo) CompareAndSetReportBuckets(buckets *metapb.Buckets) bool {
 			return true
 		}
 	}
-	failpoint.Inject("concurrentBucketHeartbeat", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("concurrentBucketHeartbeat")
 	return atomic.CompareAndSwapPointer(&r.reportBuckets, unsafe.Pointer(old), unsafe.Pointer(buckets))
 }
 
@@ -1553,12 +1602,13 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 // ResetRegionCache resets the regions info.
 func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
+	defer r.t.Unlock()
+	r.st.Lock()
+	defer r.st.Unlock()
 	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
 	r.notifyRegionIDLocked(0, nil)
-	r.t.Unlock()
-	r.st.Lock()
-	defer r.st.Unlock()
+	failpoint.InjectCall("afterResetRegionRoot")
 	r.subRegions = make(map[uint64]*regionItem)
 	r.leaders = make(map[uint64]*regionTree)
 	r.followers = make(map[uint64]*regionTree)
@@ -2020,6 +2070,20 @@ func (r *RegionsInfo) GetStoreLeaderCount(storeID uint64) int {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.leaders[storeID].length()
+}
+
+// IsRegionLeaderPrepared checks that the root and subtree counts agree and
+// every subtree Region has a leader. Cache updates remain asynchronous.
+func (r *RegionsInfo) IsRegionLeaderPrepared() bool {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	r.st.RLock()
+	defer r.st.RUnlock()
+	count := 0
+	for _, leaders := range r.leaders {
+		count += leaders.length()
+	}
+	return count == len(r.regions) && count == len(r.subRegions)
 }
 
 // GetStoreFollowerCount get the total count of a store's follower RegionInfo

@@ -172,6 +172,34 @@ func TestConfigValidate(t *testing.T) {
 	err = validateMeteringConfig(c)
 	re.Error(err)
 	re.Contains(err.Error(), "bucket")
+
+	// Test TOS config - valid.
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeTOS,
+		Region: "cn-beijing",
+		Bucket: "metering-bucket",
+	}
+	err = validateMeteringConfig(c)
+	re.NoError(err)
+
+	// Test TOS config without Region - should return error even when Endpoint is set.
+	c = &config.MeteringConfig{
+		Type:     storage.ProviderTypeTOS,
+		Bucket:   "metering-bucket",
+		Endpoint: "https://tos-cn-beijing.ivolces.com",
+	}
+	err = validateMeteringConfig(c)
+	re.Error(err)
+	re.Contains(err.Error(), "region")
+
+	// Test TOS config without Bucket - should return error.
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeTOS,
+		Region: "cn-beijing",
+	}
+	err = validateMeteringConfig(c)
+	re.Error(err)
+	re.Contains(err.Error(), "bucket")
 }
 
 func TestNewWriterWithCOSConfig(t *testing.T) {
@@ -186,6 +214,40 @@ func TestNewWriterWithCOSConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, writer)
 	writer.Stop()
+}
+
+func TestNewWriterWithTOSConfig(t *testing.T) {
+	t.Run("static credentials", func(t *testing.T) {
+		c := config.NewMeteringConfig().
+			WithTOS("cn-beijing", "metering-bucket").
+			WithTOSConfig(&config.MeteringTOSConfig{
+				AccessKey:       "test-access-key",
+				SecretAccessKey: "test-secret-access-key",
+			})
+
+		writer, err := NewWriter(t.Context(), c, "testtoswriter")
+		require.NoError(t, err)
+		require.NotNil(t, writer)
+		writer.Stop()
+	})
+
+	t.Run("assume role without static credentials", func(t *testing.T) {
+		t.Setenv("VOLCSTACK_ACCESS_KEY_ID", "")
+		t.Setenv("VOLCSTACK_ACCESS_KEY", "")
+		t.Setenv("VOLCSTACK_SECRET_ACCESS_KEY", "")
+		t.Setenv("VOLCSTACK_SECRET_KEY", "")
+		t.Setenv("VOLCSTACK_SESSION_TOKEN", "")
+		t.Setenv("VOLCENGINE_OIDC_TOKEN_FILE", "")
+		t.Setenv("VOLCENGINE_OIDC_ROLE_TRN", "")
+
+		c := config.NewMeteringConfig().
+			WithTOSAssumeRole("cn-beijing", "metering-bucket", "trn:iam::1234567890:role/metering-writer")
+
+		writer, err := NewWriter(t.Context(), c, "testtosassumerolewriter")
+		require.NoError(t, err)
+		require.NotNil(t, writer)
+		writer.Stop()
+	})
 }
 
 func TestRegisterCollector(t *testing.T) {

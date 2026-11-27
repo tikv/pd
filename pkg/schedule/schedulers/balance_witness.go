@@ -296,7 +296,7 @@ func createTransferWitnessOperator(cs *candidateStores, s *balanceWitnessSchedul
 // the best follower peer and transfers the witness.
 func (s *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.Region = filter.SelectOneRegion(solver.RandWitnessRegions(solver.sourceStoreID(), s.conf.getRanges()),
-		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no witness", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.sourceStoreID()))
 		schedulerCounter.WithLabelValues(s.GetName(), "no-witness-region").Inc()

@@ -20,12 +20,17 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestBalanceWitnessSchedulerTestSuite(t *testing.T) {
@@ -135,4 +140,38 @@ func (suite *balanceWitnessSchedulerTestSuite) TestTransferWitnessOut() {
 	for _, count := range targets {
 		re.Zero(count)
 	}
+}
+
+func (suite *balanceWitnessSchedulerTestSuite) TestAffinity() {
+	re := suite.Require()
+	tc := suite.tc
+	tc.SetEnableWitness(true)
+	tc.SetTolerantSizeRatio(0.1)
+	tc.AddWitnessStore(1, 0)
+	tc.AddWitnessStore(2, 10)
+	tc.AddWitnessStore(3, 10)
+	tc.AddWitnessStore(4, 100)
+	re.NoError(tc.SetRules([]*placement.Rule{
+		{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3},
+		{GroupID: placement.DefaultGroupID, ID: "witness", Role: placement.Voter, Count: 1, IsWitness: true},
+	}))
+	region := tc.AddLeaderRegionWithWitness(1, 1, []uint64{2, 3, 4}, 4)
+	keyRange := testutil.TxnKeyspaceRange(region.GetStartKey(), region.GetEndKey())
+	region = region.Clone(core.WithStartKey(keyRange.StartKey), core.WithEndKey(keyRange.EndKey))
+	tc.PutRegion(region)
+	manager := tc.GetAffinityManager()
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: "witness", KeyRanges: []keyutil.KeyRange{keyRange},
+	}}))
+	_, err := manager.UpdateAffinityGroupPeers("witness", 2, []uint64{1, 2, 3, 4})
+	re.NoError(err)
+	manager.RestoreAffinityGroup("witness")
+	ac := checker.NewAffinityChecker(suite.T().Context(), tc, tc.GetCheckerConfig())
+	for range 3 {
+		re.Len(ac.Check(region), 1)
+		re.Empty(suite.schedule())
+		re.Equal(uint64(2), manager.GetAffinityGroupState("witness").LeaderStoreID)
+	}
+	re.NoError(manager.DeleteAffinityGroups([]string{"witness"}, true))
+	re.NotEmpty(suite.schedule(), "ordinary regions still balance witnesses")
 }

@@ -16,13 +16,17 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -35,6 +39,68 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+type rejectedSplitIDAllocator struct {
+	*mockid.IDAllocator
+	calls int
+}
+
+func (a *rejectedSplitIDAllocator) Alloc(uint32) (uint64, uint32, error) {
+	a.calls++
+	return 0, 0, errors.New("unexpected split ID allocation")
+}
+
+func TestHandleAskBatchSplitRejectsInvalidRequestBeforeAllocation(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		count   uint32
+		peers   int
+		newer   bool
+		message string
+	}{
+		{"count limit", core.MaxBatchSplitCount + 1, 0, false, "exceeds maximum"},
+		{"count overflow", math.MaxUint32, 0, false, "exceeds maximum"},
+		{"peer product", core.MaxBatchSplitCount, 32766, true, "split response exceeds maximum"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cluster, _ := newSplitScatterTestCluster(t)
+			original := cluster.id
+			allocator := &rejectedSplitIDAllocator{IDAllocator: mockid.NewIDAllocator()}
+			cluster.id = allocator
+			region := cluster.GetRegion(100)
+			meta := region.GetMeta()
+			if test.peers != 0 {
+				peers := make([]*metapb.Peer, test.peers)
+				for i := range peers {
+					peers[i] = &metapb.Peer{Id: uint64(i + 1), StoreId: uint64(i + 1)}
+				}
+				meta = region.Clone(core.SetPeers(peers)).GetMeta()
+				if test.newer {
+					meta.RegionEpoch.ConfVer++
+				}
+			}
+			request := &pdpb.AskBatchSplitRequest{Region: meta, SplitCount: test.count}
+			require.Less(t, request.Size(), 1<<20)
+			resp, err := cluster.HandleAskBatchSplit(request)
+			require.Zero(t, allocator.calls, "invalid requests must not reach the allocator")
+			require.ErrorContains(t, err, test.message)
+			require.Nil(t, resp)
+
+			request.Region = region.Clone(core.SetRegionVersion(0)).GetMeta()
+			resp, err = cluster.HandleAskBatchSplit(request)
+			require.ErrorContains(t, err, "invalid region epoch")
+			require.Nil(t, resp)
+			require.Zero(t, allocator.calls, "region validation must precede count validation and allocation")
+
+			cluster.id = original
+			request.Region = region.GetMeta()
+			request.SplitCount = 1
+			resp, err = cluster.HandleAskBatchSplit(request)
+			require.NoError(t, err)
+			require.Len(t, resp.GetIds(), 1)
+		})
+	}
+}
 
 const (
 	// CPU usage is only populated to mimic load-split region heartbeat data.
@@ -145,11 +211,19 @@ func TestHandleAskBatchSplitSkipsSplitScatterForSizeReason(t *testing.T) {
 		newSplitScatterRegion(splitRegionID, []byte("m"), []byte(""), splitScatterReportedCPUUsage),
 	))
 
+	dispatched := make(chan struct{})
+	notifyDispatched := sync.OnceFunc(func() { close(dispatched) })
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/schedule/checker/afterSplitScatterDispatch", notifyDispatched))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/afterSplitScatterDispatch"))
+	})
 	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
-		// PatrolRegions uses a ticker; wait for at least one tick interval
-		// so the dispatch phase is guaranteed to have executed.
-		time.Sleep(100 * time.Millisecond)
-		return true
+		select {
+		case <-dispatched:
+			return true
+		default:
+			return false
+		}
 	})
 
 	re.Nil(cluster.GetOperatorController().GetOperator(splitRegionID))

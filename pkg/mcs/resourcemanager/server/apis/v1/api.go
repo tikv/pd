@@ -337,7 +337,7 @@ func (s *Service) setKeyspaceRUVersion(c *gin.Context) {
 // @Success	200		{string}	json	format	of	rmserver.Config
 func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Server)
-	config := svr.GetConfig()
+	config := rmserver.RedactedConfig(svr.GetConfig())
 	c.IndentedJSON(http.StatusOK, config)
 }
 

@@ -303,7 +303,9 @@ var (
 	affinityCheckerCreateOpFailedCounter          = checkerCounter.WithLabelValues(affinityChecker, "create-operator-failed")
 	affinityCheckerUnhealthyRegionCounter         = checkerCounter.WithLabelValues(affinityChecker, "unhealthy-region")
 	affinityCheckerAbnormalReplicaCounter         = checkerCounter.WithLabelValues(affinityChecker, "abnormal-replica")
+	affinityCheckerLearnerMoveCounter             = checkerCounter.WithLabelValues(affinityChecker, "learner-move")
 	affinityCheckerLearnerPeerConflictCounter     = checkerCounter.WithLabelValues(affinityChecker, "learner-peer-conflict")
+	affinityCheckerSplitTimeoutCounter            = checkerCounter.WithLabelValues(affinityChecker, "split-timeout-fallback")
 
 	// Affinity merge checker metrics
 	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")

@@ -33,6 +33,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
 	pd "github.com/tikv/pd/client"
@@ -352,7 +353,18 @@ func (suite *tsoClientTestSuite) TestGetMinTS() {
 	wg.Wait()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		clients := suite.clients[0].GetServiceDiscovery().GetAllServiceClients()
+		if len(clients) == 0 {
+			return false
+		}
+		for _, client := range clients {
+			if client.Available() {
+				return false
+			}
+		}
+		return true
+	})
 	testutil.Eventually(re, func() bool {
 		var err error
 		_, _, err = suite.clients[0].GetMinTS(suite.ctx)
@@ -592,53 +604,74 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 		[]string{pdLeader.GetAddr()}, pd.SecurityOption{})
 	re.NoError(err)
 	defer pdClient.Close()
-	memberIDs := make([]string, 0, len(cluster.GetServers()))
-	for _, server := range cluster.GetServers() {
+	servers := cluster.GetServers()
+	memberIDs := make([]string, 0, len(servers))
+	for _, server := range servers {
 		memberIDs = append(memberIDs, strconv.FormatUint(server.GetServerID(), 10))
 	}
 	memberIDList := strings.Join(memberIDs, ",")
 
+	const initializationHook = "github.com/tikv/pd/server/cluster/afterTSOInitialized"
+	initialized := make(chan *tests.TestServer, 1)
+	release := make(chan struct{})
+	var initializedOnce sync.Once
+	resume := sync.OnceFunc(func() { close(release) })
+	re.NoError(failpoint.EnableCall(initializationHook, func(id uint64) {
+		for _, server := range servers {
+			if server.GetServerID() == id {
+				initializedOnce.Do(func() { initialized <- server })
+				<-release
+				return
+			}
+		}
+	}))
+	defer func() {
+		resume()
+		re.NoError(failpoint.Disable(initializationHook))
+	}()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", fmt.Sprintf("return(\"%s\")", memberIDList)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", fmt.Sprintf("return(\"%s\")", memberIDList)))
-	leaderFailpointsDisabled := false
-	disableLeaderFailpoints := func() {
-		if leaderFailpointsDisabled {
-			return
-		}
-		leaderFailpointsDisabled = true
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
-	}
-	failpointsDisabled := false
-	disableFailpoints := func() {
-		if failpointsDisabled {
-			return
-		}
-		failpointsDisabled = true
+	disableFailpoints := sync.OnceFunc(func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
-		disableLeaderFailpoints()
-	}
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+	})
 	defer disableFailpoints()
-	// Exit the PD leader loop to trigger the rebase error without directly transferring etcd leadership.
-	// Trying to get TSO should fail with "not leader" error.
+	var initializingServer *tests.TestServer
+	select {
+	case initializingServer = <-initialized:
+	case <-time.After(30 * time.Second):
+		suite.T().Fatal("leader initialization did not reach the TSO checkpoint")
+	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+	svr := initializingServer.GetServer()
+	re.NotNil(svr.GetMember().GetLeadership().GetLease())
+	re.True(svr.GetTSOAllocator().IsInitialize())
+	re.False(svr.IsServing())
+	// The existing client may use the new term before ID rebasing completes.
 	getTSError := func() error {
 		_, _, err := pdClient.GetTS(ctx)
 		return err
 	}
 	testutil.Eventually(re, func() bool {
-		err := getTSError()
-		return err != nil && strings.Contains(err.Error(), "not leader")
-	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(20*time.Millisecond))
-	disableLeaderFailpoints()
+		return getTSError() == nil
+	}, testutil.WithWaitFor(5*time.Second))
+	// Let this term fail rebasing, but prevent another term from serving TSO
+	// during the rejection assertions below.
+	const campaignHook = "github.com/tikv/pd/server/leaderLoopCheckAgain"
+	re.NoError(failpoint.Enable(campaignHook, fmt.Sprintf("return(\"%s\")", memberIDList)))
+	defer func() { re.NoError(failpoint.Disable(campaignHook)) }()
+	resume()
+	testutil.Eventually(re, func() bool {
+		return svr.GetMember().GetLeadership().GetLease() == nil &&
+			!svr.GetTSOAllocator().IsInitialize()
+	})
 	for range 10 {
 		re.ErrorContains(getTSError(), "not leader")
 	}
 	disableFailpoints()
+	re.NoError(failpoint.Disable(campaignHook))
 	// The TSO should be eventually available.
 	testutil.Eventually(re, func() bool {
 		_, _, err := pdClient.GetTS(ctx)
@@ -981,4 +1014,76 @@ func (suite *tsoClientTestSuite) TestTSOStreamSetupRace() {
 	case <-time.After(30 * time.Second):
 		re.Failf("timed out", "GetTS has not returned")
 	}
+}
+
+func TestPDClientUsesTSODuringPDInitialization(t *testing.T) {
+	re := require.New(t)
+	cluster, err := tests.NewTestCluster(t.Context(), 3)
+	re.NoError(err)
+	t.Cleanup(cluster.Destroy)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	target := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(target)
+
+	// Keep the default client alive across the handoff, as existing TiDB and
+	// TiKV clients do during a PD upgrade. Constructing a new client also
+	// initializes router metadata, which still requires full PD readiness.
+	clientCtx, clientCancel := context.WithTimeout(t.Context(), time.Minute)
+	t.Cleanup(clientCancel)
+	client, err := pd.NewClientWithContext(clientCtx, caller.TestComponent,
+		[]string{target.GetAddr()}, pd.SecurityOption{},
+		opt.WithCustomTimeoutOption(time.Second), opt.WithMaxErrorRetry(1))
+	re.NoError(err)
+	t.Cleanup(client.Close)
+	re.Equal(leader.GetAddr(), client.GetLeaderURL())
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	physical, logical, err := client.GetTS(ctx)
+	cancel()
+	re.NoError(err)
+	previous := &pdpb.Timestamp{Physical: physical, Logical: logical}
+
+	const hook = "github.com/tikv/pd/server/cluster/afterTSOInitialized"
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	var reachedOnce sync.Once
+	resume := sync.OnceFunc(func() { close(release) })
+	memberID := target.GetServerID()
+	re.NoError(failpoint.EnableCall(hook, func(id uint64) {
+		if id == memberID {
+			reachedOnce.Do(func() { close(reached) })
+			<-release
+		}
+	}))
+	t.Cleanup(func() {
+		resume()
+		re.NoError(failpoint.Disable(hook))
+	})
+	re.NoError(leader.MoveEtcdLeader(leader.GetServerID(), target.GetServerID()))
+	select {
+	case <-reached:
+	case <-time.After(30 * time.Second):
+		t.Fatal("leader initialization did not reach the TSO checkpoint")
+	}
+	re.False(target.GetServer().IsServing())
+
+	// Recovery includes discovering the new owner and reconnecting its TSO
+	// stream while that owner's metadata initialization remains blocked.
+	testutil.Eventually(re, func() bool {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		physical, logical, err = client.GetTS(ctx)
+		return err == nil
+	}, testutil.WithWaitFor(5*time.Second))
+	re.Equal(target.GetAddr(), client.GetLeaderURL())
+	re.Positive(physical)
+	re.Positive(logical)
+	next := &pdpb.Timestamp{Physical: physical, Logical: logical}
+	re.Negative(tsoutil.CompareTimestamp(previous, next))
+	re.False(target.GetServer().IsServing())
+
+	resume()
+	testutil.Eventually(re, target.GetServer().IsServing)
 }

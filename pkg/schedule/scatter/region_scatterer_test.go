@@ -22,8 +22,10 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -50,6 +52,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Deadlock detection stays enabled; its timers must not cross synctest bubbles.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -578,28 +582,31 @@ func TestScattersGroup(t *testing.T) {
 }
 
 func TestSelectedStoreGC(t *testing.T) {
-	re := require.New(t)
-	originalGCInterval := gcInterval
-	originalGCTTL := gcTTL
-	gcInterval = time.Second
-	gcTTL = time.Second * 3
-	defer func() {
-		gcInterval = originalGCInterval
-		gcTTL = originalGCTTL
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		originalGCInterval := gcInterval
+		originalGCTTL := gcTTL
+		gcInterval = time.Second
+		gcTTL = time.Second * 3
+		defer func() {
+			gcInterval = originalGCInterval
+			gcTTL = originalGCTTL
+		}()
 
-	ctx := t.Context()
-	stores := newSelectedStores(ctx)
-	stores.Put(1, "testgroup")
-	_, ok := stores.GetGroupDistribution("testgroup")
-	re.True(ok)
-	_, ok = stores.GetGroupDistribution("testgroup")
-	re.True(ok)
-	time.Sleep(gcTTL)
-	_, ok = stores.GetGroupDistribution("testgroup")
-	re.False(ok)
-	_, ok = stores.GetGroupDistribution("testgroup")
-	re.False(ok)
+		ctx := t.Context()
+		stores := newSelectedStores(ctx)
+		stores.Put(1, "testgroup")
+		_, ok := stores.GetGroupDistribution("testgroup")
+		re.True(ok)
+		_, ok = stores.GetGroupDistribution("testgroup")
+		re.True(ok)
+		// A TTL entry expires strictly after its deadline.
+		synctest.Sleep(gcTTL + time.Nanosecond)
+		_, ok = stores.GetGroupDistribution("testgroup")
+		re.False(ok)
+		_, ok = stores.GetGroupDistribution("testgroup")
+		re.False(ok)
+	})
 }
 
 func TestRegionHasLearner(t *testing.T) {
@@ -1257,7 +1264,10 @@ func TestScatterWithAffinity(t *testing.T) {
 	}
 
 	// Add region 1 with leader on store 1
-	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+	keyRange := testutil.TxnKeyspaceRange(region.GetStartKey(), region.GetEndKey())
+	region = region.Clone(core.WithStartKey(keyRange.StartKey), core.WithEndKey(keyRange.EndKey))
+	tc.PutRegion(region)
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 
 	// Create affinity manager and group
@@ -1274,11 +1284,8 @@ func TestScatterWithAffinity(t *testing.T) {
 	}
 
 	keyRanges := []affinity.GroupKeyRanges{{
-		GroupID: group.ID,
-		KeyRanges: []keyutil.KeyRange{{
-			StartKey: []byte(""),
-			EndKey:   []byte(""),
-		}},
+		GroupID:   group.ID,
+		KeyRanges: []keyutil.KeyRange{keyRange},
 	}}
 	err := affinityManager.CreateAffinityGroups(keyRanges)
 	re.NoError(err)
@@ -1287,7 +1294,6 @@ func TestScatterWithAffinity(t *testing.T) {
 
 	// Test scatter with affinity (RegularSchedulingAllowed=false)
 	// Should return (nil, nil) to prevent client from retrying
-	region := tc.GetRegion(1)
 	op, err := scatterer.Scatter(region, "", true)
 	re.NoError(err)
 	re.Nil(op)

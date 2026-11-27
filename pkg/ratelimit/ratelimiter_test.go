@@ -16,26 +16,29 @@ package ratelimit
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestRateLimiter(t *testing.T) {
-	re := require.New(t)
-	limiter := NewRateLimiter(100, 100)
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		limiter := NewRateLimiter(100, 100)
 
-	re.True(limiter.Available(1))
+		re.True(limiter.Available(1))
 
-	re.True(limiter.AllowN(50))
-	re.True(limiter.Available(50))
-	re.False(limiter.Available(100))
-	re.True(limiter.Available(50))
-	re.True(limiter.AllowN(50))
-	re.False(limiter.Available(50))
-	time.Sleep(time.Second)
-	re.True(limiter.Available(1))
-	re.True(limiter.AllowN(99))
-	re.True(limiter.Allow())
-	re.False(limiter.Available(1))
+		re.True(limiter.AllowN(50))
+		re.True(limiter.Available(50))
+		re.False(limiter.Available(100))
+		re.True(limiter.Available(50))
+		re.True(limiter.AllowN(50))
+		re.False(limiter.Available(50))
+		synctest.Sleep(time.Second)
+		re.True(limiter.Available(1))
+		re.True(limiter.AllowN(99))
+		re.True(limiter.Allow())
+		re.False(limiter.Available(1))
+	})
 }

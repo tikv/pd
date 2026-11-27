@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -448,45 +449,47 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 
 // issue #1716
 func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
-	re := suite.Require()
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-	tc.AddLeaderStore(1, 0)
-	tc.AddLeaderStore(2, 1)
-	tc.AddLeaderRegion(1, 2, 1)
-	region1 := tc.GetRegion(1)
-	steps := []OpStep{
-		RemovePeer{FromStore: 1},
-		AddPeer{ToStore: 1, PeerID: 4},
-	}
-	// finished op with normal priority
-	op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
-	// unfinished op with high priority
-	op2 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion|OpAdmin, steps...)
+	synctest.Test(suite.T(), func(t *testing.T) {
+		re := require.New(t)
+		opt := mockconfig.NewTestOptions()
+		tc := mockcluster.NewCluster(t.Context(), opt)
+		stream := hbstream.NewTestHeartbeatStreams(t.Context(), tc, false /* no need to run */)
+		oc := NewController(t.Context(), tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+		tc.AddLeaderStore(1, 0)
+		tc.AddLeaderStore(2, 1)
+		tc.AddLeaderRegion(1, 2, 1)
+		region1 := tc.GetRegion(1)
+		steps := []OpStep{
+			RemovePeer{FromStore: 1},
+			AddPeer{ToStore: 1, PeerID: 4},
+		}
+		// finished op with normal priority
+		op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
+		// unfinished op with high priority
+		op2 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion|OpAdmin, steps...)
 
-	re.True(op1.Start())
-	oc.SetOperator(op1)
+		re.True(op1.Start())
+		oc.SetOperator(op1)
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator", "return(true)"))
-	var wg sync.WaitGroup
-	var success bool
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		oc.Dispatch(region1, "test", nil)
-	}()
-	go func() {
-		defer wg.Done()
-		time.Sleep(50 * time.Millisecond)
-		success = oc.AddOperator(op2)
-	}()
-	wg.Wait()
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator", "return(true)"))
+		var wg sync.WaitGroup
+		var success bool
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			oc.Dispatch(region1, "test", nil)
+		}()
+		go func() {
+			defer wg.Done()
+			time.Sleep(50 * time.Millisecond)
+			success = oc.AddOperator(op2)
+		}()
+		wg.Wait()
 
-	re.True(success)
-	re.Equal(op2, oc.GetOperator(1))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator"))
+		re.True(success)
+		re.Equal(op2, oc.GetOperator(1))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator"))
+	})
 }
 
 // issue #11404
@@ -521,77 +524,79 @@ func (suite *operatorControllerTestSuite) TestDispatchOperatorOnPublish() {
 }
 
 func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
-	re := suite.Require()
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-	tc.AddLeaderStore(1, 2)
-	tc.AddLeaderStore(2, 1)
-	tc.AddLeaderRegion(1, 1, 2)
-	tc.AddLeaderRegion(2, 1, 2)
-	tc.AddLeaderRegion(4, 2, 1)
-	steps := []OpStep{
-		RemovePeer{FromStore: 2},
-		AddPeer{ToStore: 2, PeerID: 4},
-	}
-	op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
-	op2 := NewTestOperator(2, &metapb.RegionEpoch{}, OpRegion, steps...)
-	op3 := NewTestOperator(3, &metapb.RegionEpoch{}, OpRegion, steps...)
-	op4 := NewTestOperator(4, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
-	region1 := tc.GetRegion(1)
-	region2 := tc.GetRegion(2)
-	region4 := tc.GetRegion(4)
-	// Adds operator and pushes to the notifier queue.
-	{
-		re.True(op1.Start())
-		oc.SetOperator(op1)
-		re.True(op3.Start())
-		oc.SetOperator(op3)
-		re.True(op4.Start())
-		oc.SetOperator(op4)
-		re.True(op2.Start())
-		oc.SetOperator(op2)
-		oc.opNotifierQueue.push(&operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
-		oc.opNotifierQueue.push(&operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
-		oc.opNotifierQueue.push(&operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
-		oc.opNotifierQueue.push(&operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
-	}
-	// first poll got nil
-	r, next := oc.pollNeedDispatchRegion()
-	re.Nil(r)
-	re.False(next)
+	synctest.Test(suite.T(), func(t *testing.T) {
+		re := require.New(t)
+		opt := mockconfig.NewTestOptions()
+		tc := mockcluster.NewCluster(t.Context(), opt)
+		stream := hbstream.NewTestHeartbeatStreams(t.Context(), tc, false /* no need to run */)
+		oc := NewController(t.Context(), tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+		tc.AddLeaderStore(1, 2)
+		tc.AddLeaderStore(2, 1)
+		tc.AddLeaderRegion(1, 1, 2)
+		tc.AddLeaderRegion(2, 1, 2)
+		tc.AddLeaderRegion(4, 2, 1)
+		steps := []OpStep{
+			RemovePeer{FromStore: 2},
+			AddPeer{ToStore: 2, PeerID: 4},
+		}
+		op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
+		op2 := NewTestOperator(2, &metapb.RegionEpoch{}, OpRegion, steps...)
+		op3 := NewTestOperator(3, &metapb.RegionEpoch{}, OpRegion, steps...)
+		op4 := NewTestOperator(4, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
+		region1 := tc.GetRegion(1)
+		region2 := tc.GetRegion(2)
+		region4 := tc.GetRegion(4)
+		// Adds operator and pushes to the notifier queue.
+		{
+			re.True(op1.Start())
+			oc.SetOperator(op1)
+			re.True(op3.Start())
+			oc.SetOperator(op3)
+			re.True(op4.Start())
+			oc.SetOperator(op4)
+			re.True(op2.Start())
+			oc.SetOperator(op2)
+			oc.opNotifierQueue.push(&operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
+			oc.opNotifierQueue.push(&operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
+			oc.opNotifierQueue.push(&operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
+			oc.opNotifierQueue.push(&operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
+		}
+		// first poll got nil
+		r, next := oc.pollNeedDispatchRegion()
+		re.Nil(r)
+		re.False(next)
 
-	// after wait 100 millisecond, the region1 need to dispatch, but not region2.
-	time.Sleep(100 * time.Millisecond)
-	r, next = oc.pollNeedDispatchRegion()
-	re.NotNil(r)
-	re.True(next)
-	re.Equal(region1.GetID(), r.GetID())
+		// after wait 100 millisecond, the region1 need to dispatch, but not region2.
+		synctest.Sleep(100 * time.Millisecond)
+		r, next = oc.pollNeedDispatchRegion()
+		re.NotNil(r)
+		re.True(next)
+		re.Equal(region1.GetID(), r.GetID())
 
-	// find op3 with nil region, remove it
-	re.NotNil(oc.GetOperator(3))
+		// find op3 with nil region, remove it
+		re.NotNil(oc.GetOperator(3))
 
-	r, next = oc.pollNeedDispatchRegion()
-	re.Nil(r)
-	re.True(next)
-	re.Nil(oc.GetOperator(3))
+		r, next = oc.pollNeedDispatchRegion()
+		re.Nil(r)
+		re.True(next)
+		re.Nil(oc.GetOperator(3))
 
-	// find op4 finished
-	r, next = oc.pollNeedDispatchRegion()
-	re.NotNil(r)
-	re.True(next)
-	re.Equal(region4.GetID(), r.GetID())
+		// find op4 finished
+		r, next = oc.pollNeedDispatchRegion()
+		re.NotNil(r)
+		re.True(next)
+		re.Equal(region4.GetID(), r.GetID())
 
-	// after waiting 500 milliseconds, the region2 need to dispatch
-	time.Sleep(400 * time.Millisecond)
-	r, next = oc.pollNeedDispatchRegion()
-	re.NotNil(r)
-	re.True(next)
-	re.Equal(region2.GetID(), r.GetID())
-	r, next = oc.pollNeedDispatchRegion()
-	re.Nil(r)
-	re.False(next)
+		// after waiting 500 milliseconds, the region2 need to dispatch
+		synctest.Sleep(400 * time.Millisecond)
+		r, next = oc.pollNeedDispatchRegion()
+		re.NotNil(r)
+		re.True(next)
+		re.Equal(region2.GetID(), r.GetID())
+		r, next = oc.pollNeedDispatchRegion()
+		re.Nil(r)
+		re.False(next)
+	})
 }
 
 // issue #7992

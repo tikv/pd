@@ -15,11 +15,12 @@
 package affinity
 
 import (
+	"encoding/json"
 	"fmt"
-	"maps"
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -30,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestStoreCondition(t *testing.T) {
@@ -37,7 +39,6 @@ func TestStoreCondition(t *testing.T) {
 	re.Equal(groupDegraded, storeLeaderEvicted.groupAvailability())
 	re.Equal(groupDegraded, storeBusy.groupAvailability())
 	re.Equal(groupDegraded, storeDisconnected.groupAvailability())
-	re.Equal(groupDegraded, storePreparing.groupAvailability())
 	re.Equal(groupDegraded, storeLowSpace.groupAvailability())
 	re.Equal(groupExpired, storeDown.groupAvailability())
 	re.Equal(groupExpired, storeRemoving.groupAvailability())
@@ -62,7 +63,7 @@ func TestCollectUnavailableStores(t *testing.T) {
 	manager, err := NewManager(ctx, memoryStorage, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	stores := make([]*core.StoreInfo, 12)
+	stores := make([]*core.StoreInfo, 15)
 	for i := range stores {
 		stores[i] = core.NewStoreInfo(&metapb.Store{
 			Id:        uint64(i),
@@ -79,10 +80,12 @@ func TestCollectUnavailableStores(t *testing.T) {
 	stores[4] = stores[4].Clone(core.StoppingStoreEvicted())
 	stores[5] = stores[5].Clone(core.SlowTrendEvicted())
 	// stores[6]: storeBusy
-	stores[6] = stores[6].Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
+	busy := core.SetStoreStats(&pdpb.StoreStats{IsBusy: true})
+	stores[6] = stores[6].Clone(busy)
 	// stores[7]: storeDisconnected
-	stores[7] = stores[7].Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
-	// stores[8]: storePreparing
+	disconnected := core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute))
+	stores[7] = stores[7].Clone(disconnected)
+	// stores[8]: a healthy Preparing store is available.
 	stores[8] = stores[8].Clone(core.SetNodeState(metapb.NodeState_Preparing))
 	// stores[9]: storeDown
 	stores[9] = stores[9].Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
@@ -90,6 +93,12 @@ func TestCollectUnavailableStores(t *testing.T) {
 	stores[10] = stores[10].Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	// stores[11]: storeRemoved
 	stores[11] = stores[11].Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	// stores[12..14]: the most severe degraded condition wins.
+	stores[12] = stores[12].Clone(core.StoppingStoreEvicted(), busy)
+	stores[13] = stores[13].Clone(core.StoppingStoreEvicted(), busy, disconnected)
+	stores[14] = stores[14].Clone(core.StoppingStoreEvicted(), disconnected, core.SetStoreStats(&pdpb.StoreStats{
+		Capacity: 100, Available: 1, IsBusy: true,
+	}))
 
 	for _, store := range stores {
 		storeInfos.PutStore(store)
@@ -104,12 +113,14 @@ func TestCollectUnavailableStores(t *testing.T) {
 		5:  storeLeaderEvicted,
 		6:  storeBusy,
 		7:  storeDisconnected,
-		8:  storePreparing,
 		9:  storeDown,
 		10: storeRemoving,
 		11: storeRemoved,
+		12: storeBusy,
+		13: storeDisconnected,
+		14: storeLowSpace,
 	}
-	re.True(maps.Equal(expected, actual))
+	re.Equal(expected, actual)
 }
 
 func TestObserveAvailableRegion(t *testing.T) {
@@ -118,7 +129,7 @@ func TestObserveAvailableRegion(t *testing.T) {
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
-	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1", NodeState: metapb.NodeState_Serving})
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1", NodeState: metapb.NodeState_Preparing})
 	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2", NodeState: metapb.NodeState_Serving})
 	for _, s := range []*core.StoreInfo{store1, store2} {
 		storeInfos.PutStore(s.Clone(core.SetLastHeartbeatTS(time.Now())))
@@ -134,8 +145,9 @@ func TestObserveAvailableRegion(t *testing.T) {
 
 	group := &Group{ID: "g", LeaderStoreID: 0, VoterStoreIDs: nil}
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: group.ID}}))
+	manager.checkGroupsAvailability()
 
-	// First observation makes group available with store 1.
+	// First observation initializes the group on the healthy Preparing store.
 	region1 := core.NewRegionInfo(
 		&metapb.Region{
 			Id:       10,
@@ -200,6 +212,111 @@ func TestObserveAvailableRegion(t *testing.T) {
 	re.True(state.AffinitySchedulingAllowed)
 }
 
+func TestRangeConflictPreservesTarget(t *testing.T) {
+	re := require.New(t)
+	store, stores := storage.NewStorageWithMemoryBackend(), core.NewStoresInfo()
+	for id := uint64(1); id <= 4; id++ {
+		stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: id}, core.SetLastHeartbeatTS(time.Now())))
+	}
+	manager := newTestAffinityManager(t, store, stores)
+	overlap := testKeyRanges("b", "c")
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{
+		{GroupID: "a", KeyRanges: testKeyRanges("a", "d")},
+		{GroupID: "b"},
+	}))
+	oldVoters, newVoters := []uint64{1, 2, 3}, []uint64{2, 3, 4}
+	beforeConflict, err := manager.UpdateAffinityGroupPeers("a", 1, oldVoters)
+	re.NoError(err)
+
+	rule := MakeLabelRule(GroupKeyRanges{GroupID: "b", KeyRanges: overlap})
+	re.NoError(manager.regionLabeler.SetLabelRule(rule))
+	re.NoError(manager.SyncKeyRangesFromEtcd(rule))
+	manager.ReconcileRangeConflicts()
+	conflicted := manager.GetAffinityGroupState("a")
+
+	check := func(want Group) *GroupState {
+		state := manager.GetAffinityGroupState("a")
+		re.Equal(want, state.Group)
+		saved, err := store.LoadAffinityGroup("a")
+		re.NoError(err)
+		expected, err := json.Marshal(want)
+		re.NoError(err)
+		re.Equal(string(expected), saved)
+		return state
+	}
+	manager.ObserveAvailableRegion(generateRegionForTest(1, newVoters, overlap[0]), conflicted)
+	re.True(check(beforeConflict.Group).rangeConflict)
+	// The Region observation above covers the current state with new voters.
+	_, err = manager.updateAffinityGroupPeersWithState("a", beforeConflict, 2, newVoters)
+	re.NoError(err)
+	re.True(check(beforeConflict.Group).rangeConflict)
+	_, err = manager.updateAffinityGroupPeersWithState("a", conflicted, 2, oldVoters)
+	re.NoError(err)
+	re.True(check(beforeConflict.Group).rangeConflict)
+	_, err = manager.UpdateAffinityGroupPeers("a", 2, newVoters)
+	re.NoError(err)
+	want := beforeConflict.Group
+	want.LeaderStoreID, want.VoterStoreIDs = 2, newVoters
+	re.True(check(want).rangeConflict)
+	re.NoError(manager.regionLabeler.DeleteLabelRule(rule.ID))
+	manager.SyncKeyRangesDeleteFromEtcd(rule.ID)
+	manager.ReconcileRangeConflicts()
+	state := check(want)
+	re.True(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
+}
+
+func TestObserveAvailableRegionIgnoresRecreatedGroup(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for id := uint64(1); id <= 4; id++ {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id)},
+			core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	const groupID = "recreated-group"
+	ranges := createGroupForTest(re, manager, groupID, 1)
+	original, err := manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 4})
+	re.NoError(err)
+	expired, ok := manager.ExpireAffinityGroupIf(original)
+	re.True(ok)
+	re.True(expired.RegularSchedulingAllowed)
+
+	const adminLeaderStoreID uint64 = 2
+	voters := []uint64{1, 2, 3}
+	region := generateRegionForTest(1, voters, ranges[0])
+	re.NoError(manager.DeleteAffinityGroups([]string{groupID}, true))
+	createGroupForTest(re, manager, groupID, 1)
+	_, err = manager.UpdateAffinityGroupPeers(groupID, adminLeaderStoreID, voters)
+	re.NoError(err)
+	// Updating the ranges brings the replacement to the same version as the expired snapshot.
+	replacementRange := keyutil.KeyRange{
+		StartKey: keyForTest(nonOverlappingRange.StartKey),
+		EndKey:   keyForTest(nonOverlappingRange.EndKey),
+	}
+	re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{
+		GroupID: groupID, KeyRanges: []keyutil.KeyRange{replacementRange},
+	}}, nil))
+	replacement := manager.GetAffinityGroupState(groupID)
+	re.True(replacement.AffinitySchedulingAllowed)
+	re.Equal(expired.affinityVer, replacement.affinityVer)
+	re.NotSame(expired.groupInfoPtr, replacement.groupInfoPtr)
+
+	manager.ObserveAvailableRegion(region, expired)
+	re.Equal(adminLeaderStoreID, manager.GetAffinityGroupState(groupID).LeaderStoreID)
+	persisted, err := store.LoadAffinityGroup(groupID)
+	re.NoError(err)
+	var group Group
+	re.NoError(json.Unmarshal([]byte(persisted), &group))
+	re.Equal(adminLeaderStoreID, group.LeaderStoreID)
+}
+
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -232,9 +349,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 
 	// Simulate store 2 unavailable.
 	unavailable := map[uint64]storeCondition{2: storeRemoved}
-	isUnavailableStoresChanged, groupAvailabilityChanges := manager.getGroupAvailabilityChanges(unavailable)
-	re.True(isUnavailableStoresChanged)
-	manager.setGroupAvailabilityChanges(unavailable, groupAvailabilityChanges)
+	re.True(manager.applyStoreConditions(unavailable))
 
 	state2 := manager.GetAffinityGroupState("avail")
 	re.NotNil(state2)
@@ -262,8 +377,8 @@ func TestStoreHealthCheck(t *testing.T) {
 	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store2)
 
-	// Set store3 to be disconnected
-	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
+	// Store 3 is a disconnected follower that is also evicted as a stopping store.
+	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2*time.Minute)), core.StoppingStoreEvicted())
 	storeInfos.PutStore(store3)
 
 	conf := mockconfig.NewTestOptions()
@@ -290,8 +405,8 @@ func TestStoreHealthCheck(t *testing.T) {
 	// Create a test affinity group with unhealthy store
 	group2 := &Group{
 		ID:            "group2",
-		LeaderStoreID: 3,
-		VoterStoreIDs: []uint64{3, 2},
+		LeaderStoreID: 2,
+		VoterStoreIDs: []uint64{2, 3},
 	}
 	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: group2.ID}})
 	re.NoError(err)
@@ -342,6 +457,114 @@ func TestStoreHealthCheck(t *testing.T) {
 
 	// Group2 should not be restored from expired status
 	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
+}
+
+func TestAvailabilityCheckWithUnchangedTombstone(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	now := time.Now()
+	for _, id := range []uint64{1, 3, 4} {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, NodeState: metapb.NodeState_Serving},
+			core.SetLastHeartbeatTS(now)))
+	}
+	storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: 2}, core.SetStoreState(metapb.StoreState_Tombstone)))
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	// Cache the tombstone before any groups are synced.
+	manager.checkGroupsAvailability()
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3}})
+	re.True(manager.GetAffinityGroupState("g").AffinitySchedulingAllowed)
+	re.Zero(getGroupForTest(re, manager, "g").degradedExpiredAt)
+	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
+
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 3, VoterStoreIDs: []uint64{1, 3}})
+	state := manager.GetAffinityGroupState("g")
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(3), state.LeaderStoreID)
+
+	store4 := storeInfos.GetStore(4)
+	storeInfos.PutStore(store4.Clone(core.SetLastHeartbeatTS(now.Add(-2 * time.Minute))))
+	manager.checkGroupsAvailability()
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 4}})
+	state = manager.GetAffinityGroupState("g")
+	re.False(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
+
+	// Shorten the current window without expiring it.
+	freshDeadline := newDegradedExpiredAtFromNow()
+	manager.Lock()
+	manager.groups["g"].degradedExpiredAt = freshDeadline - defaultDegradedExpirationSeconds/2
+	manager.Unlock()
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 3, VoterStoreIDs: []uint64{3, 4}})
+	groupInfo := getGroupForTest(re, manager, "g")
+	re.Equal(groupDegraded, groupInfo.GetAvailability())
+	re.GreaterOrEqual(groupInfo.degradedExpiredAt, freshDeadline)
+
+	storeInfos.PutStore(store4.Clone(core.SetLastHeartbeatTS(now.Add(-2 * time.Hour))))
+	manager.checkGroupsAvailability()
+	re.True(manager.GetAffinityGroupState("g").RegularSchedulingAllowed)
+
+	storeInfos.PutStore(store4)
+	manager.checkGroupsAvailability()
+	re.True(manager.GetAffinityGroupState("g").RegularSchedulingAllowed)
+
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 3}})
+	state = manager.GetAffinityGroupState("g")
+	re.True(state.AffinitySchedulingAllowed)
+	re.False(state.RegularSchedulingAllowed)
+	re.Zero(getGroupForTest(re, manager, "g").degradedExpiredAt)
+
+	manager.SyncGroupFromEtcd(&Group{ID: "g", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}})
+	groupInfo = getGroupForTest(re, manager, "g")
+	re.Equal(groupExpired, groupInfo.GetAvailability())
+	re.Zero(groupInfo.degradedExpiredAt)
+	re.False(manager.applyStoreConditions(manager.collectUnavailableStores()))
+}
+
+func TestAvailabilityCheckWithoutGroups(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	healthy := core.NewStoreInfo(&metapb.Store{Id: 1, NodeState: metapb.NodeState_Serving},
+		core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(healthy.Clone(core.PauseLeaderTransfer(constant.In)))
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, 5*time.Second)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "old"}}))
+	manager.checkGroupsAvailability()
+	re.Equal(float64(1), promtestutil.ToFloat64(groupCount))
+	_, err = manager.UpdateAffinityGroupPeers("old", 1, []uint64{1})
+	re.ErrorContains(err, "store 1 is leader-evicted")
+
+	re.NoError(manager.DeleteAffinityGroups([]string{"old"}, false))
+	storeInfos.PutStore(healthy)
+	manager.checkGroupsAvailability()
+	re.Zero(promtestutil.ToFloat64(groupCount))
+
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "new"}}))
+	_, err = manager.UpdateAffinityGroupPeers("new", 1, []uint64{1})
+	re.NoError(err)
+
+	re.NoError(manager.DeleteAffinityGroups([]string{"new"}, false))
+	storeInfos.PutStore(healthy.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour))))
+	manager.checkGroupsAvailability()
+	manager.SyncGroupFromEtcd(&Group{ID: "synced", LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+	state := manager.GetAffinityGroupState("synced")
+	re.NotNil(state)
+	re.True(state.RegularSchedulingAllowed)
+	manager.checkGroupsAvailability()
+	re.True(manager.GetAffinityGroupState("synced").RegularSchedulingAllowed)
+	manager.checkGroupsAvailability()
+	re.True(manager.GetAffinityGroupState("synced").RegularSchedulingAllowed)
 }
 
 // TestDegradedGroupShouldExpire verifies a degraded group should move to expired even when
@@ -418,17 +641,13 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 
 	// evict-leader on leader -> degraded
 	unavailable := map[uint64]storeCondition{1: storeLeaderEvicted}
-	changed, changes := manager.getGroupAvailabilityChanges(unavailable)
-	re.True(changed)
-	manager.setGroupAvailabilityChanges(unavailable, changes)
+	re.True(manager.applyStoreConditions(unavailable))
 	groupInfo := getGroupForTest(re, manager, "leader-only")
 	re.Equal(groupDegraded, groupInfo.GetAvailability())
 
 	// evict-leader only on follower should not change availability
 	unavailable = map[uint64]storeCondition{2: storeLeaderEvicted}
-	changed, changes = manager.getGroupAvailabilityChanges(unavailable)
-	re.True(changed)
-	manager.setGroupAvailabilityChanges(unavailable, changes)
+	re.True(manager.applyStoreConditions(unavailable))
 	groupInfo = getGroupForTest(re, manager, "leader-only")
 	re.Equal(groupAvailable, groupInfo.GetAvailability())
 
@@ -440,9 +659,7 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 		1: storeDisconnected, // degraded
 		2: storeRemoved,      // expired
 	}
-	changed, changes = manager.getGroupAvailabilityChanges(unavailable)
-	re.True(changed)
-	manager.setGroupAvailabilityChanges(unavailable, changes)
+	re.True(manager.applyStoreConditions(unavailable))
 	groupInfo = getGroupForTest(re, manager, "priority")
 	re.Equal(groupExpired, groupInfo.GetAvailability())
 }

@@ -1004,43 +1004,37 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 
 func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	re := suite.Require()
-	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
-
-	// Use the correct bootstrap keyspace name based on build type
-	var keyspaceName string
+	ctx := suite.ctx
+	name := keyspace.GetBootstrapKeyspaceName()
+	mode, opposite := keyspace.UnifiedGC, keyspace.KeyspaceLevelGC
 	if kerneltype.IsNextGen() {
-		keyspaceName = constant.SystemKeyspaceName
-	} else {
-		keyspaceName = constant.DefaultKeyspaceName
+		mode, opposite = opposite, mode
 	}
-	expectGCManagementType := "test-type"
-
-	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
-		Config: pd.KeyspaceGCManagementType{
-			GCManagementType: expectGCManagementType,
-		},
-	}
-	err := client.UpdateKeyspaceGCManagementType(ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	// The typed helper and generic patch both accept idempotent mode updates.
+	err := suite.client.UpdateKeyspaceGCManagementType(ctx, name, &pd.KeyspaceGCManagementTypeConfig{Config: pd.KeyspaceGCManagementType{GCManagementType: mode}})
 	re.NoError(err)
-
-	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(ctx, keyspaceName)
+	meta, err := suite.client.UpdateKeyspaceConfig(ctx, name, &pd.UpdateKeyspaceConfigParams{Config: map[string]*string{keyspace.GCManagementType: &mode}})
 	re.NoError(err)
-	val, ok := keyspaceMetaRes.Config[keyspace.GCManagementType]
-
-	// Check it can get expect key and value in keyspace meta config.
-	re.True(ok)
-	re.Equal(expectGCManagementType, val)
-
-	// Check it doesn't support update config to keyspace.KeyspaceLevelGC now.
-	keyspaceSafePointVersionConfig = pd.KeyspaceGCManagementTypeConfig{
-		Config: pd.KeyspaceGCManagementType{
-			GCManagementType: keyspace.KeyspaceLevelGC,
-		},
+	re.Equal(mode, meta.Config[keyspace.GCManagementType])
+	err = suite.client.UpdateKeyspaceGCManagementType(ctx, name, &pd.KeyspaceGCManagementTypeConfig{})
+	re.EqualError(err, "gc_management_type must not be empty")
+	for _, value := range []string{opposite, "test-type"} {
+		err = suite.client.UpdateKeyspaceGCManagementType(ctx, name, &pd.KeyspaceGCManagementTypeConfig{Config: pd.KeyspaceGCManagementType{GCManagementType: value}})
+		re.ErrorContains(err, "400 Bad Request")
 	}
-	err = client.UpdateKeyspaceGCManagementType(suite.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
-	re.Error(err)
+	legacy, empty := "v2", ""
+	for _, patch := range []map[string]*string{
+		{"safe_point_version": &legacy},
+		{"safe_point_version": nil},
+		{keyspace.GCManagementType: &opposite},
+		{keyspace.GCManagementType: &empty},
+	} {
+		_, err = suite.client.UpdateKeyspaceConfig(ctx, name, &pd.UpdateKeyspaceConfigParams{Config: patch})
+		re.ErrorContains(err, "400 Bad Request")
+	}
+	loaded, err := suite.client.GetKeyspaceMetaByName(ctx, name)
+	re.NoError(err)
+	re.Equal(mode, loaded.Config[keyspace.GCManagementType])
 }
 
 func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
@@ -1391,11 +1385,10 @@ func (suite *httpClientTestSuite) TestAffinityGroups() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	// Test key encoding: use raw keys that will be properly encoded
-	testKey1 := []byte("test_key_1")
-	testKey2 := []byte("test_key_2")
-	testKey3 := []byte("test_key_3")
-	testKey4 := []byte("test_key_4")
+	testKey1 := testutil.TxnKeyspaceKey([]byte("test_key_1"))
+	testKey2 := testutil.TxnKeyspaceKey([]byte("test_key_2"))
+	testKey3 := testutil.TxnKeyspaceKey([]byte("test_key_3"))
+	testKey4 := testutil.TxnKeyspaceKey([]byte("test_key_4"))
 
 	// Test 1: Create affinity groups
 	affinityGroups := map[string][]pd.AffinityGroupKeyRange{
@@ -1447,8 +1440,8 @@ func (suite *httpClientTestSuite) TestAffinityGroups() {
 	re.Contains(allGroups, "test-group-2")
 
 	// Test 4: Add key ranges to affinity groups
-	testKey5 := []byte("test_key_5")
-	testKey6 := []byte("test_key_6")
+	testKey5 := testutil.TxnKeyspaceKey([]byte("test_key_5"))
+	testKey6 := testutil.TxnKeyspaceKey([]byte("test_key_6"))
 
 	addRanges := map[string][]pd.AffinityGroupKeyRange{
 		"test-group-1": {

@@ -19,17 +19,22 @@ import (
 	"maps"
 	"testing"
 
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestMain(m *testing.M) {
+	// Pooled timers cannot cross synctest bubble boundaries.
+	deadlock.Opts.TimerPool = deadlock.TimerPoolDisabled
 	goleak.VerifyTestMain(testutil.WaitForEtcdConnections(m), testutil.LeakOptions...)
 }
 
@@ -51,18 +56,26 @@ func createGroupForTest(re *require.Assertions, m *Manager, id string, rangeCoun
 	}
 	for i := range rangeCount {
 		gkr.KeyRanges[i] = keyutil.KeyRange{
-			StartKey: fmt.Appendf(nil, "test-%s-%04d", id, i),
-			EndKey:   fmt.Appendf(nil, "test-%s-%04d", id, i+1),
+			StartKey: keyForTest(fmt.Appendf(nil, "test-%s-%04d", id, i)),
+			EndKey:   keyForTest(fmt.Appendf(nil, "test-%s-%04d", id, i+1)),
 		}
 	}
 	re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{gkr}))
 	return gkr.KeyRanges
 }
 
+func keyForTest(raw []byte) []byte {
+	if kerneltype.IsNextGen() && len(raw) > 0 {
+		return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), raw...))
+	}
+	return raw
+}
+
 func testCacheStale(re *require.Assertions, m *Manager, region *core.RegionInfo) {
-	cache, group := m.getCache(region)
-	if cache != nil && group != nil {
-		re.NotEqual(cache.affinityVer, group.affinityVer)
+	m.RLock()
+	defer m.RUnlock()
+	if cache, ok := m.regions[region.GetID()]; ok {
+		re.NotEqual(cache.affinityVer, cache.groupInfo.AffinityVer)
 	}
 }
 

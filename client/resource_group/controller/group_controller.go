@@ -420,6 +420,7 @@ func (gc *groupCostController) applyDegradedMode() {
 		cfg.newFillRate = 99999999
 	})
 	counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
+	failpoint.InjectCall("degradedModeApplied", gc.name)
 	log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("name", gc.name))
 }
 

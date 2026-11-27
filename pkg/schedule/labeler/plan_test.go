@@ -174,6 +174,9 @@ func TestPlanApply(t *testing.T) {
 	err = plan.DeleteLabelRule("existing")
 	re.NoError(err)
 
+	// Appending to a prefix must preserve the original plan's remaining operations.
+	re.NoError(plan.Prefix(1).DeleteLabelRule("rule1"))
+
 	// Execute commit operations first (simulate transaction commit)
 	commitOps := plan.CommitOps()
 	re.Len(commitOps, 3) // 2 sets + 1 delete
@@ -188,6 +191,12 @@ func TestPlanApply(t *testing.T) {
 		return nil
 	})
 	re.NoError(err)
+
+	var storedRuleIDs []string
+	re.NoError(store.LoadRegionRules(func(id, _ string) {
+		storedRuleIDs = append(storedRuleIDs, id)
+	}))
+	re.ElementsMatch([]string{"rule1", "rule2"}, storedRuleIDs)
 
 	// Now apply the changes to memory
 	plan.Apply()
@@ -231,6 +240,30 @@ func TestPlanApplyWithError(t *testing.T) {
 
 	// The rule should not be in memory (Apply didn't execute)
 	re.Nil(labeler.GetLabelRule("rule1"))
+}
+
+func TestPlanApplyPrefixBounds(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	labeler, err := NewRegionLabeler(t.Context(), store, 10*time.Millisecond)
+	re.NoError(err)
+	plan := labeler.NewPlan()
+	rule := &LabelRule{
+		ID:       "rule1",
+		Labels:   []RegionLabel{{Key: "k1", Value: "v1"}},
+		RuleType: "key-range",
+		Data:     MakeKeyRanges("1234", "5678"),
+	}
+	re.NoError(plan.SetLabelRule(rule))
+
+	plan.ApplyPrefix(-1)
+	re.Nil(labeler.GetLabelRule(rule.ID))
+	plan.ApplyPrefix(0)
+	re.Nil(labeler.GetLabelRule(rule.ID))
+
+	// A combined batch can count operations that follow the labeler operations.
+	plan.ApplyPrefix(len(plan.CommitOps()) + 1)
+	re.Equal(rule, labeler.GetLabelRule(rule.ID))
 }
 
 func TestPlanMultipleOperations(t *testing.T) {

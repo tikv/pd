@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -73,30 +74,39 @@ func (s *schedulerSuite) TestTransferLeader() {
 	}()
 	res, err := pdHTTPCli.GetSchedulers(ctx)
 	re.NoError(err)
-	oldSchedulersLen := len(res)
+	oldSchedulers := res
+	slices.Sort(oldSchedulers)
+	waitForSchedulers := func() {
+		// Scheduler initialization waits for cluster preparation after each leader change.
+		testutil.Eventually(re, func() bool {
+			schedulers, err := pdHTTPCli.GetSchedulers(ctx)
+			slices.Sort(schedulers)
+			return err == nil && slices.Equal(schedulers, oldSchedulers)
+		})
+	}
 
 	re.NoError(pdHTTPCli.TransferLeader(ctx, newLeader))
-	// wait for transfer leader to new leader
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		leader, err := pdHTTPCli.GetLeader(ctx)
+		return err == nil && leader.Name == newLeader
+	})
 	resp, err = pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	re.Equal(newLeader, resp.Name)
 
-	res, err = pdHTTPCli.GetSchedulers(ctx)
-	re.NoError(err)
-	re.Len(res, oldSchedulersLen)
+	waitForSchedulers()
 
 	// transfer leader to old leader
 	re.NoError(pdHTTPCli.TransferLeader(ctx, oldLeader))
-	// wait for transfer leader
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		leader, err := pdHTTPCli.GetLeader(ctx)
+		return err == nil && leader.Name == oldLeader
+	})
 	resp, err = pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	re.Equal(oldLeader, resp.Name)
 
-	res, err = pdHTTPCli.GetSchedulers(ctx)
-	re.NoError(err)
-	re.Len(res, oldSchedulersLen)
+	waitForSchedulers()
 }
 
 func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
