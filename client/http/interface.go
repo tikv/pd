@@ -143,6 +143,10 @@ type Client interface {
 	// GetAffinityGroups gets affinity groups by group IDs.
 	// When groupIDs is empty, it returns all affinity groups.
 	GetAffinityGroups(ctx context.Context, groupIDs []string) (map[string]*AffinityGroupState, error)
+	// GetAffinityGroupsWithDiagnostics gets affinity groups and their diagnostics by group IDs.
+	// It requires 1 to 100 unique group IDs and an encoded query of at most 4096 bytes.
+	// StatusVersion is zero when diagnostics are unavailable.
+	GetAffinityGroupsWithDiagnostics(ctx context.Context, groupIDs []string) (*AffinityGroupsResponse, error)
 	// GetAllAffinityGroups gets all affinity groups.
 	GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error)
 	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
@@ -1332,6 +1336,79 @@ func (c *client) GetAffinityGroups(ctx context.Context, groupIDs []string) (map[
 		return nil, err
 	}
 	return resp.AffinityGroups, nil
+}
+
+const (
+	maxAffinityGroupDiagnosticsIDs        = 100
+	maxAffinityGroupDiagnosticsQueryBytes = 4096
+)
+
+// GetAffinityGroupsWithDiagnostics gets affinity groups and their diagnostics by group IDs.
+// It requires 1 to 100 unique group IDs and an encoded query of at most 4096 bytes.
+// StatusVersion is zero when diagnostics are unavailable.
+func (c *client) GetAffinityGroupsWithDiagnostics(ctx context.Context, groupIDs []string) (*AffinityGroupsResponse, error) {
+	uniqueIDs := make([]string, 0, len(groupIDs))
+	seen := make(map[string]struct{}, len(groupIDs))
+	for _, id := range groupIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	if len(uniqueIDs) == 0 {
+		return nil, errors.New("group IDs must not be empty")
+	}
+	if len(uniqueIDs) > maxAffinityGroupDiagnosticsIDs {
+		return nil, errors.Errorf("at most %d unique affinity group IDs are allowed", maxAffinityGroupDiagnosticsIDs)
+	}
+
+	query := url.Values{}
+	for _, id := range uniqueIDs {
+		query.Add("ids", id)
+	}
+	query.Set("include_status", "true")
+	encodedQuery := query.Encode()
+	if len(encodedQuery) > maxAffinityGroupDiagnosticsQueryBytes {
+		return nil, errors.Errorf("affinity group diagnostics query exceeds %d bytes", maxAffinityGroupDiagnosticsQueryBytes)
+	}
+	request := func(encodedQuery string, resp *AffinityGroupsResponse) error {
+		return c.request(ctx, newRequestInfo().
+			WithName("GetAffinityGroupsWithDiagnostics").
+			WithURI(fmt.Sprintf("%s?%s", AffinityGroups, encodedQuery)).
+			WithMethod(http.MethodGet).
+			WithResp(resp))
+	}
+	var resp AffinityGroupsResponse
+	if err := request(encodedQuery, &resp); err != nil {
+		if !isUnsupportedAffinityGroupDiagnosticsError(err) {
+			return nil, err
+		}
+		query.Del("include_status")
+		if err := request(query.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		resp.StatusVersion = 0
+	}
+	filtered := make(map[string]*AffinityGroupState, len(seen))
+	for id, state := range resp.AffinityGroups {
+		if _, requested := seen[id]; requested && state != nil {
+			filtered[id] = state
+		}
+	}
+	resp.AffinityGroups = filtered
+	return &resp, nil
+}
+
+func isUnsupportedAffinityGroupDiagnosticsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// The HTTP client has no typed status error, so match both the status and
+	// the server's stable parameter rejection to avoid downgrading other errors.
+	message := err.Error()
+	return strings.Contains(message, "status: '400 Bad Request'") &&
+		strings.Contains(message, `body: '"invalid include_status value"'`)
 }
 
 // GetAllAffinityGroups gets all affinity groups.

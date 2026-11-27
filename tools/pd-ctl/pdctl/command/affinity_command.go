@@ -54,6 +54,7 @@ func newAffinityShowCommand() *cobra.Command {
 		Long:  "Show all affinity groups when --table-id is omitted or 0 and neither --partition-id nor --keyspace-id is specified. Otherwise, a nonzero --table-id is required.",
 		RunE:  affinityShowCommandFunc,
 	}
+	cmd.Flags().Bool("status", false, "include diagnostics for a single affinity group")
 	return cmd
 }
 
@@ -79,12 +80,19 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 }
 
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) error {
+	status, err := cmd.Flags().GetBool("status")
+	if err != nil {
+		return err
+	}
 	tableID, err := cmd.Flags().GetUint64("table-id")
 	if err != nil {
 		return err
 	}
 	// Preserve zero as the legacy list-all sentinel unless a scope is selected.
 	if tableID == 0 && !cmd.Flags().Changed("partition-id") && !cmd.Flags().Changed("keyspace-id") {
+		if status {
+			return errors.New("--status requires a target affinity group")
+		}
 		groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
 		if err != nil {
 			return errors.Annotate(err, "failed to get affinity groups")
@@ -99,6 +107,21 @@ func affinityShowCommandFunc(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if status {
+		response, err := PDCli.GetAffinityGroupsWithDiagnostics(cmd.Context(), []string{groupID})
+		if err != nil {
+			return errors.Annotatef(err, "failed to show affinity group %s", groupID)
+		}
+		if response.StatusVersion == 0 {
+			return errors.New("PD server does not support affinity group diagnostics")
+		}
+		state := response.AffinityGroups[groupID]
+		if state == nil {
+			return errors.Errorf("affinity group %s not found", groupID)
+		}
+		jsonPrint(cmd, state)
+		return nil
+	}
 	state, err := PDCli.GetAffinityGroup(cmd.Context(), groupID)
 	if err != nil {
 		return errors.Annotatef(err, "failed to show affinity group %s", groupID)

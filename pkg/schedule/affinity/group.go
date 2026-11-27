@@ -129,6 +129,8 @@ type GroupState struct {
 	RegionCount int `json:"region_count"`
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores.
 	AffinityRegionCount int `json:"affinity_region_count"`
+	// Diagnostics contains an optional point-in-time diagnostic sample.
+	Diagnostics *GroupDiagnostics `json:"diagnostics,omitempty"`
 
 	// affinityVer is used to mark the version of the cache.
 	affinityVer   uint64
