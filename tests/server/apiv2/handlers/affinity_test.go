@@ -116,6 +116,7 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 				{http.MethodPost, "?skip_exist_check=true", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
 				{http.MethodPatch, "", fmt.Sprintf(`{"add":[{"id":"%s","ranges":[]}]}`, id)},
 				{http.MethodPut, "/" + id, `{"leader_store_id":1,"voter_store_ids":[1]}`},
+				{http.MethodPatch, "/" + id + "/policy", `{"balance_policy":"fixed"}`},
 			} {
 				httpReq, err := http.NewRequest(req.method, url+req.path, strings.NewReader(req.body))
 				re.NoError(err)
@@ -162,6 +163,9 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 			re.Equal(http.StatusBadRequest, status)
 			re.Contains(message, "transaction keyspace 42")
 			re.Equal(1, manager.GetAffinityGroupState(id).RangeCount)
+			status, state, message := doUpdateAffinityGroupPolicy(re, leader.GetAddr(), id, affinity.BalancePolicyFixed)
+			re.Equal(http.StatusOK, status, "%s", message)
+			re.Equal(affinity.BalancePolicyFixed, state.BalancePolicy)
 			mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
 		}
 	})
@@ -438,6 +442,30 @@ func doUpdateAffinityGroupPeers(re *require.Assertions, serverAddr, groupID stri
 	return resp.StatusCode, errorMsg
 }
 
+// doUpdateAffinityGroupPolicy updates the balance policy of a group and
+// returns the status code and the group state or the error message.
+func doUpdateAffinityGroupPolicy(re *require.Assertions, serverAddr, groupID string, policy affinity.BalancePolicy) (int, *affinity.GroupState, string) {
+	data, err := json.Marshal(&handlers.UpdateAffinityGroupPolicyRequest{BalancePolicy: policy})
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPatch, getAffinityGroupURL(serverAddr, groupID, "policy"), bytes.NewReader(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	if resp.StatusCode != http.StatusOK {
+		var errorMsg string
+		if err := json.Unmarshal(body, &errorMsg); err != nil {
+			errorMsg = string(body)
+		}
+		return resp.StatusCode, nil, errorMsg
+	}
+	var state affinity.GroupState
+	re.NoError(json.Unmarshal(body, &state))
+	return resp.StatusCode, &state, ""
+}
+
 // mustDeleteAffinityGroup deletes an affinity group and expects success.
 func mustDeleteAffinityGroup(re *require.Assertions, serverAddr, groupID string, force bool) {
 	url := getAffinityGroupURL(serverAddr, groupID)
@@ -678,6 +706,41 @@ func (suite *affinityHandlerTestSuite) TestAffinityBatchModifySameGroupInAddAndR
 		re.Equal(http.StatusBadRequest, statusCode)
 		re.Contains(errorMsg, "patch-success")
 		re.Contains(errorMsg, "cannot appear in both add and remove")
+	})
+}
+
+func (suite *affinityHandlerTestSuite) TestAffinityUpdatePolicy() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		serverAddr := cluster.GetLeaderServer().GetAddr()
+		keyRange := testutil.TxnKeyspaceRange([]byte{0x00}, []byte{0x10})
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"policy": {Ranges: []handlers.AffinityKeyRange{handlers.AffinityKeyRange(keyRange)}},
+			},
+		}
+		mustCreateAffinityGroups(re, serverAddr, &createReq)
+		mustPutHealthyStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
+		mustUpdateAffinityGroupPeers(re, serverAddr, "policy", &handlers.UpdateAffinityGroupPeersRequest{LeaderStoreID: 1, VoterStoreIDs: []uint64{1}})
+
+		for _, policy := range []affinity.BalancePolicy{affinity.BalancePolicyAuto, affinity.BalancePolicyFixed} {
+			statusCode, state, errorMsg := doUpdateAffinityGroupPolicy(re, serverAddr, "policy", policy)
+			re.Equal(http.StatusOK, statusCode, errorMsg)
+			re.Equal(policy, state.BalancePolicy)
+			re.Equal(uint64(1), state.LeaderStoreID, "a policy update keeps the target")
+			re.Equal([]uint64{1}, state.VoterStoreIDs)
+			re.Equal(policy, mustGetAffinityGroup(re, serverAddr, "policy").BalancePolicy)
+		}
+
+		// A body without the policy, for example with a misspelled field, does not reset it.
+		for _, policy := range []affinity.BalancePolicy{"", affinity.BalancePolicy("manual")} {
+			statusCode, _, errorMsg := doUpdateAffinityGroupPolicy(re, serverAddr, "policy", policy)
+			re.Equal(http.StatusBadRequest, statusCode)
+			re.Contains(errorMsg, "invalid balance policy")
+		}
+		re.Equal(affinity.BalancePolicyFixed, mustGetAffinityGroup(re, serverAddr, "policy").BalancePolicy)
+		statusCode, _, _ := doUpdateAffinityGroupPolicy(re, serverAddr, "missing", affinity.BalancePolicyFixed)
+		re.Equal(http.StatusNotFound, statusCode)
 	})
 }
 
@@ -1653,15 +1716,31 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 		for id := uint64(1); id <= 3; id++ {
 			mustPutHealthyStore(re, cluster, &metapb.Store{Id: id, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
 		}
-		data, err := json.Marshal(affinity.GroupTargetsRequest{Targets: []affinity.GroupTarget{
-			{Expected: created.AffinityGroups["targets"].Group, LeaderStoreID: 2, VoterStoreIDs: []uint64{3, 2, 1}},
-		}})
-		re.NoError(err)
-		var result affinity.GroupTargetsResponse
+		target := affinity.GroupTarget{
+			Expected:      created.AffinityGroups["targets"].Group,
+			LeaderStoreID: 2,
+			VoterStoreIDs: []uint64{3, 2, 1},
+		}
+		status, pinned, _ := doUpdateAffinityGroupPolicy(re, serverAddr, "targets", affinity.BalancePolicyFixed)
+		re.Equal(http.StatusOK, status)
+
 		endpoint := getAffinityGroupURL(serverAddr, "targets")
-		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, endpoint, data, testutil.StatusOK(re), testutil.ExtractJSON(re, &result)))
+		writeTarget := func(target affinity.GroupTarget) affinity.GroupTargetsResponse {
+			data, err := json.Marshal(affinity.GroupTargetsRequest{Targets: []affinity.GroupTarget{target}})
+			re.NoError(err)
+			var result affinity.GroupTargetsResponse
+			re.NoError(testutil.CheckPostJSON(tests.TestDialClient, endpoint, data, testutil.StatusOK(re), testutil.ExtractJSON(re, &result)))
+			return result
+		}
+		result := writeTarget(target)
+		re.Empty(result.WrittenGroupIDs)
+		re.Equal([]string{"targets"}, result.PolicyMismatchGroupIDs)
+
+		target.Expected = pinned.Group
+		result = writeTarget(target)
 		re.Equal([]string{"targets"}, result.WrittenGroupIDs)
-		want := created.AffinityGroups["targets"].Group
+		re.Empty(result.PolicyMismatchGroupIDs)
+		want := pinned.Group
 		want.LeaderStoreID, want.VoterStoreIDs = 2, []uint64{1, 2, 3}
 		re.Equal(want, mustGetAffinityGroup(re, serverAddr, "targets").Group)
 
@@ -1675,11 +1754,9 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 		})
 		expected := scoped.AffinityGroups[scopedID].Group
 		re.Equal(scopedID, expected.ID)
-		data, err = json.Marshal(affinity.GroupTargetsRequest{Targets: []affinity.GroupTarget{
-			{Expected: expected, LeaderStoreID: 3, VoterStoreIDs: []uint64{3, 2, 1}},
-		}})
-		re.NoError(err)
-		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, endpoint, data, testutil.StatusOK(re), testutil.ExtractJSON(re, &result)))
+		result = writeTarget(affinity.GroupTarget{
+			Expected: expected, LeaderStoreID: 3, VoterStoreIDs: []uint64{3, 2, 1},
+		})
 		re.Equal([]string{scopedID}, result.WrittenGroupIDs)
 		expected.LeaderStoreID, expected.VoterStoreIDs = 3, []uint64{1, 2, 3}
 		value, err := cluster.GetLeaderServer().GetServer().GetStorage().LoadAffinityGroup(scopedID)

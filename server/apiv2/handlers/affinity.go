@@ -50,6 +50,7 @@ func RegisterAffinity(r *gin.RouterGroup) {
 	router.POST("/targets", bootstrap, middlewares.Audit("UpdateAffinityGroupTargets", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateAffinityGroupTargets)
 	router.PATCH("", bootstrap, middlewares.Audit("BatchModifyAffinityGroups", audit.LocalLogLabel, audit.PrometheusHistogram), BatchModifyAffinityGroups)
 	router.PUT("/:group_id", bootstrap, middlewares.Audit("UpdateAffinityGroupPeers", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateAffinityGroupPeers)
+	router.PATCH("/:group_id/policy", bootstrap, middlewares.Audit("UpdateAffinityGroupPolicy", audit.LocalLogLabel, audit.PrometheusHistogram), UpdateAffinityGroupPolicy)
 	router.DELETE("/:group_id", bootstrap, middlewares.Audit("DeleteAffinityGroup", audit.LocalLogLabel, audit.PrometheusHistogram), DeleteAffinityGroup)
 	// Count reads forwarded to scheduling as well as reads handled locally.
 	affinityRedirect := middlewares.AffinityMicroserviceRedirector()
@@ -112,6 +113,11 @@ type BatchModifyAffinityGroupsRequest struct {
 type UpdateAffinityGroupPeersRequest struct {
 	LeaderStoreID uint64   `json:"leader_store_id"`
 	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+}
+
+// UpdateAffinityGroupPolicyRequest defines the body for updating an affinity group's balance policy.
+type UpdateAffinityGroupPolicyRequest struct {
+	BalancePolicy affinity.BalancePolicy `json:"balance_policy"`
 }
 
 // --- Handlers ---
@@ -409,6 +415,44 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, state)
 }
 
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+//
+//	@Tags		affinity-groups
+//	@Summary	Update the balance policy of an affinity group.
+//	@Param		group_id	path	string								true	"The group id of the affinity group"
+//	@Param		body		body	UpdateAffinityGroupPolicyRequest	true	"New balance policy: auto or fixed"
+//	@Produce	json
+//	@Success	200	{object}	affinity.GroupState	"Updated affinity group state"
+//	@Failure	400	{string}	string				"The input is invalid."
+//	@Failure	404	{string}	string				"Affinity group not found."
+//	@Failure	500	{string}	string				"PD server failed to proceed the request."
+//	@Router		/affinity-groups/{group_id}/policy [patch]
+func UpdateAffinityGroupPolicy(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager, err := svr.GetAffinityManager()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	groupID := c.Param("group_id")
+	req := &UpdateAffinityGroupPolicyRequest{}
+	if err := c.BindJSON(req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	if err := affinity.ValidateGroupID(groupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	state, err := manager.UpdateAffinityGroupPolicy(groupID, req.BalancePolicy)
+	if handleAffinityError(c, err) {
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, state)
+}
+
 // UpdateAffinityGroupTargets writes leader and voter targets for several affinity groups.
 // A target is written only if the stored group matches the expected contents and any supplied modification revision.
 // The scheduling service uses it to store the targets it decides.
@@ -419,7 +463,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 //	@Description	Each target commits independently, so an HTTP 500 on a later target leaves earlier commits in place.
 //	@Param			body	body	affinity.GroupTargetsRequest	true	"Targets with the groups they were decided from"
 //	@Produce		json
-//	@Success		200	{object}	affinity.GroupTargetsResponse	"IDs of groups whose targets were newly written or already stored with the requested peers"
+//	@Success		200	{object}	affinity.GroupTargetsResponse	"written_group_ids confirms new or already-stored targets, and policy_mismatch_group_ids identifies groups that need revalidation against the current policy"
 //	@Failure		400	{string}	string							"The input is invalid."
 //	@Failure		500	{string}	string							"PD server failed to proceed the request."
 //	@Router			/affinity-groups/targets [post]
@@ -436,12 +480,12 @@ func UpdateAffinityGroupTargets(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	written, err := manager.UpdateAffinityGroupTargets(c.Request.Context(), req.Targets)
+	resp, err := manager.UpdateAffinityGroupTargets(c.Request.Context(), req.Targets)
 	if handleAffinityError(c, err) {
 		return
 	}
 
-	c.IndentedJSON(http.StatusOK, &affinity.GroupTargetsResponse{WrittenGroupIDs: written})
+	c.IndentedJSON(http.StatusOK, &resp)
 }
 
 // DeleteAffinityGroup deletes a specific affinity group by group id.

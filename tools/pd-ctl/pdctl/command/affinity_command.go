@@ -63,6 +63,7 @@ see create --help for lifecycle details.`,
 		newAffinityRangeCommand(),
 		newAffinityDeleteCommand(),
 		newAffinityUpdatePeersCommand(),
+		newAffinityUpdatePolicyCommand(),
 	)
 	return cmd
 }
@@ -163,6 +164,18 @@ func hasGroupSelector(cmd *cobra.Command) bool {
 	tableID, _ := cmd.Flags().GetUint64("table-id")
 	return tableID != 0 || cmd.Flags().Changed("group-id") ||
 		cmd.Flags().Changed("partition-id") || cmd.Flags().Changed("keyspace-id")
+}
+
+func newAffinityUpdatePolicyCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "policy",
+		Short: "set the balance policy for a specific affinity group",
+		Args:  cobra.NoArgs,
+		RunE:  affinityUpdatePolicyCommandFunc,
+	}
+	cmd.Flags().String("balance-policy", "", "balance policy: auto or fixed")
+	_ = cmd.MarkFlagRequired("balance-policy")
+	return cmd
 }
 
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) error {
@@ -403,6 +416,24 @@ func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) error {
 	state, err := PDCli.UpdateAffinityGroupPeers(cmd.Context(), groupID, leader, voters)
 	if err != nil {
 		return errors.Annotate(err, "failed to update affinity group peers")
+	}
+	jsonPrint(cmd, state)
+	return nil
+}
+
+func affinityUpdatePolicyCommandFunc(cmd *cobra.Command, _ []string) error {
+	groupID, err := getGroupID(cmd, false)
+	if err != nil {
+		return err
+	}
+
+	policy, _ := cmd.Flags().GetString("balance-policy")
+	if policy != string(affinity.BalancePolicyAuto) && policy != string(affinity.BalancePolicyFixed) {
+		return errors.Errorf("balance-policy must be %q or %q", affinity.BalancePolicyAuto, affinity.BalancePolicyFixed)
+	}
+	state, err := PDCli.UpdateAffinityGroupPolicy(cmd.Context(), groupID, policy)
+	if err != nil {
+		return errors.Annotate(err, "failed to update affinity group balance policy")
 	}
 	jsonPrint(cmd, state)
 	return nil

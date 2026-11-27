@@ -47,14 +47,15 @@ type GroupTargetsRequest struct {
 	Targets []GroupTarget `json:"targets"`
 }
 
-// GroupTargetsResponse lists targets committed or already stored.
+// GroupTargetsResponse lists confirmed writes and targets that need a newer policy revision.
 type GroupTargetsResponse struct {
-	WrittenGroupIDs []string `json:"written_group_ids"`
+	WrittenGroupIDs        []string `json:"written_group_ids"`
+	PolicyMismatchGroupIDs []string `json:"policy_mismatch_group_ids,omitempty"`
 }
 
 // TargetWriter persists targets in PD. The watcher publishes them locally.
 type TargetWriter interface {
-	WriteGroupTargets(context.Context, []GroupTarget) ([]string, error)
+	WriteGroupTargets(context.Context, []GroupTarget) (GroupTargetsResponse, error)
 }
 
 // SetTargetWriter configures an MCS Manager before it is used.
@@ -67,26 +68,26 @@ func (m *Manager) SetTargetWriter(w TargetWriter) {
 // cannot save a changed target, but an already stored result is still confirmed.
 // Cancellation of ctx or the Manager context stops further work. The returned
 // IDs include targets confirmed before cancellation or another error.
-func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []GroupTarget) ([]string, error) {
+func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 	if len(targets) == 0 {
-		return nil, errs.ErrEmptyRequest.FastGenByArgs("no targets provided")
+		return GroupTargetsResponse{}, errs.ErrEmptyRequest.FastGenByArgs("no targets provided")
 	}
 	adjusted := make([]GroupTarget, 0, len(targets))
 	seen := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
 		if _, ok := seen[target.Expected.ID]; ok {
-			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("duplicate group " + target.Expected.ID)
+			return GroupTargetsResponse{}, errs.ErrAffinityGroupContent.FastGenByArgs("duplicate group " + target.Expected.ID)
 		}
 		seen[target.Expected.ID] = struct{}{}
 		if target.ExpectedModRevision < 0 {
-			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("expected modification revision must be non-negative")
+			return GroupTargetsResponse{}, errs.ErrAffinityGroupContent.FastGenByArgs("expected modification revision must be non-negative")
 		}
 		// Group creation permits an entirely unset target.
 		if target.LeaderStoreID == 0 && len(target.VoterStoreIDs) == 0 {
-			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
+			return GroupTargetsResponse{}, errs.ErrAffinityGroupContent.FastGenByArgs("leader store ID and voter store IDs must be provided")
 		}
 		if err := validateGroupStructure(&Group{ID: target.Expected.ID, LeaderStoreID: target.LeaderStoreID, VoterStoreIDs: target.VoterStoreIDs}); err != nil {
-			return nil, err
+			return GroupTargetsResponse{}, err
 		}
 		target.Expected.VoterStoreIDs = sortedStoreIDs(target.Expected.VoterStoreIDs)
 		target.VoterStoreIDs = sortedStoreIDs(target.VoterStoreIDs)
@@ -97,35 +98,42 @@ func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []Grou
 	stop := context.AfterFunc(m.ctx, cancel)
 	defer stop()
 
-	written := make([]string, 0, len(adjusted))
+	resp := GroupTargetsResponse{WrittenGroupIDs: make([]string, 0, len(adjusted))}
 	for _, target := range adjusted {
 		// The Manager's AfterFunc runs asynchronously.
 		if m.ctx.Err() != nil {
 			cancel()
 		}
 		if err := ctx.Err(); err != nil {
-			return written, err
+			return resp, err
 		}
-		ok, err := m.updateGroupTarget(ctx, target)
+		written, policyMismatch, err := m.updateGroupTarget(ctx, target)
 		if err != nil {
-			return written, err
+			return resp, err
 		}
-		if ok {
-			written = append(written, target.Expected.ID)
+		if written {
+			resp.WrittenGroupIDs = append(resp.WrittenGroupIDs, target.Expected.ID)
+		} else if policyMismatch {
+			resp.PolicyMismatchGroupIDs = append(resp.PolicyMismatchGroupIDs, target.Expected.ID)
 		}
 	}
-	return written, nil
+	return resp, nil
 }
 
-func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bool, error) {
+func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (written, policyMismatch bool, err error) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
+	return m.updateGroupTargetLocked(ctx, target, false)
+}
+
+// updateGroupTargetLocked requires metaMutex to serialize metadata changes.
+func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarget, confirmBeforeScan bool) (written, policyMismatch bool, err error) {
 	failpoint.InjectCall("afterLockGroupTarget")
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return false, false, err
 	}
 	if err := m.ctx.Err(); err != nil {
-		return false, err
+		return false, false, err
 	}
 	m.RLock()
 	initialGroup := m.groups[target.Expected.ID]
@@ -136,8 +144,7 @@ func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bo
 	m.RUnlock()
 
 	var stored *Group
-	written := false
-	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+	err = m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
 		value, revision, err := m.storage.LoadAffinityGroupInTxn(txn, target.Expected.ID)
 		if err != nil || value == "" {
 			return err
@@ -164,32 +171,54 @@ func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (bo
 			if err := m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs); err != nil {
 				return nil
 			}
+			result.BalancePolicy = group.BalancePolicy
 			if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
 				return err
 			}
 			stored, written = result, true
+		case group.CreateTimestamp == target.Expected.CreateTimestamp &&
+			sameGroupTarget(group, &target.Expected) &&
+			group.BalancePolicy != target.Expected.BalancePolicy &&
+			(!group.BalancePolicy.IsFixed() || !group.hasTarget()):
+			// A fixed policy pins existing peers but still allows an empty group to learn them.
+			m.RLock()
+			current := m.groups[group.ID]
+			conflict := current != nil && current.rangeConflict
+			m.RUnlock()
+			policyMismatch = !conflict && m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs) == nil
 		}
 		return nil
 	})
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if stored != nil {
 		m.Lock()
 		if group, ok := m.groups[stored.ID]; ok {
-			// A retry can restore a healthy persisted target. Sync handles
-			// confirmation of local targets.
 			changed := m.syncGroupTargetLocked(group, stored)
-			if written && !changed && !group.IsAvailable() && m.storeConditionsKnown &&
-				group == initialGroup && group.AffinityVer == initialVer &&
+			group = m.groups[stored.ID]
+			if written && group == initialGroup &&
 				m.checkHasUnavailableStoreLocked(group.LeaderStoreID, group.VoterStoreIDs) == nil {
-				m.setTargetAvailabilityLocked(group)
-				m.resetCountLocked(group)
+				switch {
+				case changed && !m.storeConditionsKnown && confirmBeforeScan:
+					// Publish Classic first-win availability with the new affinity version.
+					group.SetAvailability(groupAvailable)
+				case !changed && !group.IsAvailable() && group.AffinityVer == initialVer:
+					prevAvail, prevDeadline := group.GetAvailability(), group.degradedExpiredAt
+					if m.storeConditionsKnown {
+						m.setTargetAvailabilityLocked(group)
+					} else if confirmBeforeScan {
+						group.SetAvailability(groupAvailable)
+					}
+					if group.GetAvailability() != prevAvail || group.degradedExpiredAt != prevDeadline {
+						m.resetCountLocked(group)
+					}
+				}
 			}
 		}
 		m.Unlock()
 	}
-	return written, nil
+	return written, policyMismatch, nil
 }
 
 func (t *GroupTarget) result() *Group {
@@ -203,9 +232,23 @@ func (t *GroupTarget) result() *Group {
 // existing second-resolution creation timestamp cannot distinguish same-ID
 // recreations within one second.
 func sameStoredGroup(a, b *Group) bool {
+	return sameGroupTarget(a, b) && sameBalancePolicy(a.BalancePolicy, b.BalancePolicy)
+}
+
+func sameGroupTarget(a, b *Group) bool {
 	return a.ID == b.ID && a.CreateTimestamp == b.CreateTimestamp &&
 		a.LeaderStoreID == b.LeaderStoreID &&
 		slices.Equal(sortedStoreIDs(a.VoterStoreIDs), sortedStoreIDs(b.VoterStoreIDs))
+}
+
+func sameBalancePolicy(a, b BalancePolicy) bool {
+	if a == "" {
+		a = BalancePolicyAuto
+	}
+	if b == "" {
+		b = BalancePolicyAuto
+	}
+	return a == b
 }
 
 func sortedStoreIDs(ids []uint64) []uint64 {

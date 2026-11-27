@@ -107,6 +107,13 @@ type Group struct {
 	LeaderStoreID uint64 `json:"leader_store_id,omitempty"`
 	// VoterStoreIDs indicates which stores Voters should be on.
 	VoterStoreIDs []uint64 `json:"voter_store_ids,omitempty"`
+	// BalancePolicy controls whether balancing or first-win may change the target.
+	// An empty value is treated as auto for backward compatibility.
+	BalancePolicy BalancePolicy `json:"balance_policy,omitempty"`
+}
+
+func (g *Group) hasTarget() bool {
+	return g.LeaderStoreID != 0 || len(g.VoterStoreIDs) > 0
 }
 
 func (g *Group) String() string {
@@ -191,6 +198,8 @@ type runtimeGroupInfo struct {
 	// Manager.RWMutex protects the confirmation, which stays set until
 	// metadata reconciliation even if availability or range changes advance AffinityVer.
 	lastSentWritten bool
+	// Block further writes at the stale revision until the watcher catches up.
+	lastSentPolicyMismatch bool
 	// persistedGroup holds the last stored group while Group holds a local target.
 	// It is nil when Group itself holds the stored target.
 	persistedGroup *Group
@@ -201,7 +210,7 @@ type runtimeGroupInfo struct {
 	availability groupAvailability
 	// degradedExpiredAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
 	degradedExpiredAt uint64
-	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
+	// AffinityVer tracks changes to Region affinity; policy-only updates preserve it.
 	AffinityVer uint64
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
 	AffinityRegionCount int
@@ -235,6 +244,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		CreateTimestamp:           g.CreateTimestamp,
 		LeaderStoreID:             g.LeaderStoreID,
 		VoterStoreIDs:             slices.Clone(g.VoterStoreIDs),
+		BalancePolicy:             g.BalancePolicy,
 		RegularSchedulingAllowed:  g.IsRegularSchedulingAllowed(),
 		AffinitySchedulingAllowed: affinitySchedulingAllowed,
 		Phase:                     phase,
@@ -352,6 +362,9 @@ func validateGroupStructure(g *Group) error {
 	if err := ValidateGroupID(g.ID); err != nil {
 		return err
 	}
+	if err := validateBalancePolicy(g.BalancePolicy); err != nil {
+		return err
+	}
 	// If no distribution is provided, we will use the default distribution.
 	if g.LeaderStoreID == 0 && len(g.VoterStoreIDs) == 0 {
 		return nil
@@ -369,6 +382,15 @@ func validateGroupStructure(g *Group) error {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("leader must be in voter stores")
 	}
 	return nil
+}
+
+func validateBalancePolicy(policy BalancePolicy) error {
+	switch policy {
+	case "", BalancePolicyAuto, BalancePolicyFixed:
+		return nil
+	default:
+		return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("invalid balance policy %q", policy))
+	}
 }
 
 // GroupKeyRanges represents key ranges with group id.
