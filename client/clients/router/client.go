@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/client/pkg/batch"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/retry"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
@@ -842,6 +843,10 @@ func (c *Cli) processRequestsInner(
 	queryReq := buildQueryRegionRequest(c.svcDiscovery.GetClusterID(), requests)
 	start := time.Now()
 	if err := send(queryReq); err != nil {
+		err = grpcutil.ResolveStreamSendError(err, func() error {
+			_, err := recv()
+			return err
+		})
 		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return nil, err
 	}
