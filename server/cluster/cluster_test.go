@@ -1800,6 +1800,29 @@ func TestRegionFlowChanged(t *testing.T) {
 	re.Equal(uint64(1000), newRegion.GetBytesRead())
 }
 
+func TestRegionReadCPUChanged(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+
+	for _, readCPU := range []uint64{0, 300, 150, 0} {
+		heartbeat := &pdpb.RegionHeartbeatRequest{
+			Region:   region.GetMeta(),
+			Leader:   region.GetLeader(),
+			CpuStats: &pdpb.CPUStats{UnifiedRead: readCPU},
+		}
+		re.NoError(cluster.HandleRegionHeartbeat(core.RegionFromHeartbeat(heartbeat, 0)))
+		re.Equal(readCPU, cluster.GetRegion(region.GetID()).GetReadCPUUsage())
+	}
+	// Only the initial heartbeat adds region metadata to the follower sync queue.
+	re.Len(cluster.changedRegions, 1)
+}
+
 func TestRegionSizeChanged(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
