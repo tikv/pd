@@ -376,7 +376,15 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 func (c *tsoServiceDiscovery) updateMemberWithBackoff(
 	oldPrimaryURL string, maxInterval time.Duration, maxRetryTimes int,
 ) error {
+	failpoint.InjectContext(c.ctx, "beforeTSOMemberUpdate", func() {})
+	firstAttempt := true
 	return execWithBackoff(c.ctx, maxInterval, maxRetryTimes, func() error {
+		failpoint.InjectContext(c.ctx, "tsoPrimaryNotReady", func() {
+			if firstAttempt {
+				firstAttempt = false
+				failpoint.Return(errors.New("injected TSO primary not ready"))
+			}
+		})
 		err := c.updateMember()
 		// Another caller, such as the background check loop, may find the new primary while
 		// the servers queried here still miss it, so stop once the primary has switched.
