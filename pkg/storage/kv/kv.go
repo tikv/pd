@@ -130,9 +130,8 @@ type Txn interface {
 	BaseReadWrite
 }
 
-// RevisionTxn is a transaction that can guard a point read by the key's mod revision
-// instead of its value. It avoids copying a large value into the commit request and
-// detects same-value rewrites as conflicts.
+// RevisionTxn returns a key's modification revision alongside its value.
+// On etcd, both Txn.Load and RevisionTxn.LoadWithRevision check the key's ModRevision at commit time.
 type RevisionTxn interface {
 	Txn
 	// LoadWithRevision returns the value and its mod revision, or revision zero if absent.
@@ -168,22 +167,20 @@ type Base interface {
 	// This is a highly-simplified transaction interface. As
 	// etcd's transaction API is quite limited, it's hard to use it
 	// to provide a complete transaction model as how a normal database
-	// does. When this API is running on etcd backend, each read on
-	// `txn` implicitly constructs a condition.
+	// does.
 	// (ref: https://etcd.io/docs/v3.5/learning/api/#transaction)
-	// When reading a range using `LoadRange`, for each key found in the
-	// range there will be a condition constructed. Be aware of the
-	// possibility of causing phantom read.
+	// On etcd, Load and LoadRange compare the ModRevision of each
+	// returned key at commit time. They detect value changes, same-value
+	// rewrites, and changes that restore the original value (ABA).
+	// If Load finds a key missing, it checks CreateRevision == 0 at commit
+	// time. LoadRange checks only the keys it returns, so phantom reads
+	// are possible.
 	// RunInTxn may not suit all use cases. When RunInTxn is found
 	// improper to use, require RawTxnCapable explicitly and use
 	// CreateRawTxn instead.
 	//
 	// Note that transaction are not committed until RunInTxn returns nil.
 	// Note:
-	// 1. Load and LoadRange operations provides only stale read.
-	// Values saved/ removed during transaction will not be immediately
-	// observable in the same transaction.
-	// 2. Only when storage is etcd, does RunInTxn checks that
-	// values loaded during transaction has not been modified before commit.
+	// Load and LoadRange do not see writes buffered by the same transaction.
 	RunInTxn(ctx context.Context, f func(txn Txn) error) error
 }
