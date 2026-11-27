@@ -1020,8 +1020,10 @@ func TestRevertChain(t *testing.T) {
 					p.opt.WorkBudget = c.limit
 				}
 				// Re-entry after stopping must not process another trial.
+				score := best
 				for range 2 {
-					require.Equal(t, best, p.revert(origV, origL, voters, leaders))
+					score = p.revert(origV, origL, voters, leaders, score)
+					require.Equal(t, best, score)
 					require.Equal(t, reason, p.stop)
 					require.Equal(t, c.trials, p.visits)
 					require.Equal(t, c.work, p.work) // Rejected trials restore four load entries.
@@ -1054,7 +1056,7 @@ func TestRevertRestoresRuleAssignment(t *testing.T) {
 	p.move(g, []int{1, 3}, 1)
 	g.curRule = []int{0, 1}
 	voters, leaders := p.layout()
-	require.Equal(t, Score{2, 1}, p.revert(origV, origL, voters, leaders))
+	require.Equal(t, Score{2, 1}, p.revert(origV, origL, voters, leaders, p.score()))
 	require.Equal(t, []int{2, 0}, g.cur)
 	require.Equal(t, []int{1, 0}, g.curRule)
 }

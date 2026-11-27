@@ -251,9 +251,9 @@ func Plan(in *Input, opt Options) Result {
 		return res
 	}
 	origV, origL := p.layout()
-	fastV, fastL, _ := p.greedy(opt.Seed)
+	fastV, fastL, fastScore := p.greedy(opt.Seed)
 	res.Stop = StopGreedy
-	res.Score = p.revert(origV, origL, fastV, fastL)
+	res.Score = p.revert(origV, origL, fastV, fastL, fastScore)
 	res.Score.Leader += p.chainLeaders(fastL)
 	if p.stop != "" {
 		res.Stop = p.stop
@@ -508,21 +508,6 @@ func (p *planner) layout() ([][]int, []int) {
 	return voters, leaders
 }
 
-func (p *planner) setLayout(voters [][]int, leaders []int) {
-	for i := range p.gs {
-		g := &p.gs[i]
-		for _, s := range g.cur {
-			p.v[s]--
-		}
-		p.l[g.lead]--
-		g.cur, g.lead = slices.Clone(voters[i]), leaders[i]
-		for _, s := range g.cur {
-			p.v[s]++
-		}
-		p.l[g.lead]++
-	}
-}
-
 // stopped reports cancellation or an exhausted work budget.
 func (p *planner) stopped() bool {
 	if p.stop == "" {
@@ -536,7 +521,8 @@ func (p *planner) stopped() bool {
 }
 
 // greedy runs the source-ordered complete-target sweeps from the working
-// layout and returns the final layout without discarding tie-break improvements.
+// layout. It keeps the final layout installed, including tie-break improvements,
+// and returns a snapshot and its exact score even if the search stops early.
 // Groups with different candidate stores may stop at a local optimum;
 // see #11502.
 func (p *planner) greedy(seed uint64) ([][]int, []int, Score) {
@@ -733,15 +719,15 @@ func (p *planner) runTargetCheck(g *groupState, voters []int, leader int) Target
 
 // revert restores the original target of every changed group whose change is
 // not needed for the planned score, so fewer groups are rewritten and moved.
+// voters, leaders, and cur describe the installed layout and are updated
+// as reverts are accepted. The updated score is returned.
 // Later visits may make an earlier change unnecessary. It repeats until a
 // pass reverts nothing; every other pass reverts at least one group, so it ends.
 // Trials share the search's cancellation and work budget. A cutoff keeps the
 // last accepted layout, whose score is never worse than the greedy layout.
 // A reverted group also gets the rule assignment of its input target back,
 // which chainLeaders reads.
-func (p *planner) revert(origV [][]int, origL []int, voters [][]int, leaders []int) Score {
-	p.setLayout(voters, leaders)
-	cur := p.score()
+func (p *planner) revert(origV [][]int, origL []int, voters [][]int, leaders []int, cur Score) Score {
 	if p.stopped() {
 		return cur
 	}
