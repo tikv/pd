@@ -413,6 +413,117 @@ func TestAffinityGroupWatcherReloadsAfterCompaction(t *testing.T) {
 	failpointEnabled = false
 }
 
+func TestAffinityWatcherSkipsEventsBeforePDConfirmation(t *testing.T) {
+	re := require.New(t)
+	ctx, client, _ := prepare(t)
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	const checkInterval = "github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval"
+	re.NoError(failpoint.Enable(checkInterval, "return(true)"))
+	defer func() { re.NoError(failpoint.Disable(checkInterval)) }()
+
+	stores := core.NewStoresInfo()
+	for id := uint64(1); id <= 3; id++ {
+		stores.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, NodeState: metapb.NodeState_Serving}, core.SetLastHeartbeatTS(time.Now())))
+	}
+	newManager := func(store *endpoint.StorageEndpoint) *affinity.Manager {
+		labels, err := labeler.NewRegionLabeler(ctx, store, time.Hour)
+		re.NoError(err)
+		manager, err := affinity.NewManager(ctx, store, stores, mockconfig.NewTestOptions(), labels)
+		re.NoError(err)
+		return manager
+	}
+	group := makeTestGroup("confirmed", 1, []uint64{1, 2, 3})
+	key := keypath.AffinityGroupPath(group.ID)
+	re.NoError(putGroup(ctx, client, group))
+	resp, err := client.Get(ctx, key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	mcs := newManager(endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil))
+	watcher := &Watcher{affinityManager: mcs}
+	re.NoError(watcher.applyGroupPut(resp.Kvs[0]))
+	testutil.Eventually(re, func() bool { return mcs.GetAffinityGroupState(group.ID).AffinitySchedulingAllowed })
+	mcs.ExpireAffinityGroup(group.ID)
+
+	// Consume the actual etcd watch events after delivering PD's confirmation.
+	events := client.Watch(ctx, key, clientv3.WithRev(resp.Header.Revision+1))
+	group.LeaderStoreID = 3
+	re.NoError(putGroup(ctx, client, group))
+	_, err = client.Delete(ctx, key)
+	re.NoError(err)
+	group.LeaderStoreID = 2
+	re.NoError(putGroup(ctx, client, group))
+	stored, err := client.Get(ctx, key)
+	re.NoError(err)
+	re.Len(stored.Kvs, 1)
+	pd := newManager(endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil))
+
+	const barrierID = "sender-barrier"
+	barrier := make(chan struct{})
+	reply := make(chan affinity.GroupTargetsResponse, 1)
+	allowReply := make(chan struct{})
+	mcs.SyncGroupFromEtcd(&affinity.Group{ID: barrierID})
+	mcs.SetTargetWriter(targetWriterFunc(func(ctx context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
+		if targets[0].Expected.ID == barrierID {
+			close(barrier)
+			return affinity.GroupTargetsResponse{}, nil
+		}
+		result, err := pd.UpdateAffinityGroupTargets(ctx, targets)
+		reply <- result
+		select {
+		case <-allowReply:
+		case <-ctx.Done():
+		}
+		return result, err
+	}))
+	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[1])
+	mcs.ObserveAvailableRegion(region, mcs.GetAffinityGroupState(group.ID))
+	select {
+	case result := <-reply:
+		re.Equal([]string{group.ID}, result.WrittenGroupIDs)
+		re.Equal(stored.Kvs[0].ModRevision, result.WrittenRevisions[group.ID])
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the target confirmation")
+	}
+	mcs.ObserveAvailableRegion(region, mcs.GetAffinityGroupState(barrierID))
+	close(allowReply)
+	select {
+	case <-barrier:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the sender to process the confirmation")
+	}
+
+	for applied := 0; applied < 3; {
+		select {
+		case batch := <-events:
+			re.NoError(batch.Err())
+			for _, event := range batch.Events {
+				if event.Type == clientv3.EventTypeDelete {
+					re.NoError(watcher.applyGroupDelete(event.Kv))
+				} else {
+					re.NoError(watcher.applyGroupPut(event.Kv))
+				}
+				state := mcs.GetAffinityGroupState(group.ID)
+				re.NotNil(state)
+				if event.Kv.ModRevision < stored.Kvs[0].ModRevision {
+					re.Equal(uint64(1), state.LeaderStoreID)
+					re.False(state.AffinitySchedulingAllowed)
+				} else {
+					re.Equal(*group, state.Group)
+					re.True(state.AffinitySchedulingAllowed)
+				}
+				applied++
+			}
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for the affinity watch events")
+		}
+	}
+	after, err := client.Get(ctx, key)
+	re.NoError(err)
+	re.Equal(stored.Kvs, after.Kvs, "confirming an already stored target must not rewrite it")
+}
+
 func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 	re := require.New(t)
 	ctx, client, _ := prepare(t)

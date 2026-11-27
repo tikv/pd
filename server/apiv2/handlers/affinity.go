@@ -463,7 +463,7 @@ func UpdateAffinityGroupPolicy(c *gin.Context) {
 //	@Description	Each target commits independently, so an HTTP 500 on a later target leaves earlier commits in place.
 //	@Param			body	body	affinity.GroupTargetsRequest	true	"Targets with the groups they were decided from"
 //	@Produce		json
-//	@Success		200	{object}	affinity.GroupTargetsResponse	"IDs of groups whose targets were newly written or already stored with the requested peers"
+//	@Success		200	{object}	affinity.GroupTargetsResponse	"IDs and watch revision bounds of groups whose targets were newly written or already stored"
 //	@Failure		400	{string}	string							"The input is invalid."
 //	@Failure		500	{string}	string							"PD server failed to proceed the request."
 //	@Router			/affinity-groups/targets [post]
@@ -480,12 +480,14 @@ func UpdateAffinityGroupTargets(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	resp, err := manager.UpdateAffinityGroupTargets(c.Request.Context(), req.Targets)
-	if handleAffinityError(c, err) {
+	result, err := manager.UpdateAffinityGroupTargets(c.Request.Context(), req.Targets)
+	if err != nil {
+		result.Error = err.Error()
+		c.AbortWithStatusJSON(affinityErrorStatus(err), &result)
 		return
 	}
 
-	c.IndentedJSON(http.StatusOK, &resp)
+	c.IndentedJSON(http.StatusOK, &result)
 }
 
 // DeleteAffinityGroup deletes a specific affinity group by group id.
@@ -605,22 +607,26 @@ func handleAffinityError(c *gin.Context, err error) bool {
 	if err == nil {
 		return false
 	}
+	c.AbortWithStatusJSON(affinityErrorStatus(err), err.Error())
+	return true
+}
+
+func affinityErrorStatus(err error) int {
 	switch {
 	case errs.ErrAffinityGroupNotFound.Equal(err):
-		c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		return http.StatusNotFound
 	case errs.ErrAffinityGroupContent.Equal(err),
 		errs.ErrInvalidGroupID.Equal(err),
 		errs.ErrEmptyRequest.Equal(err),
 		errs.ErrAffinityGroupConflict.Equal(err),
 		errs.ErrInvalidKeyFormat.Equal(err):
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return http.StatusBadRequest
 	case errs.ErrAffinityGroupExist.Equal(err):
-		c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+		return http.StatusConflict
 	default:
 		// such as ErrAffinityInternal
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return http.StatusInternalServerError
 	}
-	return true
 }
 
 // validateKeyRange checks the endpoints of a range in a create, add, or remove request.

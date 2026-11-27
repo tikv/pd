@@ -200,6 +200,10 @@ type runtimeGroupInfo struct {
 	lastSentWritten bool
 	// Block further writes at the stale revision until the watcher catches up.
 	lastSentPolicyMismatch bool
+	// confirmedRevision is the first etcd revision that can supersede a confirmed target.
+	confirmedRevision int64
+	// awaitingTarget suppresses scheduling while the current peers differ from the confirmed target.
+	awaitingTarget bool
 	// persistedGroup holds the last stored group while Group holds a local target.
 	// It is nil when Group itself holds the stored target.
 	persistedGroup *Group
@@ -337,7 +341,7 @@ func newDegradedExpiredAtFromNow() uint64 {
 
 // IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
 func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
-	return !g.rangeConflict && g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
+	return !g.awaitingTarget && !g.rangeConflict && g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
 }
 
 // IsRegularSchedulingAllowed indicates whether balance scheduling is allowed.

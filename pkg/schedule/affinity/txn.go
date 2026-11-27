@@ -440,7 +440,7 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 		}
 		// Recheck the persisted target and policy before a classic first-win write.
 		target := GroupTarget{Expected: group.Group, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
-		if _, _, err := m.updateGroupTargetLocked(m.ctx, target, true); err != nil {
+		if _, _, _, err := m.updateGroupTargetLocked(m.ctx, target, true); err != nil {
 			return nil, err
 		}
 		return m.GetAffinityGroupState(groupID), nil
@@ -467,6 +467,8 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 	defer m.Unlock()
 	groupInfo := m.groups[groupID]
 	groupInfo.lastSentWritten = false
+	groupInfo.confirmedRevision = 0
+	groupInfo.awaitingTarget = false
 	delete(m.sendingTargets, groupID)
 	changed := m.syncGroupTargetLocked(groupInfo, &group.Group)
 	groupInfo = m.groups[groupID]

@@ -39,6 +39,11 @@ type observedTarget struct {
 	localOnly    bool // recover the stored target without sending a write
 }
 
+type inFlightTarget struct {
+	observedTarget
+	deleteRevision int64
+}
+
 // matches checks the observation against the current group under Manager.RWMutex.
 func (obs *observedTarget) matches(group *runtimeGroupInfo) bool {
 	// A recreated group can reuse the same creation timestamp and affinity version.
@@ -103,13 +108,8 @@ func (m *Manager) sendObservedTarget(obs observedTarget) {
 	m.RUnlock()
 	now := time.Now()
 	retrying := now.Before(m.targetWriteRetryAt)
-	if retrying && m.targetEndpointUnsupported {
-		if current && !obs.persistOnly {
-			m.applyLocalObservedTarget(&obs)
-		}
-		return
-	}
-	if !current || m.ctx.Err() != nil || retrying || group.lastSentPolicyMismatch {
+	coolingDown := now.Before(m.targetEndpointUnsupportedUntil)
+	if !current || m.ctx.Err() != nil || (retrying && !coolingDown) || group.lastSentPolicyMismatch {
 		return
 	}
 
@@ -118,7 +118,7 @@ func (m *Manager) sendObservedTarget(obs observedTarget) {
 		m.pendingTargets[id] = nil
 		queued = nil
 	}
-	if sending, ok := m.sendingTargets[id]; ok && obs.sameCandidate(sending) {
+	if sending, ok := m.sendingTargets[id]; ok && obs.sameCandidate(sending.observedTarget) {
 		return
 	}
 	if lastSent := group.lastSentTarget; now.Before(group.targetSendAfter) && lastSent != nil && obs.sameCandidate(*lastSent) {
@@ -154,7 +154,7 @@ func (m *Manager) enqueueObservedTarget(queued []observedTarget, obs observedTar
 // stored targets locally as soon as they reach the front of their queue. It
 // takes at most one HTTP candidate per group and returns the next cooldown deadline.
 // Caller holds metaMutex and targetWriteMutex.
-func (m *Manager) popObservedTargets(now time.Time) ([]observedTarget, time.Time) {
+func (m *Manager) popObservedTargets(now time.Time, coolingDown bool) ([]observedTarget, time.Time) {
 	batch := make([]observedTarget, 0, min(maxTargetBatchSize, len(m.pendingTargetIDs)))
 	var retryAt time.Time
 	m.Lock()
@@ -170,8 +170,10 @@ func (m *Manager) popObservedTargets(now time.Time) ([]observedTarget, time.Time
 			switch {
 			case !obs.matches(group) || group.lastSentWritten:
 				queued = nil
-			case obs.localOnly:
-				m.applyLocalObservedTargetLocked(&obs)
+			case obs.localOnly || coolingDown:
+				if !obs.persistOnly {
+					m.applyLocalObservedTargetLocked(&obs)
+				}
 				queued = slices.Delete(queued, 0, 1)
 				continue
 			case !obs.persistOnly && m.checkHasUnavailableStoreLocked(obs.target.LeaderStoreID, obs.target.VoterStoreIDs) != nil:
@@ -207,7 +209,8 @@ func (m *Manager) drainObservedTargets() {
 		m.targetWriteMutex.Lock()
 		m.targetDrainWake = nil
 		now := time.Now()
-		if m.ctx.Err() != nil || now.Before(m.targetWriteRetryAt) {
+		coolingDown := now.Before(m.targetEndpointUnsupportedUntil)
+		if m.ctx.Err() != nil || (now.Before(m.targetWriteRetryAt) && !coolingDown) {
 			clear(m.pendingTargets)
 			m.pendingTargetIDs = nil
 			m.targetDrainRunning = false
@@ -215,7 +218,7 @@ func (m *Manager) drainObservedTargets() {
 			m.metaMutex.Unlock()
 			return
 		}
-		batch, retryAt := m.popObservedTargets(now)
+		batch, retryAt := m.popObservedTargets(now, coolingDown)
 		if len(batch) == 0 {
 			if retryAt.IsZero() {
 				m.targetDrainRunning = false
@@ -237,92 +240,116 @@ func (m *Manager) drainObservedTargets() {
 			continue
 		}
 		if m.sendingTargets == nil {
-			m.sendingTargets = make(map[string]observedTarget, maxTargetBatchSize)
+			m.sendingTargets = make(map[string]inFlightTarget, maxTargetBatchSize)
 		}
 		targets := make([]GroupTarget, len(batch))
 		for i, obs := range batch {
 			targets[i] = obs.target
-			m.sendingTargets[obs.target.Expected.ID] = obs
+			m.sendingTargets[obs.target.Expected.ID] = inFlightTarget{observedTarget: obs}
 		}
 		m.targetWriteMutex.Unlock()
 		m.metaMutex.Unlock()
 
-		resp, err := m.targetWriter.WriteGroupTargets(m.ctx, targets)
+		response, err := m.targetWriter.WriteGroupTargets(m.ctx, targets)
 		unsupported := errors.Is(err, ErrTargetWriterUnsupported)
 		notReady := errors.Is(err, ErrTargetWriterNotReady)
 
 		m.metaMutex.Lock()
 		m.targetWriteMutex.Lock()
 		finish := time.Now()
-		m.targetEndpointUnsupported = unsupported
-		if err == nil {
+		if err == nil || len(response.WrittenGroupIDs) != 0 || len(response.PolicyMismatchGroupIDs) != 0 {
 			// PD can skip individual targets in a successful response. Keep any
 			// remaining candidates queued for after the cooldown.
 			m.Lock()
+			written := make(map[string]struct{}, len(response.WrittenGroupIDs))
+			for _, id := range response.WrittenGroupIDs {
+				written[id] = struct{}{}
+			}
 			for _, obs := range batch {
 				id := obs.target.Expected.ID
-				if _, ok := m.sendingTargets[id]; !ok {
-					continue // the group reconciled while the request was in flight
+				sending, ok := m.sendingTargets[id]
+				if !ok {
+					continue // a local update superseded the in-flight request
 				}
-				obs.groupInfoPtr.lastSentTarget = &obs
-				obs.groupInfoPtr.lastSentWritten = slices.Contains(resp.WrittenGroupIDs, id)
-				obs.groupInfoPtr.lastSentPolicyMismatch = slices.Contains(resp.PolicyMismatchGroupIDs, id)
-				if obs.groupInfoPtr.lastSentPolicyMismatch {
-					if queued := m.pendingTargets[id]; len(queued) > 0 && queued[0].matches(obs.groupInfoPtr) {
+				_, confirmed := written[id]
+				revision := response.WrittenRevisions[id]
+				group := m.groups[id]
+				if confirmed && revision > 0 {
+					if !m.protectConfirmedTarget(&obs.target, revision, sending.deleteRevision) {
+						continue
+					}
+				} else if group != obs.groupInfoPtr || group.modRevision != obs.target.ExpectedModRevision || group.confirmedRevision > 0 {
+					continue
+				}
+				group.lastSentTarget = &obs
+				group.lastSentWritten = confirmed
+				group.lastSentPolicyMismatch = slices.Contains(response.PolicyMismatchGroupIDs, id)
+				if group.lastSentPolicyMismatch {
+					if queued := m.pendingTargets[id]; len(queued) > 0 && queued[0].matches(group) {
 						m.pendingTargets[id] = nil
 					}
 				} else {
-					obs.groupInfoPtr.targetSendAfter = finish.Add(time.Second)
+					group.targetSendAfter = finish.Add(time.Second)
 				}
 			}
 			m.Unlock()
-			clear(m.sendingTargets)
-			shouldReport := m.ctx.Err() == nil
-			m.targetWriteMutex.Unlock()
-			var firstSkippedID string
-			skipped := 0
-			if len(resp.WrittenGroupIDs) < len(targets) {
-				for _, obs := range batch {
-					id := obs.target.Expected.ID
-					if slices.Contains(resp.WrittenGroupIDs, id) || slices.Contains(resp.PolicyMismatchGroupIDs, id) {
-						continue
-					}
-					skipped++
-					if firstSkippedID == "" {
-						firstSkippedID = id
-					}
-					if obs.persistOnly {
-						m.Lock()
-						group := m.groups[id]
-						if group == obs.groupInfoPtr && group.AffinityVer == obs.affinityVer &&
-							group.modRevision == obs.target.ExpectedModRevision && group.persistedGroup != nil {
-							m.applyGroupTargetLocked(group, group.persistedGroup)
+			if err == nil {
+				clear(m.sendingTargets)
+				var firstSkippedID string
+				skipped := 0
+				if len(written) < len(targets) {
+					for _, obs := range batch {
+						id := obs.target.Expected.ID
+						if _, ok := written[id]; ok || slices.Contains(response.PolicyMismatchGroupIDs, id) {
+							continue
 						}
-						m.Unlock()
+						skipped++
+						if firstSkippedID == "" {
+							firstSkippedID = id
+						}
+						if obs.persistOnly {
+							m.Lock()
+							group := m.groups[id]
+							if group == obs.groupInfoPtr && group.AffinityVer == obs.affinityVer &&
+								group.modRevision == obs.target.ExpectedModRevision && group.persistedGroup != nil &&
+								!group.lastSentWritten && group.confirmedRevision == 0 {
+								m.applyGroupTargetLocked(group, group.persistedGroup)
+							}
+							m.Unlock()
+						}
 					}
 				}
+				m.targetWriteMutex.Unlock()
+				m.metaMutex.Unlock()
+				if m.ctx.Err() == nil && firstSkippedID != "" {
+					targetWriteFailureCounter.Add(float64(skipped))
+					log.Warn("skipped affinity group target writes",
+						zap.Int("skipped-count", skipped),
+						zap.Int("group-count", len(targets)),
+						zap.String("sample-group-id", firstSkippedID))
+				}
+				continue
 			}
-			m.metaMutex.Unlock()
-			if shouldReport && skipped > 0 {
-				targetWriteFailureCounter.Add(float64(skipped))
-				log.Warn("skipped affinity group target writes",
-					zap.Int("skipped-count", skipped),
-					zap.Int("group-count", len(targets)),
-					zap.String("sample-group-id", firstSkippedID))
-			}
-			continue
 		}
 
 		clear(m.sendingTargets)
 		m.targetWriteRetryAt = finish.Add(time.Second)
-		var fallback []observedTarget
 		if unsupported {
-			fallback = batch
+			m.recordTargetEndpointUnsupportedLocked(finish)
+			for _, obs := range batch {
+				if !obs.persistOnly {
+					m.applyLocalObservedTarget(&obs)
+				}
+			}
+			m.targetWriteMutex.Unlock()
+			m.metaMutex.Unlock()
+			continue
 		}
-		if unsupported || notReady {
+		var fallback []observedTarget
+		if notReady {
 			for _, id := range m.pendingTargetIDs {
 				for _, obs := range m.pendingTargets[id] {
-					if unsupported || obs.localOnly {
+					if obs.localOnly {
 						fallback = append(fallback, obs)
 					}
 				}
@@ -340,10 +367,22 @@ func (m *Manager) drainObservedTargets() {
 		m.targetWriteMutex.Unlock()
 		m.metaMutex.Unlock()
 		if !unsupported && !notReady && m.ctx.Err() == nil {
-			targetWriteFailureCounter.Add(float64(len(targets)))
+			if unconfirmed := len(targets) - len(response.WrittenGroupIDs) - len(response.PolicyMismatchGroupIDs); unconfirmed > 0 {
+				targetWriteFailureCounter.Add(float64(unconfirmed))
+			}
 			log.Warn("failed to write affinity group targets", zap.Int("group-count", len(targets)), zap.Error(err))
 		}
 		return
+	}
+}
+
+// recordTargetEndpointUnsupportedLocked defers both writers after a 404 and
+// wakes the sender to consider queued candidates locally.
+func (m *Manager) recordTargetEndpointUnsupportedLocked(now time.Time) {
+	m.targetEndpointUnsupportedUntil = now.Add(time.Second)
+	if m.targetDrainWake != nil {
+		close(m.targetDrainWake)
+		m.targetDrainWake = nil
 	}
 }
 
@@ -389,4 +428,31 @@ func (m *Manager) applyLocalObservedTargetLocked(obs *observedTarget) {
 	m.resetCountLocked(groupInfo)
 	obs.affinityVer = groupInfo.AffinityVer
 	obs.persistOnly = groupInfo.persistedGroup != nil
+}
+
+// protectConfirmedTarget fences stale watch events and pauses scheduling while
+// the group's peers differ from the confirmed target. The caller holds all
+// three Manager locks.
+func (m *Manager) protectConfirmedTarget(target *GroupTarget, revision, deletedAt int64) bool {
+	id := target.Expected.ID
+	group := m.groups[id]
+	if group == nil {
+		if revision > max(deletedAt, m.deletedTargetConfirmations[id]) {
+			if m.deletedTargetConfirmations == nil {
+				m.deletedTargetConfirmations = make(map[string]int64)
+			}
+			m.deletedTargetConfirmations[id] = revision
+		}
+		return false
+	}
+	if revision <= max(group.modRevision, group.confirmedRevision) {
+		return false
+	}
+	group.confirmedRevision = revision
+	group.lastSentWritten = true
+	if !sameStoredGroup(&group.Group, target.result()) {
+		group.awaitingTarget = true
+		m.resetCountLocked(group)
+	}
+	return true
 }

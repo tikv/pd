@@ -16,16 +16,19 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/docker/go-units"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -37,11 +40,13 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/apiv2/middlewares"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -1743,6 +1748,17 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 		want := pinned.Group
 		want.LeaderStoreID, want.VoterStoreIDs = 2, []uint64{1, 2, 3}
 		re.Equal(want, mustGetAffinityGroup(re, serverAddr, "targets").Group)
+		client := cluster.GetEtcdClient()
+		ctx := suite.T().Context()
+		stored, err := client.Get(ctx, keypath.AffinityGroupPath("targets"))
+		re.NoError(err)
+		re.Len(stored.Kvs, 1)
+		re.Positive(result.WrittenRevisions["targets"])
+		re.LessOrEqual(result.WrittenRevisions["targets"], stored.Kvs[0].ModRevision)
+
+		result = writeTarget(target)
+		re.Equal([]string{"targets"}, result.WrittenGroupIDs)
+		re.Equal(stored.Kvs[0].ModRevision, result.WrittenRevisions["targets"])
 
 		const scopedID = "_tidb_ks42_t_1001"
 		lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 42)
@@ -1768,5 +1784,42 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 		re.Equal(want, mustGetAffinityGroup(re, serverAddr, "targets").Group)
 
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, endpoint, []byte(`{}`), testutil.Status(re, http.StatusBadRequest)))
+
+		manager, err := cluster.GetLeaderServer().GetServer().GetAffinityManager()
+		re.NoError(err)
+		changes := []affinity.GroupKeyRanges{{GroupID: "cancel-first"}, {GroupID: "cancel-second"}}
+		re.NoError(manager.CreateAffinityGroups(changes))
+		targets := make([]affinity.GroupTarget, 0, len(changes))
+		for _, change := range changes {
+			targets = append(targets, affinity.GroupTarget{
+				Expected:      manager.GetAffinityGroupState(change.GroupID).Group,
+				LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
+			})
+		}
+		data, err := json.Marshal(affinity.GroupTargetsRequest{Targets: targets})
+		re.NoError(err)
+		for _, want := range [][]string{nil, {changes[0].GroupID}} {
+			ctx, cancel := context.WithCancel(suite.T().Context())
+			if len(want) == 0 {
+				cancel()
+			} else {
+				const fp = "github.com/tikv/pd/pkg/schedule/affinity/afterAffinityTargetWritten"
+				re.NoError(failpoint.EnableCall(fp, cancel))
+				defer func() { re.NoError(failpoint.Disable(fp)) }()
+			}
+			response := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(response)
+			c.Request = httptest.NewRequest(http.MethodPost, endpoint, bytes.NewReader(data)).WithContext(ctx)
+			c.Set(middlewares.ServerContextKey, cluster.GetLeaderServer().GetServer())
+			handlers.UpdateAffinityGroupTargets(c)
+			cancel()
+			re.Equal(http.StatusInternalServerError, response.Code)
+			var result affinity.GroupTargetsResponse
+			re.NoError(json.Unmarshal(response.Body.Bytes(), &result))
+			re.Contains(result.Error, "context canceled")
+			re.ElementsMatch(want, result.WrittenGroupIDs)
+			re.Len(result.WrittenRevisions, len(want))
+			re.Zero(manager.GetAffinityGroupState(changes[1].GroupID).LeaderStoreID)
+		}
 	})
 }

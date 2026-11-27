@@ -61,6 +61,9 @@ type Manager struct {
 	// Metadata updates typically hold metaMutex for the whole operation,
 	// and may acquire RWMutex only for the final in-memory update.
 	metaMutex syncutil.Mutex
+	// A DELETE can remove a group while its confirmation is in flight. Keep the
+	// confirmed revision by ID until the watcher recreates or deletes the group.
+	deletedTargetConfirmations map[string]int64
 
 	ctx              context.Context
 	storage          endpoint.AffinityStorage
@@ -71,14 +74,15 @@ type Manager struct {
 	// as in the scheduling service. When it is nil, the Manager writes its own storage.
 	targetWriter TargetWriter
 	// targetWriteMutex protects the queue, backoff, and per-group state for background first-win requests.
-	targetWriteMutex          syncutil.Mutex
-	pendingTargets            map[string][]observedTarget // FIFO candidates by group ID
-	pendingTargetIDs          []string
-	sendingTargets            map[string]observedTarget
-	targetDrainRunning        bool
-	targetDrainWake           chan struct{}
-	targetWriteRetryAt        time.Time
-	targetEndpointUnsupported bool
+	targetWriteMutex               syncutil.Mutex
+	pendingTargets                 map[string][]observedTarget // FIFO candidates by group ID
+	pendingTargetIDs               []string
+	sendingTargets                 map[string]inFlightTarget
+	targetDrainRunning             bool
+	targetDrainWake                chan struct{}
+	targetWriteRetryAt             time.Time
+	targetEndpointUnsupportedUntil time.Time
+	balancingTargets               map[string][]*int64
 
 	// labelRuleVer is increased while holding RWMutex whenever a group's label rule may change.
 	// A lookup reads it before the region labeler and saves its result only if it is unchanged,
@@ -95,6 +99,8 @@ type Manager struct {
 	// storeConditionsGeneration changes when the last group is deleted, so a
 	// scan that started before the deletion cannot publish its results afterward.
 	storeConditionsGeneration uint64
+	balanceTables             map[TableID]*balanceTable
+	lastBalanceVersion        uint64
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	// Validated PD writes cannot introduce conflicts, so they only need to
@@ -133,6 +139,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
 		unavailableStores:   make(map[uint64]storeCondition),
+		balanceTables:       make(map[TableID]*balanceTable),
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 		splitDeniedRegions:  cache.NewCache(splitDeniedRegionLimit, cache.LRUCache),
@@ -202,6 +209,7 @@ func (m *Manager) setGroupLocked(group *Group) {
 	groupInfo.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
 	m.setTargetAvailabilityLocked(groupInfo)
 	m.groups[group.ID] = groupInfo
+	m.touchBalanceTableLocked(group.ID)
 }
 
 func (m *Manager) noGroupsExist(groups []*Group) error {
@@ -239,6 +247,7 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	m.affinityRegionCount -= groupInfo.AffinityRegionCount
 	groupInfo.AffinityRegionCount = 0
 	groupInfo.AffinityVer++
+	m.touchBalanceTableLocked(groupInfo.ID)
 }
 
 // setTargetAvailabilityLocked resets availability and the degradation deadline for a new or replaced target.
@@ -361,6 +370,7 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	m.labelRuleVer.Add(1)
 	m.clearGroupCacheLocked(groupID)
 	delete(m.groups, groupID)
+	m.removeBalanceGroupLocked(groupID)
 	if len(m.groups) == 0 {
 		m.unavailableStores = nil
 		m.storeConditionsKnown = false
@@ -584,12 +594,17 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
+	if modRevision > 0 && modRevision < m.deletedTargetConfirmations[group.ID] {
+		return
+	}
+	delete(m.deletedTargetConfirmations, group.ID)
+
 	// Fast path: avoid taking write lock if nothing changes.
 	m.RLock()
 	existingGroup, exists := m.groups[group.ID]
 	matchesStored := false
 	if exists {
-		if modRevision > 0 && modRevision <= existingGroup.modRevision {
+		if modRevision > 0 && (modRevision <= existingGroup.modRevision || modRevision < existingGroup.confirmedRevision) {
 			m.RUnlock()
 			return
 		}
@@ -623,11 +638,18 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 
 	m.targetWriteMutex.Lock()
 	m.Lock()
+	prevBalanceVer := m.lastBalanceVersion
 	if exists {
-		// An accepted watch event supersedes both confirmed and in-flight writes.
 		existingGroup.lastSentWritten = false
 		existingGroup.lastSentPolicyMismatch = false
-		delete(m.sendingTargets, group.ID)
+		existingGroup.confirmedRevision = 0
+		if existingGroup.awaitingTarget {
+			existingGroup.awaitingTarget = false
+			m.resetCountLocked(existingGroup)
+		}
+		if modRevision == 0 {
+			delete(m.sendingTargets, group.ID)
+		}
 	}
 	switch {
 	case !exists:
@@ -648,6 +670,9 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 	}
 	if modRevision > 0 {
 		m.groups[group.ID].modRevision = modRevision
+		if exists && m.lastBalanceVersion == prevBalanceVer {
+			m.touchBalanceTableLocked(group.ID)
+		}
 	}
 	var revalidate observedTarget
 	if existingGroup := m.groups[group.ID]; exists && existingGroup.persistedGroup != nil && m.targetWriter != nil {
@@ -706,12 +731,16 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		m.groups[group.ID].rangeConflict = groupInfo.rangeConflict
 		return true
 	}
+	policyChanged := groupInfo.BalancePolicy != group.BalancePolicy
 	// Keep an unpersisted local replacement across policy-only updates unless
 	// the update pins a nonempty stored target.
 	if groupInfo.persistedGroup != nil && sameGroupTarget(groupInfo.persistedGroup, group) &&
 		(!group.BalancePolicy.IsFixed() || !group.hasTarget()) {
 		groupInfo.BalancePolicy = group.BalancePolicy
 		groupInfo.persistedGroup.BalancePolicy = group.BalancePolicy
+		if policyChanged {
+			m.touchBalanceTableLocked(groupInfo.ID)
+		}
 		return false
 	}
 
@@ -720,7 +749,11 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 	if (groupInfo.persistedGroup == nil || groupInfo.IsAvailable()) &&
 		sameGroupTarget(&groupInfo.Group, group) && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
 		groupInfo.BalancePolicy = group.BalancePolicy
+		wasUnpersisted := groupInfo.persistedGroup != nil
 		groupInfo.persistedGroup = nil
+		if policyChanged || wasUnpersisted {
+			m.touchBalanceTableLocked(groupInfo.ID)
+		}
 		return false
 	}
 	m.applyGroupTargetLocked(groupInfo, group)
@@ -739,16 +772,36 @@ func (m *Manager) applyGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Gro
 
 // SyncGroupDeleteFromEtcd synchronizes a group deletion from etcd.
 func (m *Manager) SyncGroupDeleteFromEtcd(groupID string) {
+	m.SyncGroupDeleteFromEtcdWithRevision(groupID, 0)
+}
+
+// SyncGroupDeleteFromEtcdWithRevision applies a deletion at its watch or snapshot revision.
+func (m *Manager) SyncGroupDeleteFromEtcdWithRevision(groupID string, revision int64) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
-	delete(m.keyRanges, groupID)
-
+	m.targetWriteMutex.Lock()
+	defer m.targetWriteMutex.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	groupInfo, exists := m.groups[groupID]
+	if revision > 0 && (revision < m.deletedTargetConfirmations[groupID] ||
+		(exists && (revision <= groupInfo.modRevision || revision < groupInfo.confirmedRevision))) {
+		return
+	}
+	delete(m.deletedTargetConfirmations, groupID)
+	delete(m.keyRanges, groupID)
+	sending, inFlight := m.sendingTargets[groupID]
+	if revision == 0 {
+		delete(m.sendingTargets, groupID)
+	} else if inFlight {
+		sending.deleteRevision = max(sending.deleteRevision, revision)
+		m.sendingTargets[groupID] = sending
+	}
+	for _, deletedAt := range m.balancingTargets[groupID] {
+		*deletedAt = max(*deletedAt, revision)
+	}
 	if !exists {
-		log.Warn("affinity group not found during etcd sync delete", zap.String("group-id", groupID))
 		return
 	}
 	// The affinity label watcher may be ahead and have applied the rule of a group
@@ -761,6 +814,39 @@ func (m *Manager) SyncGroupDeleteFromEtcd(groupID string) {
 	}
 	m.deleteGroupLocked(groupID)
 	m.rangeConflictsStale = true
+}
+
+// GroupIDsAwaitingTargetRevision returns groups still awaiting watch events,
+// including groups deleted while a request was in flight. A full snapshot can
+// reconcile their absence if the intervening watch events were compacted.
+func (m *Manager) GroupIDsAwaitingTargetRevision() []string {
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	m.targetWriteMutex.Lock()
+	defer m.targetWriteMutex.Unlock()
+	m.RLock()
+	defer m.RUnlock()
+
+	var ids []string
+	for id, group := range m.groups {
+		if group.confirmedRevision > 0 {
+			ids = append(ids, id)
+		}
+	}
+	for id := range m.deletedTargetConfirmations {
+		ids = append(ids, id)
+	}
+	for id, sending := range m.sendingTargets {
+		if sending.deleteRevision > 0 && m.groups[id] == nil {
+			ids = append(ids, id)
+		}
+	}
+	for id := range m.balancingTargets {
+		if m.groups[id] == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // SyncKeyRangesFromEtcd synchronizes key ranges from a label rule.

@@ -983,7 +983,7 @@ func TestFirstWinRetainsStoredTargetInPatrolOrder(t *testing.T) {
 					calls := slices.Clone(test.calls)
 					test.callsMu.Unlock()
 					test.Equal(want, calls, "the earlier candidate must wait for the cooldown")
-					synctest.Sleep(time.Second)
+					time.Sleep(time.Second)
 					synctest.Wait()
 					want = append(want, second)
 				}
@@ -991,7 +991,7 @@ func TestFirstWinRetainsStoredTargetInPatrolOrder(t *testing.T) {
 				test.Equal(!scenario.stayExpired, recovered.AffinitySchedulingAllowed)
 				test.False(recovered.HasUnpersistedTarget())
 				test.Equal(*stored, recovered.Group)
-				synctest.Sleep(time.Second)
+				time.Sleep(time.Second)
 				synctest.Wait()
 				test.Equal(want, test.calls)
 			})
@@ -1020,6 +1020,79 @@ func TestFirstWinStoreRecoveryWaitsForReconciliation(t *testing.T) {
 		test.True(test.GetAffinityGroupState("g").AffinitySchedulingAllowed)
 		test.Equal(uint64(2), test.GetAffinityGroupState("g").LeaderStoreID)
 	})
+}
+
+func TestRemoteTargetConfirmationRevision(t *testing.T) {
+	for _, path := range []string{"first-win", "balance"} {
+		for _, event := range []string{"after reply", "put before reply", "delete before reply", "newer delete before reply"} {
+			t.Run(path+"/"+event, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					test := newTargetTest(t)
+					initial := Group{ID: "_tidb_ks1_pt_100_p1", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
+					id := initial.ID
+					test.SyncGroupFromEtcdWithRevision(&initial, 10)
+					test.checkGroupsAvailability()
+					if path == "first-win" {
+						test.ExpireAffinityGroup(id)
+					}
+					intermediate := initial
+					intermediate.LeaderStoreID = 3
+					const confirmed = 13
+					test.useWriter(func(_ context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
+						test.Len(targets, 1)
+						test.Equal(int64(10), targets[0].ExpectedModRevision)
+						switch event {
+						case "put before reply":
+							test.SyncGroupFromEtcdWithRevision(&intermediate, 11)
+							test.True(test.GetAffinityGroupState(id).AffinitySchedulingAllowed)
+						case "delete before reply":
+							test.SyncGroupDeleteFromEtcdWithRevision(id, 11)
+							test.Contains(test.GroupIDsAwaitingTargetRevision(), id)
+						case "newer delete before reply":
+							test.SyncGroupDeleteFromEtcdWithRevision(id, 14)
+						}
+						return GroupTargetsResponse{
+							WrittenGroupIDs:  []string{id},
+							WrittenRevisions: map[string]int64{id: confirmed},
+						}, nil
+					})
+					if path == "first-win" {
+						test.observe(id, 2, 1, 3)
+					} else {
+						snapshot := test.GetBalanceSnapshot("_tidb_ks1_pt_100", test.GetBalanceCounts())
+						written, err := test.CommitBalanceTargets(t.Context(), snapshot, []*Group{test.target(id, 2, 1, 2, 3).result()})
+						test.NoError(err)
+						test.Equal([]string{id}, written)
+					}
+					test.Len(test.calls, 1)
+					if event == "newer delete before reply" {
+						test.Nil(test.GetAffinityGroupState(id))
+						test.Empty(test.GroupIDsAwaitingTargetRevision())
+						return
+					}
+					before := test.GetAffinityGroupState(id)
+					test.SyncGroupFromEtcdWithRevision(&intermediate, 12)
+					test.SyncGroupDeleteFromEtcdWithRevision(id, 12)
+					test.Equal(before, test.GetAffinityGroupState(id))
+					if before != nil {
+						test.False(before.AffinitySchedulingAllowed)
+						time.Sleep(time.Second)
+						test.observe(id, 1, 2, 3)
+						test.Len(test.calls, 1, "PD already confirmed the target")
+					}
+					test.SyncGroupFromEtcdWithRevision(test.calls[0].result(), confirmed)
+					test.checkGroupsAvailability()
+					current := test.GetAffinityGroupState(id)
+					test.Equal(int64(confirmed), current.modRevision)
+					test.Equal(uint64(2), current.LeaderStoreID)
+					test.True(current.AffinitySchedulingAllowed)
+					test.SyncGroupDeleteFromEtcdWithRevision(id, confirmed+1)
+					test.Nil(test.GetAffinityGroupState(id))
+					test.Empty(test.GroupIDsAwaitingTargetRevision())
+				})
+			})
+		}
+	}
 }
 
 func TestFirstWinConfirmationWaitsForReconciliation(t *testing.T) {
@@ -1104,7 +1177,7 @@ func TestFirstWinDoesNotRestoreTargetWithPurgedVoter(t *testing.T) {
 					stored.LeaderStoreID = 2
 					test.SyncGroupFromEtcdWithRevision(stored, 2)
 				case "skipped persistence":
-					synctest.Sleep(time.Second)
+					time.Sleep(time.Second)
 					test.observe("g", 3, 4)
 					test.Len(test.calls, 2)
 				default:
@@ -1410,6 +1483,49 @@ func TestFirstWinReconcilesLocalTarget(t *testing.T) {
 		test.Equal(groupDegraded, test.groups["h"].GetAvailability())
 		test.Equal(newDegradedExpiredAtFromNow(), test.groups["h"].degradedExpiredAt)
 	})
+}
+
+func TestFirstWinDuringBalanceCooldown(t *testing.T) {
+	for _, confirmed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("confirmed=%t", confirmed), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				test := newTargetTest(t, "g", "h", "balance")
+				test.checkGroupsAvailability()
+				request := "h"
+				if confirmed {
+					request = "g"
+				}
+				release := make(chan struct{})
+				test.useWriter(func(_ context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
+					if targets[0].Expected.ID == request {
+						<-release
+						if confirmed {
+							return GroupTargetsResponse{WrittenGroupIDs: []string{request}}, nil
+						}
+					}
+					return GroupTargetsResponse{}, ErrTargetWriterUnsupported
+				})
+
+				test.observe(request, 1, 2)
+				test.observe("g", 2, 3)
+				snapshot := &BalanceSnapshot{Groups: []*GroupState{test.GetAffinityGroupState("balance")}}
+				_, err := test.CommitBalanceTargets(t.Context(), snapshot, []*Group{test.target("balance", 1, 1, 2).result()})
+				test.ErrorIs(err, ErrTargetWriterUnsupported)
+				test.observe("g", 3, 4)
+				close(release)
+				synctest.Wait()
+
+				state := test.GetAffinityGroupState("g")
+				if confirmed {
+					test.Zero(state.LeaderStoreID, "the earlier successful write is awaiting confirmation")
+				} else {
+					test.Equal(uint64(2), state.LeaderStoreID, "the first queued candidate wins")
+				}
+				test.Equal(!confirmed, state.HasUnpersistedTarget())
+				test.Len(test.calls, 2, "the shared cooldown prevents further HTTP requests")
+			})
+		})
+	}
 }
 
 func TestFirstWinReplacesRejectedLocalTarget(t *testing.T) {

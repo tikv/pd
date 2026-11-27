@@ -326,29 +326,9 @@ func TestObserveAvailableRegionIgnoresRecreatedGroup(t *testing.T) {
 
 func TestObserveAvailableRegionKeepsFixedTarget(t *testing.T) {
 	re := require.New(t)
-	ctx := t.Context()
-
-	store := storage.NewStorageWithMemoryBackend()
-	storeInfos := core.NewStoresInfo()
-	for _, id := range []uint64{1, 2} {
-		s := core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id), NodeState: metapb.NodeState_Serving})
-		storeInfos.PutStore(s.Clone(core.SetLastHeartbeatTS(time.Now())))
-	}
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
-	re.NoError(err)
-	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
-	re.NoError(err)
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
-
-	// Both Regions have voters on stores 1 and 2, with the leader on the given store.
-	newRegion := func(id, leaderStoreID uint64) *core.RegionInfo {
-		peers := []*metapb.Peer{
-			{Id: id + 1, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: id + 2, StoreId: 2, Role: metapb.PeerRole_Voter},
-		}
-		return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[leaderStoreID-1])
-	}
-	leaderOn1, leaderOn2 := newRegion(10, 1), newRegion(20, 2)
+	manager := newTargetTest(t, "g").Manager
+	leaderOn1 := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
+	leaderOn2 := generateRegionForTest(20, []uint64{2, 1}, nonOverlappingRange)
 	observe := func(region *core.RegionInfo) *GroupState {
 		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
 		return manager.GetAffinityGroupState("g")

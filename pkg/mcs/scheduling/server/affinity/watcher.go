@@ -81,38 +81,45 @@ func NewWatcher(
 	return w, nil
 }
 
+func (w *Watcher) applyGroupPut(kv *mvccpb.KeyValue) error {
+	log.Info("update affinity group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+	group := &affinity.Group{}
+	if err := json.Unmarshal(kv.Value, group); err != nil {
+		log.Warn("failed to unmarshal affinity group", zap.String("key", string(kv.Key)), zap.Error(err))
+		return err
+	}
+	w.affinityManager.SyncGroupFromEtcdWithRevision(group, kv.ModRevision)
+	return nil
+}
+
+func (w *Watcher) applyGroupDelete(kv *mvccpb.KeyValue) error {
+	key := string(kv.Key)
+	log.Info("delete affinity group", zap.String("key", key))
+	groupID := strings.TrimPrefix(key, keypath.AffinityGroupsPrefix())
+	w.affinityManager.SyncGroupDeleteFromEtcdWithRevision(groupID, kv.ModRevision)
+	return nil
+}
+
 // initializeGroupWatcher initializes the watcher for affinity group changes.
 func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
-	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Info("update affinity group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
-		group := &affinity.Group{}
-		if err := json.Unmarshal(kv.Value, group); err != nil {
-			log.Warn("failed to unmarshal affinity group", zap.String("key", string(kv.Key)), zap.Error(err))
-			return err
-		}
-		w.affinityManager.SyncGroupFromEtcdWithRevision(group, kv.ModRevision)
-		return nil
-	}
-
-	deleteFn := func(kv *mvccpb.KeyValue) error {
-		key := string(kv.Key)
-		log.Info("delete affinity group", zap.String("key", key))
-		groupID := strings.TrimPrefix(key, keypath.AffinityGroupsPrefix())
-		w.affinityManager.SyncGroupDeleteFromEtcd(groupID)
-		return nil
-	}
-
 	w.groupWatcher = etcdutil.NewLoopWatcher(
 		ctx, w.wg,
 		w.etcdClient,
 		"scheduling-affinity-group-watcher",
 		strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "/"),
 		func([]*clientv3.Event) error { return nil },
-		putFn, deleteFn,
+		w.applyGroupPut, w.applyGroupDelete,
 		w.reconcileRangeConflicts,
 		true, /* withPrefix */
 	)
 	w.groupWatcher.SetReconcileDeletedKeys()
+	w.groupWatcher.SetAdditionalDeleteKeys(func() []string {
+		ids := w.affinityManager.GroupIDsAwaitingTargetRevision()
+		for i, id := range ids {
+			ids[i] = keypath.AffinityGroupPath(id)
+		}
+		return ids
+	})
 	w.groupWatcher.StartWatchLoop()
 	return w.groupWatcher.WaitLoad()
 }

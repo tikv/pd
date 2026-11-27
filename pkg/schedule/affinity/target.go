@@ -51,11 +51,15 @@ type GroupTargetsRequest struct {
 type GroupTargetsResponse struct {
 	WrittenGroupIDs        []string `json:"written_group_ids"`
 	PolicyMismatchGroupIDs []string `json:"policy_mismatch_group_ids,omitempty"`
+	// WrittenRevisions is the minimum watch revision that can supersede each
+	// confirmed target. It is omitted for storage without revisions.
+	WrittenRevisions map[string]int64 `json:"written_revisions,omitempty"`
+	Error            string           `json:"error,omitempty"`
 }
 
 // TargetWriter persists targets in PD. The watcher publishes them locally.
 type TargetWriter interface {
-	WriteGroupTargets(context.Context, []GroupTarget) (GroupTargetsResponse, error)
+	WriteGroupTargets(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error)
 }
 
 // SetTargetWriter configures an MCS Manager before it is used.
@@ -67,7 +71,7 @@ func (m *Manager) SetTargetWriter(w TargetWriter) {
 // target in its own conditional transaction. Groups currently in range conflict
 // cannot save a changed target, but an already stored result is still confirmed.
 // Cancellation of ctx or the Manager context stops further work. The returned
-// IDs include targets confirmed before cancellation or another error.
+// result includes targets confirmed before cancellation or another error.
 func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 	if len(targets) == 0 {
 		return GroupTargetsResponse{}, errs.ErrEmptyRequest.FastGenByArgs("no targets provided")
@@ -98,42 +102,49 @@ func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []Grou
 	stop := context.AfterFunc(m.ctx, cancel)
 	defer stop()
 
-	resp := GroupTargetsResponse{WrittenGroupIDs: make([]string, 0, len(adjusted))}
+	response := GroupTargetsResponse{WrittenGroupIDs: make([]string, 0, len(adjusted))}
 	for _, target := range adjusted {
 		// The Manager's AfterFunc runs asynchronously.
 		if m.ctx.Err() != nil {
 			cancel()
 		}
 		if err := ctx.Err(); err != nil {
-			return resp, err
+			return response, err
 		}
-		written, policyMismatch, err := m.updateGroupTarget(ctx, target)
+		written, revision, policyMismatch, err := m.updateGroupTarget(ctx, target)
 		if err != nil {
-			return resp, err
+			return response, err
 		}
 		if written {
-			resp.WrittenGroupIDs = append(resp.WrittenGroupIDs, target.Expected.ID)
+			response.WrittenGroupIDs = append(response.WrittenGroupIDs, target.Expected.ID)
+			if revision > 0 {
+				if response.WrittenRevisions == nil {
+					response.WrittenRevisions = make(map[string]int64, len(adjusted))
+				}
+				response.WrittenRevisions[target.Expected.ID] = revision
+			}
+			failpoint.InjectCall("afterAffinityTargetWritten")
 		} else if policyMismatch {
-			resp.PolicyMismatchGroupIDs = append(resp.PolicyMismatchGroupIDs, target.Expected.ID)
+			response.PolicyMismatchGroupIDs = append(response.PolicyMismatchGroupIDs, target.Expected.ID)
 		}
 	}
-	return resp, nil
+	return response, nil
 }
 
-func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (written, policyMismatch bool, err error) {
+func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (written bool, confirmedRevision int64, policyMismatch bool, err error) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	return m.updateGroupTargetLocked(ctx, target, false)
 }
 
 // updateGroupTargetLocked requires metaMutex to serialize metadata changes.
-func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarget, confirmBeforeScan bool) (written, policyMismatch bool, err error) {
+func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarget, confirmBeforeScan bool) (written bool, confirmedRevision int64, policyMismatch bool, err error) {
 	failpoint.InjectCall("afterLockGroupTarget")
 	if err := ctx.Err(); err != nil {
-		return false, false, err
+		return false, 0, false, err
 	}
 	if err := m.ctx.Err(); err != nil {
-		return false, false, err
+		return false, 0, false, err
 	}
 	m.RLock()
 	initialGroup := m.groups[target.Expected.ID]
@@ -160,6 +171,7 @@ func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarge
 		switch {
 		case sameStoredGroup(group, result):
 			written = true
+			confirmedRevision = revision
 		case revisionMatches && sameStoredGroup(group, &target.Expected):
 			m.RLock()
 			current := m.groups[group.ID]
@@ -175,6 +187,11 @@ func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarge
 				return err
 			}
 			stored, written = result, true
+			if revision > 0 {
+				// The commit compares the key's ModRevision. No event for this
+				// key can fall between the loaded revision and our new write.
+				confirmedRevision = revision + 1
+			}
 		case group.CreateTimestamp == target.Expected.CreateTimestamp &&
 			sameGroupTarget(group, &target.Expected) &&
 			group.BalancePolicy != target.Expected.BalancePolicy &&
@@ -189,7 +206,7 @@ func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarge
 		return nil
 	})
 	if err != nil {
-		return false, false, err
+		return false, 0, false, err
 	}
 	if stored != nil {
 		m.Lock()
@@ -217,10 +234,10 @@ func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarge
 		}
 		m.Unlock()
 	}
-	return written, policyMismatch, nil
+	return written, confirmedRevision, policyMismatch, nil
 }
 
-func (t *GroupTarget) result() *Group {
+func (t GroupTarget) result() *Group {
 	group := t.Expected
 	group.LeaderStoreID = t.LeaderStoreID
 	group.VoterStoreIDs = t.VoterStoreIDs
