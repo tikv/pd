@@ -579,8 +579,11 @@ func probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome string) (string, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), tiupProbeTimeout)
 	defer cancel()
 	binPath, err := playgroundprobe.LookupBinary(ctx, bin, envWithTiUPHome(absTiUPHome))
-	if err != nil {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return "", fmt.Errorf("tiup playground lookup timed out after %s: %w", tiupProbeTimeout, err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("tiup playground lookup failed: %w", err)
 	}
 	return binPath, nil
 }

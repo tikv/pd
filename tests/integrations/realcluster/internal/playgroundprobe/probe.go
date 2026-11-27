@@ -64,26 +64,7 @@ func IsExecutable(path string) bool {
 // RunVersionCheck executes `binPath --version` in its own process group and
 // terminates the entire process group if ctx is canceled or times out.
 func RunVersionCheck(ctx context.Context, binPath string, env []string) error {
-	return newProcessGroupCommand(ctx, env, binPath, "--version").Run()
-}
-
-// LookupBinary executes `tiupBin --binary playground` in its own process group
-// and returns the reported playground binary path. It terminates the entire
-// process group and returns an error if ctx is canceled or times out. Any other
-// TiUP failure means that playground is not installed and returns an empty path.
-func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, error) {
-	out, err := newProcessGroupCommand(ctx, env, tiupBin, "--binary", "playground").Output()
-	if err == nil {
-		return strings.TrimSpace(string(out)), nil
-	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return "", fmt.Errorf("%s --binary playground did not finish: %w", tiupBin, ctxErr)
-	}
-	return "", nil
-}
-
-func newProcessGroupCommand(ctx context.Context, env []string, name string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec
+	cmd := exec.CommandContext(ctx, binPath, "--version") //nolint:gosec
 	if len(env) > 0 {
 		cmd.Env = env
 	}
@@ -95,7 +76,81 @@ func newProcessGroupCommand(ctx context.Context, env []string, name string, args
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = 200 * time.Millisecond
-	return cmd
+	return cmd.Run()
+}
+
+// LookupBinary executes `tiupBin --binary playground` in its own process group
+// and returns the reported playground binary path. TiUP must both exit and close
+// its output before ctx is done; otherwise the entire process group is killed,
+// any output is discarded, and an error wrapping ctx's error is returned. A
+// non-zero TiUP exit means that playground is not installed and returns an empty
+// path; any other execution or I/O failure returns an error.
+func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = r.Close() }()
+	cmd := exec.Command(tiupBin, "--binary", "playground") //nolint:gosec
+	if len(env) > 0 {
+		cmd.Env = env
+	}
+	// Give the child the write end directly so that exec does not copy output
+	// with its own wait semantics; ctx alone bounds both the exit and the output.
+	cmd.Stdout = w
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	err = cmd.Start()
+	_ = w.Close()
+	if err != nil {
+		return "", err
+	}
+
+	type readResult struct {
+		out []byte
+		err error
+	}
+	readDone := make(chan readResult, 1)
+	go func() {
+		out, err := io.ReadAll(r)
+		readDone <- readResult{out: out, err: err}
+	}()
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+
+	var (
+		read    readResult
+		waitErr error
+	)
+	for readDone != nil || waitDone != nil {
+		select {
+		case read = <-readDone:
+			readDone = nil
+		case waitErr = <-waitDone:
+			waitDone = nil
+		case <-ctx.Done():
+			// Killing the group also reaches children that outlived the
+			// leader and still hold the output pipe.
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = r.Close()
+			if waitDone != nil {
+				<-waitDone
+			}
+			if readDone != nil {
+				<-readDone
+			}
+			return "", fmt.Errorf("%s --binary playground did not finish: %w", tiupBin, ctx.Err())
+		}
+	}
+	if read.err != nil {
+		return "", fmt.Errorf("read %s --binary playground output: %w", tiupBin, read.err)
+	}
+	if waitErr != nil {
+		if _, ok := errors.AsType[*exec.ExitError](waitErr); ok {
+			return "", nil
+		}
+		return "", fmt.Errorf("%s --binary playground: %w", tiupBin, waitErr)
+	}
+	return strings.TrimSpace(string(read.out)), nil
 }
 
 // ParseTimeout parses a probe timeout given either as a Go duration (e.g. "30s",

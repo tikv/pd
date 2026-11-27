@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -34,7 +35,8 @@ const defaultProbeTimeout = 30 * time.Second
 //
 // The first form prints "usable" or "unusable". The second form prints the path
 // reported by `tiup --binary playground`, or nothing if playground is not
-// installed, and fails if TiUP does not answer before the timeout.
+// installed, and fails if TiUP does not exit and close its output before the
+// timeout or cannot be run.
 func main() {
 	args := os.Args[1:]
 	lookup := len(args) > 0 && args[0] == "--lookup"
@@ -72,8 +74,11 @@ func main() {
 		os.Exit(130)
 	}
 	switch {
-	case lookup && err != nil:
+	case lookup && errors.Is(err, context.DeadlineExceeded):
 		fmt.Fprintf(os.Stderr, "tiup playground lookup timed out after %s: %v\n", timeout, err)
+		os.Exit(1)
+	case lookup && err != nil:
+		fmt.Fprintf(os.Stderr, "tiup playground lookup failed: %v\n", err)
 		os.Exit(1)
 	case lookup:
 		if binPath != "" {
