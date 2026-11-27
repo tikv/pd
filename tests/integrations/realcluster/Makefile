@@ -32,163 +32,6 @@ tidy:
 
 check: tiup test
 
-define PLAYGROUND_PROBE_PL
-use strict;
-use warnings;
-use POSIX qw(:sys_wait_h);
-use Time::HiRes qw(time sleep);
-
-my ($$bin, $$timeout) = @ARGV;
-$$timeout = 30 if !defined($$timeout) || $$timeout !~ /^(?:\d+(?:\.\d+)?|\.\d+)$$/ || $$timeout <= 0;
-exit 1 unless defined($$bin) && -f $$bin && -s $$bin && -x $$bin;
-
-my $$size = -s $$bin;
-open my $$fh, "<:raw", $$bin or exit 1;
-my $$magic = "";
-my $$n = read($$fh, $$magic, 4);
-if (defined($$n) && $$n == 4) {
-    my $$fits = sub { my ($$off, $$len, $$tot) = @_; return $$off <= $$tot && $$len <= $$tot - $$off; };
-    if ($$magic eq "\x7fELF") {
-        seek($$fh, 0, 0) or exit 1;
-        my $$hdr = "";
-        read($$fh, $$hdr, 64) >= 52 or exit 1;
-        my ($$cls, $$endi) = unpack("x4 C C", $$hdr);
-        exit 1 unless ($$cls == 1 || $$cls == 2) && ($$endi == 1 || $$endi == 2);
-        my ($$phoff, $$shoff, $$phent, $$phnum, $$shent, $$shnum);
-        if ($$cls == 2) {
-            length($$hdr) >= 64 or exit 1;
-            my $$fmt = $$endi == 1 ? "x32 Q< Q< x6 v v v v" : "x32 Q> Q> x6 n n n n";
-            ($$phoff, $$shoff, $$phent, $$phnum, $$shent, $$shnum) = unpack($$fmt, $$hdr);
-        } else {
-            my $$fmt = $$endi == 1 ? "x28 V V x6 v v v v" : "x28 N N x6 n n n n";
-            ($$phoff, $$shoff, $$phent, $$phnum, $$shent, $$shnum) = unpack($$fmt, $$hdr);
-        }
-        if ($$phnum > 0) {
-            exit 1 unless $$phent >= ($$cls == 2 ? 56 : 32) && $$fits->($$phoff, $$phnum * $$phent, $$size);
-            for my $$i (0 .. $$phnum - 1) {
-                seek($$fh, $$phoff + $$i * $$phent, 0) or exit 1;
-                my $$buf = "";
-                read($$fh, $$buf, $$phent) == $$phent or exit 1;
-                my ($$poff, $$pfsz) = $$cls == 2
-                    ? unpack($$endi == 1 ? "x8 Q< x16 Q<" : "x8 Q> x16 Q>", $$buf)
-                    : unpack($$endi == 1 ? "x4 V x8 V" : "x4 N x8 N", $$buf);
-                exit 1 if $$pfsz > 0 && !$$fits->($$poff, $$pfsz, $$size);
-            }
-        }
-        if ($$shnum > 0) {
-            exit 1 unless $$shent >= ($$cls == 2 ? 64 : 40) && $$fits->($$shoff, $$shnum * $$shent, $$size);
-            for my $$i (0 .. $$shnum - 1) {
-                seek($$fh, $$shoff + $$i * $$shent, 0) or exit 1;
-                my $$buf = "";
-                read($$fh, $$buf, $$shent) == $$shent or exit 1;
-                my ($$stype, $$soff, $$ssz) = $$cls == 2
-                    ? unpack($$endi == 1 ? "x4 V x16 Q< Q<" : "x4 N x16 Q> Q>", $$buf)
-                    : unpack($$endi == 1 ? "x4 V x8 V V" : "x4 N x8 N N", $$buf);
-                exit 1 if $$stype != 8 && $$ssz > 0 && !$$fits->($$soff, $$ssz, $$size);
-            }
-        }
-    } elsif ($$magic eq "\xfe\xed\xfa\xce" || $$magic eq "\xce\xfa\xed\xfe" ||
-             $$magic eq "\xfe\xed\xfa\xcf" || $$magic eq "\xcf\xfa\xed\xfe" ||
-             $$magic eq "\xca\xfe\xba\xbe") {
-        my $$check_macho = sub {
-            my ($$base, $$len) = @_;
-            seek($$fh, $$base, 0) or return 0;
-            my $$mh = "";
-            read($$fh, $$mh, 32) >= 28 or return 0;
-            my $$m = substr($$mh, 0, 4);
-            my ($$is64, $$le);
-            if ($$m eq "\xcf\xfa\xed\xfe") { ($$is64, $$le) = (1, 1); }
-            elsif ($$m eq "\xfe\xed\xfa\xcf") { ($$is64, $$le) = (1, 0); }
-            elsif ($$m eq "\xce\xfa\xed\xfe") { ($$is64, $$le) = (0, 1); }
-            elsif ($$m eq "\xfe\xed\xfa\xce") { ($$is64, $$le) = (0, 0); }
-            else { return 0; }
-            my $$hdr_len = $$is64 ? 32 : 28;
-            return 0 if length($$mh) < $$hdr_len;
-            my ($$ncmds, $$sizeofcmds) = unpack($$le ? "x16 V V" : "x16 N N", $$mh);
-            return 0 unless $$fits->($$hdr_len, $$sizeofcmds, $$len);
-            my $$pos = $$hdr_len;
-            for (my $$i = 0; $$i < $$ncmds; $$i++) {
-                return 0 unless $$fits->($$pos, 8, $$len);
-                seek($$fh, $$base + $$pos, 0) or return 0;
-                my $$ch = "";
-                read($$fh, $$ch, 8) == 8 or return 0;
-                my ($$cmd, $$cmdsize) = unpack($$le ? "V V" : "N N", $$ch);
-                return 0 if $$cmdsize < 8 || !$$fits->($$pos, $$cmdsize, $$len);
-                if (($$cmd == 0x19 && $$is64) || ($$cmd == 0x1 && !$$is64)) {
-                    my $$seg_len = $$is64 ? 72 : 56;
-                    return 0 if $$cmdsize < $$seg_len;
-                    my $$sb = "";
-                    seek($$fh, $$base + $$pos, 0) or return 0;
-                    read($$fh, $$sb, $$cmdsize) == $$cmdsize or return 0;
-                    my ($$foff, $$fsz, $$nsects) = $$is64
-                        ? unpack($$le ? "x40 Q< Q< x8 V" : "x40 Q> Q> x8 N", $$sb)
-                        : unpack($$le ? "x32 V V x8 V" : "x32 N N x8 N", $$sb);
-                    return 0 if $$fsz > 0 && !$$fits->($$foff, $$fsz, $$len);
-                    my $$sec_len = $$is64 ? 80 : 68;
-                    return 0 unless $$fits->($$seg_len, $$nsects * $$sec_len, $$cmdsize);
-                    for (my $$j = 0; $$j < $$nsects; $$j++) {
-                        my $$sec = substr($$sb, $$seg_len + $$j * $$sec_len, $$sec_len);
-                        my ($$ssz, $$soff, $$flags) = $$is64
-                            ? unpack($$le ? "x40 Q< V x12 V" : "x40 Q> N x12 N", $$sec)
-                            : unpack($$le ? "x36 V V x12 V" : "x36 N N x12 N", $$sec);
-                        my $$st = $$flags & 0xff;
-                        next if $$ssz == 0 || $$st == 0x1 || $$st == 0xc || $$st == 0x12;
-                        return 0 unless $$fits->($$soff, $$ssz, $$len);
-                    }
-                }
-                $$pos += $$cmdsize;
-            }
-            return 1;
-        };
-        if ($$magic eq "\xca\xfe\xba\xbe") {
-            seek($$fh, 0, 0) or exit 1;
-            my $$fhdr = "";
-            read($$fh, $$fhdr, 8) == 8 or exit 1;
-            my $$narch = unpack("x4 N", $$fhdr);
-            exit 1 unless $$narch > 0 && $$fits->(8, $$narch * 20, $$size);
-            for my $$i (0 .. $$narch - 1) {
-                my $$ab = "";
-                read($$fh, $$ab, 20) == 20 or exit 1;
-                my ($$aoff, $$asz) = unpack("x8 N N", $$ab);
-                exit 1 unless $$fits->($$aoff, $$asz, $$size) && $$check_macho->($$aoff, $$asz);
-            }
-        } else {
-            exit 1 unless $$check_macho->(0, $$size);
-        }
-    }
-}
-close $$fh;
-
-my $$pid = fork();
-exit 1 unless defined $$pid;
-if ($$pid == 0) {
-    setpgrp(0, 0);
-    open STDIN, "<", "/dev/null";
-    open STDOUT, ">", "/dev/null";
-    open STDERR, ">", "/dev/null";
-    { exec { $$bin } $$bin, "--version"; }
-    POSIX::_exit(127);
-}
-my $$deadline = time() + $$timeout;
-while (1) {
-    my $$r = waitpid($$pid, WNOHANG);
-    if ($$r == $$pid) {
-        exit($$? == 0 ? 0 : 1);
-    }
-    if ($$r < 0) {
-        exit 1;
-    }
-    if (time() >= $$deadline) {
-        kill "KILL", -$$pid;
-        kill "KILL", $$pid;
-        waitpid($$pid, 0);
-        exit 124;
-    }
-    sleep 0.02;
-}
-endef
-export PLAYGROUND_PROBE_PL
-
 tiup:
 	@echo "==> Checking tiup installation"
 	@set -eu; \
@@ -210,16 +53,23 @@ tiup:
 	is_playground_usable() { \
 		local pg_bin="$$1"; \
 		local probe_timeout="$${TIUP_PROBE_TIMEOUT:-30}"; \
-		if [ -z "$$pg_bin" ] || [ ! -f "$$pg_bin" ] || [ ! -s "$$pg_bin" ] || [ ! -x "$$pg_bin" ]; then \
+		if [ -z "$$pg_bin" ]; then \
 			return 1; \
 		fi; \
-		if command -v perl >/dev/null 2>&1; then \
-			perl -e "$$PLAYGROUND_PROBE_PL" "$$pg_bin" "$$probe_timeout"; \
-		elif command -v timeout >/dev/null 2>&1; then \
-			timeout -k 1 "$$probe_timeout" "$$pg_bin" --version >/dev/null 2>&1; \
-		else \
-			( "$$pg_bin" --version >/dev/null 2>&1 ) 2>/dev/null; \
+		if ! command -v go >/dev/null 2>&1; then \
+			echo "go is required to verify tiup playground binary: $$pg_bin" >&2; \
+			exit 1; \
 		fi; \
+		local probe_result; \
+		if ! probe_result="$$(GOWORK=off CGO_ENABLED=0 go run ./internal/playgroundprobe/cmd "$$pg_bin" "$$probe_timeout" 9>&-)"; then \
+			echo "failed to verify tiup playground binary: $$pg_bin" >&2; \
+			exit 1; \
+		fi; \
+		case "$$probe_result" in \
+			usable) return 0 ;; \
+			unusable) return 1 ;; \
+			*) echo "unexpected tiup playground probe result '$$probe_result' for $$pg_bin" >&2; exit 1 ;; \
+		esac; \
 	}; \
 	TIUP_BIN="$$(resolve_tiup_bin)"; \
 	PG_BIN=""; \

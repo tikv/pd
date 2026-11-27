@@ -16,6 +16,8 @@ package realcluster
 
 import (
 	"context"
+	"debug/macho"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -33,11 +35,19 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/tikv/pd/tests/integrations/realcluster/internal/playgroundprobe"
+
 	_ "embed"
 )
 
 //go:embed Makefile
 var realClusterMakefile []byte
+
+//go:embed internal/playgroundprobe/probe.go
+var playgroundProbeSource []byte
+
+//go:embed internal/playgroundprobe/cmd/main.go
+var playgroundProbeCmdSource []byte
 
 type triggerDeadlineCtx struct {
 	context.Context
@@ -1571,8 +1581,9 @@ exit 1
 			})
 		}
 
-		// Timeout and process-group cleanup for a hanging --version probe in both Go and make tiup.
-		t.Run("hanging version probe times out and kills child group", func(t *testing.T) {
+		// Timeout, process-group cleanup, and immediate lock release for a hanging --version probe
+		// in Go and in make tiup (including a PATH without perl or timeout).
+		t.Run("hanging version probe times out, kills child group, and releases lock", func(t *testing.T) {
 			makeHangingScript := func(pidFile string) []byte {
 				return []byte(fmt.Sprintf("#!/bin/sh\nsleep 30 &\npid=$!\nprintf '%%s\\n' \"$pid\" >> %q\nwait\n", pidFile))
 			}
@@ -1592,6 +1603,15 @@ exit 1
 				re.NotEmpty(pids)
 				return pids
 			}
+			assertLockImmediatelyAvailable := func(re *require.Assertions, tiupHome string) {
+				lockPath := filepath.Join(canonicalPathForLock(tiupHome), playgroundInstallLockFileName)
+				f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec
+				re.NoError(err)
+				defer func() { _ = f.Close() }()
+				err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+				re.NoError(err, "install lock %s remained held after hanging probe recovery", lockPath)
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			}
 
 			t.Run("go", func(t *testing.T) {
 				re := require.New(t)
@@ -1606,6 +1626,7 @@ exit 1
 				ensurePlaygroundInstalledWithTiUPHome(re, fakeTiUP, tiupHome)
 				re.Less(time.Since(start), 5*time.Second)
 
+				assertLockImmediatelyAvailable(re, tiupHome)
 				childPIDs := readChildPIDs(re, pidFile)
 				re.Eventually(func() bool {
 					return !slices.ContainsFunc(childPIDs, isProcessRunning)
@@ -1615,26 +1636,32 @@ exit 1
 				re.Equal("installed", strings.TrimSpace(string(logData)))
 			})
 
-			t.Run("make", func(t *testing.T) {
+			t.Run("make without perl or timeout", func(t *testing.T) {
 				re := require.New(t)
 				if _, err := exec.LookPath("make"); err != nil {
 					t.Skip("make not found in PATH")
 				}
+				if _, err := exec.LookPath("flock"); err != nil {
+					t.Skip("flock not found in PATH")
+				}
 				makefileDir := writeRealClusterMakefileDir(t)
+				noPerlPath := buildMinimalToolPath(t, "make", "bash", "sh", "pwd", "go", "flock", "mkdir", "dirname", "basename", "rm", "cp", "chmod", "env", "which", "sleep", "printf")
 				pidFile := filepath.Join(t.TempDir(), "make-hang.pid")
 				tiupHome, fakeTiUP, _, installLog, _ := setupWithPayload(t, makeHangingScript(pidFile))
 
 				start := time.Now()
 				cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
 				cmd.Env = append(os.Environ(),
+					"PATH="+noPerlPath,
 					"TIUP_HOME="+tiupHome,
 					"TIUP_PROBE_TIMEOUT=0.3",
 				)
 				out, err := cmd.CombinedOutput()
-				re.NoError(err, "make tiup failed to recover from hanging probe:\n%s", string(out))
+				re.NoError(err, "make tiup without perl failed to recover from hanging probe:\n%s", string(out))
 				re.Less(time.Since(start), 5*time.Second)
 				re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
 
+				assertLockImmediatelyAvailable(re, tiupHome)
 				childPIDs := readChildPIDs(re, pidFile)
 				re.Eventually(func() bool {
 					return !slices.ContainsFunc(childPIDs, isProcessRunning)
@@ -1643,6 +1670,111 @@ exit 1
 				re.NoError(err)
 				re.Equal("installed", strings.TrimSpace(string(logData)))
 			})
+		})
+
+		t.Run("make without perl rejects trailing-4096-byte truncated executable", func(t *testing.T) {
+			re := require.New(t)
+			if _, err := exec.LookPath("make"); err != nil {
+				t.Skip("make not found in PATH")
+			}
+			if _, err := exec.LookPath("flock"); err != nil {
+				t.Skip("flock not found in PATH")
+			}
+			makefileDir := writeRealClusterMakefileDir(t)
+			noPerlPath := buildMinimalToolPath(t, "make", "bash", "sh", "pwd", "go", "flock", "mkdir", "dirname", "basename", "rm", "cp", "chmod", "env", "which")
+			tiupHome, fakeTiUP, partialBin, installLog, offlineMarker := setupWithPayload(t, actualBinary[:len(actualBinary)-4096])
+
+			cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+			cmd.Env = append(os.Environ(),
+				"PATH="+noPerlPath,
+				"TIUP_HOME="+tiupHome,
+			)
+			out, err := cmd.CombinedOutput()
+			re.NoError(err, "make tiup without perl failed on trailing-truncated binary:\n%s", string(out))
+			re.True(isPlaygroundInstalledWithTiUPHome(fakeTiUP, tiupHome))
+
+			re.NoError(os.WriteFile(offlineMarker, []byte("offline"), 0600))
+			cmd2 := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+			cmd2.Env = append(os.Environ(),
+				"PATH="+noPerlPath,
+				"TIUP_HOME="+tiupHome,
+			)
+			out2, err := cmd2.CombinedOutput()
+			re.NoError(err, "offline make tiup reuse without perl failed:\n%s", string(out2))
+
+			logData, err := os.ReadFile(installLog) //nolint:gosec
+			re.NoError(err)
+			re.Equal("installed", strings.TrimSpace(string(logData)))
+			info, err := os.Stat(partialBin)
+			re.NoError(err)
+			re.Equal(int64(len(actualBinary)), info.Size())
+		})
+
+		t.Run("make preserves healthy cache on invalid probe timeout or missing go", func(t *testing.T) {
+			re := require.New(t)
+			if _, err := exec.LookPath("make"); err != nil {
+				t.Skip("make not found in PATH")
+			}
+			makefileDir := writeRealClusterMakefileDir(t)
+			tiupHome, _, partialBin, installLog, offlineMarker := setupWithPayload(t, actualBinary)
+			re.NoError(os.WriteFile(offlineMarker, []byte("offline"), 0600))
+
+			cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+			cmd.Env = append(os.Environ(),
+				"TIUP_HOME="+tiupHome,
+				"TIUP_PROBE_TIMEOUT=invalid",
+			)
+			out, err := cmd.CombinedOutput()
+			re.Error(err, "expected make tiup to fail on invalid TIUP_PROBE_TIMEOUT, output:\n%s", string(out))
+			re.Contains(string(out), "invalid TIUP_PROBE_TIMEOUT")
+			re.False(fileExists(installLog), "invalid timeout must not trigger reinstall")
+			info, err := os.Stat(partialBin)
+			re.NoError(err, "healthy cached binary must be preserved when timeout is invalid")
+			re.Equal(int64(len(actualBinary)), info.Size())
+
+			noGoPath := buildMinimalToolPath(t, "make", "bash", "sh", "pwd", "mkdir", "dirname", "basename", "rm", "env", "which")
+			cmdNoGo := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
+			cmdNoGo.Env = append(os.Environ(),
+				"PATH="+noGoPath,
+				"TIUP_HOME="+tiupHome,
+			)
+			outNoGo, err := cmdNoGo.CombinedOutput()
+			re.Error(err, "expected make tiup to fail when go is unavailable, output:\n%s", string(outNoGo))
+			re.Contains(string(outNoGo), "go is required to verify tiup playground binary")
+			re.False(fileExists(installLog), "missing go must not trigger reinstall")
+			info, err = os.Stat(partialBin)
+			re.NoError(err, "healthy cached binary must be preserved when go is unavailable")
+			re.Equal(int64(len(actualBinary)), info.Size())
+		})
+
+		t.Run("valid and truncated macOS universal Mach-O binary layout", func(t *testing.T) {
+			re := require.New(t)
+			archBins := make([][]byte, 0, 2)
+			for _, arch := range []string{"amd64", "arm64"} {
+				outBin := filepath.Join(buildDir, "tiup-playground-darwin-"+arch)
+				c := exec.Command("go", "build", "-o", outBin, mainSrc) //nolint:gosec
+				c.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=darwin", "GOARCH="+arch)
+				out, err := c.CombinedOutput()
+				re.NoError(err, "cross-build darwin/%s failed:\n%s", arch, string(out))
+				data, err := os.ReadFile(outBin) //nolint:gosec
+				re.NoError(err)
+				re.True(playgroundprobe.HasCompleteBinaryLayout(outBin, int64(len(data))), "complete darwin/%s binary should pass", arch)
+				singleTruncPath := outBin + "-truncated"
+				singleTrunc := data[:len(data)-4096]
+				re.NoError(os.WriteFile(singleTruncPath, singleTrunc, 0700)) //nolint:gosec
+				re.False(playgroundprobe.HasCompleteBinaryLayout(singleTruncPath, int64(len(singleTrunc))), "truncated darwin/%s binary should fail", arch)
+				archBins = append(archBins, data)
+			}
+
+			universal := buildFatMachOBinary(t, archBins)
+			universalPath := filepath.Join(buildDir, "tiup-playground-universal")
+			re.NoError(os.WriteFile(universalPath, universal, 0700)) //nolint:gosec
+			re.True(playgroundprobe.HasCompleteBinaryLayout(universalPath, int64(len(universal))))
+
+			truncPath := filepath.Join(buildDir, "tiup-playground-universal-truncated")
+			truncBytes := universal[:len(universal)-4096]
+			re.NoError(os.WriteFile(truncPath, truncBytes, 0700)) //nolint:gosec
+			re.False(playgroundprobe.HasCompleteBinaryLayout(truncPath, int64(len(truncBytes))))
 		})
 	})
 }
@@ -2522,7 +2654,70 @@ exit 1
 
 func writeRealClusterMakefileDir(t *testing.T) string {
 	t.Helper()
+	re := require.New(t)
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"), realClusterMakefile, 0600))
+	re.NoError(os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module github.com/tikv/pd/tests/integrations/realcluster\n\ngo 1.24\n"), 0600))
+	re.NoError(os.WriteFile(filepath.Join(dir, "Makefile"), realClusterMakefile, 0600))
+	probeDir := filepath.Join(dir, "internal", "playgroundprobe")
+	cmdDir := filepath.Join(probeDir, "cmd")
+	re.NoError(os.MkdirAll(cmdDir, 0750))
+	re.NoError(os.WriteFile(filepath.Join(probeDir, "probe.go"), playgroundProbeSource, 0600))
+	re.NoError(os.WriteFile(filepath.Join(cmdDir, "main.go"), playgroundProbeCmdSource, 0600))
 	return dir
+}
+
+func buildMinimalToolPath(t *testing.T, tools ...string) string {
+	t.Helper()
+	re := require.New(t)
+	dir := t.TempDir()
+	for _, tool := range tools {
+		p, err := exec.LookPath(tool)
+		re.NoError(err, "required tool %q not found in PATH", tool)
+		re.NoError(os.Symlink(p, filepath.Join(dir, tool)))
+	}
+	return dir
+}
+
+func buildFatMachOBinary(t *testing.T, slicesData [][]byte) []byte {
+	t.Helper()
+	re := require.New(t)
+	const alignShift = 14 // 16 KiB alignment
+	const alignSize = 1 << alignShift
+
+	type archEntry struct {
+		cpu     uint32
+		subCPU  uint32
+		offset  uint32
+		size    uint32
+		payload []byte
+	}
+	cur := uint32(8 + len(slicesData)*20)
+	entries := make([]archEntry, 0, len(slicesData))
+	for _, raw := range slicesData {
+		re.GreaterOrEqual(len(raw), 12)
+		cur = (cur + alignSize - 1) &^ (alignSize - 1)
+		cpu := binary.LittleEndian.Uint32(raw[4:8])
+		subCPU := binary.LittleEndian.Uint32(raw[8:12])
+		entries = append(entries, archEntry{
+			cpu:     cpu,
+			subCPU:  subCPU,
+			offset:  cur,
+			size:    uint32(len(raw)),
+			payload: raw,
+		})
+		cur += uint32(len(raw))
+	}
+	out := make([]byte, cur)
+	binary.BigEndian.PutUint32(out[0:4], macho.MagicFat)
+	binary.BigEndian.PutUint32(out[4:8], uint32(len(entries)))
+	for i, e := range entries {
+		base := 8 + i*20
+		binary.BigEndian.PutUint32(out[base:base+4], e.cpu)
+		binary.BigEndian.PutUint32(out[base+4:base+8], e.subCPU)
+		binary.BigEndian.PutUint32(out[base+8:base+12], e.offset)
+		binary.BigEndian.PutUint32(out[base+12:base+16], e.size)
+		binary.BigEndian.PutUint32(out[base+16:base+20], alignShift)
+		copy(out[e.offset:e.offset+e.size], e.payload)
+	}
+	return out
 }

@@ -16,12 +16,8 @@ package realcluster
 
 import (
 	"context"
-	"debug/elf"
-	"debug/macho"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +36,7 @@ import (
 	"github.com/pingcap/log"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/tests/integrations/realcluster/internal/playgroundprobe"
 )
 
 var (
@@ -480,123 +477,9 @@ func isPlaygroundInstalledWithTiUPHome(bin, absTiUPHome string) bool {
 }
 
 func isPlaygroundBinaryUsable(binPath, absTiUPHome string) bool {
-	if !isExecutable(binPath) {
-		return false
-	}
-	info, err := os.Stat(binPath) //nolint:gosec
-	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
-		return false
-	}
-	if !hasCompleteBinaryLayout(binPath, info.Size()) {
-		return false
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), tiupProbeTimeout)
 	defer cancel()
-	_, err = runExecWithEnvOutputContext(ctx, "", envWithTiUPHome(absTiUPHome), binPath, "--version")
-	return err == nil
-}
-
-func hasCompleteBinaryLayout(path string, fileSize int64) bool {
-	if fileSize <= 0 {
-		return false
-	}
-	f, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return false
-	}
-	defer func() { _ = f.Close() }()
-
-	var magic [4]byte
-	if _, err := io.ReadFull(f, magic[:]); err != nil {
-		return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
-	}
-	uSize := uint64(fileSize)
-
-	switch {
-	case magic == [4]byte{0x7f, 'E', 'L', 'F'}:
-		ef, err := elf.NewFile(f)
-		if err != nil {
-			return false
-		}
-		return hasCompleteELFLayout(ef, uSize)
-	case isMachOMagic(magic):
-		mf, err := macho.NewFile(f)
-		if err != nil {
-			return false
-		}
-		return hasCompleteMachOLayout(mf, uSize)
-	case isMachOFatMagic(magic):
-		ff, err := macho.NewFatFile(f)
-		if err != nil {
-			return false
-		}
-		for _, arch := range ff.Arches {
-			if !fitsInSize(uint64(arch.Offset), uint64(arch.Size), uSize) || !hasCompleteMachOLayout(arch.File, uint64(arch.Size)) {
-				return false
-			}
-		}
-		return true
-	default:
-		return true
-	}
-}
-
-func hasCompleteELFLayout(ef *elf.File, fileSize uint64) bool {
-	for _, p := range ef.Progs {
-		if p.Filesz > 0 && !fitsInSize(p.Off, p.Filesz, fileSize) {
-			return false
-		}
-	}
-	for _, s := range ef.Sections {
-		// Use FileSize (on-disk byte length) rather than Size, because Size is
-		// the uncompressed length for SHF_COMPRESSED sections (e.g. Go DWARF debug info).
-		if s.Type != elf.SHT_NOBITS && s.FileSize > 0 && !fitsInSize(s.Offset, s.FileSize, fileSize) {
-			return false
-		}
-	}
-	return true
-}
-
-func hasCompleteMachOLayout(mf *macho.File, fileSize uint64) bool {
-	const (
-		machoSectionTypeMask   = 0xff
-		machoSectionZeroFill   = 0x1
-		machoSectionGBZeroFill = 0xc
-		machoSectionThreadZero = 0x12
-	)
-	for _, load := range mf.Loads {
-		seg, ok := load.(*macho.Segment)
-		if !ok || seg.Filesz == 0 {
-			continue
-		}
-		if !fitsInSize(seg.Offset, seg.Filesz, fileSize) {
-			return false
-		}
-	}
-	for _, sec := range mf.Sections {
-		secType := sec.Flags & machoSectionTypeMask
-		if sec.Size == 0 || secType == machoSectionZeroFill || secType == machoSectionGBZeroFill || secType == machoSectionThreadZero {
-			continue
-		}
-		if !fitsInSize(uint64(sec.Offset), sec.Size, fileSize) {
-			return false
-		}
-	}
-	return true
-}
-
-func fitsInSize(offset, length, total uint64) bool {
-	return offset <= total && length <= total-offset
-}
-
-func isMachOMagic(magic [4]byte) bool {
-	be := binary.BigEndian.Uint32(magic[:])
-	le := binary.LittleEndian.Uint32(magic[:])
-	return be == macho.Magic32 || be == macho.Magic64 || le == macho.Magic32 || le == macho.Magic64
-}
-
-func isMachOFatMagic(magic [4]byte) bool {
-	return binary.BigEndian.Uint32(magic[:]) == macho.MagicFat
+	return playgroundprobe.Check(ctx, binPath, envWithTiUPHome(absTiUPHome))
 }
 
 func probePlaygroundBinaryWithTiUPHome(bin, absTiUPHome string) string {
