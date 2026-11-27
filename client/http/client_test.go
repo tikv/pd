@@ -147,3 +147,63 @@ func TestWithTargetURL(t *testing.T) {
 	_, err = c.WithTargetURL("http://127.0.0.2").GetStatus(ctx)
 	re.ErrorContains(err, "connect: connection refused")
 }
+
+func TestGetAffinityGroupsByPrefix(t *testing.T) {
+	re := require.New(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		re.Equal(http.MethodGet, r.Method)
+		re.Equal("/pd/api/v2/affinity-groups?prefix=_tidb_ks1_pt_100_p", r.RequestURI)
+		w.Header().Set("Content-Type", "application/json")
+		_, err := io.WriteString(w, `{"affinity_groups":{"_tidb_ks1_pt_100_p101":{"id":"_tidb_ks1_pt_100_p101"}}}`)
+		re.NoError(err)
+	}))
+	defer server.Close()
+
+	c := newClientWithMockServiceDiscovery("test-affinity-prefix", []string{server.URL})
+	defer c.Close()
+	groups, err := c.GetAffinityGroupsByPrefix(context.Background(), "_tidb_ks1_pt_100_p")
+	re.NoError(err)
+	re.Len(groups, 1)
+	re.Contains(groups, "_tidb_ks1_pt_100_p101")
+}
+
+func TestAffinityGroupPathValidation(t *testing.T) {
+	validID := "Group_1-" + strings.Repeat("g", 56)
+	for _, tc := range []struct {
+		method string
+		query  string
+		send   func(Client, string) error
+	}{
+		{http.MethodGet, "", func(c Client, id string) error {
+			_, err := c.GetAffinityGroup(t.Context(), id)
+			return err
+		}},
+		{http.MethodPut, "", func(c Client, id string) error {
+			_, err := c.UpdateAffinityGroupPeers(t.Context(), id, 1, []uint64{1})
+			return err
+		}},
+		{http.MethodDelete, "", func(c Client, id string) error {
+			return c.DeleteAffinityGroup(t.Context(), id, false)
+		}},
+		{http.MethodDelete, "?force=true", func(c Client, id string) error {
+			return c.DeleteAffinityGroup(t.Context(), id, true)
+		}},
+	} {
+		calls := 0
+		transport := NewHTTPClientWithRequestChecker(func(req *http.Request) error {
+			calls++
+			require.Equal(t, tc.method, req.Method)
+			require.Equal(t, "/pd/api/v2/affinity-groups/"+validID+tc.query, req.URL.RequestURI())
+			return nil
+		})
+		c := newClientWithMockServiceDiscovery("affinity-path", []string{"http://127.0.0.1"}, WithHTTPClient(transport))
+		t.Cleanup(c.Close)
+		require.ErrorContains(t, tc.send(c, ""), "group ID must not be empty")
+		for _, id := range []string{"g/", "../g", "a/b", "../a?force=true#% b", "a b", "g\n", validID + "g"} {
+			require.ErrorContains(t, tc.send(c, id), "invalid group ID", "%s %q", tc.method, id)
+		}
+		require.Zero(t, calls)
+		require.NoError(t, tc.send(c, validID))
+		require.Equal(t, 1, calls)
+	}
+}

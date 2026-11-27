@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -138,13 +139,16 @@ type Client interface {
 	// The affinityGroups parameter is a map from group ID to a list of key ranges.
 	// Use options to customize behavior (for example, skipping existing groups).
 	CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange, opts ...CreateAffinityGroupsOption) (map[string]*AffinityGroupState, error)
-	// GetAffinityGroup gets an affinity group by group ID.
 	GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error)
 	// GetAffinityGroups gets affinity groups by group IDs.
 	// When groupIDs is empty, it returns all affinity groups.
 	GetAffinityGroups(ctx context.Context, groupIDs []string) (map[string]*AffinityGroupState, error)
 	// GetAllAffinityGroups gets all affinity groups.
 	GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error)
+	// GetAffinityGroupsByPrefix gets the affinity groups whose IDs start with prefix.
+	// A PD that does not support the filter returns all groups, so callers that
+	// depend on the filter should check the IDs again.
+	GetAffinityGroupsByPrefix(ctx context.Context, prefix string) (map[string]*AffinityGroupState, error)
 	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
 	UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error)
 	// DeleteAffinityGroup deletes an affinity group by group ID.
@@ -1293,12 +1297,27 @@ func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[st
 	return resp.AffinityGroups, nil
 }
 
+var affinityGroupIDPattern = regexp.MustCompile("^[-A-Za-z0-9_]{1,64}$")
+
+func validateAffinityGroupID(groupID string) error {
+	if groupID == "" {
+		return errors.New("group ID must not be empty")
+	}
+	if !affinityGroupIDPattern.MatchString(groupID) {
+		return errors.Errorf("invalid group ID %q: expected 1 to 64 ASCII letters, digits, underscores, or hyphens", groupID)
+	}
+	return nil
+}
+
 // GetAffinityGroup gets an affinity group by group ID.
 func (c *client) GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error) {
+	if err := validateAffinityGroupID(groupID); err != nil {
+		return nil, err
+	}
 	var state AffinityGroupState
 	err := c.request(ctx, newRequestInfo().
 		WithName("GetAffinityGroup").
-		WithURI(fmt.Sprintf(AffinityGroupByID, groupID)).
+		WithURI(AffinityGroupByIDPath(groupID)).
 		WithMethod(http.MethodGet).
 		WithResp(&state))
 	if err != nil {
@@ -1334,6 +1353,20 @@ func (c *client) GetAffinityGroups(ctx context.Context, groupIDs []string) (map[
 	return resp.AffinityGroups, nil
 }
 
+// GetAffinityGroupsByPrefix gets the affinity groups whose IDs start with prefix.
+func (c *client) GetAffinityGroupsByPrefix(ctx context.Context, prefix string) (map[string]*AffinityGroupState, error) {
+	var resp AffinityGroupsResponse
+	err := c.request(ctx, newRequestInfo().
+		WithName("GetAffinityGroupsByPrefix").
+		WithURI(fmt.Sprintf("%s?prefix=%s", AffinityGroups, url.QueryEscape(prefix))).
+		WithMethod(http.MethodGet).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
 // GetAllAffinityGroups gets all affinity groups.
 func (c *client) GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error) {
 	var resp AffinityGroupsResponse
@@ -1350,6 +1383,9 @@ func (c *client) GetAllAffinityGroups(ctx context.Context) (map[string]*Affinity
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
 func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error) {
+	if err := validateAffinityGroupID(groupID); err != nil {
+		return nil, err
+	}
 	req := UpdateAffinityGroupPeersRequest{
 		LeaderStoreID: leaderStoreID,
 		VoterStoreIDs: voterStoreIDs,
@@ -1361,7 +1397,7 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 	var state AffinityGroupState
 	err = c.request(ctx, newRequestInfo().
 		WithName("UpdateAffinityGroupPeers").
-		WithURI(fmt.Sprintf(AffinityGroupByID, groupID)).
+		WithURI(AffinityGroupByIDPath(groupID)).
 		WithMethod(http.MethodPut).
 		WithBody(reqJSON).
 		WithResp(&state))
@@ -1373,7 +1409,10 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 
 // DeleteAffinityGroup deletes an affinity group by group ID.
 func (c *client) DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error {
-	uri := fmt.Sprintf(AffinityGroupByID, groupID)
+	if err := validateAffinityGroupID(groupID); err != nil {
+		return err
+	}
+	uri := AffinityGroupByIDPath(groupID)
 	if force {
 		uri = fmt.Sprintf("%s?force=true", uri)
 	}

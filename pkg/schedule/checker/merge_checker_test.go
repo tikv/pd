@@ -659,9 +659,9 @@ func TestMergeCheckerSkipsActiveAffinityGroup(t *testing.T) {
 			}
 			cluster.AddLeaderRegion(1, 1, 2, 3)
 			cluster.AddLeaderRegion(2, tc.targetStores[0], tc.targetStores[1:]...)
-			source := cluster.GetRegion(1).Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("b")),
+			source := cluster.GetRegion(1).Clone(withAffinityTestRange("a", "b"),
 				core.SetApproximateSize(5), core.SetApproximateKeys(5))
-			target := cluster.GetRegion(2).Clone(core.WithStartKey([]byte("b")), core.WithEndKey([]byte("c")),
+			target := cluster.GetRegion(2).Clone(withAffinityTestRange("b", "c"),
 				core.SetApproximateSize(5), core.SetApproximateKeys(5))
 			cluster.PutRegion(source)
 			cluster.PutRegion(target)
@@ -669,7 +669,7 @@ func TestMergeCheckerSkipsActiveAffinityGroup(t *testing.T) {
 			manager := cluster.GetAffinityManager()
 			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
 				ID: "test", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
-			}, []byte("a"), []byte("c")))
+			}, affinityTestRange("a", "c")))
 			re.False(manager.GetAffinityGroupState("test").RegularSchedulingAllowed)
 			affinityChecker := newTestAffinityChecker(ctx, cluster, opt)
 			ops := affinityChecker.Check(source)

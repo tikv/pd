@@ -17,6 +17,7 @@ package affinity
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
@@ -173,6 +175,117 @@ func TestBasicGroupOperations(t *testing.T) {
 	err = manager.DeleteAffinityGroups([]string{"group1"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group1"))
+}
+
+type stubGroupStateProvider map[string]*GroupState
+
+func (p stubGroupStateProvider) GetAllAffinityGroupStates() []*GroupState {
+	return slices.Collect(maps.Values(p))
+}
+
+func (p stubGroupStateProvider) GetAffinityGroupState(id string) *GroupState {
+	return p[id]
+}
+
+func TestCollectGroupStatesWithCustomProvider(t *testing.T) {
+	re := require.New(t)
+	first := &GroupState{ID: "first"}
+	second := &GroupState{ID: "second"}
+	provider := stubGroupStateProvider{"first": first, "second": second}
+	all := map[string]*GroupState{"first": first, "second": second}
+
+	re.Equal(all, CollectAllGroupStates(provider))
+
+	states, err := CollectGroupStates(provider, nil)
+	re.NoError(err)
+	re.Equal(all, states)
+
+	states, err = CollectGroupStates(provider, []string{" second ", "second", "", "missing"})
+	re.NoError(err)
+	re.Equal(map[string]*GroupState{"second": second}, states)
+
+	states, err = CollectGroupStates(provider, []string{" "})
+	re.NoError(err)
+	re.Empty(states)
+
+	_, err = CollectGroupStates(provider, []string{"bad id"})
+	re.ErrorIs(err, errs.ErrInvalidGroupID)
+}
+
+func TestCollectGroupStatesByQuery(t *testing.T) {
+	re := require.New(t)
+	manager := newTxnTestManager(t)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "p-1"}, {GroupID: "p-10"}, {GroupID: "q-1"}}))
+	manager.Lock()
+	manager.groups["p-1"].VoterStoreIDs = []uint64{1, 2, 3}
+	manager.Unlock()
+
+	for _, tc := range []struct {
+		ids    []string
+		prefix string
+		want   []string
+	}{
+		{nil, "", []string{"p-1", "p-10", "q-1"}},
+		{nil, "p-", []string{"p-1", "p-10"}},
+		{nil, "p-1", []string{"p-1", "p-10"}},
+		{nil, "r", []string{}},
+		{[]string{"p-10", "q-1", "missing"}, "p-", []string{"p-10"}},
+		{[]string{"q-1"}, "", []string{"q-1"}},
+		{[]string{" p-1 ", "p-1", "", "q-1"}, "p-", []string{"p-1"}},
+		{[]string{""}, "", []string{}},
+	} {
+		states, err := CollectGroupStatesByQuery(manager, tc.ids, tc.prefix)
+		re.NoError(err)
+		re.ElementsMatch(tc.want, slices.Collect(maps.Keys(states)), "%v %q", tc.ids, tc.prefix)
+	}
+	states, err := CollectGroupStatesByQuery(manager, nil, "p-")
+	re.NoError(err)
+	states["p-1"].VoterStoreIDs[0] = 99
+	re.Equal([]uint64{1, 2, 3}, manager.GetAffinityGroupState("p-1").VoterStoreIDs)
+	for _, prefix := range []string{"bad prefix", strings.Repeat("a", 65)} {
+		_, err := CollectGroupStatesByQuery(manager, nil, prefix)
+		re.ErrorIs(err, errs.ErrAffinityGroupContent)
+	}
+}
+
+// TestSyncLabelRuleBeforeGroup ensures label rules arriving before group sync are applied after group creation.
+func TestSyncLabelRuleBeforeGroup(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	gkr := GroupKeyRanges{
+		GroupID: "group-label-first",
+		KeyRanges: []keyutil.KeyRange{
+			{StartKey: []byte{0x01}, EndKey: []byte{0x02}},
+		},
+	}
+	labelRule := MakeLabelRule(gkr)
+	// Simulate watcher path (JSON roundtrip) to ensure Data types match real events.
+	b, err := json.Marshal(labelRule)
+	re.NoError(err)
+	parsedRule, err := labeler.NewLabelRuleFromJSON(b)
+	re.NoError(err)
+	re.NoError(manager.SyncKeyRangesFromEtcd(parsedRule))
+
+	// Group arrives after label rule.
+	manager.SyncGroupFromEtcd(&Group{ID: gkr.GroupID})
+
+	state := manager.GetAffinityGroupState(gkr.GroupID)
+	re.NotNil(state)
+	re.Equal(1, state.RangeCount)
 }
 
 // TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.
@@ -505,8 +618,8 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 func TestLookupRacingWithLabelRuleChange(t *testing.T) {
 	const lookupHook = "github.com/tikv/pd/pkg/schedule/affinity/afterRegionLabelLookup"
 	const groupID = "g"
-	oldRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
-	otherRange := keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}
+	oldRange := keyutil.KeyRange{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("b"))}
+	otherRange := keyutil.KeyRange{StartKey: keyForTest([]byte("c")), EndKey: keyForTest([]byte("d"))}
 	testCases := []struct {
 		name   string
 		ranges []keyutil.KeyRange
@@ -571,8 +684,10 @@ func TestLookupRacingWithLabelRuleChange(t *testing.T) {
 			manager.GetAndCacheRegionAffinityGroupState(region)
 			re.True(changed)
 
-			cache, _ := manager.getCache(region)
-			re.Nil(cache, "the outdated lookup result must not be cached")
+			manager.RLock()
+			_, cached := manager.regions[region.GetID()]
+			manager.RUnlock()
+			re.False(cached, "the outdated lookup result must not be cached")
 			group := manager.GetAffinityGroupState(groupID)
 			re.Zero(group.RegionCount)
 			re.Zero(group.AffinityRegionCount)
@@ -586,8 +701,8 @@ func TestLookupRacingWithLabelRuleChange(t *testing.T) {
 // service applies a label rule change to the Manager and the region labeler, in either order.
 func TestInvalidCacheByLabelRules(t *testing.T) {
 	const groupID = "g"
-	oldRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
-	otherRange := keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}
+	oldRange := keyutil.KeyRange{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("b"))}
+	otherRange := keyutil.KeyRange{StartKey: keyForTest([]byte("c")), EndKey: keyForTest([]byte("d"))}
 	testCases := []struct {
 		name         string
 		managerFirst bool
@@ -644,8 +759,10 @@ func TestInvalidCacheByLabelRules(t *testing.T) {
 				re.Nil(state)
 				syncManager(otherRange)
 			}
-			cache, _ := manager.getCache(region)
-			re.Nil(cache)
+			manager.RLock()
+			_, cached := manager.regions[region.GetID()]
+			manager.RUnlock()
+			re.False(cached)
 			group = manager.GetAffinityGroupState(groupID)
 			re.Zero(group.RegionCount)
 			re.Zero(group.AffinityRegionCount)

@@ -22,10 +22,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestHandleAskBatchSplitRejectsExpiredAffinity(t *testing.T) {
@@ -37,8 +39,11 @@ func TestHandleAskBatchSplitRejectsExpiredAffinity(t *testing.T) {
 	re.NoError(err)
 	cluster.hbstreams = cluster.GetCoordinator().GetHeartbeatStreams()
 	region := cluster.GetRegion(100)
+	keyRange := testutil.TxnKeyspaceRange(region.GetStartKey(), region.GetEndKey())
+	region = region.Clone(core.WithStartKey(keyRange.StartKey), core.WithEndKey(keyRange.EndKey))
+	re.NoError(cluster.putRegion(region))
 	re.NoError(cluster.affinityManager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{keyRange},
 	}}))
 	_, err = cluster.affinityManager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
 	re.NoError(err)
@@ -95,9 +100,12 @@ func TestHandleRegionHeartbeatAfterAffinitySplitDenial(t *testing.T) {
 	// no operator, so a heartbeat can only queue a ChangeSplit message.
 	cluster.hbstreams = cluster.GetCoordinator().GetHeartbeatStreams()
 	region := cluster.GetRegion(100)
+	keyRange := testutil.TxnKeyspaceRange(region.GetStartKey(), region.GetEndKey())
+	region = region.Clone(core.WithStartKey(keyRange.StartKey), core.WithEndKey(keyRange.EndKey))
+	re.NoError(cluster.putRegion(region))
 	manager := cluster.GetAffinityManager()
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{keyRange},
 	}}))
 	_, err = manager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
 	re.NoError(err)

@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -220,19 +221,21 @@ func TestHotRegionRevertAffinity(t *testing.T) {
 			updateStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
 			addRegionInfo(tc, rwTy, regions)
 			revertRegion := tc.GetRegion(7)
+			keyRange := testutil.TxnKeyspaceRange(revertRegion.GetStartKey(), revertRegion.GetEndKey())
+			revertRegion = revertRegion.Clone(core.WithStartKey(keyRange.StartKey), core.WithEndKey(keyRange.EndKey))
 			if testCase.buckets {
 				// An oversized revert Region with buckets gets a USEKEY split instead of a move.
 				tc.SetRegionBucketEnabled(true)
 				revertRegion = revertRegion.Clone(core.SetApproximateSize(1024))
 				re.True(revertRegion.UpdateBuckets(&metapb.Buckets{
 					RegionId: 7, PeriodInMs: 1000,
-					Keys: [][]byte{revertRegion.GetStartKey(), fmt.Appendf(nil, "%20d5", 7), revertRegion.GetEndKey()},
+					Keys: [][]byte{keyRange.StartKey, testutil.TxnKeyspaceKey(fmt.Appendf(nil, "%20d5", 7)), keyRange.EndKey},
 				}, revertRegion.GetBuckets()))
-				tc.PutRegion(revertRegion)
 			}
+			tc.PutRegion(revertRegion)
 			mgr := tc.GetAffinityManager()
 			re.NoError(mgr.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-				GroupID: "hot-revert", KeyRanges: []keyutil.KeyRange{{StartKey: revertRegion.GetStartKey(), EndKey: revertRegion.GetEndKey()}},
+				GroupID: "hot-revert", KeyRanges: []keyutil.KeyRange{keyRange},
 			}}))
 			_, err := mgr.UpdateAffinityGroupPeers("hot-revert", regions[1].peers[0], regions[1].peers)
 			re.NoError(err)

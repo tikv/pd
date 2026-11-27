@@ -1264,7 +1264,10 @@ func TestScatterWithAffinity(t *testing.T) {
 	}
 
 	// Add region 1 with leader on store 1
-	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+	keyRange := testutil.TxnKeyspaceRange(region.GetStartKey(), region.GetEndKey())
+	region = region.Clone(core.WithStartKey(keyRange.StartKey), core.WithEndKey(keyRange.EndKey))
+	tc.PutRegion(region)
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 
 	// Create affinity manager and group
@@ -1281,11 +1284,8 @@ func TestScatterWithAffinity(t *testing.T) {
 	}
 
 	keyRanges := []affinity.GroupKeyRanges{{
-		GroupID: group.ID,
-		KeyRanges: []keyutil.KeyRange{{
-			StartKey: []byte(""),
-			EndKey:   []byte(""),
-		}},
+		GroupID:   group.ID,
+		KeyRanges: []keyutil.KeyRange{keyRange},
 	}}
 	err := affinityManager.CreateAffinityGroups(keyRanges)
 	re.NoError(err)
@@ -1294,7 +1294,6 @@ func TestScatterWithAffinity(t *testing.T) {
 
 	// Test scatter with affinity (RegularSchedulingAllowed=false)
 	// Should return (nil, nil) to prevent client from retrying
-	region := tc.GetRegion(1)
 	op, err := scatterer.Scatter(region, "", true)
 	re.NoError(err)
 	re.Nil(op)

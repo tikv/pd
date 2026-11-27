@@ -296,8 +296,12 @@ func TestObserveAvailableRegionIgnoresRecreatedGroup(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers(groupID, adminLeaderStoreID, voters)
 	re.NoError(err)
 	// Updating the ranges brings the replacement to the same version as the expired snapshot.
+	replacementRange := keyutil.KeyRange{
+		StartKey: keyForTest(nonOverlappingRange.StartKey),
+		EndKey:   keyForTest(nonOverlappingRange.EndKey),
+	}
 	re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{
-		GroupID: groupID, KeyRanges: []keyutil.KeyRange{nonOverlappingRange},
+		GroupID: groupID, KeyRanges: []keyutil.KeyRange{replacementRange},
 	}}, nil))
 	replacement := manager.GetAffinityGroupState(groupID)
 	re.True(replacement.AffinitySchedulingAllowed)

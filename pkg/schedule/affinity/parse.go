@@ -14,7 +14,12 @@
 
 package affinity
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+
+	"github.com/tikv/pd/pkg/errs"
+)
 
 type groupStateProvider interface {
 	GetAllAffinityGroupStates() []*GroupState
@@ -23,9 +28,13 @@ type groupStateProvider interface {
 
 // CollectAllGroupStates returns all affinity group states mapped by ID.
 func CollectAllGroupStates(provider groupStateProvider) map[string]*GroupState {
-	allGroupStates := provider.GetAllAffinityGroupStates()
-	result := make(map[string]*GroupState, len(allGroupStates))
-	for _, state := range allGroupStates {
+	if m, ok := provider.(*Manager); ok {
+		return m.GetAffinityGroupStates(nil, "")
+	}
+
+	states := provider.GetAllAffinityGroupStates()
+	result := make(map[string]*GroupState, len(states))
+	for _, state := range states {
 		result[state.ID] = state
 	}
 	return result
@@ -48,7 +57,7 @@ func ParseGroupIDs(rawIDs []string) ([]string, error) {
 		if _, ok := seen[id]; ok {
 			continue
 		}
-		if err := ValidateGroupID(id); err != nil {
+		if err := ValidateExistingGroupID(id); err != nil {
 			return nil, err
 		}
 		seen[id] = struct{}{}
@@ -60,6 +69,9 @@ func ParseGroupIDs(rawIDs []string) ([]string, error) {
 // CollectGroupStates returns affinity group states for the specified ids.
 // When rawIDs is empty, it returns all affinity group states.
 func CollectGroupStates(provider groupStateProvider, rawIDs []string) (map[string]*GroupState, error) {
+	if m, ok := provider.(*Manager); ok {
+		return CollectGroupStatesByQuery(m, rawIDs, "")
+	}
 	if len(rawIDs) == 0 {
 		return CollectAllGroupStates(provider), nil
 	}
@@ -68,13 +80,59 @@ func CollectGroupStates(provider groupStateProvider, rawIDs []string) (map[strin
 	if err != nil {
 		return nil, err
 	}
-
 	result := make(map[string]*GroupState, len(ids))
 	for _, id := range ids {
-		state := provider.GetAffinityGroupState(id)
-		if state != nil {
+		if state := provider.GetAffinityGroupState(id); state != nil {
 			result[id] = state
 		}
 	}
 	return result, nil
+}
+
+// idPrefixRegexp matches a prefix of a valid group ID. An empty prefix selects every group.
+var idPrefixRegexp = regexp.MustCompile("^[-A-Za-z0-9_]{0,64}$")
+
+// ValidateGroupIDPrefix checks that prefix can start a valid group ID.
+func ValidateGroupIDPrefix(prefix string) error {
+	if !idPrefixRegexp.MatchString(prefix) {
+		return errs.ErrAffinityGroupContent.FastGenByArgs("invalid group ID prefix " + prefix)
+	}
+	return nil
+}
+
+// CollectGroupStatesByQuery returns the affinity group states that a list
+// request selects. rawIDs selects groups by ID and prefix selects the groups
+// whose IDs start with it; when both are given, a group must match both. With
+// neither, it returns all groups.
+func CollectGroupStatesByQuery(manager *Manager, rawIDs []string, prefix string) (map[string]*GroupState, error) {
+	if err := ValidateGroupIDPrefix(prefix); err != nil {
+		return nil, err
+	}
+	ids, err := ParseGroupIDs(rawIDs)
+	if err != nil {
+		return nil, err
+	}
+	return manager.GetAffinityGroupStates(ids, prefix), nil
+}
+
+// GetAffinityGroupStates returns a snapshot of the groups matching ids and prefix.
+// A nil ids slice selects all IDs; an empty non-nil slice selects none.
+func (m *Manager) GetAffinityGroupStates(ids []string, prefix string) map[string]*GroupState {
+	m.RLock()
+	defer m.RUnlock()
+	result := make(map[string]*GroupState, len(ids))
+	if ids != nil {
+		for _, id := range ids {
+			if group, ok := m.groups[id]; ok && strings.HasPrefix(id, prefix) {
+				result[id] = newGroupState(group)
+			}
+		}
+		return result
+	}
+	for id, group := range m.groups {
+		if strings.HasPrefix(id, prefix) {
+			result[id] = newGroupState(group)
+		}
+	}
+	return result
 }

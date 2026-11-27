@@ -242,6 +242,30 @@ func TestPlanApplyWithError(t *testing.T) {
 	re.Nil(labeler.GetLabelRule("rule1"))
 }
 
+func TestPlanApplyPrefixBounds(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	labeler, err := NewRegionLabeler(t.Context(), store, 10*time.Millisecond)
+	re.NoError(err)
+	plan := labeler.NewPlan()
+	rule := &LabelRule{
+		ID:       "rule1",
+		Labels:   []RegionLabel{{Key: "k1", Value: "v1"}},
+		RuleType: "key-range",
+		Data:     MakeKeyRanges("1234", "5678"),
+	}
+	re.NoError(plan.SetLabelRule(rule))
+
+	plan.ApplyPrefix(-1)
+	re.Nil(labeler.GetLabelRule(rule.ID))
+	plan.ApplyPrefix(0)
+	re.Nil(labeler.GetLabelRule(rule.ID))
+
+	// A combined batch can count operations that follow the labeler operations.
+	plan.ApplyPrefix(len(plan.CommitOps()) + 1)
+	re.Equal(rule, labeler.GetLabelRule(rule.ID))
+}
+
 func TestPlanMultipleOperations(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
