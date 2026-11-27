@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -557,6 +558,167 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeaderIssue3130() {
 	re.NotNil(op)
 	re.Equal("remove-orphan-peer", op.Desc())
 	re.Equal(uint64(1), op.Step(0).(operator.RemovePeer).FromStore)
+}
+
+func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithEvictedPeerAndOrphan() {
+	re := suite.Require()
+	suite.cluster.SetLeaderScheduleLimit(0)
+	for _, storeID := range []uint64{1001, 1004, 1005, 1006, 2001} {
+		suite.cluster.AddLabelsStore(storeID, 1, map[string]string{"store": strconv.FormatUint(storeID, 10)})
+	}
+	suite.cluster.SetStoreEvictLeader(1006, true)
+	re.NoError(suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID:  placement.DefaultGroupID,
+			ID:       "leader",
+			Index:    1000,
+			Override: true,
+			Role:     placement.Leader,
+			Count:    1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "store", Op: placement.In, Values: []string{"1001", "1004", "1006"}},
+			},
+		},
+		{
+			GroupID: placement.DefaultGroupID,
+			ID:      "followers",
+			Index:   1001,
+			Role:    placement.Follower,
+			Count:   2,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "store", Op: placement.In, Values: []string{"1001", "1004", "1005", "1006"}},
+			},
+		},
+	}))
+	peers := []*metapb.Peer{
+		{Id: 10, StoreId: 1005},
+		{Id: 11, StoreId: 1006},
+		{Id: 12, StoreId: 2001},
+		{Id: 20, StoreId: 1001},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[2])
+	suite.cluster.PutRegion(region)
+	fit := suite.ruleManager.FitRegion(suite.cluster, region)
+	re.Equal([]*metapb.Peer{peers[1]}, fit.RuleFits[0].PeersWithDifferentRole)
+	re.Equal([]*metapb.Peer{peers[2]}, fit.OrphanPeers)
+
+	op := suite.rc.Check(region)
+	operatorutil.CheckTransferLeader(re, op, 0, 2001, 1001)
+	re.Equal("fix-leader-role", op.Desc())
+	operator.ApplyOperator(suite.cluster, op)
+
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	operatorutil.CheckRemovePeer(re, op, 2001)
+	re.Equal("remove-orphan-peer", op.Desc())
+	operator.ApplyOperator(suite.cluster, op)
+
+	region = suite.cluster.GetRegion(1)
+	re.Len(region.GetVoters(), 3)
+	re.True(suite.ruleManager.FitRegion(suite.cluster, region).IsSatisfied())
+	re.Nil(suite.rc.Check(region))
+}
+
+func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithAlternativePeer() {
+	suite.cluster.AddLabelsStore(1006, 1, map[string]string{"store": "1006", "zone": "z1"})
+	suite.cluster.AddLabelsStore(1001, 1, map[string]string{"store": "1001", "zone": "z2"})
+	suite.cluster.AddLabelsStore(1005, 1, map[string]string{"store": "1005", "zone": "z1"})
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1006},
+		{Id: 20, StoreId: 1001},
+		{Id: 30, StoreId: 1005},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[2])
+	allStores := []string{"1001", "1005", "1006"}
+	for _, testCase := range []struct {
+		name            string
+		rejectWithLabel bool
+		voterStores     []string
+		voterCount      int
+		lastVoterStores []string
+		locationLabels  []string
+		wantTransfer    bool
+	}{
+		{name: "evict-leader", voterStores: allStores, voterCount: 2, wantTransfer: true},
+		{name: "reject-leader", rejectWithLabel: true, voterStores: allStores, voterCount: 2, wantTransfer: true},
+		{name: "orphan candidate", voterStores: []string{"1005"}, voterCount: 1, wantTransfer: true},
+		{
+			name:            "reassign across two voter rules",
+			voterStores:     []string{"1001", "1005"},
+			voterCount:      1,
+			lastVoterStores: []string{"1005", "1006"},
+			wantTransfer:    true,
+		},
+		{name: "voter rule loses a peer", voterStores: []string{"1001", "1005"}, voterCount: 2},
+		{name: "voter rule loses isolation", voterStores: allStores, voterCount: 2, locationLabels: []string{"zone"}},
+	} {
+		suite.Run(testCase.name, func() {
+			re := suite.Require()
+			suite.cluster.SetStoreEvictLeader(1006, !testCase.rejectWithLabel)
+			if testCase.rejectWithLabel {
+				suite.cluster.SetLabelProperty(config.RejectLeader, "store", "1006")
+				defer suite.cluster.DeleteLabelProperty(config.RejectLeader, "store", "1006")
+			}
+			rules := []*placement.Rule{
+				{
+					ID:    "leader",
+					Role:  placement.Leader,
+					Count: 1,
+					LabelConstraints: []placement.LabelConstraint{
+						{Key: "store", Op: placement.In, Values: []string{"1001", "1006"}},
+					},
+				},
+				{
+					ID:             "voters",
+					Index:          1,
+					Role:           placement.Voter,
+					Count:          testCase.voterCount,
+					LocationLabels: testCase.locationLabels,
+					LabelConstraints: []placement.LabelConstraint{
+						{Key: "store", Op: placement.In, Values: testCase.voterStores},
+					},
+				},
+			}
+			if len(testCase.lastVoterStores) > 0 {
+				rules = append(rules, &placement.Rule{
+					ID:    "last-voter",
+					Index: 2,
+					Role:  placement.Voter,
+					Count: 1,
+					LabelConstraints: []placement.LabelConstraint{
+						{Key: "store", Op: placement.In, Values: testCase.lastVoterStores},
+					},
+				})
+			}
+			re.NoError(suite.ruleManager.SetGroupBundle(placement.GroupBundle{ID: placement.DefaultGroupID, Rules: rules}))
+			fit := suite.ruleManager.FitRegion(suite.cluster, region)
+			re.Equal([]*metapb.Peer{peers[0]}, fit.RuleFits[0].PeersWithDifferentRole)
+			for _, ruleFit := range fit.RuleFits[1:] {
+				re.True(ruleFit.IsSatisfied())
+			}
+
+			op := suite.rc.Check(region)
+			if !testCase.wantTransfer {
+				transferred := region.Clone(core.WithLeader(peers[1]))
+				newFit := suite.ruleManager.FitRegion(suite.cluster, transferred)
+				re.True(newFit.RuleFits[0].IsSatisfied())
+				if len(testCase.locationLabels) > 0 {
+					re.True(newFit.IsSatisfied())
+					re.Less(newFit.RuleFits[1].IsolationScore, fit.RuleFits[1].IsolationScore)
+				} else {
+					re.False(newFit.RuleFits[1].IsSatisfied())
+				}
+				re.Nil(op)
+				return
+			}
+			operatorutil.CheckTransferLeader(re, op, 0, 1005, 1001)
+			re.Equal("fix-leader-role", op.Desc())
+			transferred := operator.ApplyOperatorStep(region, op)
+			fit = suite.ruleManager.FitRegion(suite.cluster, transferred)
+			for _, ruleFit := range fit.RuleFits {
+				re.True(ruleFit.IsSatisfied())
+			}
+		})
+	}
 }
 
 func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithUnhealthyRegion() {

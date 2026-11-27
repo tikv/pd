@@ -356,8 +356,12 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	}
 	if region.GetLeader().GetId() != peer.GetId() && rf.Rule.Role == placement.Leader {
 		ruleCheckerFixLeaderRoleCounter.Inc()
-		if c.allowLeader(fit, peer) {
-			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, peer.GetStoreId(), []uint64{}, 0)
+		leader := peer
+		if !c.allowLeader(fit, peer) {
+			leader = c.findAlternativeLeader(region, fit, rf, peer)
+		}
+		if leader != nil {
+			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, leader.GetStoreId(), []uint64{}, 0)
 		}
 		ruleCheckerNotAllowLeaderCounter.Inc()
 		return nil, errs.ErrPeerCannotBeLeader
@@ -404,6 +408,46 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		return operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer)
 	}
 	return nil, nil
+}
+
+func (c *RuleChecker) findAlternativeLeader(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer) *metapb.Peer {
+	for _, candidate := range region.GetVoters() {
+		id := candidate.GetId()
+		if id == peer.GetId() || id == region.GetLeader().GetId() || !core.IsVoterOrIncomingVoter(candidate) ||
+			region.GetDownPeer(id) != nil || region.GetPendingPeer(id) != nil || !c.allowLeader(fit, candidate) {
+			continue
+		}
+		if !placement.MatchLabelConstraints(c.cluster.GetStore(candidate.GetStoreId()), rf.Rule.LabelConstraints) {
+			continue
+		}
+		// Changing the leader can reassign peers across several rules.
+		transferred := region.Clone(core.WithLeader(candidate))
+		newFit := c.ruleManager.FitRegionWithoutCache(c.cluster, transferred)
+		leaderFit := newFit.GetRuleFit(id)
+		if leaderFit != nil && leaderFit.Rule == rf.Rule && leaderFit.IsSatisfied() && preservesRuleFits(fit, newFit) {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func preservesRuleFits(fit, newFit *placement.RegionFit) bool {
+	if len(fit.RuleFits) != len(newFit.RuleFits) {
+		return false
+	}
+	// Fitting prioritizes earlier rules. Check every rule for regressions.
+	for i, before := range fit.RuleFits {
+		after := newFit.RuleFits[i]
+		beforeCount, afterCount := len(before.Peers), len(after.Peers)
+		beforeMatched := beforeCount - len(before.PeersWithDifferentRole)
+		afterMatched := afterCount - len(after.PeersWithDifferentRole)
+		if after.Rule != before.Rule || afterCount < beforeCount || afterMatched < beforeMatched ||
+			after.IsolationScore < before.IsolationScore ||
+			(afterCount == beforeCount && after.WitnessScore > before.WitnessScore) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
