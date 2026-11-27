@@ -102,6 +102,17 @@ func TestAffinityCommandsRejectPositionalArgs(t *testing.T) {
 	}
 }
 
+func TestAffinityPolicyBatchSelectors(t *testing.T) {
+	for _, selector := range []string{"group-id", "table-id", "partition-id", "keyspace-id"} {
+		t.Run(selector, func(t *testing.T) {
+			cmd := NewAffinityCommand()
+			cmd.PersistentPreRunE = nil
+			cmd.SetArgs([]string{"policy", "--group-ids", "a,b", "--" + selector, "1", "--balance-policy", "fixed"})
+			require.ErrorContains(t, cmd.Execute(), "--group-ids cannot be used with --"+selector)
+		})
+	}
+}
+
 func TestTiDBGroupKeyRange(t *testing.T) {
 	re := require.New(t)
 	// The expected keys are TiDB table prefixes t{id} encoded like Region keys,

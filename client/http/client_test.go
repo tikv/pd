@@ -83,6 +83,53 @@ func TestUpdateAffinityGroupPolicy(t *testing.T) {
 	re.Equal("fixed", state.BalancePolicy)
 }
 
+func TestUpdateAffinityGroupPolicies(t *testing.T) {
+	re := require.New(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		re.Equal(http.MethodPatch, r.Method)
+		re.Equal("/pd/api/v2/affinity-groups/policies", r.RequestURI)
+		body, err := io.ReadAll(r.Body)
+		re.NoError(err)
+		re.JSONEq(`{"ids":["_tidb_pt_1_p2","_tidb_pt_1_p3"],"balance_policy":"fixed"}`, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, err = io.WriteString(w, `{"affinity_groups":{"_tidb_pt_1_p2":{"id":"_tidb_pt_1_p2","balance_policy":"fixed"},"_tidb_pt_1_p3":{"id":"_tidb_pt_1_p3","balance_policy":"fixed"}}}`)
+		re.NoError(err)
+	}))
+	defer server.Close()
+
+	c := newClientWithMockServiceDiscovery("test-affinity-policies", []string{server.URL})
+	defer c.Close()
+	states, err := c.UpdateAffinityGroupPolicies(t.Context(), []string{"_tidb_pt_1_p2", "_tidb_pt_1_p3"}, "fixed")
+	re.NoError(err)
+	re.Len(states, 2)
+	re.Equal("fixed", states["_tidb_pt_1_p3"].BalancePolicy)
+}
+
+func TestCreateAffinityGroupsWithInheritPolicyFrom(t *testing.T) {
+	re := require.New(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		re.Equal(http.MethodPost, r.Method)
+		re.Equal("/pd/api/v2/affinity-groups?skip_exist_check=true", r.RequestURI)
+		body, err := io.ReadAll(r.Body)
+		re.NoError(err)
+		re.JSONEq(`{"affinity_groups":{
+			"_tidb_t_2":{"ranges":[{"start_key":"YQ==","end_key":"Yg=="}],"inherit_policy_from":"_tidb_t_1"},
+			"_tidb_t_3":{"ranges":[{"start_key":"Yg==","end_key":"Yw=="}]}}}`, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, err = io.WriteString(w, `{"affinity_groups":{}}`)
+		re.NoError(err)
+	}))
+	defer server.Close()
+
+	c := newClientWithMockServiceDiscovery("test-affinity-inherit-policy", []string{server.URL})
+	defer c.Close()
+	_, err := c.CreateAffinityGroups(t.Context(), map[string][]AffinityGroupKeyRange{
+		"_tidb_t_2": {{StartKey: []byte("a"), EndKey: []byte("b")}},
+		"_tidb_t_3": {{StartKey: []byte("b"), EndKey: []byte("c")}},
+	}, WithSkipExistCheck(), WithInheritPolicyFrom(map[string]string{"_tidb_t_2": "_tidb_t_1"}))
+	re.NoError(err)
+}
+
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	re := require.New(t)
 	checked := 0

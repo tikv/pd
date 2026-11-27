@@ -26,12 +26,16 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func (m *Manager) applyStoreConditions(unavailableStores map[uint64]storeCondition) bool {
@@ -762,4 +766,80 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 	re.True(manager.applyStoreConditions(unavailable))
 	groupInfo = getGroupForTest(re, manager, "priority")
 	re.Equal(groupExpired, groupInfo.GetAvailability())
+}
+
+func TestPolicyInheritanceScope(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"custom-target", "custom-source"},
+		{"custom-target", "_tidb_ks1_t_1"},
+		{"_tidb_ks1_t_2", "custom-source"},
+		{"_tidb_ks2_t_2", "_tidb_ks1_t_1"},
+		{"_tidb_ks1_t_2", "_tidb_ks1_t_1"},
+	} {
+		t.Run(pair[1]+"-to-"+pair[0], func(t *testing.T) {
+			re := require.New(t)
+			test := newTargetTest(t)
+			m, store := test.Manager, test.store
+			re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: pair[1]}}))
+			_, err := m.UpdateAffinityGroupPolicy(pair[1], BalancePolicyFixed)
+			re.NoError(err)
+			// Even ranges proving membership cannot authorize a custom ID.
+			lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 1)
+			upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 2)
+			for _, ranges := range [][]keyutil.KeyRange{nil, {{StartKey: lower[:], EndKey: upper[:]}}} {
+				err = m.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: pair[0], InheritPolicyFrom: pair[1], KeyRanges: ranges}})
+				if kerneltype.IsNextGen() && (pair[0] != "_tidb_ks1_t_2" || pair[1] != "_tidb_ks1_t_1") {
+					re.ErrorIs(err, errs.ErrAffinityGroupContent)
+					re.False(m.IsGroupExist(pair[0]))
+					value, loadErr := store.LoadAffinityGroup(pair[0])
+					re.NoError(loadErr)
+					re.Empty(value)
+				} else {
+					re.NoError(err)
+					re.Equal(BalancePolicyFixed, m.GetAffinityGroupState(pair[0]).BalancePolicy)
+					re.Equal(BalancePolicyFixed, test.stored(pair[0]).BalancePolicy)
+					re.NoError(m.DeleteAffinityGroups([]string{pair[0]}, true))
+				}
+			}
+		})
+	}
+}
+
+func TestPolicyInheritanceRejectsSameRequestSource(t *testing.T) {
+	for _, skipExisting := range []bool{false, true} {
+		for _, sourceIndex := range []int{0, 1, etcdutil.MaxEtcdTxnOps} {
+			t.Run(fmt.Sprintf("skip-%t-source-%d", skipExisting, sourceIndex), func(t *testing.T) {
+				re := require.New(t)
+				test := newTargetTest(t)
+				m, store := test.Manager, test.store
+				const original = "_tidb_ks1_t_999"
+				re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: original}}))
+				_, err := m.UpdateAffinityGroupPolicy(original, BalancePolicyFixed)
+				re.NoError(err)
+				changes := make([]GroupKeyRanges, etcdutil.MaxEtcdTxnOps+2)
+				for i := range changes {
+					changes[i].GroupID = fmt.Sprintf("_tidb_ks1_t_%d", i+1)
+				}
+				source := changes[sourceIndex].GroupID
+				changes[sourceIndex].InheritPolicyFrom = original
+				// Source after destination, same chunk, cross-chunk and multi-hop.
+				changes[0].InheritPolicyFrom = source
+				changes[len(changes)-1].InheritPolicyFrom = source
+				if skipExisting {
+					re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: source}}))
+				}
+				_, err = m.createGroupsWithSkipExisting(t.Context(), changes, skipExisting, false)
+				re.ErrorIs(err, errs.ErrAffinityGroupContent)
+				for _, change := range changes {
+					if skipExisting && change.GroupID == source {
+						continue
+					}
+					re.False(m.IsGroupExist(change.GroupID))
+					value, loadErr := store.LoadAffinityGroup(change.GroupID)
+					re.NoError(loadErr)
+					re.Empty(value, "validation must precede all chunk writes")
+				}
+			})
+		}
+	}
 }

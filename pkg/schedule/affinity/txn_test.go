@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func newTxnTestManager(t *testing.T) *Manager {
@@ -133,6 +134,9 @@ func TestNextGenTiDBGroupOperations(t *testing.T) {
 				re.Error(manager.UpdateAffinityGroupKeyRanges(nil, op))
 			}
 		}
+		re.ErrorIs(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{
+			{GroupID: "_tidb_ks42_t_2001", InheritPolicyFrom: id},
+		}), errs.ErrAffinityGroupContent)
 		re.Equal(before, snapshot(), "rejected requests must not change persistent groups or ranges")
 	}
 	for _, id := range append(legacy, "custom_group") {
@@ -152,6 +156,13 @@ func TestNextGenTiDBGroupOperations(t *testing.T) {
 	for _, id := range append(legacy, orphan.GroupID) {
 		re.Nil(regionLabeler.GetLabelRule(GetLabelRuleID(id)))
 	}
+	const tableGroupID = "_tidb_ks42_tg_100"
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: tableGroupID}}))
+	state, err := manager.UpdateAffinityGroupPolicy(tableGroupID, BalancePolicyFixed)
+	re.NoError(err)
+	re.Equal(BalancePolicyFixed, state.BalancePolicy)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "_tidb_ks42_t_2001", InheritPolicyFrom: tableGroupID}}))
+	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("_tidb_ks42_t_2001").BalancePolicy)
 	// Identical table IDs remain independent across keyspaces, including both bounds.
 	for _, keyspaceID := range []uint32{0, 42, 43, 16777215} {
 		id := fmt.Sprintf("_tidb_ks%d_t_1001", keyspaceID)
@@ -179,6 +190,242 @@ func TestNextGenTiDBGroupOperations(t *testing.T) {
 		re.Equal(uint64(1), state.LeaderStoreID)
 		re.Len(manager.keyRanges[id].KeyRanges, 1)
 	}
+}
+
+func TestCreateAffinityGroupsAfterLostReply(t *testing.T) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	for _, tc := range []struct {
+		name         string
+		skipExisting bool
+		reverse      bool
+		omitRanges   bool
+	}{
+		{name: "skip existing", skipExisting: true},
+		{name: "skip existing in reverse order", skipExisting: true, reverse: true},
+		{name: "skip existing without ranges", skipExisting: true, omitRanges: true},
+		{name: "conflict"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			const source = "_tidb_ks1_t_1"
+			targets := []string{"_tidb_ks1_t_2", "_tidb_ks1_t_3"}
+			test := newTargetTestWithStorage(t, t.Context(), storage.NewStorageWithEtcdBackend(client), source)
+			defer func() {
+				test.storage = test.store
+				re.NoError(test.DeleteAffinityGroups(append(targets, source), true))
+			}()
+			_, err := test.UpdateAffinityGroupPolicy(source, BalancePolicyFixed)
+			re.NoError(err)
+
+			changes := make([]GroupKeyRanges, len(targets))
+			for i, id := range targets {
+				changes[i] = GroupKeyRanges{
+					GroupID:           id,
+					KeyRanges:         []keyutil.KeyRange{transactionRangeForTest(1, int64(i+2))},
+					InheritPolicyFrom: source,
+				}
+			}
+			test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+				if err := test.store.RunInTxn(ctx, apply); err != nil {
+					return err
+				}
+				return errAffinityTxn
+			})
+			_, err = test.CreateAffinityGroupsWithContext(t.Context(), changes, tc.skipExisting)
+			re.ErrorIs(err, errAffinityTxn)
+			for _, id := range targets {
+				re.Nil(test.GetAffinityGroupState(id))
+				re.Nil(test.regionLabeler.GetLabelRule(GetLabelRuleID(id)))
+			}
+
+			test.storage = test.store
+			_, err = test.UpdateAffinityGroupPolicy(source, BalancePolicyAuto)
+			re.NoError(err)
+			read := func(key string) *mvccpb.KeyValue {
+				resp, err := client.Get(t.Context(), key)
+				re.NoError(err)
+				re.Len(resp.Kvs, 1)
+				return resp.Kvs[0]
+			}
+			before := make(map[string]*mvccpb.KeyValue)
+			retry := slices.Clone(changes)
+			for i, id := range targets {
+				for _, key := range []string{keypath.AffinityGroupPath(id), keypath.RegionLabelKeyPath(GetLabelRuleID(id))} {
+					before[key] = read(key)
+				}
+				if tc.omitRanges {
+					retry[i].KeyRanges = nil
+				} else {
+					retry[i].KeyRanges = []keyutil.KeyRange{transactionRangeForTest(1, int64(i+3))}
+				}
+			}
+			if tc.reverse {
+				slices.Reverse(retry)
+			}
+			if !tc.skipExisting {
+				retry = append(retry, GroupKeyRanges{GroupID: "new-group", KeyRanges: testKeyRanges("a", "b")})
+			}
+			states, err := test.CreateAffinityGroupsWithContext(t.Context(), retry, tc.skipExisting)
+			if tc.skipExisting {
+				re.NoError(err)
+				re.Len(states, len(targets))
+			} else {
+				re.ErrorIs(err, errs.ErrAffinityGroupExist)
+				re.Nil(states)
+				resp, err := client.Get(t.Context(), keypath.AffinityGroupPath("new-group"))
+				re.NoError(err)
+				re.Empty(resp.Kvs)
+			}
+			for _, change := range changes {
+				id := change.GroupID
+				state := test.GetAffinityGroupState(id)
+				re.NotNil(state)
+				re.Equal(BalancePolicyFixed, state.BalancePolicy)
+				re.Equal(1, state.RangeCount)
+				if tc.skipExisting {
+					re.Equal(state, states[id])
+				}
+				re.Equal(change.KeyRanges, test.keyRanges[id].KeyRanges)
+				ranges, err := extractKeyRangesFromLabelRule(test.regionLabeler.GetLabelRule(GetLabelRuleID(id)))
+				re.NoError(err)
+				re.Equal(change.KeyRanges, ranges.KeyRanges)
+			}
+			for key, value := range before {
+				re.Equal(value, read(key))
+			}
+		})
+	}
+}
+
+func TestCreateAffinityGroupsReconcilesBeforeWritingChunks(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	const source = "_tidb_ks1_tg_100"
+	test := newTargetTestWithStorage(t, t.Context(), storage.NewStorageWithEtcdBackend(client), source)
+	changes := make([]GroupKeyRanges, 65)
+	for i := range changes {
+		changes[i] = GroupKeyRanges{
+			GroupID:           fmt.Sprintf("_tidb_ks1_tg_%d", i+1),
+			InheritPolicyFrom: source,
+			KeyRanges:         []keyutil.KeyRange{transactionRangeForTest(1, int64(i+1))},
+		}
+	}
+	persisted := changes[len(changes)-1]
+	persisted.KeyRanges = changes[0].KeyRanges
+	test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+		if err := test.store.RunInTxn(ctx, apply); err != nil {
+			return err
+		}
+		return errAffinityTxn
+	})
+	_, err := test.CreateAffinityGroupsWithContext(t.Context(), []GroupKeyRanges{persisted}, true)
+	re.ErrorIs(err, errAffinityTxn)
+	re.Nil(test.GetAffinityGroupState(persisted.GroupID))
+	test.storage = test.store
+
+	_, err = test.CreateAffinityGroupsWithContext(t.Context(), changes, true)
+	re.ErrorContains(err, "key range overlaps between groups")
+	resp, err := client.Get(t.Context(), keypath.AffinityGroupPath(changes[0].GroupID))
+	re.NoError(err)
+	re.Empty(resp.Kvs)
+	re.Nil(test.GetAffinityGroupState(changes[0].GroupID))
+	re.Equal(GroupKeyRanges{GroupID: persisted.GroupID, KeyRanges: persisted.KeyRanges}, test.keyRanges[persisted.GroupID])
+}
+
+func TestCreateAffinityGroupsValidatesRangesBeforeWritingChunks(t *testing.T) {
+	re := require.New(t)
+	test := newTargetTest(t)
+	changes := make([]GroupKeyRanges, 61)
+	for i := range changes {
+		changes[i] = GroupKeyRanges{
+			GroupID:   fmt.Sprintf("_tidb_ks1_tg_%d", i+1),
+			KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, int64(i+1))},
+		}
+	}
+	lastRange := &changes[60].KeyRanges[0]
+	lastRange.StartKey = lastRange.EndKey
+
+	wantErr := "endKey should be greater than startKey"
+	if kerneltype.IsNextGen() {
+		wantErr = "affinity group _tidb_ks1_tg_61 key ranges must belong to transaction keyspace 1"
+	}
+	re.ErrorContains(test.CreateAffinityGroups(changes), wantErr)
+	value, err := test.store.LoadAffinityGroup(changes[0].GroupID)
+	re.NoError(err)
+	re.Empty(value)
+}
+
+func TestAffinityAdministrativeCancellation(t *testing.T) {
+	source := GroupKeyRanges{GroupID: "_tidb_ks1_tg_1", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1)}}
+	target := GroupKeyRanges{GroupID: "_tidb_ks1_tg_2", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 2)}}
+	for _, tc := range []struct {
+		name string
+		run  func(*Manager, context.Context) error
+	}{
+		{"create", func(m *Manager, ctx context.Context) error {
+			_, err := m.CreateAffinityGroupsWithContext(ctx, []GroupKeyRanges{target}, true)
+			return err
+		}},
+		{"delete", func(m *Manager, ctx context.Context) error {
+			return m.DeleteAffinityGroupsWithContext(ctx, []string{source.GroupID}, true)
+		}},
+		{"ranges", func(m *Manager, ctx context.Context) error {
+			return m.UpdateAffinityGroupKeyRangesWithContext(ctx, nil, []GroupKeyRanges{source})
+		}},
+		{"peers", func(m *Manager, ctx context.Context) error {
+			_, err := m.UpdateAffinityGroupPeersWithContext(ctx, source.GroupID, 1, []uint64{1})
+			return err
+		}},
+		{"policy", func(m *Manager, ctx context.Context) error {
+			_, err := m.UpdateAffinityGroupPolicyWithContext(ctx, source.GroupID, BalancePolicyFixed)
+			return err
+		}},
+		{"policies", func(m *Manager, ctx context.Context) error {
+			_, err := m.UpdateAffinityGroupPoliciesWithContext(ctx, []string{source.GroupID}, BalancePolicyFixed)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test := newTargetTestWithStorage(t, t.Context(), storage.NewStorageWithMemoryBackend(), source.GroupID)
+			test.NoError(test.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{source}, nil))
+			test.interceptTxns(func(context.Context, func(kv.Txn) error) error {
+				return errAffinityTxn
+			})
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			test.ErrorIs(tc.run(test.Manager, ctx), context.Canceled)
+		})
+	}
+
+	t.Run("between batches", func(t *testing.T) {
+		test := newTargetTestWithStorage(t, t.Context(), storage.NewStorageWithMemoryBackend())
+		ids := make([]string, etcdutil.MaxEtcdTxnOps+1)
+		changes := make([]GroupKeyRanges, len(ids))
+		for i := range ids {
+			ids[i] = fmt.Sprintf("_tidb_ks1_tg_%d", i+1)
+			changes[i].GroupID = ids[i]
+		}
+		test.NoError(test.CreateAffinityGroups(changes))
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		calls := 0
+		test.interceptTxns(func(txnCtx context.Context, apply func(kv.Txn) error) error {
+			calls++
+			cancel()
+			test.Equal(test.ctx, txnCtx)
+			test.NoError(txnCtx.Err())
+			return test.store.RunInTxn(txnCtx, apply)
+		})
+		_, err := test.UpdateAffinityGroupPoliciesWithContext(ctx, ids, BalancePolicyFixed)
+		test.ErrorIs(err, context.Canceled)
+		test.Equal(1, calls)
+		test.Equal(BalancePolicyFixed, test.GetAffinityGroupState(ids[0]).BalancePolicy)
+		test.Empty(test.GetAffinityGroupState(ids[len(ids)-1]).BalancePolicy)
+		test.Equal(BalancePolicyFixed, test.stored(ids[0]).BalancePolicy)
+		test.Empty(test.stored(ids[len(ids)-1]).BalancePolicy)
+	})
 }
 
 func TestKeyRangeOverlapValidation(t *testing.T) {
@@ -706,7 +953,7 @@ func (s *failingAffinityStorage) RunInTxn(ctx context.Context, f func(kv.Txn) er
 }
 
 func TestAffinityGroupsBatchFailure(t *testing.T) {
-	const limit = etcdutil.MaxEtcdTxnOps
+	const limit = maxAffinityTxnOps
 	for _, tc := range []struct {
 		name string
 		adds int
@@ -746,7 +993,8 @@ func TestAffinityGroupsBatchFailure(t *testing.T) {
 				changes[0].KeyRanges = nil
 				want := slices.Clone(changes)
 				probe := []GroupKeyRanges{{GroupID: "overlap", KeyRanges: changes[1].KeyRanges}}
-				failing.remaining = 2
+				// Fail the second write after scanning all candidate groups.
+				failing.remaining = (len(changes)+limit/2-1)/(limit/2) + 2
 				re.ErrorIs(manager.CreateAffinityGroups(changes), errAffinityTxn)
 				clear(want[limit/2:])
 				verify(want)
@@ -901,7 +1149,7 @@ func TestUpdateAffinityGroupKeyRangesPartialCommit(t *testing.T) {
 
 	// Empty operations consume no transaction slots. The first transaction
 	// commits every nonempty add and the first two nonempty removes.
-	const addCount = etcdutil.MaxEtcdTxnOps - 2
+	const addCount = maxAffinityTxnOps - 2
 	add := make([]GroupKeyRanges, 1, addCount+1)
 	add[0].GroupID = "empty-add"
 	initial := make([]GroupKeyRanges, 0, addCount+4)

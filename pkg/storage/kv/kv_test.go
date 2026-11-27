@@ -19,6 +19,8 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,6 +59,167 @@ func TestEtcd(t *testing.T) {
 		_, err := txn.Load("canceled-key")
 		return err
 	}), context.Canceled)
+}
+
+func TestPrefetch(t *testing.T) {
+	re := require.New(t)
+	var pointReads, batchReads atomic.Int64
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
+		ClientCfgModifier: func(config *clientv3.Config) {
+			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(
+				func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn,
+					invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+					if method == "/etcdserverpb.KV/Range" {
+						pointReads.Add(1)
+					}
+					if method == "/etcdserverpb.KV/Txn" {
+						ops := req.(*etcdserverpb.TxnRequest).Success
+						if len(ops) > 0 && ops[0].GetRequestRange() != nil {
+							batchReads.Add(1)
+						}
+					}
+					return invoker(ctx, method, req, reply, cc, opts...)
+				},
+			))
+		},
+	})
+	defer clean()
+	base := NewEtcdKVBase(client)
+	keys := make([]string, etcdutil.MaxEtcdTxnOps)
+	for i := range keys {
+		keys[i] = "prefetch-" + strconv.Itoa(i)
+	}
+	re.NoError(base.Save(keys[0], "old"))
+	re.NoError(base.RunInTxn(t.Context(), func(txn Txn) error {
+		re.NoError(Prefetch(txn, keys))
+		for i, key := range keys {
+			value, err := txn.Load(key)
+			re.NoError(err)
+			if i == 0 {
+				re.Equal("old", value)
+			} else {
+				re.Empty(value)
+			}
+		}
+		return txn.Save("copy", "committed")
+	}))
+	re.Equal(int64(1), batchReads.Load())
+	re.Zero(pointReads.Load(), "prefetched loads must not issue individual RPCs")
+	for _, key := range keys[:2] {
+		err := base.RunInTxn(t.Context(), func(txn Txn) error {
+			re.NoError(Prefetch(txn, []string{key}))
+			re.NoError(base.Save(key, "changed"))
+			return txn.Save("copy", "must-not-commit")
+		})
+		re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+	}
+	value, err := base.Load("copy")
+	re.NoError(err)
+	re.Equal("committed", value)
+}
+
+func TestPrefetchRepeatableReadsAndLimit(t *testing.T) {
+	re := require.New(t)
+	var reads atomic.Int64
+	var rpcs atomic.Int64
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
+		ClientCfgModifier: func(config *clientv3.Config) {
+			config.DialOptions = append(config.DialOptions, grpc.WithChainUnaryInterceptor(
+				func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn,
+					invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+					if strings.HasPrefix(method, "/etcdserverpb.KV/") {
+						rpcs.Add(1)
+					}
+					if method == "/etcdserverpb.KV/Txn" {
+						ops := req.(*etcdserverpb.TxnRequest).Success
+						if len(ops) > 0 && ops[0].GetRequestRange() != nil {
+							re.LessOrEqual(len(ops), etcdutil.MaxEtcdTxnOps)
+							reads.Add(1)
+						}
+					}
+					return invoker(ctx, method, req, reply, cc, opts...)
+				}))
+		},
+	})
+	defer clean()
+	base := NewEtcdKVBase(client)
+	for _, first := range []string{"load", "prefetch", "revision"} {
+		for _, initial := range []string{"", "old"} {
+			key := first + initial
+			if initial != "" {
+				re.NoError(base.Save(key, initial))
+			}
+			err := base.RunInTxn(t.Context(), func(txn Txn) error {
+				switch first {
+				case "prefetch":
+					re.NoError(Prefetch(txn, slices.Repeat([]string{key}, 256)))
+				case "revision":
+					_, _, err := txn.(RevisionTxn).LoadWithRevision(key)
+					re.NoError(err)
+				default:
+					_, err := txn.Load(key)
+					re.NoError(err)
+				}
+				re.NoError(base.Save(key, "changed"))
+				re.NoError(Prefetch(txn, slices.Repeat([]string{key}, 256)))
+				value, err := txn.Load(key)
+				re.NoError(err)
+				re.Equal(initial, value)
+				re.Len(txn.(*etcdTxn).conditions, 1)
+				return txn.Save("copy", "must-not-commit")
+			})
+			re.ErrorIs(err, errs.ErrEtcdTxnConflict)
+		}
+	}
+	// A later revision read strengthens the original comparison without rereading.
+	re.NoError(base.Save("revision-upgrade", "same"))
+	re.ErrorIs(base.RunInTxn(t.Context(), func(txn Txn) error {
+		re.NoError(Prefetch(txn, []string{"revision-upgrade"}))
+		re.NoError(base.Save("revision-upgrade", "same"))
+		_, _, err := txn.(RevisionTxn).LoadWithRevision("revision-upgrade")
+		re.NoError(err)
+		re.Len(txn.(*etcdTxn).conditions, 1)
+		return txn.Save("copy", "must-not-commit")
+	}), errs.ErrEtcdTxnConflict)
+	keys := make([]string, etcdutil.MaxEtcdTxnOps+1)
+	for i := range keys {
+		keys[i] = "bounded-" + strconv.Itoa(i)
+	}
+	reads.Store(0)
+	rpcs.Store(0)
+	re.ErrorContains(base.RunInTxn(t.Context(), func(txn Txn) error {
+		return Prefetch(txn, keys)
+	}), "prefetch exceeds transaction comparison limit")
+	re.Zero(rpcs.Load(), "reject oversized prefetch before any RPC")
+	re.NoError(base.RunInTxn(t.Context(), func(txn Txn) error {
+		bounded := keys[:etcdutil.MaxEtcdTxnOps]
+		re.NoError(Prefetch(txn, append(slices.Clone(bounded), bounded...)))
+		re.NoError(Prefetch(txn, bounded))
+		re.Equal(int64(1), reads.Load())
+		return txn.Save("copy", "bounded-commit")
+	}))
+	for _, prior := range []string{"load", "prefetch", "condition"} {
+		t.Run(prior, func(t *testing.T) {
+			re := require.New(t)
+			var conditions []clientv3.Cmp
+			if prior == "condition" {
+				conditions = []clientv3.Cmp{clientv3.Compare(clientv3.CreateRevision("prior"), "=", 0)}
+			}
+			re.ErrorContains(base.RunInTxnWithConditions(t.Context(), conditions, func(txn Txn) error {
+				switch prior {
+				case "load":
+					_, err := txn.Load("prior")
+					re.NoError(err)
+				case "prefetch":
+					re.NoError(Prefetch(txn, []string{"prior"}))
+				}
+				return Prefetch(txn, keys[:etcdutil.MaxEtcdTxnOps])
+			}), "prefetch exceeds transaction comparison limit")
+		})
+	}
+	value, err := base.Load("copy")
+	re.NoError(err)
+	re.Equal("bounded-commit", value)
 }
 
 func TestLevelDB(t *testing.T) {

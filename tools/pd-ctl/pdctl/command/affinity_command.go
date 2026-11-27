@@ -169,11 +169,12 @@ func hasGroupSelector(cmd *cobra.Command) bool {
 func newAffinityUpdatePolicyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "policy",
-		Short: "set the balance policy for a specific affinity group",
+		Short: "set the balance policy for one or more affinity groups",
 		Args:  cobra.NoArgs,
 		RunE:  affinityUpdatePolicyCommandFunc,
 	}
 	cmd.Flags().String("balance-policy", "", "balance policy: auto or fixed")
+	cmd.Flags().StringSlice("group-ids", nil, "comma separated group IDs for a batch update; cannot be used with a single group selector")
 	_ = cmd.MarkFlagRequired("balance-policy")
 	return cmd
 }
@@ -422,14 +423,34 @@ func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) error {
 }
 
 func affinityUpdatePolicyCommandFunc(cmd *cobra.Command, _ []string) error {
-	groupID, err := getGroupID(cmd, false)
-	if err != nil {
-		return err
-	}
-
 	policy, _ := cmd.Flags().GetString("balance-policy")
 	if policy != string(affinity.BalancePolicyAuto) && policy != string(affinity.BalancePolicyFixed) {
 		return errors.Errorf("balance-policy must be %q or %q", affinity.BalancePolicyAuto, affinity.BalancePolicyFixed)
+	}
+	if cmd.Flags().Changed("group-ids") {
+		for _, name := range []string{"group-id", "table-id", "partition-id", "keyspace-id"} {
+			if cmd.Flags().Changed(name) {
+				return errors.Errorf("--group-ids cannot be used with --%s", name)
+			}
+		}
+		groupIDs, err := cmd.Flags().GetStringSlice("group-ids")
+		if err != nil {
+			return err
+		}
+		if len(groupIDs) == 0 {
+			return errors.New("--group-ids must specify at least one group ID")
+		}
+		states, err := PDCli.UpdateAffinityGroupPolicies(cmd.Context(), groupIDs, policy)
+		if err != nil {
+			return errors.Annotate(err, "failed to update affinity group balance policies")
+		}
+		jsonPrint(cmd, pd.AffinityGroupsResponse{AffinityGroups: states})
+		return nil
+	}
+
+	groupID, err := getGroupID(cmd, false)
+	if err != nil {
+		return err
 	}
 	state, err := PDCli.UpdateAffinityGroupPolicy(cmd.Context(), groupID, policy)
 	if err != nil {

@@ -139,6 +139,14 @@ func TestAffinityCommands(t *testing.T) {
 	_, err = tests.ExecuteCommand(ctl.GetRootCmd(), append(slices.Clone(policyArgs), "--balance-policy", "manual")...)
 	re.ErrorContains(err, "balance-policy must be")
 
+	var batch pd.AffinityGroupsResponse
+	tests.MustExec(re, ctl.GetRootCmd(), []string{"-u", pdAddr, "config", "affinity", "policy",
+		"--group-ids", tableGroup + "," + partitionGroup, "--balance-policy", "fixed"}, &batch)
+	re.Len(batch.AffinityGroups, 2)
+	for _, id := range []string{tableGroup, partitionGroup} {
+		re.Equal("fixed", batch.AffinityGroups[id].BalancePolicy)
+	}
+
 	// Keep groups with identical table/partition IDs in multiple keyspaces alive
 	// together, so updating or deleting one must preserve every other group's peers.
 	for _, keyspaceID := range []string{"0", "42", "43", "16777215"} {

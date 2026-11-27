@@ -204,17 +204,6 @@ func (m *Manager) setGroupLocked(group *Group) {
 	m.groups[group.ID] = groupInfo
 }
 
-func (m *Manager) noGroupsExist(groups []*Group) error {
-	m.RLock()
-	defer m.RUnlock()
-	for _, group := range groups {
-		if _, ok := m.groups[group.ID]; ok {
-			return errs.ErrAffinityGroupExist.GenWithStackByArgs(group.ID)
-		}
-	}
-	return nil
-}
-
 func (m *Manager) allGroupsExist(groupIDs []string) error {
 	m.RLock()
 	defer m.RUnlock()
@@ -224,15 +213,6 @@ func (m *Manager) allGroupsExist(groupIDs []string) error {
 		}
 	}
 	return nil
-}
-
-func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule) {
-	m.Lock()
-	defer m.Unlock()
-	for i, group := range groups {
-		m.initGroupLocked(group)
-		m.updateGroupLabelRuleLocked(group.ID, labelRules[i], false)
-	}
 }
 
 func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
