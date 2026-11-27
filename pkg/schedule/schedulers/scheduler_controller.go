@@ -103,6 +103,24 @@ func (c *Controller) GetScheduler(name string) *ScheduleController {
 	return c.schedulers[name]
 }
 
+// GetEvictLeaderStoreIDs returns the evict-leader store IDs, including while
+// a running instance is being removed and may still be blocking transfers.
+func (c *Controller) GetEvictLeaderStoreIDs() []uint64 {
+	name := types.EvictLeaderScheduler.String()
+	c.RLock()
+	var scheduler http.Handler
+	if len(c.schedulerHandlers) != 0 {
+		scheduler = c.schedulerHandlers[name]
+	} else if running := c.schedulers[name]; running != nil {
+		scheduler = running.Scheduler
+	}
+	c.RUnlock()
+	if evict, ok := scheduler.(interface{ EvictStoreIDs() []uint64 }); ok {
+		return evict.EvictStoreIDs()
+	}
+	return nil
+}
+
 // GetSchedulerNames returns all names of schedulers.
 func (c *Controller) GetSchedulerNames() []string {
 	c.RLock()

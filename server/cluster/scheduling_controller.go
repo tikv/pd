@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
-	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -505,24 +504,13 @@ func (sc *schedulingController) AddSuspectKeyRange(start, end []byte) {
 	sc.coordinator.GetCheckerController().AddSuspectKeyRange(start, end)
 }
 
-func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
+func (sc *schedulingController) getEvictLeaderStores() []uint64 {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	if sc.coordinator == nil {
 		return nil
 	}
-	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[types.EvictLeaderScheduler.String()]
-	if !ok {
-		return
-	}
-	type evictLeaderHandler interface {
-		EvictStoreIDs() []uint64
-	}
-	h, ok := handler.(evictLeaderHandler)
-	if !ok {
-		return
-	}
-	return h.EvictStoreIDs()
+	return sc.coordinator.GetSchedulersController().GetEvictLeaderStoreIDs()
 }
 
 // IsPrepared return true if the prepare checker is ready.
