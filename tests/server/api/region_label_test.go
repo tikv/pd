@@ -15,6 +15,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
@@ -139,16 +141,41 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		const groupID = "protected-group"
 		ruleID := affinity.GetLabelRuleID(groupID)
 		ruleURL := prefix + "/rule/" + url.QueryEscape(ruleID)
+		// In MCS mode, GET reads the scheduling service's cache, which is updated by an etcd watcher.
+		waitForRule := func(ruleURL string, matches func(*assert.Assertions, *labeler.LabelRule) bool) labeler.LabelRule {
+			var observed labeler.LabelRule
+			testutil.Eventually(re, func() bool {
+				var rule labeler.LabelRule
+				var decoded bool
+				err := testutil.CheckGetJSON(tests.TestDialClient, ruleURL, nil, func(body []byte, status int, _ http.Header) {
+					decoded = status == http.StatusOK && json.Unmarshal(body, &rule) == nil
+				})
+				if err != nil || !decoded || !matches(assert.New(&assert.CollectT{}), &rule) {
+					return false
+				}
+				observed = rule
+				return true
+			})
+			return observed
+		}
+
+		createRange := testutil.TxnKeyspaceRange([]byte{0x10}, []byte{0x20})
+		addRange := testutil.TxnKeyspaceRange([]byte{0x20}, []byte{0x30})
 		data, err := json.Marshal(handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				groupID: {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+				groupID: {Ranges: []handlers.AffinityKeyRange{{StartKey: createRange.StartKey, EndKey: createRange.EndKey}}},
 			},
 		})
 		re.NoError(err)
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
 		waitLabelRuleSync(ruleID)
-		var original labeler.LabelRule
-		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &original))
+		createRangeData := keyutil.BuildKeyRangeMaps(
+			hex.EncodeToString(createRange.StartKey),
+			hex.EncodeToString(createRange.EndKey),
+		)
+		original := waitForRule(ruleURL, func(check *assert.Assertions, rule *labeler.LabelRule) bool {
+			return check.ElementsMatch(createRangeData, rule.Data)
+		})
 
 		ordinary := &labeler.LabelRule{
 			ID: "ordinary-protected-batch", Labels: []labeler.RegionLabel{{Key: "k", Value: "v"}},
@@ -197,9 +224,9 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 		re.NoError(err)
 		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, protectedErrorChecks...))
 		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, prefix+"/rule/ordinary-rejected-batch", nil, testutil.Status(re, http.StatusNotFound)))
-		var kept labeler.LabelRule
-		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, prefix+"/rule/"+ordinary.ID, &kept))
-		re.Equal(*ordinary, kept)
+		waitForRule(prefix+"/rule/"+ordinary.ID, func(check *assert.Assertions, rule *labeler.LabelRule) bool {
+			return check.Equal(ordinary, rule)
+		})
 
 		// Custom IDs are not owned by the affinity manager. Legacy rules may
 		// be replaced with ordinary labels or deleted through either endpoint.
@@ -219,9 +246,11 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 			} else {
 				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, prefix+"/rule", data, testutil.StatusOK(re)))
 			}
+			leftoverURL := prefix + "/rule/" + leftover.ID
 			waitLabelRuleSync(leftover.ID)
-			re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, prefix+"/rule/"+leftover.ID, &kept))
-			re.Equal(ordinary.Labels, kept.Labels)
+			waitForRule(leftoverURL, func(check *assert.Assertions, rule *labeler.LabelRule) bool {
+				return check.Equal(ordinary.Labels, rule.Labels)
+			})
 			leftover.Data = keyutil.BuildKeyRangeMaps("50", "60")
 			re.NoError(leader.GetRaftCluster().GetRegionLabeler().SetLabelRule(leftover))
 			if batch {
@@ -229,30 +258,37 @@ func (suite *regionLabelTestSuite) TestAffinityRuleWriteProtection() {
 				re.NoError(err)
 				re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, prefix+"/rules", data, testutil.StatusOK(re)))
 			} else {
-				re.NoError(testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+leftover.ID, testutil.StatusOK(re)))
+				re.NoError(testutil.CheckDelete(tests.TestDialClient, leftoverURL, testutil.StatusOK(re)))
 			}
 			waitLabelRuleSync(leftover.ID)
-			re.NoError(testutil.CheckGetJSON(tests.TestDialClient, prefix+"/rule/"+leftover.ID, nil, testutil.Status(re, http.StatusNotFound)))
+			re.NoError(testutil.CheckGetUntilStatusCode(re, tests.TestDialClient, leftoverURL, http.StatusNotFound))
 		}
+		var kept labeler.LabelRule
 		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
 		re.Equal(original, kept)
 
 		// The owning API can still update its protected label rule's ranges.
 		data, err = json.Marshal(handlers.BatchModifyAffinityGroupsRequest{
 			Add: []handlers.GroupRangesModification{
-				{ID: groupID, Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				{ID: groupID, Ranges: []handlers.AffinityKeyRange{{StartKey: addRange.StartKey, EndKey: addRange.EndKey}}},
 			},
 		})
 		re.NoError(err)
 		re.NoError(testutil.CheckPatchJSON(tests.TestDialClient, affinityURL, data, testutil.StatusOK(re)))
 		waitLabelRuleSync(ruleID)
-		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, ruleURL, &kept))
-		re.Equal(original.Labels, kept.Labels)
-		re.ElementsMatch(keyutil.BuildKeyRangeMaps("10", "20", "20", "30"), kept.Data)
+		updatedRanges := keyutil.BuildKeyRangeMaps(
+			hex.EncodeToString(createRange.StartKey),
+			hex.EncodeToString(createRange.EndKey),
+			hex.EncodeToString(addRange.StartKey),
+			hex.EncodeToString(addRange.EndKey),
+		)
+		waitForRule(ruleURL, func(check *assert.Assertions, rule *labeler.LabelRule) bool {
+			return check.Equal(original.Labels, rule.Labels) && check.ElementsMatch(updatedRanges, rule.Data)
+		})
 
 		re.NoError(testutil.CheckDelete(tests.TestDialClient, affinityURL+"/"+groupID+"?force=true", testutil.StatusOK(re)))
 		waitLabelRuleSync(ruleID)
-		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, ruleURL, nil, testutil.Status(re, http.StatusNotFound)))
+		re.NoError(testutil.CheckGetUntilStatusCode(re, tests.TestDialClient, ruleURL, http.StatusNotFound))
 		re.NoError(testutil.CheckDelete(tests.TestDialClient, prefix+"/rule/"+ordinary.ID, testutil.StatusOK(re)))
 		waitLabelRuleSync(ordinary.ID)
 	})

@@ -120,7 +120,7 @@ pd-server-basic:
 
 # Tools
 pd-ctl:
-	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl pd-ctl/main.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-ctl pd-ctl/main.go
 pd-tso-bench:
 	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench pd-tso-bench/main.go
 pd-api-bench:

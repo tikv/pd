@@ -393,8 +393,8 @@ func newAffinitySplitTestRegion() *core.RegionInfo {
 	}
 	return core.NewRegionInfo(&metapb.Region{
 		Id:          100,
-		StartKey:    []byte("b"),
-		EndKey:      []byte("y"),
+		StartKey:    testutil.TxnKeyspaceKey([]byte("b")),
+		EndKey:      testutil.TxnKeyspaceKey([]byte("y")),
 		Peers:       peers,
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}, peers[0],
@@ -412,7 +412,7 @@ func putAffinitySplitTestGroup(t *testing.T, cluster *Cluster) *core.RegionInfo 
 	cluster.PutRegion(region)
 	manager := cluster.GetAffinityManager()
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("z")}},
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{testutil.TxnKeyspaceRange([]byte("a"), []byte("z"))},
 	}}))
 	_, err := manager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
 	re.NoError(err)

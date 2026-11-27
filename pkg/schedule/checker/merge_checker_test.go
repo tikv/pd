@@ -17,6 +17,7 @@ package checker
 import (
 	"context"
 	"encoding/hex"
+	"strconv"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -26,11 +27,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/keyspace"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -62,6 +66,11 @@ type mergeCheckerTestSuite struct {
 }
 
 func TestMergeCheckerTestSuite(t *testing.T) {
+	// These fixtures use arbitrary Classic keys that cross APIv2 mode boundaries.
+	// NextGen keyspace constraints are covered by TestAllowMergeKeyspace tests.
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	require.NoError(t, failpoint.Enable(modeFlag, "return(false)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
 	suite.Run(t, new(mergeCheckerTestSuite))
 }
 
@@ -650,9 +659,9 @@ func TestMergeCheckerSkipsActiveAffinityGroup(t *testing.T) {
 			}
 			cluster.AddLeaderRegion(1, 1, 2, 3)
 			cluster.AddLeaderRegion(2, tc.targetStores[0], tc.targetStores[1:]...)
-			source := cluster.GetRegion(1).Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("b")),
+			source := cluster.GetRegion(1).Clone(withAffinityTestRange("a", "b"),
 				core.SetApproximateSize(5), core.SetApproximateKeys(5))
-			target := cluster.GetRegion(2).Clone(core.WithStartKey([]byte("b")), core.WithEndKey([]byte("c")),
+			target := cluster.GetRegion(2).Clone(withAffinityTestRange("b", "c"),
 				core.SetApproximateSize(5), core.SetApproximateKeys(5))
 			cluster.PutRegion(source)
 			cluster.PutRegion(target)
@@ -660,7 +669,7 @@ func TestMergeCheckerSkipsActiveAffinityGroup(t *testing.T) {
 			manager := cluster.GetAffinityManager()
 			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
 				ID: "test", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
-			}, []byte("a"), []byte("c")))
+			}, affinityTestRange("a", "c")))
 			re.False(manager.GetAffinityGroupState("test").RegularSchedulingAllowed)
 			affinityChecker := newTestAffinityChecker(ctx, cluster, opt)
 			ops := affinityChecker.Check(source)
@@ -708,6 +717,7 @@ func TestMergeCheckerSkipsActiveAffinityGroup(t *testing.T) {
 }
 
 func TestAllowMergeCrossTable(t *testing.T) {
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
 	ctx := t.Context()
 	cfg := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, cfg)
@@ -760,42 +770,157 @@ func TestAllowMergeCrossTable(t *testing.T) {
 	cases := []struct {
 		name            string
 		pair            adjacentPair
+		nextGen         bool
 		crossTableMerge bool
 		expectAllow     bool
 	}{
 		// Classic: different table IDs.
-		{"classic/diff-table/cross-enabled", classicDiffTable, true, true},
-		{"classic/diff-table/cross-disabled", classicDiffTable, false, false},
+		{"classic/diff-table/cross-enabled", classicDiffTable, false, true, true},
+		{"classic/diff-table/cross-disabled", classicDiffTable, false, false, false},
 		// Classic: same table ID (index + record).
-		{"classic/same-table/cross-enabled", classicSameTable, true, true},
-		{"classic/same-table/cross-disabled", classicSameTable, false, true},
+		{"classic/same-table/cross-enabled", classicSameTable, false, true, true},
+		{"classic/same-table/cross-disabled", classicSameTable, false, false, true},
 
 		// Same keyspace: different table IDs.
-		{"same-keyspace/diff-table/cross-enabled", sameKSDiffTable, true, true},
-		{"same-keyspace/diff-table/cross-disabled", sameKSDiffTable, false, false},
+		{"same-keyspace/diff-table/cross-enabled", sameKSDiffTable, false, true, true},
+		{"same-keyspace/diff-table/cross-disabled", sameKSDiffTable, false, false, false},
 		// Same keyspace: same table ID (index + record).
-		{"same-keyspace/same-table/cross-enabled", sameKSSameTable, true, true},
-		{"same-keyspace/same-table/cross-disabled", sameKSSameTable, false, true},
+		{"same-keyspace/same-table/cross-enabled", sameKSSameTable, false, true, true},
+		{"same-keyspace/same-table/cross-disabled", sameKSSameTable, false, false, true},
+		{"nextgen/same-keyspace/diff-table/cross-disabled", sameKSDiffTable, true, false, false},
+		{"nextgen/same-keyspace/same-table/cross-disabled", sameKSSameTable, true, false, true},
 
 		// Different keyspaces: same numeric table ID is not the same logical table.
 		// With cross-table enabled, merge is still allowed by policy (split keys
 		// from keyspace labels normally block this path in production).
-		{"diff-keyspace/same-table/cross-enabled", diffKSSameTable, true, true},
-		{"diff-keyspace/same-table/cross-disabled", diffKSSameTable, false, false},
+		{"diff-keyspace/same-table/cross-enabled", diffKSSameTable, false, true, true},
+		{"diff-keyspace/same-table/cross-disabled", diffKSSameTable, false, false, false},
 		// Different keyspaces: different table IDs.
-		{"diff-keyspace/diff-table/cross-enabled", diffKSDiffTable, true, true},
-		{"diff-keyspace/diff-table/cross-disabled", diffKSDiffTable, false, false},
+		{"diff-keyspace/diff-table/cross-enabled", diffKSDiffTable, false, true, true},
+		{"diff-keyspace/diff-table/cross-disabled", diffKSDiffTable, false, false, false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
+			re.NoError(failpoint.Enable(modeFlag, "return("+strconv.FormatBool(tc.nextGen)+")"))
+			t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
 			cluster.SetEnableCrossTableMerge(tc.crossTableMerge)
 			regionA := newRegionInfoWithBytes(1, tc.pair.startA, tc.pair.endA)
 			regionB := newRegionInfoWithBytes(2, tc.pair.startB, tc.pair.endB)
 			re.Equal(tc.expectAllow, AllowMerge(cluster, regionA, regionB))
 		})
 	}
+}
+
+func TestAllowMergeKeyspace(t *testing.T) {
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	require.NoError(t, failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
+	for _, mode := range codec.KeyspaceModes() {
+		t.Run(string(mode), func(t *testing.T) {
+			cluster := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+			cluster.SetEnableCrossTableMerge(true)
+			// Both placement and label rules have been removed by reclamation.
+			boundary := func(id uint32) []byte {
+				key := codec.EncodeKeyspaceBoundary(mode, id)
+				return key[:]
+			}
+			key := func(id uint32, suffix string) []byte {
+				return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(mode, id), suffix...))
+			}
+			cases := []struct {
+				name               string
+				start, middle, end []byte
+				allow              bool
+			}{
+				{"within-keyspace", boundary(42), key(42, "m"), boundary(43), true},
+				{"complete-neighbors", boundary(42), boundary(43), boundary(44), true},
+				{"complete-spans", boundary(40), boundary(43), boundary(46), true},
+				{"partial-left", key(42, "a"), boundary(43), boundary(44), false},
+				{"partial-right", boundary(42), boundary(43), key(43, "b"), false},
+				{"complete-union-partial-sides", boundary(40), key(43, "m"), boundary(46), true},
+				{"partial-sides-with-complete-keyspaces", key(40, "a"), key(43, "m"), key(46, "z"), true},
+				{"left-only-partial-keyspace", key(42, "a"), key(43, "m"), boundary(45), false},
+				{"right-only-partial-keyspace", boundary(40), key(43, "m"), key(44, "z"), false},
+				{"complete-union-without-complete-right", boundary(42), key(43, "m"), boundary(44), false},
+				{"maximum-id", boundary(keyspaceconstant.MaxValidKeyspaceID - 1), boundary(keyspaceconstant.MaxValidKeyspaceID), boundary(keyspaceconstant.MaxValidKeyspaceID + 1), true},
+				{"first-id", boundary(0), boundary(1), boundary(2), true},
+				{"unbounded-left", nil, boundary(42), boundary(43), false},
+				{"unbounded-right", boundary(42), boundary(43), nil, false},
+				{"short-middle", boundary(42), boundary(43)[:4], boundary(44), false},
+				{"short-internal-end", boundary(42), key(42, "m"), boundary(43)[:4], true},
+				{"short-internal-start", boundary(43)[:4], append(boundary(43)[:4:4], 0), boundary(43), true},
+				{"outside-keyspaces", []byte("a"), []byte("b"), []byte("c"), true},
+				{"mode-crossing", codec.EncodeBytes(codec.MakeKeyspacePrefix(codec.RawKeyspaceModePrefix, 42)), boundary(43), codec.EncodeBytes(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 44)), false},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					re := require.New(t)
+					left := newRegionInfoWithBytes(1, tc.start, tc.middle)
+					right := newRegionInfoWithBytes(2, tc.middle, tc.end)
+					re.Equal(tc.allow, AllowMerge(cluster, left, right))
+					re.Equal(tc.allow, AllowMerge(cluster, right, left))
+				})
+			}
+		})
+	}
+}
+
+func TestAllowMergeKeyspaceConstraints(t *testing.T) {
+	const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
+	require.NoError(t, failpoint.Enable(modeFlag, "return(true)"))
+	t.Cleanup(func() { require.NoError(t, failpoint.Disable(modeFlag)) })
+	re := require.New(t)
+	cluster := mockcluster.NewCluster(t.Context(), mockconfig.NewTestOptions())
+	cluster.SetEnableCrossTableMerge(true)
+	boundary := func(id uint32) []byte {
+		key := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id)
+		return key[:]
+	}
+	start, middle, end := boundary(42), boundary(43), boundary(44)
+	left := newRegionInfoWithBytes(1, start, middle)
+	right := newRegionInfoWithBytes(2, middle, end)
+	for _, id := range []uint32{42, 43} {
+		re.NoError(cluster.GetRegionLabeler().SetLabelRule(keyspace.MakeTxnLabelRule(id)))
+	}
+	merged := left.Clone(core.WithEndKey(end))
+	sc := NewSplitChecker(cluster, cluster.RuleManager, cluster.GetRegionLabeler())
+	re.False(AllowMerge(cluster, left, right))
+	re.NotNil(sc.Check(merged))
+	re.NoError(cluster.GetRegionLabeler().DeleteLabelRule("keyspaces/42"))
+	re.False(AllowMerge(cluster, left, right))
+	re.NotNil(sc.Check(merged))
+	re.NoError(cluster.GetRegionLabeler().DeleteLabelRule("keyspaces/43"))
+	re.True(AllowMerge(cluster, left, right))
+	re.Nil(sc.Check(merged))
+
+	// A placement-rule boundary remains a hard constraint.
+	re.NoError(cluster.SetRule(&placement.Rule{
+		GroupID:     placement.DefaultGroupID,
+		ID:          "keyspace",
+		Index:       1,
+		Override:    true,
+		StartKeyHex: hex.EncodeToString(middle),
+		EndKeyHex:   hex.EncodeToString(end),
+		Role:        placement.Voter,
+		Count:       3,
+	}))
+	re.False(AllowMerge(cluster, left, right))
+	re.NotNil(sc.Check(merged))
+	re.NoError(cluster.RuleManager.DeleteRule(placement.DefaultGroupID, "keyspace"))
+	re.True(AllowMerge(cluster, left, right))
+	re.Nil(sc.Check(merged))
+
+	// merge_option=deny applies even if it has no boundary inside the range.
+	re.NoError(cluster.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
+		ID:       "deny",
+		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
+		RuleType: labeler.KeyRange,
+		Data:     keyutil.BuildKeyRangeMaps(hex.EncodeToString(start), hex.EncodeToString(end)),
+	}))
+	re.False(AllowMerge(cluster, left, right))
+	re.NoError(cluster.GetRegionLabeler().DeleteLabelRule("deny"))
 }
 
 func encodeKeyspaceRawKey(keyspaceID uint32, rawKey []byte) []byte {

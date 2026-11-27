@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -256,8 +257,10 @@ func TestHotRegionAffinityBucketSplit(t *testing.T) {
 				updateStats(2, 20*units.MiB*utils.StoreHeartBeatReportInterval, 14*units.MiB*utils.StoreHeartBeatReportInterval)
 				updateStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
 				addRegionInfo(tc, rwTy, regions)
-				region := tc.GetRegion(testCase.regionID).Clone(core.SetApproximateSize(1024))
-				splitKey := fmt.Appendf(nil, "%20d5", testCase.regionID)
+				region := tc.GetRegion(testCase.regionID)
+				keyRange := testutil.TxnKeyspaceRange(region.GetStartKey(), region.GetEndKey())
+				region = region.Clone(core.SetApproximateSize(1024), core.WithStartKey(keyRange.StartKey), core.WithEndKey(keyRange.EndKey))
+				splitKey := testutil.TxnKeyspaceKey(fmt.Appendf(nil, "%20d5", testCase.regionID))
 				bucket := &metapb.Buckets{
 					RegionId: testCase.regionID, PeriodInMs: 1000,
 					Keys: [][]byte{region.GetStartKey(), splitKey, region.GetEndKey()},
@@ -274,7 +277,7 @@ func TestHotRegionAffinityBucketSplit(t *testing.T) {
 				}
 				mgr := tc.GetAffinityManager()
 				re.NoError(mgr.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-					GroupID: "hot-split", KeyRanges: []keyutil.KeyRange{{StartKey: region.GetStartKey(), EndKey: region.GetEndKey()}},
+					GroupID: "hot-split", KeyRanges: []keyutil.KeyRange{keyRange},
 				}}))
 				if testCase.expired {
 					peers := regions[testCase.regionID-6].peers

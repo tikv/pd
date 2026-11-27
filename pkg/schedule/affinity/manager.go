@@ -459,16 +459,6 @@ func (m *Manager) InvalidCache(regionID uint64) {
 	m.deleteCacheLocked(regionID)
 }
 
-func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) {
-	m.RLock()
-	defer m.RUnlock()
-	cache, ok := m.regions[region.GetID()]
-	if ok {
-		return &cache, newGroupState(cache.groupInfo)
-	}
-	return nil, nil
-}
-
 // GetRegionAffinityGroupState returns the affinity group state and isAffinity for a region.
 // This is a read-only operation that does not modify cache and we use this for temporary check
 func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (group *GroupState, isAffinity bool) {
@@ -483,11 +473,19 @@ func (m *Manager) GetAndCacheRegionAffinityGroupState(region *core.RegionInfo) (
 }
 
 func (m *Manager) calcRegionAffinityGroupState(region *core.RegionInfo, saveCache bool) (group *GroupState, isAffinity bool) {
-	if region == nil || !m.IsAvailable() {
+	if region == nil {
+		return nil, false
+	}
+	m.RLock()
+	if len(m.groups) == 0 {
+		m.RUnlock()
 		return nil, false
 	}
 	var cache *regionCache
-	cache, group = m.getCache(region)
+	if cached, ok := m.regions[region.GetID()]; ok {
+		cache, group = &cached, newGroupState(cached.groupInfo)
+	}
+	m.RUnlock()
 	if cache == nil || group == nil || cache.affinityVer != group.affinityVer || region != cache.region {
 		labelRuleVer := m.labelRuleVer.Load()
 		groupID := m.regionLabeler.GetRegionLabel(region, AffinityLabelKey)
@@ -534,7 +532,7 @@ func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 
 // CheckAndGetAffinityGroupState returns the group state after validating the ID and presence.
 func (m *Manager) CheckAndGetAffinityGroupState(groupID string) (*GroupState, error) {
-	if err := ValidateGroupID(groupID); err != nil {
+	if err := ValidateExistingGroupID(groupID); err != nil {
 		return nil, err
 	}
 	state := m.GetAffinityGroupState(groupID)

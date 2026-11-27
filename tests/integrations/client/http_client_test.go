@@ -1400,11 +1400,10 @@ func (suite *httpClientTestSuite) TestAffinityGroups() {
 		})
 	}
 
-	// Test key encoding: use raw keys that will be properly encoded
-	testKey1 := []byte("test_key_1")
-	testKey2 := []byte("test_key_2")
-	testKey3 := []byte("test_key_3")
-	testKey4 := []byte("test_key_4")
+	testKey1 := testutil.TxnKeyspaceKey([]byte("test_key_1"))
+	testKey2 := testutil.TxnKeyspaceKey([]byte("test_key_2"))
+	testKey3 := testutil.TxnKeyspaceKey([]byte("test_key_3"))
+	testKey4 := testutil.TxnKeyspaceKey([]byte("test_key_4"))
 
 	// Test 1: Create affinity groups
 	affinityGroups := map[string][]pd.AffinityGroupKeyRange{
@@ -1456,8 +1455,8 @@ func (suite *httpClientTestSuite) TestAffinityGroups() {
 	re.Contains(allGroups, "test-group-2")
 
 	// Test 4: Add key ranges to affinity groups
-	testKey5 := []byte("test_key_5")
-	testKey6 := []byte("test_key_6")
+	testKey5 := testutil.TxnKeyspaceKey([]byte("test_key_5"))
+	testKey6 := testutil.TxnKeyspaceKey([]byte("test_key_6"))
 
 	addRanges := map[string][]pd.AffinityGroupKeyRange{
 		"test-group-1": {

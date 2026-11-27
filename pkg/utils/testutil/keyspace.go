@@ -22,18 +22,19 @@ import (
 
 const testKeyspaceID = 1
 
+// TxnKeyspaceKey encodes a test key in a transaction keyspace in NextGen.
+func TxnKeyspaceKey(key []byte) []byte {
+	if !kerneltype.IsNextGen() {
+		return key
+	}
+	return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, testKeyspaceID), key...))
+}
+
 // TxnKeyspaceRange encodes a test range in NextGen, using the keyspace boundaries for empty endpoints.
 func TxnKeyspaceRange(start, end []byte) keyutil.KeyRange {
-	if !kerneltype.IsNextGen() {
-		return keyutil.KeyRange{StartKey: start, EndKey: end}
-	}
-	prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, testKeyspaceID)
-	start = codec.EncodeBytes(append(prefix, start...))
-	if len(end) == 0 {
+	if kerneltype.IsNextGen() && len(end) == 0 {
 		upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, testKeyspaceID+1)
-		end = upper[:]
-	} else {
-		end = codec.EncodeBytes(append(prefix, end...))
+		return keyutil.KeyRange{StartKey: TxnKeyspaceKey(start), EndKey: upper[:]}
 	}
-	return keyutil.KeyRange{StartKey: start, EndKey: end}
+	return keyutil.KeyRange{StartKey: TxnKeyspaceKey(start), EndKey: TxnKeyspaceKey(end)}
 }

@@ -130,8 +130,11 @@ const (
 	resourceGroupStatesPathFormat   = "resource_group/states/%s"   // "resource_group/states/{group_name}"
 	controllerConfigPath            = "resource_group/controller"  // "resource_group/controller"
 
-	timestampPathFormat   = "/pd/%d/timestamp"              // "/pd/{cluster_id}/timestamp"
-	msTimestampPathFormat = "/ms/%d/tso/%05d/gta/timestamp" // "/ms/{cluster_id}/tso/{group_id}/gta/timestamp"
+	timestampPathFormat  = "/pd/%d/timestamp" // "/pd/{cluster_id}/timestamp"
+	msTSOPrefixFormat    = "/ms/%d/tso/"
+	tsoGroupPrefixFormat = msTSOPrefixFormat + "%0*d/"
+	tsoGroupIDWidth      = 5
+	groupWindowSuffix    = "gta/timestamp"
 
 	affinityGroupPathFormat = "/pd/%d/affinity_groups/%s" // "/pd/{cluster_id}/affinity_groups/{group_id}"
 
@@ -271,7 +274,56 @@ func TimestampPath(groupID uint32) string {
 	if groupID == constant.DefaultKeyspaceGroupID {
 		return fmt.Sprintf(timestampPathFormat, ClusterID())
 	}
-	return fmt.Sprintf(msTimestampPathFormat, ClusterID(), groupID)
+	return fmt.Sprintf(tsoGroupPrefixFormat+groupWindowSuffix, ClusterID(), tsoGroupIDWidth, groupID)
+}
+
+// LegacyLocalTSOPrefix contains the default group's historical per-DC windows.
+func LegacyLocalTSOPrefix() string {
+	return fmt.Sprintf("/pd/%d/lta/", ClusterID())
+}
+
+// TSOMicroservicePrefix contains the numbered TSO group directories.
+func TSOMicroservicePrefix() string {
+	return fmt.Sprintf(msTSOPrefixFormat, ClusterID())
+}
+
+// TSOGroupWindowRange returns the half-open range of non-default TSO group directories.
+func TSOGroupWindowRange() (start, end string) {
+	start = fmt.Sprintf(tsoGroupPrefixFormat, ClusterID(), tsoGroupIDWidth, constant.DefaultKeyspaceGroupID+1)
+	// ':' follows '9' in byte order, before registry and election keys.
+	return start, TSOMicroservicePrefix() + ":"
+}
+
+// IsTSOGroupWindowPath reports whether a path relative to TSOMicroservicePrefix is a non-default group's window.
+func IsTSOGroupWindowPath(relative string) bool {
+	group, suffix, ok := strings.Cut(relative, "/")
+	if !ok || len(group) != tsoGroupIDWidth {
+		return false
+	}
+	id, err := strconv.ParseUint(group, 10, 32)
+	if err != nil || id == uint64(constant.DefaultKeyspaceGroupID) {
+		return false
+	}
+	if suffix == groupWindowSuffix {
+		return true
+	}
+	local, ok := strings.CutPrefix(suffix, "lta/")
+	return ok && IsLocalTSOWindowPath(local)
+}
+
+// IsLocalTSOWindowPath reports whether a path relative to a legacy lta/ directory is a per-DC window.
+func IsLocalTSOWindowPath(relative string) bool {
+	dc, ok := strings.CutSuffix(relative, "/timestamp")
+	if !ok {
+		return false
+	}
+	// Legacy allocators used path.Join, so a DC can span multiple clean path components.
+	for component := range strings.SplitSeq(dc, "/") {
+		if component == "" || component == "." || component == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // RegionPath returns the region meta info key path with the given region ID.

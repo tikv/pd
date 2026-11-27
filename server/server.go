@@ -2152,6 +2152,13 @@ func (s *Server) campaignLeader() {
 	callbacksDuration := time.Since(callbacksStart)
 	log.Info("trigger leader callback functions completed", zap.Duration("cost", callbacksDuration))
 
+	if kerneltype.IsNextGen() {
+		if err := s.storage.GetGCStateProvider().MigrateNativeBRBarrier(ctx, s.client); err != nil {
+			log.Warn("failed to migrate legacy native_br GC barrier", errs.ZapError(err))
+			return
+		}
+	}
+
 	// Try to create raft cluster.
 	createRaftClusterStart := time.Now()
 	if err := s.createRaftCluster(); err != nil {

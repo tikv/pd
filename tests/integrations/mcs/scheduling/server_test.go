@@ -1494,7 +1494,7 @@ func (suite *serverTestSuite) TestAffinitySplitNotifications() {
 	manager := suite.pdLeader.GetRaftCluster().GetAffinityManager()
 	const groupID = "split-notifications"
 	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
-		GroupID: groupID, KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("c")}},
+		GroupID: groupID, KeyRanges: []keyutil.KeyRange{testutil.TxnKeyspaceRange([]byte("a"), []byte("c"))},
 	}}))
 	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
 	re.NoError(err)
@@ -1523,7 +1523,7 @@ func (suite *serverTestSuite) TestAffinitySplitNotifications() {
 	}()
 	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 33, StoreId: 3}}
 	regionReq := &pdpb.RegionHeartbeatRequest{
-		Header: header, Region: &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Header: header, Region: &metapb.Region{Id: 10, Peers: peers, StartKey: testutil.TxnKeyspaceKey([]byte("a")), EndKey: testutil.TxnKeyspaceKey([]byte("b"))},
 		Leader: peers[0], ApproximateSize: 5 * units.MiB, ApproximateKeys: 500,
 	}
 	testutil.Eventually(re, func() bool {

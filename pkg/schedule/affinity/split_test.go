@@ -62,7 +62,7 @@ func TestAllowSplit(t *testing.T) {
 	re.NoError(err)
 
 	groupID := "g1"
-	keyRange := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("z")}
+	keyRange := keyutil.KeyRange{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("z"))}
 	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: groupID, KeyRanges: []keyutil.KeyRange{keyRange}}})
 	re.NoError(err)
 	_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
@@ -75,7 +75,7 @@ func TestAllowSplit(t *testing.T) {
 	conf.SetMaxAffinityMergeRegionSize(10)
 
 	// Case 1: small affinity region will not be split but admin split will always be allowed
-	smallRegion := generateRegionForTest(1, []uint64{1, 2, 3}, keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("y")})
+	smallRegion := generateRegionForTest(1, []uint64{1, 2, 3}, keyutil.KeyRange{StartKey: keyForTest([]byte("b")), EndKey: keyForTest([]byte("y"))})
 	smallRegion = smallRegion.Clone(
 		core.SetApproximateSize(5),
 		core.SetApproximateKeys(int64(5*config.RegionSizeToKeysRatio)),
@@ -142,11 +142,11 @@ func newSplitRecoveryTestManager(t *testing.T) (*Manager, *serverconfig.PersistO
 	manager, err := NewManager(t.Context(), store, stores, conf, regionLabeler)
 	re.NoError(err)
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{
-		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("a"), EndKey: []byte("z")}},
+		GroupID: "g1", KeyRanges: []keyutil.KeyRange{{StartKey: keyForTest([]byte("a")), EndKey: keyForTest([]byte("z"))}},
 	}}))
 	_, err = manager.UpdateAffinityGroupPeers("g1", 1, []uint64{1, 2, 3})
 	re.NoError(err)
-	region := generateRegionForTest(1, []uint64{1, 2, 3}, keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("y")}).Clone(
+	region := generateRegionForTest(1, []uint64{1, 2, 3}, keyutil.KeyRange{StartKey: keyForTest([]byte("b")), EndKey: keyForTest([]byte("y"))}).Clone(
 		core.SetApproximateSize(60), core.SetApproximateKeys(1000),
 	)
 	streams := hbstream.NewTestHeartbeatStreams(t.Context(), stores, false)
@@ -203,7 +203,7 @@ func TestSplitPolicyLookupDoesNotHoldSplitMutex(t *testing.T) {
 			defer func() { re.NoError(failpoint.Disable(lookupHook)) }()
 
 			// This version spans the group boundary, so its policy requires a fresh lookup.
-			changed := region.Clone(core.WithEndKey([]byte("zz")), core.WithIncVersion())
+			changed := region.Clone(core.WithEndKey(keyForTest([]byte("zz"))), core.WithIncVersion())
 			if path == "split request" {
 				re.True(m.CheckSplit(changed, pdpb.SplitReason_SIZE, streams))
 			} else {
@@ -235,7 +235,7 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			re := require.New(t)
 			re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g2"}}))
 			rule := MakeLabelRule(GroupKeyRanges{
-				GroupID: "g2", KeyRanges: []keyutil.KeyRange{{StartKey: []byte("b"), EndKey: []byte("y")}},
+				GroupID: "g2", KeyRanges: testKeyRanges("b", "y"),
 			})
 			re.NoError(m.regionLabeler.SetLabelRule(rule))
 			re.NoError(m.SyncKeyRangesFromEtcd(rule))
@@ -244,7 +244,7 @@ func TestEnableSplitAfterAffinityChanges(t *testing.T) {
 			return r
 		}},
 		{"region crosses group boundary", func(_ *testing.T, _ *Manager, _ *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
-			return r.Clone(core.WithEndKey([]byte("zz")), core.WithIncVersion())
+			return r.Clone(core.WithEndKey(keyForTest([]byte("zz"))), core.WithIncVersion())
 		}},
 		{"affinity scheduling disabled", func(_ *testing.T, _ *Manager, c *serverconfig.PersistOptions, r *core.RegionInfo) *core.RegionInfo {
 			c.SetAffinityScheduleLimit(0)

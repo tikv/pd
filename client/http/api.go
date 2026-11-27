@@ -124,6 +124,11 @@ func RegionsReplicatedByKeyRange(keyRange *KeyRange) string {
 		regionsReplicated, startKeyStr, endKeyStr)
 }
 
+// AffinityGroupByIDPath returns the endpoint for one escaped group ID.
+func AffinityGroupByIDPath(groupID string) string {
+	return fmt.Sprintf(AffinityGroupByID, url.PathEscape(groupID))
+}
+
 // RegionSiblingsByID returns the path of PD HTTP API to get sibling regions by ID.
 func RegionSiblingsByID(regionID uint64) string {
 	return fmt.Sprintf("%s/%d", regionsSiblings, regionID)

@@ -81,7 +81,7 @@ func (suite *ruleTestSuite) TestAffinityOverlapStartup() {
 	re := suite.Require()
 	raftCluster := suite.pdLeaderServer.GetRaftCluster()
 	change := func(id, start, end string) affinity.GroupKeyRanges {
-		return affinity.GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{{StartKey: []byte(start), EndKey: []byte(end)}}}
+		return affinity.GroupKeyRanges{GroupID: id, KeyRanges: []keyutil.KeyRange{testutil.TxnKeyspaceRange([]byte(start), []byte(end))}}
 	}
 	a, b := change("overlap-a", "a", "d"), change("overlap-b", "b", "c")
 	snapshot, watch := change("paired-snapshot", "x", "y"), change("paired-watch", "y", "z")

@@ -546,8 +546,8 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsAdvancementAndWrites() {
 	_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "global")
 	re.NoError(err)
 	re.Empty(gatherBarrierMetrics(s.T(), registry))
-	// Compatibility paths share the successful set/delete/advance hooks.
-	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", newerTS, 3600, now)
+	// Local compatibility and native global operations both publish observations.
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "native_br", newerTS, time.Hour, now)
 	re.NoError(err)
 	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint(2, "compat", newerTS, 3600, now)
 	re.NoError(err)
@@ -557,7 +557,7 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsAdvancementAndWrites() {
 	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint(2, "compat", ts(time.Hour), 3600, now)
 	re.NoError(err)
 	re.Len(gatherBarrierMetrics(s.T(), registry), 1)
-	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", newerTS, 0, now)
+	_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "native_br")
 	re.NoError(err)
 	re.Empty(gatherBarrierMetrics(s.T(), registry))
 }
@@ -594,14 +594,15 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsDisabledKeyspace() {
 	}
 	_, err = m.AdvanceTxnSafePoint(2, ts, now)
 	re.NoError(err)
-	re.Equal(map[string]float64{"keyspace/2/old": 1_999_712_000, "global//global": 1_999_712_000}, gatherBarrierMetrics(s.T(), registry))
+	expected := map[string]float64{"keyspace/2/old": float64(ts>>18) / 1000, "global//global": float64(ts>>18) / 1000}
+	re.Equal(expected, gatherBarrierMetrics(s.T(), registry))
 	re.Len(logs.FilterMessage("GC barrier timestamp is too old").All(), 2)
 	counted.afterCommit = nil
 	// Compatibility gc_worker advancement must discover the same disabled scope.
 	m.OnNodeBecomesLeader()
 	_, _, err = m.CompatibleUpdateServiceGCSafePoint(2, "gc_worker", ts, math.MaxInt64, now)
 	re.NoError(err)
-	re.Equal(map[string]float64{"keyspace/2/old": 1_999_712_000, "global//global": 1_999_712_000}, gatherBarrierMetrics(s.T(), registry))
+	re.Equal(expected, gatherBarrierMetrics(s.T(), registry))
 	re.Len(logs.FilterMessage("GC barrier timestamp is too old").All(), 4)
 }
 

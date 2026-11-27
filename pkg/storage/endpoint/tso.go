@@ -16,6 +16,8 @@ package endpoint
 
 import (
 	"context"
+	"math"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -25,8 +27,10 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -118,4 +122,75 @@ func (se *StorageEndpoint) DeleteTimestamp(ctx context.Context, groupID uint32) 
 	return se.RunInTxn(ctx, func(txn kv.Txn) error {
 		return txn.Remove(keypath.TimestampPath(groupID))
 	})
+}
+
+// Window records store positive Unix nanoseconds as eight big-endian bytes.
+func decodeTSOWindow(key, value string) (uint64, error) {
+	nanos, err := typeutil.BytesToUint64([]byte(value))
+	if err != nil {
+		return 0, errors.Annotatef(err, "invalid TSO window at %q", key)
+	}
+	if nanos == 0 || nanos > math.MaxInt64 {
+		return 0, errors.Errorf("invalid TSO window at %q: expected positive Unix nanoseconds", key)
+	}
+	return nanos, nil
+}
+
+// LoadGlobalGCBarrierTSFloor returns the greater of the persisted TSO window
+// bound (including retired groups and legacy per-DC allocators) and the unified
+// txn safe point, which can outlive the group that issued its timestamp.
+func (p GCStateProvider) LoadGlobalGCBarrierTSFloor(ctx context.Context) (uint64, error) {
+	defaultKey := keypath.TimestampPath(constant.DefaultKeyspaceGroupID)
+	unifiedKey := keypath.TxnSafePointPath(constant.NullKeyspaceID)
+	localPrefix, groupPrefix := keypath.LegacyLocalTSOPrefix(), keypath.TSOMicroservicePrefix()
+	groupStart, groupEnd := keypath.TSOGroupWindowRange()
+	// Read the safe point and windows at the same etcd revision. Deleted groups
+	// keep their windows at the original keys in the group range.
+	ops := []kv.RawTxnOp{
+		{OpType: kv.RawTxnOpGet, Key: unifiedKey},
+		{OpType: kv.RawTxnOpGet, Key: defaultKey},
+		{OpType: kv.RawTxnOpGetRange, Key: localPrefix, EndKey: "\x00"},
+		{OpType: kv.RawTxnOpGetRange, Key: groupStart, EndKey: groupEnd},
+	}
+	txn, err := p.storage.createRawTxnWithContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+	result, err := txn.Then(ops...).Commit()
+	if err != nil {
+		return 0, err
+	}
+	if !result.Succeeded || len(result.Responses) != len(ops) {
+		return 0, errors.New("invalid TSO window snapshot response")
+	}
+	var unifiedTxnSafePoint uint64
+	if pairs := result.Responses[0].KeyValuePairs; len(pairs) > 0 {
+		unifiedTxnSafePoint, err = decodeTxnSafePoint(pairs[0].Value)
+		if err != nil {
+			return 0, errors.Annotatef(err, "invalid unified txn safe point at %q", unifiedKey)
+		}
+	}
+	var largest uint64
+	for _, item := range result.Responses[1:] {
+		for _, pair := range item.KeyValuePairs {
+			isWindow := pair.Key == defaultKey ||
+				keypath.IsLocalTSOWindowPath(strings.TrimPrefix(pair.Key, localPrefix)) ||
+				keypath.IsTSOGroupWindowPath(strings.TrimPrefix(pair.Key, groupPrefix))
+			if !isWindow {
+				continue
+			}
+			nanos, err := decodeTSOWindow(pair.Key, pair.Value)
+			if err != nil {
+				return 0, err
+			}
+			largest = max(largest, nanos)
+		}
+	}
+	if largest == 0 {
+		return 0, errors.New("no persisted TSO window available for a global GC barrier")
+	}
+	// Round the maximal physical window up to a millisecond boundary before
+	// composing logical zero. Avoid overflowing when rounding a large UnixNano.
+	millis := (largest-1)/uint64(time.Millisecond) + 1
+	return max(tsoutil.ComposeTS(int64(millis), 0), unifiedTxnSafePoint), nil
 }

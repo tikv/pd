@@ -42,7 +42,8 @@ const (
 	// KeyspacePrefixLen is the raw keyspace prefix length before memcomparable encoding.
 	KeyspacePrefixLen = 4
 
-	encodedKeyspacePrefixLen = encGroupSize + 1
+	// EncodedKeyspacePrefixLen is the length of a memcomparable keyspace prefix.
+	EncodedKeyspacePrefixLen = encGroupSize + 1
 	keyspacePrefixMarker     = encMarker - byte(encGroupSize-KeyspacePrefixLen)
 )
 
@@ -65,14 +66,14 @@ func parseKeyspaceMode(prefix byte) (byte, bool) {
 // EncodeKeyspaceBoundary returns the fixed-width memcomparable boundary for a
 // keyspace ID. An ID beyond the 24-bit keyspace prefix is encoded as the
 // mode's exclusive fencepost.
-func EncodeKeyspaceBoundary(mode byte, id uint32) [encodedKeyspacePrefixLen]byte {
+func EncodeKeyspaceBoundary(mode byte, id uint32) [EncodedKeyspacePrefixLen]byte {
 	if id >= 1<<(8*(KeyspacePrefixLen-1)) {
 		// The next prefix byte is the exclusive upper bound of this mode's
 		// keyspace range.
 		mode++
 		id = 0
 	}
-	return [encodedKeyspacePrefixLen]byte{
+	return [EncodedKeyspacePrefixLen]byte{
 		mode,
 		byte(id >> 16),
 		byte(id >> 8),
@@ -85,7 +86,7 @@ func EncodeKeyspaceBoundary(mode byte, id uint32) [encodedKeyspacePrefixLen]byte
 // DecodeKeyspaceKey extracts the API mode and keyspace ID from a
 // memcomparable key that contains the complete four-byte keyspace prefix.
 func DecodeKeyspaceKey(key []byte) (byte, uint32, bool) {
-	if len(key) < encodedKeyspacePrefixLen || key[encGroupSize] < keyspacePrefixMarker {
+	if len(key) < EncodedKeyspacePrefixLen || key[encGroupSize] < keyspacePrefixMarker {
 		return 0, 0, false
 	}
 	mode, ok := parseKeyspaceMode(key[0])
