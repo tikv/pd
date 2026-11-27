@@ -100,10 +100,11 @@ type Controller struct {
 	successCallbacks []func(op *Operator)
 
 	// states
-	records   *records // safe for concurrent
-	wop       WaitingOperator
-	wopStatus *waitingOperatorStatus
-	counts    *opCounter
+	records          *records // safe for concurrent
+	wop              WaitingOperator
+	wopStatus        *waitingOperatorStatus
+	counts           *opCounter
+	splitMergePairMu syncutil.Mutex // serializes lazy pair-token assignment with publication for split unsynced merge ops
 }
 
 // NewController creates a Controller.
@@ -336,29 +337,36 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 	for i := 0; i < len(ops); i++ {
 		op := ops[i]
 		desc := op.Desc()
+		var relatedOp *Operator
 		isMerge := false
 		if op.HasRelatedMergeRegion() {
-			if i+1 >= len(ops) {
+			remaining := ops[i+1:]
+			if len(remaining) == 0 {
 				// should not be here forever
 				log.Error("orphan merge operators found", zap.String("desc", desc), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("orphan operator found")))
 				return added
 			}
-			if !ops[i+1].HasRelatedMergeRegion() {
+			relatedOp = remaining[0]
+			if !relatedOp.HasRelatedMergeRegion() {
 				log.Error("merge operator should be paired", zap.String("desc",
-					ops[i+1].Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
+					relatedOp.Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
 				return added
 			}
 			isMerge = true
 		}
-		if pass, reason := oc.checkAddOperator(false, op); !pass {
+		pass, reason := oc.checkAddOperator(false, op)
+		if pass && isMerge && !op.ensureMergePair(relatedOp) {
+			pass = false
+			reason = RelatedMergeRegion
+		}
+		if !pass {
 			_ = op.Cancel(reason)
 			oc.buryOperator(op)
 			if isMerge {
 				// Merge operation have two operators, cancel them all
 				i++
-				next := ops[i]
-				_ = next.Cancel(reason)
-				oc.buryOperator(next)
+				_ = relatedOp.Cancel(reason)
+				oc.buryOperator(relatedOp)
 			}
 			continue
 		}
@@ -367,7 +375,7 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 			// count two merge operators as one, so wopStatus.ops[desc] should
 			// not be updated here
 			// TODO: call checkAddOperator ...
-			oc.wop.PutMergeOperators([]*Operator{op, ops[i+1]})
+			oc.wop.PutMergeOperators([]*Operator{op, relatedOp})
 			i++
 			added++
 		} else {
@@ -405,12 +413,34 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 		}
 		return false
 	}
+	pairBatchMergeOperators(ops)
 	for _, op := range ops {
 		if !oc.addOperatorInner(op) {
 			return false
 		}
 	}
 	return true
+}
+
+// pairBatchMergeOperators assigns a shared mergePairToken to reciprocal
+// unsynced merge operators submitted in the same AddOperator batch so callers
+// constructing merge pairs with NewOperator + RelatedMergeRegion without Sync
+// remain compatible while preserving per-generation pair identity.
+func pairBatchMergeOperators(ops []*Operator) {
+	for i, op := range ops {
+		if op == nil || !op.HasRelatedMergeRegion() || op.hasMergePair() {
+			continue
+		}
+		for j := i + 1; j < len(ops); j++ {
+			other := ops[j]
+			if other == nil || !other.HasRelatedMergeRegion() || other.hasMergePair() {
+				continue
+			}
+			if op.ensureMergePair(other) {
+				break
+			}
+		}
+	}
 }
 
 // PromoteWaitingOperator promotes operators from waiting operators.
@@ -543,14 +573,59 @@ func isHigherPriorityOperator(new, old *Operator) bool {
 	return new.GetPriorityLevel() > old.GetPriorityLevel()
 }
 
+func (oc *Controller) ensureSingleMergePair(op *Operator) *mergePairToken {
+	if !op.HasRelatedMergeRegion() || op.hasMergePair() {
+		return nil
+	}
+	if relatedID := op.GetRelatedMergeRegion(); relatedID != 0 {
+		if relatedOpi, ok := oc.operators.Load(relatedID); ok {
+			if relatedOp := relatedOpi.(*Operator); relatedOp != nil &&
+				op.hasReciprocalMergeRegion(relatedOp) &&
+				op.hasCompatibleMergeSteps(relatedOp) &&
+				!IsEndStatus(relatedOp.Status()) {
+				if pair := relatedOp.mergePair.Load(); pair != nil && pair.claimed.CompareAndSwap(false, true) {
+					if op.mergePair.CompareAndSwap(nil, pair) {
+						return pair
+					}
+					pair.claimed.Store(false)
+					return nil
+				}
+			}
+		}
+	}
+	op.mergePair.CompareAndSwap(nil, &mergePairToken{})
+	return nil
+}
+
+func releaseSplitMergePair(op *Operator, claimedPair *mergePairToken) {
+	if claimedPair != nil && op.mergePair.CompareAndSwap(claimedPair, nil) {
+		claimedPair.claimed.Store(false)
+	}
+}
+
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
+	kind := op.SchedulerKind()
 
+	needSplitPairLock := op.HasRelatedMergeRegion() && !op.hasMergePair()
+	if needSplitPairLock {
+		oc.splitMergePairMu.Lock()
+	}
+	claimedPair := oc.ensureSingleMergePair(op)
+
+	// Increment before publishing so any concurrent removal after publish
+	// cannot decrement before inc and leave oc.counts unbalanced.
+	oc.counts.inc(kind)
 	old, loaded := oc.operators.LoadOrStore(regionID, op)
 	if loaded {
 		// If there is an old operator and it has lower priority, replace it
 		oldOp := old.(*Operator)
 		if !isHigherPriorityOperator(op, oldOp) {
+			oc.counts.dec(kind)
+			releaseSplitMergePair(op, claimedPair)
+			if needSplitPairLock {
+				oc.splitMergePairMu.Unlock()
+			}
 			log.Debug("operator already exists with higher or equal priority",
 				zap.Uint64("region-id", regionID),
 				zap.Reflect("old", oldOp),
@@ -562,6 +637,11 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		}
 		// replace old operator
 		if !oc.operators.CompareAndSwap(regionID, oldOp, op) {
+			oc.counts.dec(kind)
+			releaseSplitMergePair(op, claimedPair)
+			if needSplitPairLock {
+				oc.splitMergePairMu.Unlock()
+			}
 			_ = op.Cancel()
 			oc.buryOperator(op)
 			log.Debug("operator changed during replace, skip this add",
@@ -570,21 +650,31 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 				zap.Reflect("new", op))
 			return false
 		}
+		if needSplitPairLock {
+			oc.splitMergePairMu.Unlock()
+		}
 		oc.counts.dec(oldOp.SchedulerKind())
 		oc.ack(oldOp)
 		if oldOp.HasRelatedMergeRegion() {
 			oc.removeRelatedMergeOperator(oldOp)
 		}
-		_ = oldOp.Replace()
+		if !oldOp.Replace() {
+			_ = oldOp.Cancel(AlreadyExist)
+		}
 		oc.buryOperator(oldOp)
+	} else if needSplitPairLock {
+		oc.splitMergePairMu.Unlock()
 	}
 
 	failpoint.InjectCall("afterPublishOperator")
 
-	oc.counts.inc(op.SchedulerKind())
 	// Now start the operator after successfully adding it to the map
 	if !op.Start() {
-		_ = oc.removeOperatorWithoutBury(op)
+		// If a concurrent remover already deleted op after publish, it already
+		// balanced oc.counts and buried op.
+		if !oc.removeOperatorWithoutBury(op) {
+			return false
+		}
 		_ = op.Cancel(StartFailed)
 		oc.buryOperator(op)
 		log.Warn("adding operator with unexpected status",
@@ -705,14 +795,21 @@ func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) 
 }
 
 func (oc *Controller) removeOperatorWithoutBury(op *Operator) bool {
+	if oc.deleteOperatorWithoutBury(op) {
+		if op.HasRelatedMergeRegion() {
+			oc.removeRelatedMergeOperator(op)
+		}
+		return true
+	}
+	return false
+}
+
+func (oc *Controller) deleteOperatorWithoutBury(op *Operator) bool {
 	regionID := op.RegionID()
 	if oc.operators.CompareAndDelete(regionID, op) {
 		oc.counts.dec(op.SchedulerKind())
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
-		if op.HasRelatedMergeRegion() {
-			oc.removeRelatedMergeOperator(op)
-		}
 		return true
 	}
 	return false
@@ -728,10 +825,11 @@ func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
 		return
 	}
 	relatedOp := relatedOpi.(*Operator)
-	if relatedOp != nil && relatedOp.Status() != CANCELED {
-		oc.removeOperatorWithoutBury(relatedOp)
-		relatedOp.Cancel(RelatedMergeRegion)
-		oc.buryOperator(relatedOp)
+	if relatedOp != nil && op.isPairedMergeOperator(relatedOp) && relatedOp.Status() != CANCELED {
+		if oc.deleteOperatorWithoutBury(relatedOp) {
+			relatedOp.Cancel(RelatedMergeRegion)
+			oc.buryOperator(relatedOp)
+		}
 	}
 }
 
