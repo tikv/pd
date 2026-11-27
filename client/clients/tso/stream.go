@@ -377,9 +377,11 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 			req.callback(tsoRequestResult{}, req.reqKeyspaceGroupID, errors.WithStack(finishWithErr))
 		}
 
-		s.wg.Done()
 		s.ongoingRequests.Store(0)
 		s.ongoingRequestCountGauge.Set(0)
+		metrics.OngoingRequestCountGauge.DeleteLabelValues(s.streamID)
+		metrics.EstimateTSOLatencyGauge.DeleteLabelValues(s.streamID)
+		s.wg.Done()
 	}()
 
 	// For calculating the estimated RPC latency.

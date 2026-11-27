@@ -22,6 +22,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap/zapcore"
@@ -30,6 +31,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
@@ -306,6 +308,64 @@ func TestTSOStreamTestSuite(t *testing.T) {
 		})
 	}
 	suite.Run(t, new(testTSOStreamSuite))
+}
+
+func TestTSOStreamMetricLabelsRemovedOnClose(t *testing.T) {
+	for _, receivedTSO := range []bool{false, true} {
+		name := "without response"
+		if receivedTSO {
+			name = "after response"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			inner := newMockTSOStreamImpl(ctx, resultModeManual)
+			stream := newTSOStream(ctx, mockStreamURL, inner)
+			t.Cleanup(func() {
+				cancel()
+				stream.WaitForClosed()
+			})
+
+			require.True(t, hasTSOStreamMetric(t, metrics.OngoingRequestCountGauge, stream.streamID))
+			if receivedTSO {
+				result := make(chan error, 1)
+				require.NoError(t, stream.processRequests(1, 2, 3, 1, time.Now(),
+					func(_ tsoRequestResult, _ uint32, err error) { result <- err }))
+				inner.returnResult(10, 1, 1)
+				select {
+				case err := <-result:
+					require.NoError(t, err)
+				case <-time.After(5 * time.Second):
+					t.Fatal("TSO response was not processed")
+				}
+				require.True(t, hasTSOStreamMetric(t, metrics.EstimateTSOLatencyGauge, stream.streamID))
+			}
+
+			inner.stop()
+			stream.WaitForClosed()
+			if receivedTSO {
+				require.False(t, hasTSOStreamMetric(t, metrics.EstimateTSOLatencyGauge, stream.streamID))
+			}
+			require.False(t, hasTSOStreamMetric(t, metrics.OngoingRequestCountGauge, stream.streamID))
+		})
+	}
+}
+
+func hasTSOStreamMetric(t *testing.T, vector *prometheus.GaugeVec, streamID string) bool {
+	t.Helper()
+	registry := prometheus.NewRegistry()
+	require.NoError(t, registry.Register(vector))
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "stream" && label.GetValue() == streamID {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (s *testTSOStreamSuite) noResult(ch <-chan callbackInvocation) {
