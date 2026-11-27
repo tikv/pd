@@ -63,8 +63,13 @@ type ruSecondBucket struct {
 // such as the correction of a large forward jump, starts the timeline over
 // instead of waiting for the clock to catch up. A forward step only relabels
 // later seconds, like clock skew between clients.
-// Methods read the clock while holding mu, so concurrent callers cannot
-// present seconds out of order and be mistaken for a clock rollback.
+// Recording reads the clock before locking to keep the critical section
+// short, so a caller can lock after another one that read a later second.
+// When its reading is behind the latest observed second, the clock is read
+// again while holding mu, and that reading is behind only after a clock
+// rollback. So concurrent callers are not mistaken for a rollback, and without
+// one consumption never lands in a second that a snapshot has covered.
+// Snapshots read the clock while holding mu.
 type ruTimeline struct {
 	mu sync.Mutex
 	// buckets hold the retained closed seconds and the open one.
@@ -109,9 +114,19 @@ func (t *ruTimeline) record(rru, wru float64) {
 	if t == nil {
 		return
 	}
+	t.recordAt(time.Now(), time.Now, rru, wru)
+}
+
+// recordAt records consumption at read, a clock reading taken before locking.
+// A stale reading, behind the latest observed second, is replaced by now()
+// read while holding mu.
+func (t *ruTimeline) recordAt(read time.Time, now func() time.Time, rru, wru float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.recordLocked(time.Now(), rru, wru)
+	if read.Unix() < t.last {
+		read = now()
+	}
+	t.recordLocked(read, rru, wru)
 }
 
 func (t *ruTimeline) recordLocked(now time.Time, rru, wru float64) {
