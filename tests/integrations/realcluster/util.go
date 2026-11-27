@@ -33,6 +33,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/tests/integrations/realcluster/internal/playgroundprobe"
 )
 
 const physicalShiftBits = 18
@@ -65,27 +66,21 @@ func runExecWithOutputContext(ctx context.Context, dir, name string, args ...str
 }
 
 func runExecWithEnvOutputContext(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec
+	cmd := exec.Command(name, args...) //nolint:gosec
 	cmd.Dir = dir
 	if len(env) > 0 {
 		cmd.Env = env
 	}
-	if ctx.Done() != nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.Cancel = func() error {
-			if cmd.Process == nil {
-				return nil
-			}
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		cmd.WaitDelay = 200 * time.Millisecond
-	}
 	log.Info(cmd.String())
-	out, err := cmd.Output()
-	if err != nil {
+	if ctx.Done() == nil {
+		out, err := cmd.Output()
 		return string(out), err
 	}
-	return string(out), nil
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.WaitDelay = 200 * time.Millisecond
+	err := playgroundprobe.RunGroup(ctx, cmd)
+	return out.String(), err
 }
 
 func fileExists(path string) bool {

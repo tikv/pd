@@ -64,19 +64,82 @@ func IsExecutable(path string) bool {
 // RunVersionCheck executes `binPath --version` in its own process group and
 // terminates the entire process group if ctx is canceled or times out.
 func RunVersionCheck(ctx context.Context, binPath string, env []string) error {
-	cmd := exec.CommandContext(ctx, binPath, "--version") //nolint:gosec
+	cmd := exec.Command(binPath, "--version") //nolint:gosec
 	if len(env) > 0 {
 		cmd.Env = env
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
 	cmd.WaitDelay = 200 * time.Millisecond
-	return cmd.Run()
+	return RunGroup(ctx, cmd)
+}
+
+// RunGroup runs cmd as the leader of a new process group and waits for it. If
+// ctx is done before the leader exits, the entire process group is killed. Like
+// exec.CommandContext, it returns ctx's error if ctx is done before cmd starts,
+// or if the group is killed and cmd still reports success.
+func RunGroup(ctx context.Context, cmd *exec.Cmd) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	g, err := startGroup(cmd)
+	if err != nil {
+		return err
+	}
+	select {
+	case <-g.exited:
+		return g.wait()
+	case <-ctx.Done():
+		g.kill()
+		if err := g.wait(); err != nil {
+			return err
+		}
+		return ctx.Err()
+	}
+}
+
+// processGroup is a process group led by a started command. Where waitExited
+// is supported, the leader stays unreaped until wait, so its PID, and therefore
+// the PGID, cannot be reused and kill reaches only processes that remain in
+// this group. Callers must not call kill after wait.
+type processGroup struct {
+	cmd *exec.Cmd
+	// exited is closed once the leader has exited.
+	exited chan struct{}
+	// reaped and waitErr record the result if the leader was already reaped
+	// because waitExited is not supported.
+	reaped  bool
+	waitErr error
+}
+
+func startGroup(cmd *exec.Cmd) (*processGroup, error) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	g := &processGroup{cmd: cmd, exited: make(chan struct{})}
+	go func() {
+		defer close(g.exited)
+		if !waitExited(cmd.Process.Pid) {
+			// Without a non-reaping wait, the leader is reaped as soon as it
+			// exits, and a later kill can in an extremely unlikely case reach a
+			// process group that reused its PID (see golang/go#13987).
+			g.waitErr = cmd.Wait()
+			g.reaped = true
+		}
+	}()
+	return g, nil
+}
+
+func (g *processGroup) kill() {
+	_ = syscall.Kill(-g.cmd.Process.Pid, syscall.SIGKILL)
+}
+
+// wait waits for the leader to exit, reaps it, and returns its exit error.
+func (g *processGroup) wait() error {
+	<-g.exited
+	if g.reaped {
+		return g.waitErr
+	}
+	return g.cmd.Wait()
 }
 
 // LookupBinary executes `tiupBin --binary playground` in its own process group
@@ -99,8 +162,7 @@ func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, er
 	// Give the child the write end directly so that exec does not copy output
 	// with its own wait semantics; ctx alone bounds both the exit and the output.
 	cmd.Stdout = w
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	err = cmd.Start()
+	g, err := startGroup(cmd)
 	_ = w.Close()
 	if err != nil {
 		return "", err
@@ -115,21 +177,16 @@ func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, er
 		out, err := io.ReadAll(r)
 		readDone <- readResult{out: out, err: err}
 	}()
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- cmd.Wait() }()
 
-	var (
-		read    readResult
-		waitErr error
-	)
+	var read readResult
+	exited := g.exited
 	timedOut := func() (string, error) {
-		// Killing the group also reaches children that outlived the leader
-		// and still hold the output pipe.
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		// Kill before wait reaps the leader so that the PGID still identifies
+		// this lookup. Killing the group also reaches children that outlived
+		// the leader and still hold the output pipe.
+		g.kill()
+		_ = g.wait()
 		_ = r.Close()
-		if waitDone != nil {
-			<-waitDone
-		}
 		if readDone != nil {
 			<-readDone
 		}
@@ -139,12 +196,12 @@ func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, er
 		}
 		return "", fmt.Errorf("%s --binary playground did not finish: %w", tiupBin, cause)
 	}
-	for readDone != nil || waitDone != nil {
+	for readDone != nil || exited != nil {
 		select {
 		case read = <-readDone:
 			readDone = nil
-		case waitErr = <-waitDone:
-			waitDone = nil
+		case <-exited:
+			exited = nil
 		case <-ctx.Done():
 			return timedOut()
 		}
@@ -155,6 +212,7 @@ func LookupBinary(ctx context.Context, tiupBin string, env []string) (string, er
 	if deadline, ok := ctx.Deadline(); ctx.Err() != nil || (ok && !time.Now().Before(deadline)) {
 		return timedOut()
 	}
+	waitErr := g.wait()
 	if read.err != nil {
 		return "", fmt.Errorf("read %s --binary playground output: %w", tiupBin, read.err)
 	}

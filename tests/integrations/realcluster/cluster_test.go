@@ -15,6 +15,7 @@
 package realcluster
 
 import (
+	"bytes"
 	"context"
 	"debug/macho"
 	"encoding/binary"
@@ -45,6 +46,12 @@ var realClusterMakefile []byte
 
 //go:embed internal/playgroundprobe/probe.go
 var playgroundProbeSource []byte
+
+//go:embed internal/playgroundprobe/wait_linux.go
+var playgroundProbeWaitLinuxSource []byte
+
+//go:embed internal/playgroundprobe/wait_other.go
+var playgroundProbeWaitOtherSource []byte
 
 //go:embed internal/playgroundprobe/cmd/main.go
 var playgroundProbeCmdSource []byte
@@ -1742,9 +1749,13 @@ wait
 							"TIUP_PROBE_TIMEOUT=10",
 						)
 						re.NoError(cmd.Start())
+						// Signal the group only before Wait may reap make, whose PID
+						// could otherwise be reused by an unrelated process group.
+						waitStarted := false
 						t.Cleanup(func() {
-							if cmd.Process != nil {
+							if !waitStarted {
 								_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+								_ = cmd.Wait()
 							}
 						})
 
@@ -1774,6 +1785,7 @@ wait
 						}, 5*time.Second, 20*time.Millisecond, "timed out waiting for probe script and sleep PIDs")
 
 						re.NoError(syscall.Kill(-cmd.Process.Pid, tc.sig))
+						waitStarted = true
 						done := make(chan error, 1)
 						go func() {
 							done <- cmd.Wait()
@@ -2122,16 +2134,16 @@ exit 1
 			// unbounded lookup fails this test instead of stalling it.
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, "make", "-C", makefileDir, "tiup") //nolint:gosec
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			cmd.Cancel = func() error {
-				return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			}
+			cmd := exec.Command("make", "-C", makefileDir, "tiup") //nolint:gosec
 			cmd.Env = append(os.Environ(),
 				"TIUP_HOME="+tiupHome,
 				"TIUP_PROBE_TIMEOUT="+tc.makeTimeout,
 			)
-			out, err := cmd.CombinedOutput()
+			var output bytes.Buffer
+			cmd.Stdout = &output
+			cmd.Stderr = &output
+			err := playgroundprobe.RunGroup(ctx, cmd)
+			out := output.Bytes()
 			re.NoError(ctx.Err(), "make tiup was still waiting on tiup --binary playground, output:\n%s", string(out))
 			switch tc.want {
 			case wantReuse:
@@ -3606,6 +3618,8 @@ func writeRealClusterMakefileDir(t *testing.T) string {
 	cmdDir := filepath.Join(probeDir, "cmd")
 	re.NoError(os.MkdirAll(cmdDir, 0750))
 	re.NoError(os.WriteFile(filepath.Join(probeDir, "probe.go"), playgroundProbeSource, 0600))
+	re.NoError(os.WriteFile(filepath.Join(probeDir, "wait_linux.go"), playgroundProbeWaitLinuxSource, 0600))
+	re.NoError(os.WriteFile(filepath.Join(probeDir, "wait_other.go"), playgroundProbeWaitOtherSource, 0600))
 	re.NoError(os.WriteFile(filepath.Join(cmdDir, "main.go"), playgroundProbeCmdSource, 0600))
 	return dir
 }
