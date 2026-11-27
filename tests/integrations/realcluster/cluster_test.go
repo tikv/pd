@@ -2770,7 +2770,9 @@ exit 1
 				t.Skip("kernel proc startTime unavailable on this platform")
 			}
 
-			// Wait until the process snapshot shows the child attached to launcher in its own PGID.
+			// Wait until the process snapshot shows the child attached to launcher in its own PGID,
+			// and record its pre-exec shell argv.
+			var preExecArgs []string
 			re.Eventually(func() bool {
 				procs, listErr := baseList()
 				if listErr != nil {
@@ -2778,6 +2780,7 @@ exit 1
 				}
 				for _, p := range procs {
 					if p.pid == childPID && p.ppid == launcherPID && p.pgid == childPID && len(p.args) > 0 {
+						preExecArgs = p.args
 						return true
 					}
 				}
@@ -2806,22 +2809,26 @@ exit 1
 				if shouldWait {
 					// Wait deterministically for the real helper to finish `exec cat` and for
 					// the launcher to exit so the scan observes the post-exec argv change.
+					// Compare against the recorded shell argv instead of expecting argv[0] to be
+					// `cat`: multi-call coreutils (such as coreutils-single on RHEL-like CI
+					// images) installs cat as a `#!/usr/bin/coreutils` script, so the exec'd
+					// argv starts with /usr/bin/coreutils.
 					deadline := time.Now().Add(2 * time.Second)
 					for time.Now().Before(deadline) {
 						procs, listErr := baseList()
 						if listErr != nil {
 							return nil, listErr
 						}
-						var sawCat, launcherAlive bool
+						var sawExec, launcherAlive bool
 						for _, p := range procs {
 							if p.pid == launcherPID && p.state != 'Z' && p.state != 'X' {
 								launcherAlive = true
 							}
-							if p.pid == childPID && p.state != 'Z' && p.state != 'X' && len(p.args) > 0 && filepath.Base(p.args[0]) == "cat" {
-								sawCat = true
+							if p.pid == childPID && p.state != 'Z' && p.state != 'X' && len(p.args) > 0 && !slices.Equal(p.args, preExecArgs) {
+								sawExec = true
 							}
 						}
-						if sawCat && !launcherAlive {
+						if sawExec && !launcherAlive {
 							mu.Lock()
 							waitedForExec = true
 							mu.Unlock()
