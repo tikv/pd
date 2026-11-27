@@ -514,7 +514,8 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 
 	if networkErrNum == constants.MaxRetryTimes {
 		cctx, cancel := context.WithCancel(ctx)
-		build := c.trackStreamBuild(cancel, c.getLeaderURL(), false)
+		// Only forward for the leader whose direct attempts exhausted the retry budget.
+		build := c.trackStreamBuild(cancel, url, false)
 		if build == nil {
 			cancel()
 			return nil
@@ -524,7 +525,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		backupClientConn, backupURL := c.backupClientConn(cctx)
 		if backupClientConn != nil {
 			log.Info("[tso] fall back to use follower to forward tso stream", zap.String("follower-url", backupURL))
-			forwardedHost := c.getLeaderURL()
+			forwardedHost := url
 			if len(forwardedHost) == 0 {
 				return errors.Errorf("cannot find the tso leader")
 			}

@@ -1415,6 +1415,7 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 		{name: "new-leader-during-proxy-build", proxy: true, blocked: "build"},
 		{name: "new-leader-during-forwarding-health", blocked: "health"},
 		{name: "new-leader-during-forwarding-build", blocked: "forward"},
+		{name: "new-leader-after-final-direct-attempt", blocked: "fallback"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const oldLeader, newLeader, follower = "old-leader", "new-leader", "follower"
@@ -1435,7 +1436,7 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 					grpc.WithUnaryInterceptor(func(ctx context.Context, _ string, _, reply any,
 						_ *grpc.ClientConn, _ grpc.UnaryInvoker, _ ...grpc.CallOption,
 					) error {
-						if url == follower && tc.blocked == "health" && !changed.Load() {
+						if url == follower && (tc.blocked == "fallback" || tc.blocked == "health" && !changed.Load()) {
 							return block(ctx)
 						}
 						resp := reply.(*healthpb.HealthCheckResponse)
@@ -1464,7 +1465,8 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 				return svc.conns[url], nil
 			}
 			svc.onSchedule = func() {
-				if tc.blocked == "retry" && !changed.Load() {
+				if !changed.Load() && (tc.blocked == "retry" ||
+					tc.blocked == "fallback" && svc.scheduleCount.Load() == constants.MaxRetryTimes) {
 					startOnce.Do(func() { close(started) })
 					<-release
 				}
@@ -1481,7 +1483,7 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 				return newTSOStream(ctx, client.getLeaderURL(), newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
 			})
 			option := opt.NewOption()
-			option.EnableForwarding = tc.blocked == "health" && !tc.proxy || tc.blocked == "forward"
+			option.EnableForwarding = tc.blocked == "health" && !tc.proxy || tc.blocked == "forward" || tc.blocked == "fallback"
 			option.SetEnableTSOFollowerProxy(tc.proxy)
 			client = NewClient(t.Context(), option, svc, builder)
 			svc.ctx = client.ctx
