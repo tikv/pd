@@ -16,7 +16,9 @@ package gc
 
 import (
 	"context"
+	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,11 +27,13 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	pingcaperrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -213,6 +217,186 @@ func TestStarterGCMigrationFirstWatch(t *testing.T) {
 	ts, rev := readStarterSafePoint(t, manager, id)
 	re.Zero(ts)
 	re.Greater(rev, cutoff)
+}
+
+func TestStarterGCWatchSkipsInvalidKeyspaces(t *testing.T) {
+	re := require.New(t)
+	const (
+		badLegacyT uint32 = iota + 1
+		emptyLocalT
+		badLocalT
+		badLocalG
+		gAboveCandidates
+		gAboveVerifiedT
+		invalidGroup
+		unknownGroup
+		healthy
+	)
+	m, dest, source, _ := newStarterGCAPIFixture(t, int(healthy))
+	put := func(client *clientv3.Client, key, value string) {
+		t.Helper()
+		_, err := client.Put(t.Context(), key, value)
+		re.NoError(err)
+	}
+	put(source, keypath.TxnSafePointPath(badLegacyT), "invalid")
+	put(dest, keypath.TxnSafePointPath(emptyLocalT), "")
+	put(dest, keypath.TxnSafePointPath(badLocalT), "invalid")
+	put(dest, keypath.GCSafePointPath(badLocalG), "invalid")
+	put(dest, keypath.GCSafePointPath(gAboveCandidates), `{"safe_point":150}`)
+	// Writing T after the cutoff exercises validation of an already verified keyspace.
+	put(dest, keypath.TxnSafePointPath(gAboveVerifiedT), "110")
+	put(dest, keypath.GCSafePointPath(gAboveVerifiedT), `{"safe_point":150}`)
+	setStarterKeyspaceConfig(t, dest, invalidGroup, keyspace.MetaServiceGroupIDKey, "bad/group")
+	setStarterKeyspaceConfig(t, dest, unknownGroup, keyspace.MetaServiceGroupIDKey, "missing")
+
+	// Each failed keyspace still reports the underlying error to its own readers.
+	failures := map[uint32]struct {
+		message string
+		cause   error
+	}{
+		badLegacyT:       {`invalid transaction safe point for keyspace 1 in meta-service group "group1"`, strconv.ErrSyntax},
+		emptyLocalT:      {"empty transaction safe point", nil},
+		badLocalT:        {"invalid syntax", nil},
+		badLocalG:        {"invalid character", errs.ErrJSONUnmarshal},
+		gAboveCandidates: {"exceeds selected transaction safe point", nil},
+		gAboveVerifiedT:  {"exceeds transaction safe point", nil},
+		invalidGroup:     {"invalid meta-service group", nil},
+		unknownGroup:     {"unknown meta-service group", errs.ErrUnknownMetaServiceGroup},
+	}
+	for id, failure := range failures {
+		_, err := m.GetGCState(id, true)
+		re.ErrorContains(err, failure.message, "keyspace %d", id)
+		if failure.cause != nil {
+			re.ErrorIs(err, failure.cause)
+		}
+	}
+	requireStarterGCWatchUpdates(t, m, healthy, slices.Collect(maps.Keys(failures))...)
+}
+
+func requireStarterGCWatchUpdates(t *testing.T, m *GCStateManager, healthy uint32, skipped ...uint32) {
+	t.Helper()
+	re := require.New(t)
+	_, _, err := m.AdvanceGCSafePoint(healthy, 80)
+	re.NoError(err)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	watcher, err := m.WatchGCStates(ctx, false)
+	re.NoError(err)
+	defer watcher.Close()
+	expectHealthy := func(wantG uint64) {
+		t.Helper()
+		for {
+			changes, err := watcher.RecvBatch(1)
+			re.NoError(err)
+			state := mustUpsert(t, changes[0])
+			if state.KeyspaceID == healthy {
+				re.Equal(uint64(100+healthy), state.TxnSafePoint)
+				re.Equal(wantG, state.GCSafePoint)
+				return
+			}
+			re.NotContains(skipped, state.KeyspaceID)
+		}
+	}
+	expectHealthy(80)
+	_, _, err = m.AdvanceGCSafePoint(healthy, 90)
+	re.NoError(err)
+	expectHealthy(90)
+}
+
+func TestStarterGCWarmupSkipsInvalidKeyspace(t *testing.T) {
+	re := require.New(t)
+	const failing, healthy uint32 = 1, 2
+	m, _, source, _ := newStarterGCAPIFixture(t, 2)
+	_, err := source.Put(t.Context(), keypath.TxnSafePointPath(failing), "invalid")
+	re.NoError(err)
+	t.Cleanup(startStarterWarmup(m))
+	gcWarmupWait(t, m.activeGeneration.Load().warmup.done)
+
+	_, ok := m.gcStateCache.load(failing)
+	re.False(ok)
+	cached, ok := m.gcStateCache.load(healthy)
+	re.True(ok)
+	re.Equal(uint64(102), cached.TxnSafePoint)
+	_, err = m.GetGCState(failing, true)
+	var parseErr *strconv.NumError
+	re.ErrorAs(err, &parseErr)
+	re.Same(parseErr, pingcaperrors.Cause(err))
+
+	_, err = source.Put(t.Context(), keypath.TxnSafePointPath(failing), "101")
+	re.NoError(err)
+	state, err := m.GetGCState(failing, true)
+	re.NoError(err)
+	re.Equal(uint64(101), state.TxnSafePoint)
+}
+
+func TestStarterGCWatchAndWarmupKeepUnifiedScopeErrors(t *testing.T) {
+	re := require.New(t)
+	m, dest, _, _ := newStarterGCAPIFixture(t, 1)
+	key := keypath.TxnSafePointPath(constant.NullKeyspaceID)
+	_, err := dest.Put(t.Context(), key, "invalid")
+	re.NoError(err)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	watcher, err := m.WatchGCStates(ctx, false)
+	re.NoError(err)
+	defer watcher.Close()
+	_, err = watcher.RecvBatch(1)
+	re.ErrorContains(err, "invalid syntax")
+
+	t.Cleanup(startStarterWarmup(m))
+	// One worker visits the unified scope first. Once tenant 1 is cached the
+	// first read of the malformed unified record has already failed.
+	re.Eventually(func() bool {
+		_, ok := m.gcStateCache.load(1)
+		return ok
+	}, 5*time.Second, 10*time.Millisecond)
+	_, err = dest.Put(t.Context(), key, "120")
+	re.NoError(err)
+	gcWarmupWait(t, m.activeGeneration.Load().warmup.done)
+	cached, ok := m.gcStateCache.load(constant.NullKeyspaceID)
+	re.True(ok)
+	re.Equal(uint64(120), cached.TxnSafePoint)
+}
+
+func TestStarterGCWatchReportsSourceReadFailure(t *testing.T) {
+	re := require.New(t)
+	m, dest, source, _ := newStarterGCAPIFixture(t, 1)
+	group, _ := recordStarterGroups(t, m, dest, source)
+	group.beforeRead = func() error { return context.DeadlineExceeded }
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	watcher, err := m.WatchGCStates(ctx, false)
+	re.NoError(err)
+	defer watcher.Close()
+	_, err = watcher.RecvBatch(1)
+	re.ErrorContains(err, "read meta-service group")
+	re.ErrorIs(err, context.DeadlineExceeded)
+}
+
+func TestStarterGCWatchAndWarmupSkipKeyspacesWithInvalidGroupConfig(t *testing.T) {
+	re := require.New(t)
+	const pending, migrated uint32 = 1, 2
+	m, dest, _, cutoff := newStarterGCAPIFixture(t, 2)
+	_, err := m.GetGCState(migrated, true)
+	re.NoError(err)
+	_, err = dest.Put(t.Context(), keypath.ConfigPath(), "{")
+	re.NoError(err)
+	_, err = m.GetGCState(pending, true)
+	re.ErrorIs(err, errs.ErrJSONUnmarshal)
+	requireStarterGCWatchUpdates(t, m, migrated, pending)
+
+	// A new generation clears the cache. Only the migrated tenant can reload locally.
+	t.Cleanup(startStarterWarmup(m))
+	gcWarmupWait(t, m.activeGeneration.Load().warmup.done)
+	_, ok := m.gcStateCache.load(pending)
+	re.False(ok)
+	cached, ok := m.gcStateCache.load(migrated)
+	re.True(ok)
+	re.Equal(uint64(102), cached.TxnSafePoint)
+	ts, rev := readStarterSafePoint(t, m, pending)
+	re.Equal(uint64(10), ts)
+	re.LessOrEqual(rev, cutoff)
 }
 
 func TestStarterGCMigrationWarmupAndReenabledTenant(t *testing.T) {

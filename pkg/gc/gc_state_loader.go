@@ -16,6 +16,7 @@ package gc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/pingcap/failpoint"
@@ -24,6 +25,36 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
+
+// invalidGCStateError identifies a stored safe point or migration route that
+// must be repaired before the GC state can be loaded.
+type invalidGCStateError struct{ cause error }
+
+func (e *invalidGCStateError) Error() string { return e.cause.Error() }
+func (e *invalidGCStateError) Unwrap() error { return e.cause }
+
+// Cause exposes the original error to github.com/pingcap/errors.
+func (e *invalidGCStateError) Cause() error { return e.cause }
+
+func canSkipKeyspaceGCState(id uint32, err error) bool {
+	if id == constant.NullKeyspaceID {
+		return false
+	}
+	_, ok := errors.AsType[*invalidGCStateError](err)
+	return ok
+}
+
+// loadLocalSafePointPairs marks per-scope decode errors for watch and warmup.
+// Storage and response errors affect the whole batch.
+func (m *GCStateManager) loadLocalSafePointPairs(ctx context.Context, ids []uint32) ([]endpoint.GCSafePointReadResult, error) {
+	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
+	for i := range pairs {
+		if decodeErr := pairs[i].Err; decodeErr != nil {
+			pairs[i].Err = &invalidGCStateError{decodeErr}
+		}
+	}
+	return pairs, err
+}
 
 // err becomes immutable when done closes. Success describes this load, even if
 // its cached values have been invalidated before a waiter observes completion.
@@ -105,7 +136,7 @@ func (m *GCStateManager) publishStarterGroup(ctx context.Context, generation *gc
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
+	pairs, err := m.loadLocalSafePointPairs(ctx, ids)
 	generation.mu.Lock()
 	defer generation.mu.Unlock()
 	for _, item := range items {
@@ -183,7 +214,7 @@ func (m *GCStateManager) loadLocalGCStateBatch(ctx context.Context, generation *
 	if m.activeGeneration.Load() != generation {
 		err = errs.ErrNotLeader
 	} else {
-		values, err = m.gcMetaStorage.LoadGCSafePointPairs(ctx, batch.keyspaceIDs)
+		values, err = m.loadLocalSafePointPairs(ctx, batch.keyspaceIDs)
 		failpoint.InjectCall("afterGCStateLoadBatchRead", ctx, m, batch.keyspaceIDs)
 	}
 	generation.mu.Lock()
@@ -234,10 +265,10 @@ func (m *GCStateManager) finishGCStateFlight(ctx context.Context, generation *gc
 
 func validateStarterGCState(pair endpoint.GCSafePointReadResult) error {
 	if pair.TxnSafePointEmpty {
-		return fmt.Errorf("empty transaction safe point for keyspace %d", pair.KeyspaceID)
+		return &invalidGCStateError{fmt.Errorf("empty transaction safe point for keyspace %d", pair.KeyspaceID)}
 	}
 	if pair.GCSafePoint > pair.TxnSafePoint {
-		return fmt.Errorf("keyspace %d GC safe point %d exceeds transaction safe point %d", pair.KeyspaceID, pair.GCSafePoint, pair.TxnSafePoint)
+		return &invalidGCStateError{fmt.Errorf("keyspace %d GC safe point %d exceeds transaction safe point %d", pair.KeyspaceID, pair.GCSafePoint, pair.TxnSafePoint)}
 	}
 	return nil
 }
@@ -339,7 +370,7 @@ func (m *GCStateManager) readGCStateDirect(ctx context.Context, generation *gcSt
 	if err := ctx.Err(); err != nil {
 		return endpoint.GCSafePointReadResult{Err: err}
 	}
-	values, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, []uint32{id})
+	values, err := m.loadLocalSafePointPairs(ctx, []uint32{id})
 	if m.activeGeneration.Load() != generation {
 		err = errs.ErrNotLeader
 	} else if ctx.Err() != nil {

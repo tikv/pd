@@ -26,6 +26,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	pingcaperrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
@@ -68,7 +69,7 @@ func (m *GCStateManager) ensureMigratedTxnSafePoint(ctx context.Context, generat
 	}
 	ctx, cancel := generation.loadContext(ctx)
 	defer cancel()
-	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, []uint32{id})
+	pairs, err := m.loadLocalSafePointPairs(ctx, []uint32{id})
 	if err == nil {
 		item := migrationItem{localRead: pairs[0]}
 		var pending bool
@@ -161,7 +162,7 @@ func (m *GCStateManager) reloadRetryableItems(ctx context.Context, items []*migr
 	if len(retryable) == 0 {
 		return nil
 	}
-	pairs, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
+	pairs, err := m.loadLocalSafePointPairs(ctx, ids)
 	pending := retryable[:0]
 	for i, item := range retryable {
 		if err != nil {
@@ -236,7 +237,7 @@ func (item *migrationItem) resolveSourceGroup(row *mvccpb.KeyValue, cutoff int64
 		return "", nil
 	}
 	if !config.IsValidMetaServiceGroupID(groupID) {
-		return "", fmt.Errorf("invalid meta-service group %q for keyspace %d", groupID, id)
+		return "", &invalidGCStateError{fmt.Errorf("invalid meta-service group %q for keyspace %d", groupID, id)}
 	}
 	return groupID, nil
 }
@@ -253,6 +254,9 @@ func (m *GCStateManager) loadSourceTxnSafePoints(ctx context.Context, groupID st
 	}
 	client, configRevision, err := m.metaServiceGroupManager.GetEtcdClientWithConfigRevision(ctx, groupID)
 	if err != nil {
+		if errors.Is(err, errs.ErrUnknownMetaServiceGroup) || errors.Is(err, errs.ErrJSONUnmarshal) {
+			return 0, &invalidGCStateError{err}
+		}
 		return 0, err
 	}
 	rows, err := readStarterKeys(ctx, client, items, keypath.TxnSafePointPath)
@@ -264,7 +268,8 @@ func (m *GCStateManager) loadSourceTxnSafePoints(ctx context.Context, groupID st
 		if rows[i] != nil {
 			value, err := strconv.ParseUint(string(rows[i].Value), 10, 64)
 			if err != nil {
-				item.err = fmt.Errorf("invalid transaction safe point for keyspace %d in meta-service group %q: %w", item.localRead.KeyspaceID, groupID, err)
+				msg := fmt.Sprintf("invalid transaction safe point for keyspace %d in meta-service group %q", item.localRead.KeyspaceID, groupID)
+				item.err = &invalidGCStateError{pingcaperrors.WithMessage(err, msg)}
 			}
 			item.sourceTxnSafePoint = value
 		}
@@ -307,7 +312,7 @@ func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcS
 		}
 		// Read G after the transaction captures the GC state revision. Any
 		// intervening GC advancement must invalidate the batch at commit.
-		current, err := m.gcMetaStorage.LoadGCSafePointPairs(ctx, ids)
+		current, err := m.loadLocalSafePointPairs(ctx, ids)
 		if err != nil {
 			return err
 		}
@@ -327,7 +332,7 @@ func (m *GCStateManager) commitStarterBatch(ctx context.Context, generation *gcS
 			case current[i].Err != nil:
 				item.err = current[i].Err
 			case current[i].GCSafePoint > chosenT:
-				item.err = fmt.Errorf("keyspace %d GC safe point %d exceeds selected transaction safe point %d (local %d, frozen %d)", id, current[i].GCSafePoint, chosenT, localT, frozenT)
+				item.err = &invalidGCStateError{fmt.Errorf("keyspace %d GC safe point %d exceeds selected transaction safe point %d (local %d, frozen %d)", id, current[i].GCSafePoint, chosenT, localT, frozenT)}
 			default:
 				// Stamp even an equal T (or a verified zero) with a new revision.
 				if err := wb.SetTxnSafePoint(id, chosenT); err != nil {
