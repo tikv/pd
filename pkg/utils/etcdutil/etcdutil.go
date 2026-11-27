@@ -673,7 +673,13 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 				continue
 			}
-		case wresp := <-watchChan:
+		case wresp, ok := <-watchChan:
+			if !ok {
+				if ctx.Err() != nil {
+					return revision, nil
+				}
+				return revision, errs.ErrEtcdWatcherCancel.FastGen("watch channel closed")
+			}
 			failpoint.Inject("watchChanBlock", func() {
 				// watchChanBlock is used to simulate the case that the watchChan is blocked for a long time.
 				// So we discard these responses when the failpoint is injected.
@@ -705,6 +711,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				revision = max(revision, wresp.Header.Revision+1)
 				log.Debug("watcher receives progress notify in watch loop",
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				goto watchChanLoop
+			}
+			if len(wresp.Events) == 0 {
+				revision = max(revision, wresp.Header.Revision+1)
 				goto watchChanLoop
 			}
 			if err := lw.preEventsFn(wresp.Events); err != nil {
@@ -777,7 +787,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					}
 				}
 			}
-			revision = wresp.Header.Revision + 1
+			// For batched history, the header can be ahead of the last event.
+			// Resume after the last event so a new watch still sees later batches.
+			lastEvent := wresp.Events[len(wresp.Events)-1]
+			revision = max(revision, lastEvent.Kv.ModRevision+1)
 		}
 		goto watchChanLoop // Use goto to avoid creating a new watchChan
 	}
