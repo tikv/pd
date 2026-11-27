@@ -32,7 +32,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
-	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -1511,7 +1510,10 @@ func TestExpireAffinityGroupIf(t *testing.T) {
 
 func TestUpdateAffinityGroupPolicies(t *testing.T) {
 	re := require.New(t)
-	test := newTargetTest(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client)
+	test := newTargetTestWithStorage(t, t.Context(), store)
 	manager := test.Manager
 
 	ranges := createGroupForTest(re, manager, "a", 1)
@@ -1543,13 +1545,9 @@ func TestUpdateAffinityGroupPolicies(t *testing.T) {
 	re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
 	re.Equal(before.LeaderStoreID, test.stored("a").LeaderStoreID)
 
-	// A missing group fails the request before anything is written.
+	// Invalid or missing requests fail before anything is written.
 	_, err = manager.UpdateAffinityGroupPolicies([]string{"a", "missing"}, BalancePolicyAuto)
 	re.ErrorIs(err, errs.ErrAffinityGroupNotFound)
-	re.Equal(BalancePolicyFixed, test.stored("a").BalancePolicy)
-	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("a").BalancePolicy)
-
-	// A request must name a valid policy and at least one valid group.
 	for _, policy := range []BalancePolicy{"", BalancePolicy("manual")} {
 		_, err = manager.UpdateAffinityGroupPolicies([]string{"a"}, policy)
 		re.ErrorIs(err, errs.ErrAffinityGroupContent)
@@ -1558,25 +1556,14 @@ func TestUpdateAffinityGroupPolicies(t *testing.T) {
 	re.ErrorIs(err, errs.ErrEmptyRequest)
 	_, err = manager.UpdateAffinityGroupPolicies([]string{"bad id"}, BalancePolicyAuto)
 	re.ErrorIs(err, errs.ErrInvalidGroupID)
-	re.Equal(BalancePolicyFixed, test.stored("b").BalancePolicy)
-}
-
-func TestUpdateAffinityGroupPoliciesInChunks(t *testing.T) {
-	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
-	store := storage.NewStorageWithEtcdBackend(client)
-	test := newTargetTestWithStorage(t, t.Context(), store)
-	manager := test.Manager
+	for _, id := range []string{"a", "b"} {
+		re.Equal(BalancePolicyFixed, test.stored(id).BalancePolicy)
+		re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState(id).BalancePolicy)
+	}
+	re.NoError(manager.DeleteAffinityGroups([]string{"a", "b"}, true))
 
 	// More groups than one etcd transaction can hold.
-	ids := make([]string, 0, 130)
-	changes := make([]GroupKeyRanges, 0, 130)
-	for i := range 130 {
-		id := fmt.Sprintf("g%03d", i)
-		ids = append(ids, id)
-		changes = append(changes, GroupKeyRanges{GroupID: id})
-	}
+	ids, changes := makeTestGroupBatch(130, "", false)
 	re.NoError(manager.CreateAffinityGroups(changes))
 	states, err := manager.UpdateAffinityGroupPolicies(ids, BalancePolicyFixed)
 	re.NoError(err)
@@ -1618,10 +1605,9 @@ func TestCreateAffinityGroupsInheritPolicy(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	store := storage.NewStorageWithEtcdBackend(client)
-	test := newTargetTestWithStorage(t, ctx, store)
+	test := newTargetTestWithStorage(t, ctx, store, "_tidb_ks1_t_1", "_tidb_ks1_t_9")
 	manager := test.Manager
 
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_1"}}))
 	_, err := manager.UpdateAffinityGroupPolicy("_tidb_ks1_t_1", BalancePolicyFixed)
 	re.NoError(err)
 	// A policy that this version does not know is copied as stored.
@@ -1630,23 +1616,16 @@ func TestCreateAffinityGroupsInheritPolicy(t *testing.T) {
 	manager.SyncGroupFromEtcd(future)
 	re.Equal(BalancePolicy("future"), manager.GetAffinityGroupState("_tidb_ks1_t_2").BalancePolicy)
 
-	newRange := func(id string) []keyutil.KeyRange {
-		prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1)
-		return []keyutil.KeyRange{{StartKey: codec.EncodeBytes(append(prefix, []byte("new-"+id)...)), EndKey: codec.EncodeBytes(append(prefix, []byte("new-"+id+"~")...))}}
-	}
-	changes := []GroupKeyRanges{
-		{GroupID: "_tidb_ks1_t_4", KeyRanges: newRange("fixed"), InheritPolicyFrom: "_tidb_ks1_t_1"},
-		{GroupID: "_tidb_ks1_t_5", KeyRanges: newRange("future"), InheritPolicyFrom: "_tidb_ks1_t_2"},
-		{GroupID: "_tidb_ks1_t_6", KeyRanges: newRange("_tidb_ks1_t_3"), InheritPolicyFrom: "_tidb_ks1_t_3"},
-		{GroupID: "_tidb_ks1_t_7", KeyRanges: newRange("plain")},
-	}
-	// Label writes cross one transaction boundary before the group writes do.
-	for i := range 130 {
-		id := fmt.Sprintf("_tidb_ks1_t_%d", 100+i)
-		changes = append(changes, GroupKeyRanges{GroupID: id, KeyRanges: newRange(id), InheritPolicyFrom: "_tidb_ks1_t_2"})
-	}
+	// The batch spans multiple transactions.
+	_, batch := makeTestGroupBatch(130, "_tidb_ks1_t_2", true)
+	changes := append([]GroupKeyRanges{
+		{GroupID: "_tidb_ks1_t_4", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1004)}, InheritPolicyFrom: "_tidb_ks1_t_1"},
+		{GroupID: "_tidb_ks1_t_5", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1005)}, InheritPolicyFrom: "_tidb_ks1_t_2"},
+		{GroupID: "_tidb_ks1_t_6", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1006)}, InheritPolicyFrom: "_tidb_ks1_t_3"},
+		{GroupID: "_tidb_ks1_t_7", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1007)}},
+	}, batch...)
 	re.NoError(manager.CreateAffinityGroupsIfNotExists(changes))
-	for _, change := range changes[4:] {
+	for _, change := range batch {
 		re.Equal(BalancePolicy("future"), manager.GetAffinityGroupState(change.GroupID).BalancePolicy)
 		re.Equal(BalancePolicy("future"), test.stored(change.GroupID).BalancePolicy)
 	}
@@ -1661,24 +1640,20 @@ func TestCreateAffinityGroupsInheritPolicy(t *testing.T) {
 	}
 
 	// A group that already exists keeps its policy, as a retried request finds it.
-	re.NoError(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_7", KeyRanges: newRange("plain"), InheritPolicyFrom: "_tidb_ks1_t_1"}}))
-	re.Equal(BalancePolicy(""), manager.GetAffinityGroupState("_tidb_ks1_t_7").BalancePolicy)
-	re.Equal(BalancePolicy(""), test.stored("_tidb_ks1_t_7").BalancePolicy)
+	re.NoError(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{
+		GroupID: "_tidb_ks1_t_7", KeyRanges: changes[3].KeyRanges, InheritPolicyFrom: "_tidb_ks1_t_1",
+	}}))
+	re.Empty(manager.GetAffinityGroupState("_tidb_ks1_t_7").BalancePolicy)
+	re.Empty(test.stored("_tidb_ks1_t_7").BalancePolicy)
 
 	// The source must be a valid group ID.
-	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_8", InheritPolicyFrom: "bad id"}})
-	re.ErrorIs(err, errs.ErrInvalidGroupID)
+	re.ErrorIs(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_8", InheritPolicyFrom: "bad id"}}), errs.ErrInvalidGroupID)
 	re.False(manager.IsGroupExist("_tidb_ks1_t_8"))
-}
 
-func TestInheritPolicyAfterLostPolicyReply(t *testing.T) {
-	re := require.New(t)
-	test := newTargetTest(t)
-	manager, store := test.Manager, test.store
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_9"}}))
-	manager.storage = &lostReplyStorage{AffinityStorage: store, lose: true}
-	_, err := manager.UpdateAffinityGroupPolicy("_tidb_ks1_t_9", BalancePolicyFixed)
-	re.ErrorContains(err, "reply lost")
+	// Inheritance reads the committed source policy from storage even after a lost policy reply.
+	test.loseNextTxnReply()
+	_, err = manager.UpdateAffinityGroupPolicy("_tidb_ks1_t_9", BalancePolicyFixed)
+	re.ErrorIs(err, errAffinityTxn)
 	re.Equal(BalancePolicyFixed, test.stored("_tidb_ks1_t_9").BalancePolicy)
 	re.Empty(manager.GetAffinityGroupState("_tidb_ks1_t_9").BalancePolicy)
 	re.NoError(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_10", InheritPolicyFrom: "_tidb_ks1_t_9"}}))

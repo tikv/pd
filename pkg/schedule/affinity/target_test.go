@@ -1505,6 +1505,16 @@ func (test *targetTest) interceptTxns(run func(context.Context, func(kv.Txn) err
 	test.storage = targetTxnStorage{test.store, run}
 }
 
+func (test *targetTest) loseNextTxnReply() {
+	test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+		if err := test.store.RunInTxn(ctx, apply); err != nil {
+			return err
+		}
+		test.storage = test.store
+		return errAffinityTxn
+	})
+}
+
 // Memory transactions do not track revisions, so supply the revision at each
 // storage update to exercise the same checks as an etcd transaction.
 type revisionedTargetStorage struct {

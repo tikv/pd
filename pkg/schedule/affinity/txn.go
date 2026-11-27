@@ -157,10 +157,13 @@ func (m *Manager) createGroupsWithSkipExisting(reqCtx context.Context, changes [
 			if !skipExisting {
 				return nil, errs.ErrAffinityGroupExist.GenWithStackByArgs(change.GroupID)
 			}
-			if !requireRanges {
-				if err := validateGroupKeyRanges(change); err != nil {
+			for _, kr := range change.KeyRanges {
+				if err := ValidateKeyRange(change.GroupID, kr.StartKey, kr.EndKey, false); err != nil {
 					return nil, err
 				}
+			}
+			if err := validateGroupKeyRanges(change); err != nil {
+				return nil, err
 			}
 			states[state.ID] = state
 			continue

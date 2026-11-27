@@ -17,6 +17,8 @@ package affinity
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -769,6 +771,12 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 }
 
 func TestPolicyInheritanceScope(t *testing.T) {
+	test := newTargetTest(t, "custom-source", "_tidb_ks1_t_1")
+	_, err := test.UpdateAffinityGroupPolicies([]string{"custom-source", "_tidb_ks1_t_1"}, BalancePolicyFixed)
+	test.NoError(err)
+	// Even ranges proving membership cannot authorize a custom ID.
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 1)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 2)
 	for _, pair := range [][2]string{
 		{"custom-target", "custom-source"},
 		{"custom-target", "_tidb_ks1_t_1"},
@@ -778,27 +786,19 @@ func TestPolicyInheritanceScope(t *testing.T) {
 	} {
 		t.Run(pair[1]+"-to-"+pair[0], func(t *testing.T) {
 			re := require.New(t)
-			test := newTargetTest(t)
-			m, store := test.Manager, test.store
-			re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: pair[1]}}))
-			_, err := m.UpdateAffinityGroupPolicy(pair[1], BalancePolicyFixed)
-			re.NoError(err)
-			// Even ranges proving membership cannot authorize a custom ID.
-			lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 1)
-			upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 2)
 			for _, ranges := range [][]keyutil.KeyRange{nil, {{StartKey: lower[:], EndKey: upper[:]}}} {
-				err = m.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: pair[0], InheritPolicyFrom: pair[1], KeyRanges: ranges}})
+				err := test.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: pair[0], InheritPolicyFrom: pair[1], KeyRanges: ranges}})
 				if kerneltype.IsNextGen() && (pair[0] != "_tidb_ks1_t_2" || pair[1] != "_tidb_ks1_t_1") {
 					re.ErrorIs(err, errs.ErrAffinityGroupContent)
-					re.False(m.IsGroupExist(pair[0]))
-					value, loadErr := store.LoadAffinityGroup(pair[0])
+					re.False(test.IsGroupExist(pair[0]))
+					val, loadErr := test.store.LoadAffinityGroup(pair[0])
 					re.NoError(loadErr)
-					re.Empty(value)
+					re.Empty(val)
 				} else {
 					re.NoError(err)
-					re.Equal(BalancePolicyFixed, m.GetAffinityGroupState(pair[0]).BalancePolicy)
+					re.Equal(BalancePolicyFixed, test.GetAffinityGroupState(pair[0]).BalancePolicy)
 					re.Equal(BalancePolicyFixed, test.stored(pair[0]).BalancePolicy)
-					re.NoError(m.DeleteAffinityGroups([]string{pair[0]}, true))
+					re.NoError(test.DeleteAffinityGroups([]string{pair[0]}, true))
 				}
 			}
 		})
@@ -806,39 +806,34 @@ func TestPolicyInheritanceScope(t *testing.T) {
 }
 
 func TestPolicyInheritanceRejectsSameRequestSource(t *testing.T) {
+	const original = "_tidb_ks1_t_999"
+	test := newTargetTest(t, original)
+	_, err := test.UpdateAffinityGroupPolicy(original, BalancePolicyFixed)
+	test.NoError(err)
+	_, base := makeTestGroupBatch(etcdutil.MaxEtcdTxnOps+2, "", false)
 	for _, skipExisting := range []bool{false, true} {
 		for _, sourceIndex := range []int{0, 1, etcdutil.MaxEtcdTxnOps} {
 			t.Run(fmt.Sprintf("skip-%t-source-%d", skipExisting, sourceIndex), func(t *testing.T) {
 				re := require.New(t)
-				test := newTargetTest(t)
-				m, store := test.Manager, test.store
-				const original = "_tidb_ks1_t_999"
-				re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: original}}))
-				_, err := m.UpdateAffinityGroupPolicy(original, BalancePolicyFixed)
-				re.NoError(err)
-				changes := make([]GroupKeyRanges, etcdutil.MaxEtcdTxnOps+2)
-				for i := range changes {
-					changes[i].GroupID = fmt.Sprintf("_tidb_ks1_t_%d", i+1)
-				}
+				changes := slices.Clone(base)
 				source := changes[sourceIndex].GroupID
 				changes[sourceIndex].InheritPolicyFrom = original
 				// Source after destination, same chunk, cross-chunk and multi-hop.
 				changes[0].InheritPolicyFrom = source
 				changes[len(changes)-1].InheritPolicyFrom = source
+				expected := []string{original}
 				if skipExisting {
-					re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{{GroupID: source}}))
+					re.NoError(test.CreateAffinityGroups([]GroupKeyRanges{{GroupID: source}}))
+					t.Cleanup(func() { re.NoError(test.DeleteAffinityGroups([]string{source}, true)) })
+					expected = append(expected, source)
 				}
-				_, err = m.createGroupsWithSkipExisting(t.Context(), changes, skipExisting, false)
+				_, err := test.createGroupsWithSkipExisting(t.Context(), changes, skipExisting, false)
 				re.ErrorIs(err, errs.ErrAffinityGroupContent)
-				for _, change := range changes {
-					if skipExisting && change.GroupID == source {
-						continue
-					}
-					re.False(m.IsGroupExist(change.GroupID))
-					value, loadErr := store.LoadAffinityGroup(change.GroupID)
-					re.NoError(loadErr)
-					re.Empty(value, "validation must precede all chunk writes")
-				}
+				re.Equal(len(expected), test.GetAffinityGroupCount())
+				re.ElementsMatch(expected, slices.Collect(maps.Keys(test.GetAffinityGroupStates(nil, ""))))
+				var stored []string
+				re.NoError(test.store.LoadAllAffinityGroups(func(id, _ string) { stored = append(stored, id) }))
+				re.ElementsMatch(expected, stored, "validation must precede all chunk writes")
 			})
 		}
 	}

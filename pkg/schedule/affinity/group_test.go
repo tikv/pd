@@ -178,19 +178,15 @@ func TestCustomGroupPolicyInheritanceKeyspace(t *testing.T) {
 	re.Error(validateGroupKeyRanges(GroupKeyRanges{GroupID: "custom", InheritPolicyFrom: "bad id"}))
 	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 42)
 	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 43)
-	group := GroupKeyRanges{GroupID: "custom", InheritPolicyFrom: "_tidb_ks42_t_1",
-		KeyRanges: []keyutil.KeyRange{{StartKey: lower[:], EndKey: upper[:]}}}
-	if kerneltype.IsNextGen() {
-		re.ErrorIs(validateGroupKeyRanges(group), errs.ErrAffinityGroupContent)
-	} else {
-		re.NoError(validateGroupKeyRanges(group))
-	}
-	group.InheritPolicyFrom = "_tidb_ks43_t_1"
-	if kerneltype.IsNextGen() {
-		re.ErrorIs(validateGroupKeyRanges(group), errs.ErrAffinityGroupContent)
-		group.InheritPolicyFrom = "_tidb_t_1"
-		re.Error(validateGroupKeyRanges(group))
-	} else {
-		re.NoError(validateGroupKeyRanges(group))
+	for _, source := range []string{"_tidb_ks42_t_1", "_tidb_ks43_t_1", "_tidb_t_1"} {
+		err := validateGroupKeyRanges(GroupKeyRanges{
+			GroupID: "custom", InheritPolicyFrom: source,
+			KeyRanges: []keyutil.KeyRange{{StartKey: lower[:], EndKey: upper[:]}},
+		})
+		if kerneltype.IsNextGen() {
+			re.ErrorIs(err, errs.ErrAffinityGroupContent, source)
+		} else {
+			re.NoError(err, source)
+		}
 	}
 }
