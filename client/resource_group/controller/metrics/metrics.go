@@ -14,7 +14,12 @@
 
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"maps"
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 const (
 	namespace             = "resource_manager_client"
@@ -29,6 +34,8 @@ const (
 
 	typeLabel = "type"
 )
+
+var registerOnce sync.Once
 
 var (
 	// ResourceGroupStatusGauge comments placeholder
@@ -237,23 +244,31 @@ func initMetrics(constLabels prometheus.Labels) {
 		}, []string{newResourceGroupNameLabel})
 }
 
-// InitAndRegisterMetrics initializes and register metrics.
+// InitAndRegisterMetrics registers the process-wide resource group metrics once
+// using the constant labels from the first call.
 func InitAndRegisterMetrics(constLabels prometheus.Labels) {
-	initMetrics(constLabels)
-	prometheus.MustRegister(ResourceGroupStatusGauge)
-	prometheus.MustRegister(SuccessfulRequestDuration)
-	prometheus.MustRegister(FailedRequestCounter)
-	prometheus.MustRegister(FailedLimitReserveDuration)
-	prometheus.MustRegister(GroupRunningKVRequestCounter)
-	prometheus.MustRegister(RequestRetryCounter)
-	prometheus.MustRegister(TokenRequestDuration)
-	prometheus.MustRegister(ResourceGroupTokenRequestCounter)
-	prometheus.MustRegister(LowTokenRequestNotifyCounter)
-	prometheus.MustRegister(TokenConsumedHistogram)
-	prometheus.MustRegister(RequestSourceRUCounter)
-	prometheus.MustRegister(CopReadPrechargeCounter)
-	prometheus.MustRegister(CopReadNoPrechargeCounter)
-	prometheus.MustRegister(PagingPrechargeBytesCounter)
-	prometheus.MustRegister(PagingActualBytesCounter)
-	prometheus.MustRegister(PagingPredictionResidualBytes)
+	registerOnce.Do(func() {
+		reg := prometheus.DefaultRegisterer
+		if len(constLabels) > 0 {
+			reg = prometheus.WrapRegistererWith(maps.Clone(constLabels), reg)
+		}
+		reg.MustRegister(
+			ResourceGroupStatusGauge,
+			SuccessfulRequestDuration,
+			FailedRequestCounter,
+			FailedLimitReserveDuration,
+			GroupRunningKVRequestCounter,
+			RequestRetryCounter,
+			TokenRequestDuration,
+			ResourceGroupTokenRequestCounter,
+			LowTokenRequestNotifyCounter,
+			TokenConsumedHistogram,
+			RequestSourceRUCounter,
+			CopReadPrechargeCounter,
+			CopReadNoPrechargeCounter,
+			PagingPrechargeBytesCounter,
+			PagingActualBytesCounter,
+			PagingPredictionResidualBytes,
+		)
+	})
 }

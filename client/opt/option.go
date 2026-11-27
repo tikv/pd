@@ -207,14 +207,20 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
-// WithMetricsLabels configures the client with metrics labels.
+// WithMetricsLabels sets the constant labels used when the client registers metrics.
+//
+// Deprecated: Call metrics.InitAndRegisterMetrics once at process startup
+// before creating clients.
 func WithMetricsLabels(labels prometheus.Labels) ClientOption {
 	return func(op *Option) {
 		op.MetricsLabels = labels
 	}
 }
 
-// WithInitMetricsOption configures the client with metrics labels.
+// WithInitMetricsOption controls whether creating the client registers metrics.
+//
+// Deprecated: Call metrics.InitAndRegisterMetrics once at process startup
+// before creating clients.
 func WithInitMetricsOption(initMetrics bool) ClientOption {
 	return func(op *Option) {
 		op.InitMetrics = initMetrics
