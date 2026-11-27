@@ -31,6 +31,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
@@ -40,6 +41,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/affinity/balanceplan"
 	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -87,6 +89,7 @@ func (f *affinityBalanceTest) waitForStoreScan(id string) {
 			return f.affinityManager.GetAffinityGroupState(id).AffinitySchedulingAllowed != busy
 		}, 2*time.Second, 10*time.Millisecond)
 	}
+	f.SetStoreLastHeartbeatInterval(leader, -time.Hour)
 	for _, region := range f.GetRegions() {
 		f.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 	}
@@ -114,50 +117,94 @@ func newAffinityBalanceTest(t testing.TB, stores uint64, zones ...string) *affin
 	return &affinityBalanceTest{Cluster: tc, AffinityChecker: c, tb: t}
 }
 
+func (f *affinityBalanceTest) addSizedStore(id uint64, regions, zone int, lowSpace bool) {
+	f.tb.Helper()
+	f.AddRegionStore(id, regions)
+	f.SetStoreUp(id)
+	store := f.GetStore(id)
+	capacity := uint64(1) << 40
+	available := capacity - store.GetStoreStats().GetUsedSize()
+	if lowSpace {
+		available = 1
+	}
+	f.PutStore(store.Clone(
+		core.SetStoreStats(&pdpb.StoreStats{Capacity: capacity, UsedSize: capacity - available, Available: available}),
+		core.SetLastHeartbeatTS(time.Now().Add(time.Hour)),
+	))
+	f.SetStoreLabel(id, map[string]string{"zone": fmt.Sprintf("z%d", zone)})
+	if lowSpace {
+		require.True(f.tb, f.GetStore(id).IsLowSpace(f.GetLowSpaceRatio()))
+	}
+}
+
 func (f *affinityBalanceTest) group(id string, firstRegion, leader uint64, voters []uint64, keys ...string) {
 	f.tb.Helper()
-	re := require.New(f.tb)
 	keys = slices.Clone(keys)
 	for i := range keys {
 		keys[i] = balanceTestKey(keys[i])
 	}
 	group := &affinity.Group{ID: id, LeaderStoreID: leader, VoterStoreIDs: voters}
-	re.NoError(createAffinityGroupForTest(f.affinityManager, group, keyutil.KeyRange{
+	require.NoError(f.tb, createAffinityGroupForTest(f.affinityManager, group, keyutil.KeyRange{
 		StartKey: []byte(keys[0]),
 		EndKey:   []byte(keys[len(keys)-1]),
 	}))
+	f.putAlignedRegions(firstRegion, leader, voters, keys...)
+}
+
+func (f *affinityBalanceTest) putAlignedRegions(firstRegion, leader uint64, voters []uint64, encodedKeys ...string) {
+	f.tb.Helper()
 	followers := slices.DeleteFunc(slices.Clone(voters), func(id uint64) bool { return id == leader })
-	for i := 0; i+1 < len(keys); i++ {
+	for i := 0; i+1 < len(encodedKeys); i++ {
 		regionID := firstRegion + uint64(i)
-		f.AddLeaderRegionWithRange(regionID, keys[i], keys[i+1], leader, followers...)
+		f.AddLeaderRegionWithRange(regionID, encodedKeys[i], encodedKeys[i+1], leader, followers...)
 		f.PutRegion(f.GetRegion(regionID).Clone(core.SetApproximateSize(1)))
 		_, aligned := f.affinityManager.GetAndCacheRegionAffinityGroupState(f.GetRegion(regionID))
-		re.True(aligned)
+		require.True(f.tb, aligned)
 	}
 }
 
 func (f *affinityBalanceTest) seed(table string, firstRegion uint64, leaders ...uint64) []string {
 	f.tb.Helper()
-	return f.seedVoters(table, firstRegion, []uint64{1, 2, 3}, leaders...)
+	return f.seedRegions(table, firstRegion, 1, []uint64{1, 2, 3}, leaders...)
 }
 
-func (f *affinityBalanceTest) seedVoters(table string, firstRegion uint64, voters []uint64, leaders ...uint64) []string {
+func (f *affinityBalanceTest) seedVoters(voters []uint64, leaders ...uint64) []string {
 	f.tb.Helper()
-	ids := make([]string, 0, len(leaders))
+	return f.seedRegions("100", 1, 1, voters, leaders...)
+}
+
+func (f *affinityBalanceTest) seedRegions(table string, firstRegion uint64, regions int, voters []uint64, leaders ...uint64) []string {
+	f.tb.Helper()
+	re := require.New(f.tb)
+	ids := make([]string, len(leaders))
+	changes := make([]affinity.GroupKeyRanges, len(leaders))
+	keyAt := func(g, r int) string { return balanceTestKey(fmt.Sprintf("%s-%04d-%05d", table, g, r)) }
+	for i := range leaders {
+		ids[i] = balanceTestGroupID(fmt.Sprintf("_tidb_pt_%s_p%d", table, i+1))
+		changes[i] = affinity.GroupKeyRanges{
+			GroupID:   ids[i],
+			KeyRanges: []keyutil.KeyRange{{StartKey: []byte(keyAt(i, 0)), EndKey: []byte(keyAt(i+1, 0))}},
+		}
+	}
+	re.NoError(f.affinityManager.CreateAffinityGroups(changes))
+	keys := make([]string, regions+1)
 	for i, leader := range leaders {
-		id := balanceTestGroupID(fmt.Sprintf("_tidb_pt_%s_p%d", table, i+1))
-		f.group(id, firstRegion+uint64(i), leader, voters, fmt.Sprintf("%s-%04d", table, i), fmt.Sprintf("%s-%04d", table, i+1))
-		ids = append(ids, id)
+		_, err := f.affinityManager.UpdateAffinityGroupPeers(ids[i], leader, voters)
+		re.NoError(err)
+		for r := range regions {
+			keys[r] = keyAt(i, r)
+		}
+		keys[regions] = keyAt(i+1, 0)
+		f.putAlignedRegions(firstRegion+uint64(i*regions), leader, voters, keys...)
 	}
 	return ids
 }
 
 func (f *affinityBalanceTest) policy(policy affinity.BalancePolicy, ids ...string) {
 	f.tb.Helper()
-	re := require.New(f.tb)
 	for _, id := range ids {
 		_, err := f.affinityManager.UpdateAffinityGroupPolicy(id, policy)
-		re.NoError(err)
+		require.NoError(f.tb, err)
 	}
 }
 
@@ -175,8 +222,31 @@ func (f *affinityBalanceTest) plan(snapshot *affinity.BalanceSnapshot) balancePl
 func (f *affinityBalanceTest) setRules(rules ...*placement.Rule) {
 	f.tb.Helper()
 	for _, rule := range rules {
-		rule.GroupID = placement.DefaultGroupID
+		if rule.GroupID == "" {
+			rule.GroupID = placement.DefaultGroupID
+		}
 		require.NoError(f.tb, f.ruleManager.SetRule(rule))
+	}
+}
+
+func (f *affinityBalanceTest) denySchedule(startKey, endKey []byte) {
+	f.tb.Helper()
+	require.NoError(f.tb, f.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
+		ID: "deny", Index: 100, Labels: []labeler.RegionLabel{{Key: "schedule", Value: "deny"}}, RuleType: "key-range",
+		Data: []any{map[string]any{"start_key": hex.EncodeToString(startKey), "end_key": hex.EncodeToString(endKey)}},
+	}))
+}
+
+func (f *affinityBalanceTest) disableBalance(reason string) {
+	switch reason {
+	case "limit":
+		f.SetAffinityScheduleLimit(0)
+	case "pause":
+		f.PauseOrResume(60)
+	case "halt":
+		f.SetHaltScheduling(true, "test")
+	case "placement disabled":
+		f.SetEnablePlacementRules(false)
 	}
 }
 
@@ -277,41 +347,39 @@ func TestAffinityBalanceLeaderConvergence(t *testing.T) {
 	f := newAffinityBalanceTest(t, 3)
 	ids := f.seed("100", 1, 1, 1, 1)
 	f.waitForStoreScan(ids[0])
-	m := f.affinityManager
-	c := newTestAffinityChecker(t.Context(), f.Cluster, f.PersistOptions)
 	ctx, cancel := context.WithCancel(t.Context())
 	var wg sync.WaitGroup
-	wg.Go(func() { c.RunBalancer(ctx) })
+	wg.Go(func() { f.RunBalancer(ctx) })
 	defer func() {
 		cancel()
 		wg.Wait()
 	}()
 	custom := []string{"custom", balanceTestGroupID("_tidb_t_100")}
 	for _, id := range custom {
-		re.NoError(createAffinityGroupForTest(m, &affinity.Group{ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}))
-		c.balancer.enqueue(id)
+		re.NoError(createAffinityGroupForTest(f.affinityManager, &affinity.Group{ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}))
+		f.balancer.enqueue(id)
 	}
 	for i := range ids {
-		re.Empty(c.Check(f.GetRegion(uint64(i + 1))))
+		re.Empty(f.Check(f.GetRegion(uint64(i + 1))))
 	}
-	re.Eventually(func() bool { return balanceTableScore(m, balanceTestTable()) == [2]int{27, 3} }, 10*time.Second, 10*time.Millisecond)
-	c.balancer.mu.Lock()
-	registered := len(c.balancer.tables)
-	c.balancer.mu.Unlock()
+	re.Eventually(func() bool { return balanceTableScore(f.affinityManager, balanceTestTable()) == [2]int{27, 3} }, 10*time.Second, 10*time.Millisecond)
+	f.balancer.mu.Lock()
+	registered := len(f.balancer.tables)
+	f.balancer.mu.Unlock()
 	re.Equal(1, registered)
 	for i, id := range ids {
-		group, region := m.GetAffinityGroupState(id), f.GetRegion(uint64(i+1))
+		group, region := f.affinityManager.GetAffinityGroupState(id), f.GetRegion(uint64(i+1))
 		if group.LeaderStoreID != region.GetLeader().GetStoreId() {
-			ops := c.Check(region)
+			ops := f.Check(region)
 			re.Len(ops, 1)
 			re.Equal(operator.OpLeader|operator.OpAffinity, ops[0].Kind())
 			operator.ApplyOperator(f.Cluster, ops[0])
-			c.Check(f.GetRegion(region.GetID()))
+			f.Check(f.GetRegion(region.GetID()))
 		}
-		re.Equal(affinity.PhaseStable, m.GetAffinityGroupState(id).Phase)
+		re.Equal(affinity.PhaseStable, f.affinityManager.GetAffinityGroupState(id).Phase)
 	}
 	for _, id := range custom {
-		state := m.GetAffinityGroupState(id)
+		state := f.affinityManager.GetAffinityGroupState(id)
 		re.Equal(uint64(1), state.LeaderStoreID)
 		re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
 	}
@@ -342,7 +410,7 @@ func TestAffinityBalancePlacement(t *testing.T) {
 	re.Equal(balanceplan.TargetRejected, feedback([]int{0, 1, 3}, 0, balanceplan.DefaultWorkBudget).Status)
 	rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	rule.IsolationLevel = "zone"
-	re.NoError(f.ruleManager.SetRule(rule))
+	f.setRules(rule)
 	re.Equal([2]int{27, 3}, balanceTableScore(f.affinityManager, balanceTestTable()))
 	re.True(f.step())
 	group := f.affinityManager.GetAffinityGroupState(ids[0])
@@ -351,27 +419,72 @@ func TestAffinityBalancePlacement(t *testing.T) {
 	re.Equal([2]int{23, 5}, balanceTableScore(f.affinityManager, balanceTestTable()))
 }
 
-func TestBalanceRuleCacheHardIsolation(t *testing.T) {
-	f := newAffinityBalanceTest(t, 3, "a", "b", "c")
-	cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1, 2, 3}, func(uint64) bool { return true })
-	for _, tc := range []struct {
-		level   string
-		witness bool
-		depth   int
-		ok      bool
-	}{{"", false, 0, true}, {"zone", false, 2, true}, {"dc", false, 1, true}, {"rack", false, 0, false}, {"zone", true, 0, false}} {
-		rule := &placement.Rule{Role: placement.Voter, Count: 3, LocationLabels: []string{"dc", "zone"}, IsolationLevel: tc.level, IsWitness: tc.witness}
-		for range 2 {
-			got, ok := cache.get(rule)
-			require.Equal(t, tc.ok, ok)
-			if ok {
-				require.Equal(t, tc.depth, got.IsolationDepth)
-			} else {
-				require.Nil(t, got)
-				require.Contains(t, cache.rules, balanceRuleSignature(rule))
+func TestBalanceRuleCache(t *testing.T) {
+	t.Run("location-label-boundaries", func(t *testing.T) {
+		f := newAffinityBalanceTest(t, 1)
+		f.SetStoreLabel(1, map[string]string{"zone": "a", "rack": "b"})
+		cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1}, func(uint64) bool { return true })
+		require.Equal(t, [][]int32{{-1}}, cache.location([]string{"zone,rack"}))
+		require.Equal(t, [][]int32{{0, 0}}, cache.location([]string{"zone", "rack"}))
+	})
+
+	t.Run("hard-isolation", func(t *testing.T) {
+		f := newAffinityBalanceTest(t, 3, "a", "b", "c")
+		cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1, 2, 3}, func(uint64) bool { return true })
+		for _, tc := range []struct {
+			level   string
+			witness bool
+			depth   int
+			ok      bool
+		}{{"", false, 0, true}, {"zone", false, 2, true}, {"dc", false, 1, true}, {"rack", false, 0, false}, {"zone", true, 0, false}} {
+			rule := &placement.Rule{Role: placement.Voter, Count: 3, LocationLabels: []string{"dc", "zone"}, IsolationLevel: tc.level, IsWitness: tc.witness}
+			for range 2 {
+				got, ok := cache.get(rule)
+				require.Equal(t, tc.ok, ok)
+				if ok {
+					require.Equal(t, tc.depth, got.IsolationDepth)
+				} else {
+					require.Nil(t, got)
+					require.Contains(t, cache.rules, balanceRuleSignature(rule))
+				}
 			}
 		}
-	}
+	})
+
+	t.Run("unicode-fold", func(t *testing.T) {
+		values := []string{"S", "s", "ſ", "Σ", "σ", "ς", "K", "k", "K", "İ", "i", "ı", "a"}
+		f := newAffinityBalanceTest(t, uint64(len(values)), values...)
+		ids := make([]uint64, len(values))
+		for i := range ids {
+			ids[i] = uint64(i + 1)
+		}
+		locations := newBalanceRuleCache(f.AffinityChecker, ids, func(uint64) bool { return true }).location([]string{"zone"})
+		for i, a := range values {
+			for j, b := range values {
+				require.Equal(t, strings.EqualFold(a, b), locations[i][0] == locations[j][0], "%q and %q", a, b)
+			}
+		}
+	})
+
+	t.Run("signature-boundaries", func(t *testing.T) {
+		re := require.New(t)
+		f := newAffinityBalanceTest(t, 2, "foo bar", "foo")
+		cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1, 2}, func(uint64) bool { return true })
+		first := &placement.Rule{Role: placement.Voter, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"foo bar", "a"}}}}
+		second := first.Clone()
+		second.LabelConstraints[0].Values = []string{"foo", "bar a"}
+		re.NotEqual(balanceRuleSignature(first), balanceRuleSignature(second))
+		a, ok := cache.get(first)
+		re.True(ok)
+		b, ok := cache.get(second)
+		re.True(ok)
+		re.Equal([]int{0}, a.Stores)
+		re.Equal([]int{1}, b.Stores)
+		first.LocationLabels, second.LocationLabels = []string{"foo bar", "a"}, []string{"foo", "bar a"}
+		first.LabelConstraints, second.LabelConstraints = nil, nil
+		re.NotEqual(balanceRuleSignature(first), balanceRuleSignature(second))
+	})
 }
 
 func TestAffinityBalanceLearnerInLaterRegion(t *testing.T) {
@@ -380,8 +493,8 @@ func TestAffinityBalanceLearnerInLaterRegion(t *testing.T) {
 	f := newAffinityBalanceTest(t, 6)
 	f.SetEnableUseJointConsensus(false)
 	f.SetStoreLabel(6, map[string]string{"engine": "tiflash"})
-	re.NoError(f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: "learner", Role: placement.Learner, Count: 1,
-		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.NotIn, Values: []string{"other"}}}}))
+	f.setRules(&placement.Rule{ID: "learner", Role: placement.Learner, Count: 1,
+		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.NotIn, Values: []string{"other"}}}})
 	ids := []string{balanceTestGroupID("_tidb_pt_100_p1"), balanceTestGroupID("_tidb_pt_100_p2"), balanceTestGroupID("_tidb_pt_100_p3")}
 	f.group(ids[0], 1, 1, []uint64{1, 2, 3}, "a", "b", "c")
 	f.group(ids[1], 3, 2, []uint64{1, 2, 3}, "c", "d", "e")
@@ -424,39 +537,31 @@ func TestAffinityBalanceLearnerInLaterRegion(t *testing.T) {
 	re.Equal(learner, f.GetRegion(later.GetID()).GetStoreLearner(4))
 }
 
-func newMissingHeartbeatBalanceTest(t *testing.T) (*affinityBalanceTest, *core.RegionInfo) {
-	t.Helper()
-	re := require.New(t)
-	enableFastAffinityAvailabilityCheck(t)
-	f := newAffinityBalanceTest(t, 3)
-	group := &affinity.Group{ID: balanceTestGroupID("_tidb_pt_100_p1"), LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-	re.NoError(createAffinityGroupForTest(f.affinityManager, group, keyutil.KeyRange{
-		StartKey: []byte(balanceTestKey("a")),
-		EndKey:   []byte(balanceTestKey("c")),
-	}))
-	f.AddLeaderRegionWithRange(1, balanceTestKey("a"), balanceTestKey("b"), 1, 2, 3)
-	f.PutRegion(f.GetRegion(1).Clone(core.SetApproximateSize(1)))
-	f.group(balanceTestGroupID("_tidb_pt_100_p2"), 3, 1, []uint64{1, 2, 3}, "d", "e")
-	f.group(balanceTestGroupID("_tidb_pt_100_p3"), 4, 2, []uint64{1, 2, 3}, "f", "g")
-	f.waitForStoreScan(group.ID)
-	f.policy(affinity.BalancePolicyFixed, balanceTestGroupID("_tidb_pt_100_p2"), balanceTestGroupID("_tidb_pt_100_p3"))
-	for _, region := range f.GetRegions() {
-		region = region.Clone(core.SetSource(core.Heartbeat))
-		f.PutRegion(region)
-		f.affinityManager.GetAndCacheRegionAffinityGroupState(region)
-	}
-	// This Region has never entered the cluster cache; the reported [a,b)
-	// Region keeps its original boundaries throughout the test.
-	missing := f.GetRegion(1).Clone(core.WithNewRegionID(2), core.WithStartKey([]byte(balanceTestKey("b"))), core.WithEndKey([]byte(balanceTestKey("c"))), core.SetSource(core.Heartbeat))
-	return f, missing
-}
-
 func TestAffinityBalanceRegionHeartbeat(t *testing.T) {
 	for _, source := range []string{"missing", "storage"} {
 		t.Run(source, func(t *testing.T) {
 			re := require.New(t)
-			f, heartbeat := newMissingHeartbeatBalanceTest(t)
+			enableFastAffinityAvailabilityCheck(t)
+			f := newAffinityBalanceTest(t, 3)
 			f.SetMaxAffinityMergeRegionSize(0)
+			firstID := balanceTestGroupID("_tidb_pt_100_p1")
+			re.NoError(createAffinityGroupForTest(f.affinityManager,
+				&affinity.Group{ID: firstID, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+				keyutil.KeyRange{StartKey: []byte(balanceTestKey("a")), EndKey: []byte(balanceTestKey("c"))}))
+			f.putAlignedRegions(1, 1, []uint64{1, 2, 3}, balanceTestKey("a"), balanceTestKey("b"))
+			f.group(balanceTestGroupID("_tidb_pt_100_p2"), 3, 1, []uint64{1, 2, 3}, "d", "e")
+			f.group(balanceTestGroupID("_tidb_pt_100_p3"), 4, 2, []uint64{1, 2, 3}, "f", "g")
+			f.waitForStoreScan(firstID)
+			f.policy(affinity.BalancePolicyFixed, balanceTestGroupID("_tidb_pt_100_p2"), balanceTestGroupID("_tidb_pt_100_p3"))
+			for _, region := range f.GetRegions() {
+				region = region.Clone(core.SetSource(core.Heartbeat))
+				f.PutRegion(region)
+				f.affinityManager.GetAndCacheRegionAffinityGroupState(region)
+			}
+			// This Region has never entered the cluster cache; the reported [a,b)
+			// Region keeps its original boundaries throughout the test.
+			heartbeat := f.GetRegion(1).Clone(core.WithNewRegionID(2), core.WithStartKey([]byte(balanceTestKey("b"))), core.WithEndKey([]byte(balanceTestKey("c"))), core.SetSource(core.Heartbeat))
+
 			var targets []affinity.GroupTarget
 			f.affinityManager.SetTargetWriter(targetWriterFunc(func(_ context.Context, writes []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
 				targets = append(targets, writes...)
@@ -518,36 +623,32 @@ func TestAffinityBalanceTiFlashRecordRules(t *testing.T) {
 				start := encode(codec.GenerateTableKey(partition))
 				record := encode(codec.GenerateRecordKeyPrefix(partition))
 				end := encode(codec.GenerateTableKey(partition + 1))
+				recordHex, endHex := hex.EncodeToString(record), hex.EncodeToString(end)
 				// TiDB's TiFlash rule starts at the record prefix, inside the
 				// affinity range, leaving the index Region without a learner.
-				re.NoError(f.ruleManager.SetRule(&placement.Rule{
+				f.setRules(&placement.Rule{
 					GroupID: "tiflash", ID: fmt.Sprintf("table-%d-r", partition), Role: placement.Learner, Count: 1,
-					StartKeyHex: hex.EncodeToString(record), EndKeyHex: hex.EncodeToString(end),
+					StartKeyHex: recordHex, EndKeyHex: endHex,
 					LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}},
-				}))
+				})
 				if differentVoterRules {
 					rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 					rule.ID, rule.Index, rule.Override = fmt.Sprintf("record-%d", partition), 1, true
-					rule.StartKeyHex, rule.EndKeyHex = hex.EncodeToString(record), hex.EncodeToString(end)
+					rule.StartKeyHex, rule.EndKeyHex = recordHex, endHex
 					rule.LabelConstraints = []placement.LabelConstraint{{Key: "engine", Op: placement.NotIn, Values: []string{"tiflash"}}}
-					re.NoError(f.ruleManager.SetRule(rule))
+					f.setRules(rule)
 				}
 				id := balanceTestGroupID(fmt.Sprintf("_tidb_pt_100_p%d", partition))
 				re.NoError(createAffinityGroupForTest(f.affinityManager,
 					&affinity.Group{ID: id, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
 					keyutil.KeyRange{StartKey: start, EndKey: end}))
-				keys := [][]byte{start, record, end}
+				f.putAlignedRegions(uint64(2*i+1), 1, []uint64{1, 2, 3}, string(start), string(record), string(end))
+				recordRegion := learnerAt(f.GetRegion(uint64(2*i+2)), 5)
+				f.PutRegion(recordRegion)
+				_, aligned := f.affinityManager.GetAndCacheRegionAffinityGroupState(recordRegion)
+				re.True(aligned)
 				for j := range 2 {
-					regionID := uint64(2*i + j + 1)
-					f.AddLeaderRegionWithRange(regionID, string(keys[j]), string(keys[j+1]), 1, 2, 3)
-					region := f.GetRegion(regionID).Clone(core.SetApproximateSize(1))
-					if j == 1 {
-						region = region.Clone(core.WithAddPeer(&metapb.Peer{Id: 100 + regionID, StoreId: 5, Role: metapb.PeerRole_Learner}))
-					}
-					f.PutRegion(region)
-					_, aligned := f.affinityManager.GetAndCacheRegionAffinityGroupState(region)
-					re.True(aligned)
-					re.True(f.ruleManager.FitRegionWithoutCache(f.Cluster, region).IsSatisfied())
+					re.True(f.ruleManager.FitRegionWithoutCache(f.Cluster, f.GetRegion(uint64(2*i+j+1))).IsSatisfied())
 				}
 			}
 			f.waitForStoreScan(balanceTestGroupID("_tidb_pt_100_p101"))
@@ -583,12 +684,9 @@ func TestAffinityBalanceTiFlashRecordRules(t *testing.T) {
 					operator.ApplyOperator(f.Cluster, op)
 				}
 				moved := f.GetRegion(region.GetID())
+				_, aligned := f.affinityManager.GetRegionAffinityGroupState(moved)
+				re.True(aligned)
 				re.Equal(learners, moved.GetLearners())
-				re.Equal(group.LeaderStoreID, moved.GetLeader().GetStoreId())
-				re.Len(moved.GetVoters(), len(group.VoterStoreIDs))
-				for _, id := range group.VoterStoreIDs {
-					re.NotNil(moved.GetStoreVoter(id))
-				}
 				re.True(f.ruleManager.FitRegionWithoutCache(f.Cluster, moved).IsSatisfied())
 			}
 		})
@@ -596,7 +694,7 @@ func TestAffinityBalanceTiFlashRecordRules(t *testing.T) {
 }
 
 func TestAffinityBalanceKeepsUnmodelledGroups(t *testing.T) {
-	for _, reason := range []string{"same rules", "different rules", "missing label", "unknown policy"} {
+	for _, reason := range []string{"same rules", "different rules", "missing label", "witness", "unknown policy"} {
 		t.Run(reason, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 5, "a", "b", "c", "a", "")
@@ -604,14 +702,19 @@ func TestAffinityBalanceKeepsUnmodelledGroups(t *testing.T) {
 			switch reason {
 			case "missing label":
 				voters = []uint64{1, 2, 5}
-			case "same rules", "different rules":
+			case "same rules", "different rules", "witness":
 				rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 				rule.ID, rule.Index, rule.Override = "subrange", 1, true
-				rule.StartKeyHex, rule.EndKeyHex = hex.EncodeToString([]byte(balanceTestKey("a"))), hex.EncodeToString([]byte(balanceTestKey("b")))
-				if reason == "different rules" {
+				endKey := "b"
+				switch reason {
+				case "different rules":
 					rule.IsolationLevel = "zone"
+				case "witness":
+					rule.IsWitness, rule.Count, endKey = true, 1, "c"
 				}
-				re.NoError(f.ruleManager.SetRule(rule))
+				rule.StartKeyHex = hex.EncodeToString([]byte(balanceTestKey("a")))
+				rule.EndKeyHex = hex.EncodeToString([]byte(balanceTestKey(endKey)))
+				f.setRules(rule)
 			}
 			f.group(balanceTestGroupID("_tidb_pt_100_p1"), 1, 1, voters, "a", "b", "c")
 			f.group(balanceTestGroupID("_tidb_pt_100_p2"), 3, 1, []uint64{1, 2, 3}, "d", "e")
@@ -622,6 +725,13 @@ func TestAffinityBalanceKeepsUnmodelledGroups(t *testing.T) {
 				f.affinityManager.SyncGroupFromEtcd(&group)
 			}
 			before := f.snapshot()
+			plan := f.balancePlanInput(before, nil, nil)
+			re.Len(plan.input.Groups, 1)
+			if reason == "unknown policy" {
+				re.Equal(1, plan.groupCounts[balanceGroupFixed])
+			} else {
+				re.Equal(1, plan.groupCounts[balanceGroupUnsupported])
+			}
 			re.True(f.step())
 			re.Equal(before.Groups[0].Group, f.affinityManager.GetAffinityGroupState(before.Groups[0].ID).Group)
 			re.NotContains(f.affinityManager.GetAffinityGroupState(balanceTestGroupID("_tidb_pt_100_p2")).VoterStoreIDs, uint64(5))
@@ -678,20 +788,13 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 				called = true
 				switch change {
 				case "rule":
-					rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
-					re.NoError(f.ruleManager.SetRule(rule))
-				case "limit":
-					f.SetAffinityScheduleLimit(0)
-				case "pause":
-					f.PauseOrResume(60)
-				case "halt":
-					f.SetHaltScheduling(true, "test")
-				case "placement disabled":
-					f.SetEnablePlacementRules(false)
+					f.setRules(f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID))
 				case "policy":
 					f.policy(affinity.BalancePolicyFixed, ids[0])
 				case "cancel":
 					cancel()
+				default:
+					f.disableBalance(change)
 				}
 			})
 			result := affinityBalanceRejected
@@ -810,12 +913,11 @@ func TestAffinityBalanceExecutionAfterRegionChanges(t *testing.T) {
 			f.SetEnableUseJointConsensus(false)
 			f.SetMaxAffinityMergeRegionSize(0)
 			for id := uint64(1); id <= 4; id++ {
-				zone := f.GetStore(id).GetLabelValue("zone")
-				f.SetStoreLabel(id, map[string]string{"zone": zone, "disk": "ssd"})
+				f.SetStoreLabel(id, map[string]string{"zone": f.GetStore(id).GetLabelValue("zone"), "disk": "ssd"})
 			}
 			rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 			rule.LabelConstraints = []placement.LabelConstraint{{Key: "disk", Op: placement.In, Values: []string{"ssd"}}}
-			re.NoError(f.ruleManager.SetRule(rule))
+			f.setRules(rule)
 			id := balanceTestGroupID("_tidb_pt_100_p1")
 			f.group(id, 1, 1, []uint64{1, 2, 3}, "a", "b", "c")
 			fixedID := balanceTestGroupID("_tidb_pt_100_p2")
@@ -880,37 +982,34 @@ func TestAffinityBalanceExecutionAfterRegionChanges(t *testing.T) {
 				re.True(fit.IsSatisfied())
 				re.Equal(affinityPlacementRejected, f.checkRegionPlacement(virtual, fit, false).status)
 			}
-			type firstWin struct {
-				expired *affinity.GroupState
-				targets []affinity.GroupTarget
-				err     error
-			}
-			firstWins := make(chan firstWin, 1)
+			var expired *affinity.GroupState
+			var writtenTargets []affinity.GroupTarget
 			var firstWinCount atomic.Int32
+			done := make(chan error, 1)
 			f.affinityManager.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
-				firstWinCount.Add(1)
-				expired := f.affinityManager.GetAffinityGroupState(id)
+				if firstWinCount.Add(1) == 1 {
+					expired, writtenTargets = f.affinityManager.GetAffinityGroupState(id), targets
+				}
 				ids, err := f.affinityManager.UpdateAffinityGroupTargets(t.Context(), targets)
 				select {
-				case firstWins <- firstWin{expired: expired, targets: targets, err: err}:
+				case done <- err:
 				default:
 				}
 				return ids, err
 			}))
 			re.Empty(f.Check(region))
-			var observed firstWin
 			select {
-			case observed = <-firstWins:
+			case err := <-done:
+				re.NoError(err)
 			case <-time.After(10 * time.Second):
 				re.FailNow("first-win did not write a target")
 			}
-			re.NoError(observed.err)
-			re.True(observed.expired.RegularSchedulingAllowed)
-			re.False(observed.expired.AffinitySchedulingAllowed)
-			re.Len(observed.targets, 1)
-			re.Equal(observed.targets[0].Expected, *target)
-			re.Equal(uint64(1), observed.targets[0].LeaderStoreID)
-			re.Equal([]uint64{1, 2, 3}, observed.targets[0].VoterStoreIDs)
+			re.True(expired.RegularSchedulingAllowed)
+			re.False(expired.AffinitySchedulingAllowed)
+			re.Len(writtenTargets, 1)
+			re.Equal(writtenTargets[0].Expected, *target)
+			re.Equal(uint64(1), writtenTargets[0].LeaderStoreID)
+			re.Equal([]uint64{1, 2, 3}, writtenTargets[0].VoterStoreIDs)
 			learned := f.affinityManager.GetAffinityGroupState(id)
 			re.True(learned.AffinitySchedulingAllowed)
 			re.False(learned.RegularSchedulingAllowed)
@@ -922,19 +1021,16 @@ func TestAffinityBalanceExecutionAfterRegionChanges(t *testing.T) {
 }
 
 func TestAffinityBalanceModelsLeaderAndFollowerRules(t *testing.T) {
-	re := require.New(t)
 	f := newAffinityBalanceTest(t, 6, "a", "a", "b", "b", "c", "c")
-	for _, rule := range []*placement.Rule{
-		{GroupID: placement.DefaultGroupID, ID: "leader", Index: 1, Override: true, Role: placement.Leader, Count: 1,
-			LocationLabels: []string{"zone"}, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"a"}}}},
-		{GroupID: placement.DefaultGroupID, ID: "followers", Index: 2, Role: placement.Follower, Count: 2,
-			LocationLabels: []string{"zone"}, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"b", "c"}}}},
-	} {
-		re.NoError(f.ruleManager.SetRule(rule))
-	}
-	f.seedVoters("100", 1, []uint64{1, 3, 5}, 1, 1, 1, 1)
-	re.True(f.step())
-	re.Equal([2]int{24, 8}, balanceTableScore(f.affinityManager, balanceTestTable()))
+	f.setRules(
+		&placement.Rule{ID: "leader", Index: 1, Override: true, Role: placement.Leader, Count: 1, LocationLabels: []string{"zone"},
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"a"}}}},
+		&placement.Rule{ID: "followers", Index: 2, Role: placement.Follower, Count: 2, LocationLabels: []string{"zone"},
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"b", "c"}}}},
+	)
+	f.seedVoters([]uint64{1, 3, 5}, 1, 1, 1, 1)
+	require.True(t, f.step())
+	require.Equal(t, [2]int{24, 8}, balanceTableScore(f.affinityManager, balanceTestTable()))
 }
 
 func TestAffinityBalanceOverlappingRulesAllowLeaderBalance(t *testing.T) {
@@ -942,11 +1038,10 @@ func TestAffinityBalanceOverlappingRulesAllowLeaderBalance(t *testing.T) {
 	f := newAffinityBalanceTest(t, 4, "a", "a", "a", "b")
 	rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	rule.Count = 2
-	re.NoError(f.ruleManager.SetRule(rule))
 	second := rule.Clone()
 	second.ID, second.Index = "second", 1
-	re.NoError(f.ruleManager.SetRule(second))
-	for i, id := range f.seedVoters("100", 1, []uint64{1, 2, 3, 4}, 1, 1) {
+	f.setRules(rule, second)
+	for i, id := range f.seedVoters([]uint64{1, 2, 3, 4}, 1, 1) {
 		group, region := f.affinityManager.GetAffinityGroupState(id), f.GetRegion(uint64(i+1))
 		fit, status := f.validateBalanceCurrentRegion(group, region)
 		re.Equal(balanceAllowed, status)
@@ -972,56 +1067,105 @@ func TestAffinityBalanceIncludesPersistedLeader(t *testing.T) {
 	require.Equal(t, []int{1}, plan.input.BaseLeaders)
 }
 
-func TestAffinityBalanceSameRoleIsolation(t *testing.T) {
+func TestAffinityBalanceRejectsCoLocatedVoterWithTiKVLearner(t *testing.T) {
 	re := require.New(t)
-	enableFastAffinityAvailabilityCheck(t)
-	f := newAffinityBalanceTest(t, 3, "a", "a", "b")
-	rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
-	rule.Count = 1
-	rule.LabelConstraints = []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"1"}}}
-	re.NoError(f.ruleManager.SetRule(rule))
-	second := rule.Clone()
-	second.ID, second.Index = "second", 1
-	second.LabelConstraints[0].Values = []string{"2", "3"}
-	re.NoError(f.ruleManager.SetRule(second))
-	ids := f.seedVoters("100", 1, []uint64{1, 3}, 1, 1)
-	f.waitForStoreScan(ids[0])
-	snapshot := f.snapshot()
-	region := f.GetRegion(1)
-	currentFit, status := f.validateBalanceCurrentRegion(snapshot.Groups[0], region)
-	re.Equal(balanceAllowed, status)
-	virtual := cloneRegionWithReplacePeerStores(region, 1, 1, 2)
+	f := newAffinityBalanceTest(t, 4, "a", "b", "a", "c")
+	voters := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	voters.Count = 2
+	f.setRules(voters, &placement.Rule{ID: "learner", Role: placement.Learner, Count: 1,
+		LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"3"}}}})
+	f.AddLeaderRegion(1, 2, 4)
+	region := learnerAt(f.GetRegion(1), 3)
+	f.UpdateRegionCount(2, 100)
+	currentFit := f.ruleManager.FitRegionWithoutCache(f.Cluster, region)
+	re.True(currentFit.IsSatisfied())
+	target := &affinity.Group{LeaderStoreID: 2, VoterStoreIDs: []uint64{1, 2}}
+	virtual := cloneRegionWithReplacePeerStores(region, target.LeaderStoreID, target.VoterStoreIDs...)
 	fit := f.ruleManager.FitRegionWithoutCache(f.Cluster, virtual)
-	re.True(fit.IsSatisfied())
-	re.True(placementNotWorse(currentFit, fit))
-	re.Equal(affinityPlacementRejected, f.checkRegionPlacement(virtual, fit, false).status)
-	strategy := f.strategy(virtual, second, false)
-	old, next, temporary := strategy.getBetterLocation(f.Cluster, virtual, fit, fit.RuleFits[1])
-	re.Equal(uint64(2), old)
-	re.Equal(uint64(3), next)
-	re.False(temporary)
-	res := f.plan(snapshot)
-	re.Equal(balanceplan.Score{Voter: 8, Leader: 2}, res.planner.Score)
-	re.Len(res.targets, 1)
-	re.Equal(2, res.rounds)
-	re.Equal(2, res.groupCounts[balanceGroupMutable])
-	re.True(f.step())
-	re.Equal([2]int{8, 2}, balanceTableScore(f.affinityManager, balanceTestTable()))
-	for _, group := range f.snapshot().Groups {
-		re.Equal([]uint64{1, 3}, group.VoterStoreIDs)
+	re.Equal(affinityPlacementReady, f.checkPlacement(virtual, fit, false, false).status)
+	status, reason := f.validateBalanceTarget(target, region, currentFit)
+	re.Equal(balanceRejected, status)
+	re.Equal(balanceTargetLocation, reason)
+}
+
+func TestAffinityBalanceSameRoleIsolation(t *testing.T) {
+	setup := func(t *testing.T) (*affinityBalanceTest, *placement.Rule, []string) {
+		t.Helper()
+		f := newAffinityBalanceTest(t, 3, "a", "a", "b")
+		first := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+		first.Count = 1
+		first.LabelConstraints = []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"1"}}}
+		second := first.Clone()
+		second.ID, second.Index = "second", 1
+		second.LabelConstraints[0].Values = []string{"2", "3"}
+		f.setRules(first, second)
+		return f, second, f.seedVoters([]uint64{1, 3}, 1, 1)
 	}
-	f.settle()
-	re.False(f.step())
-	// A new store in zone b is usable even though store 2 is cheaper to try.
-	f.AddRegionStore(4, 10)
-	f.SetStoreLabel(4, map[string]string{"zone": "b", "id": "4"})
-	second.LabelConstraints[0].Values = []string{"2", "3", "4"}
-	re.NoError(f.ruleManager.SetRule(second))
-	re.True(f.step())
-	re.Equal([2]int{6, 2}, balanceTableScore(f.affinityManager, balanceTestTable()))
-	for _, group := range f.snapshot().Groups {
-		re.NotContains(group.VoterStoreIDs, uint64(2))
-	}
+
+	t.Run("healthy-and-expanded", func(t *testing.T) {
+		re := require.New(t)
+		enableFastAffinityAvailabilityCheck(t)
+		f, second, ids := setup(t)
+		f.waitForStoreScan(ids[0])
+		snapshot := f.snapshot()
+		region := f.GetRegion(1)
+		currentFit, status := f.validateBalanceCurrentRegion(snapshot.Groups[0], region)
+		re.Equal(balanceAllowed, status)
+		virtual := cloneRegionWithReplacePeerStores(region, 1, 1, 2)
+		fit := f.ruleManager.FitRegionWithoutCache(f.Cluster, virtual)
+		re.True(fit.IsSatisfied())
+		re.True(placementNotWorse(currentFit, fit))
+		re.Equal(affinityPlacementRejected, f.checkRegionPlacement(virtual, fit, false).status)
+		strategy := f.strategy(virtual, second, false)
+		old, next, temporary := strategy.getBetterLocation(f.Cluster, virtual, fit, fit.RuleFits[1])
+		re.Equal(uint64(2), old)
+		re.Equal(uint64(3), next)
+		re.False(temporary)
+		res := f.plan(snapshot)
+		re.Equal(balanceplan.Score{Voter: 8, Leader: 2}, res.planner.Score)
+		re.Len(res.targets, 1)
+		re.Equal(2, res.rounds)
+		re.Equal(2, res.groupCounts[balanceGroupMutable])
+		re.True(f.step())
+		re.Equal([2]int{8, 2}, balanceTableScore(f.affinityManager, balanceTestTable()))
+		for _, group := range f.snapshot().Groups {
+			re.Equal([]uint64{1, 3}, group.VoterStoreIDs)
+		}
+		f.settle()
+		re.False(f.step())
+		// A new store in zone b is usable even though store 2 is cheaper to try.
+		f.AddRegionStore(4, 10)
+		f.SetStoreLabel(4, map[string]string{"zone": "b", "id": "4"})
+		second.LabelConstraints[0].Values = []string{"2", "3", "4"}
+		f.setRules(second)
+		re.True(f.step())
+		re.Equal([2]int{6, 2}, balanceTableScore(f.affinityManager, balanceTestTable()))
+		for _, group := range f.snapshot().Groups {
+			re.NotContains(group.VoterStoreIDs, uint64(2))
+		}
+	})
+
+	t.Run("temporarily-blocked-leader-only", func(t *testing.T) {
+		re := require.New(t)
+		f, _, ids := setup(t)
+		f.blockStore(3, "store limit")
+		snapshot := f.snapshot()
+		input := f.balancePlanInput(snapshot, nil, nil)
+		relaxed := balanceplan.Plan(&input.input, balanceplan.Options{Seed: snapshot.Version})
+		targets := input.changedTargets(&relaxed)
+		re.Len(targets, 1)
+		target := targets[0]
+		status, _, failure, _ := f.validateBalancePlanTarget(t.Context(), snapshot, snapshot.Group(target.ID), target)
+		re.Equal(balanceTemporarilyBlocked, status)
+		re.Equal(balanceTargetLocation, failure)
+
+		res := f.plan(snapshot)
+		re.Equal(2, res.rounds)
+		re.Len(res.targets, 1)
+		re.Contains(ids, res.targets[0].ID)
+		re.Equal([]uint64{1, 3}, res.targets[0].VoterStoreIDs)
+		re.Equal(uint64(3), res.targets[0].LeaderStoreID)
+	})
 }
 
 func TestAffinityBalanceLaterRegionPlacement(t *testing.T) {
@@ -1030,9 +1174,11 @@ func TestAffinityBalanceLaterRegionPlacement(t *testing.T) {
 	rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	rule.Count = 2
 	rule.LabelConstraints = []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"1", "2", "3", "4", "5"}}}
-	require.NoError(t, f.ruleManager.SetRule(rule))
-	require.NoError(t, f.ruleManager.SetRule(&placement.Rule{GroupID: placement.DefaultGroupID, ID: "learner", Role: placement.Learner, Count: 1,
-		StartKeyHex: hex.EncodeToString([]byte(balanceTestKey("b"))), EndKeyHex: hex.EncodeToString([]byte(balanceTestKey("c"))), LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"5"}}}}))
+	f.setRules(rule, &placement.Rule{
+		ID: "learner", Role: placement.Learner, Count: 1,
+		StartKeyHex: hex.EncodeToString([]byte(balanceTestKey("b"))), EndKeyHex: hex.EncodeToString([]byte(balanceTestKey("c"))),
+		LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"5"}}},
+	})
 	f.group(balanceTestGroupID("_tidb_pt_100_p1"), 1, 1, []uint64{1, 4}, "a", "b", "c")
 	f.group(balanceTestGroupID("_tidb_pt_100_p2"), 3, 1, []uint64{1, 4}, "d", "e")
 	f.policy(affinity.BalancePolicyFixed, balanceTestGroupID("_tidb_pt_100_p2"))
@@ -1074,69 +1220,4 @@ func TestAffinityBalanceLaterRegionPlacement(t *testing.T) {
 	res := f.plan(snapshot)
 	require.NotEmpty(t, res.targets)
 	require.Greater(t, res.rounds, 1)
-}
-
-func TestBalanceRuleCacheUnicodeFold(t *testing.T) {
-	values := []string{"S", "s", "ſ", "Σ", "σ", "ς", "K", "k", "K", "İ", "i", "ı", "a"}
-	f := newAffinityBalanceTest(t, uint64(len(values)), values...)
-	ids := make([]uint64, len(values))
-	for i := range ids {
-		ids[i] = uint64(i + 1)
-	}
-	cache := newBalanceRuleCache(f.AffinityChecker, ids, func(uint64) bool { return true })
-	locations := cache.location([]string{"zone"})
-	for i, a := range values {
-		for j, b := range values {
-			require.Equal(t, strings.EqualFold(a, b), locations[i][0] == locations[j][0], "%q and %q", a, b)
-		}
-	}
-}
-
-func TestBalanceRuleSignatureBoundaries(t *testing.T) {
-	re := require.New(t)
-	f := newAffinityBalanceTest(t, 2, "foo bar", "foo")
-	cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1, 2}, func(uint64) bool { return true })
-	first := &placement.Rule{Role: placement.Voter, Count: 1,
-		LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"foo bar", "a"}}}}
-	second := first.Clone()
-	second.LabelConstraints[0].Values = []string{"foo", "bar a"}
-	re.NotEqual(balanceRuleSignature(first), balanceRuleSignature(second))
-	a, ok := cache.get(first)
-	re.True(ok)
-	b, ok := cache.get(second)
-	re.True(ok)
-	re.Equal([]int{0}, a.Stores)
-	re.Equal([]int{1}, b.Stores)
-	first.LocationLabels, second.LocationLabels = []string{"foo bar", "a"}, []string{"foo", "bar a"}
-	first.LabelConstraints, second.LabelConstraints = nil, nil
-	re.NotEqual(balanceRuleSignature(first), balanceRuleSignature(second))
-}
-
-func TestAffinityBalanceRetriesTemporaryLocationWithLeaderOnly(t *testing.T) {
-	re := require.New(t)
-	f := newAffinityBalanceTest(t, 3, "a", "a", "b")
-	f.setRules(
-		&placement.Rule{ID: placement.DefaultRuleID, Role: placement.Voter, Count: 1, LocationLabels: []string{"zone"},
-			LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"1"}}}},
-		&placement.Rule{ID: "second", Index: 1, Role: placement.Voter, Count: 1, LocationLabels: []string{"zone"},
-			LabelConstraints: []placement.LabelConstraint{{Key: "id", Op: placement.In, Values: []string{"2", "3"}}}},
-	)
-	ids := f.seedVoters("100", 1, []uint64{1, 3}, 1, 1)
-	f.blockStore(3, "store limit")
-	snapshot := f.snapshot()
-	input := f.balancePlanInput(snapshot, nil, nil)
-	relaxed := balanceplan.Plan(&input.input, balanceplan.Options{Seed: snapshot.Version})
-	targets := input.changedTargets(&relaxed)
-	re.Len(targets, 1)
-	target := targets[0]
-	status, _, failure, _ := f.validateBalancePlanTarget(t.Context(), snapshot, snapshot.Group(target.ID), target)
-	re.Equal(balanceTemporarilyBlocked, status)
-	re.Equal(balanceTargetLocation, failure)
-
-	res := f.plan(snapshot)
-	re.Equal(2, res.rounds)
-	re.Len(res.targets, 1)
-	re.Contains(ids, res.targets[0].ID)
-	re.Equal([]uint64{1, 3}, res.targets[0].VoterStoreIDs)
-	re.Equal(uint64(3), res.targets[0].LeaderStoreID)
 }

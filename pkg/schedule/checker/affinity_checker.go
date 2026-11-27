@@ -783,7 +783,7 @@ func (c *AffinityChecker) witnessTargetMayBeValid(region *core.RegionInfo, group
 				_, status := c.moveConflictingLearners(region, group, fit, roles, target)
 				return status != affinityPlacementRejected
 			}
-			return c.checkRegionPlacement(target, c.ruleManager.FitRegionWithoutCache(c.cluster, target), false).status != affinityPlacementRejected
+			return c.checkPlacement(target, c.ruleManager.FitRegionWithoutCache(c.cluster, target), false, false).status != affinityPlacementRejected
 		}
 		for i := start; i <= len(candidates)-count; i++ {
 			if remaining == 0 {
@@ -827,17 +827,30 @@ func (c *AffinityChecker) strategy(region *core.RegionInfo, rule *placement.Rule
 	}
 }
 
-// hasCoLocationRules limits the extra source scan to competing location rules.
+// hasCoLocationRules reports whether stores fitted to other rules can affect location scoring.
 func hasCoLocationRules(fit *placement.RegionFit, rf *placement.RuleFit) bool {
-	if len(fit.RuleFits) <= 1 {
+	if len(rf.Peers) <= 1 || len(fit.RuleFits) <= 1 {
 		return false
 	}
 	for _, other := range fit.RuleFits {
 		if other == rf {
 			continue
 		}
-		if other.Rule.Role == rf.Rule.Role || other.Rule.Role != placement.Learner && rf.Rule.Role != placement.Learner {
-			return true
+		for _, store := range other.Stores {
+			if store == nil {
+				continue
+			}
+			engine := store.GetLabelValue(core.EngineKey)
+			if !slices.ContainsFunc(rf.Stores, func(source *core.StoreInfo) bool {
+				return source != nil && source.GetLabelValue(core.EngineKey) == engine
+			}) {
+				continue
+			}
+			for _, rule := range fit.GetRules() {
+				if rule.Role == rf.Rule.Role && placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+					return true
+				}
+			}
 		}
 	}
 	return false

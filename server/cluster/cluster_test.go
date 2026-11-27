@@ -6272,37 +6272,6 @@ func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream)
 	})
 }
 
-// newAffinityBalancerTestCluster returns a cluster whose coordinators have an
-// affinity balancer.
-func newAffinityBalancerTestCluster(t *testing.T) (*RaftCluster, *hbstream.HeartbeatStreams) {
-	re := require.New(t)
-	ctx := t.Context()
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-	cluster.regionLabeler, err = labeler.NewRegionLabeler(ctx, cluster.storage, time.Second*5)
-	re.NoError(err)
-	cluster.affinityManager, err = affinity.NewManager(ctx, cluster.storage, cluster, cluster.GetOpts(), cluster.regionLabeler)
-	re.NoError(err)
-	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, cluster.BasicCluster, false)
-	t.Cleanup(hbStreams.Close)
-	return cluster, hbStreams
-}
-
-// TestSchedulingFallbackStopsInactiveCoordinator checks that PD stops the
-// coordinator that it keeps while the scheduling service is independent when
-// it takes the scheduling jobs back.
-func TestSchedulingFallbackStopsInactiveCoordinator(t *testing.T) {
-	re := require.New(t)
-	cluster, hbStreams := newAffinityBalancerTestCluster(t)
-	cluster.initCoordinator(cluster.ctx, cluster, hbStreams)
-	inactive := cluster.GetCoordinator()
-	cluster.startSchedulingJobs(cluster, hbStreams)
-	re.NotSame(inactive, cluster.GetCoordinator())
-	re.ErrorIs(inactive.GetOperatorController().Ctx().Err(), context.Canceled)
-	re.True(cluster.stopSchedulingJobs())
-}
-
 // affinityLimitBlocker blocks the first read of the affinity schedule limit.
 // Without Regions, only the affinity balancer reads it.
 type affinityLimitBlocker struct {
@@ -6324,16 +6293,27 @@ type affinityLimitCluster struct {
 	limit *affinityLimitBlocker
 }
 
-func (c *affinityLimitCluster) GetCheckerConfig() sc.CheckerConfigProvider {
-	return c.limit
-}
+func (c *affinityLimitCluster) GetCheckerConfig() sc.CheckerConfigProvider { return c.limit }
 
-// TestStopSchedulingJobsWaitsForAffinityBalancer checks that stopping the
-// scheduling jobs waits for the affinity balancer, so that the balancer does
-// not read the cluster while PD initializes it again for its next term.
-func TestStopSchedulingJobsWaitsForAffinityBalancer(t *testing.T) {
+// TestSchedulingCoordinatorAndAffinityBalancerLifecycle checks that taking
+// scheduling jobs back cancels the inactive coordinator and that stopping
+// scheduling jobs waits for the affinity balancer before re-election.
+func TestSchedulingCoordinatorAndAffinityBalancerLifecycle(t *testing.T) {
 	re := require.New(t)
-	cluster, hbStreams := newAffinityBalancerTestCluster(t)
+	ctx := t.Context()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.regionLabeler, err = labeler.NewRegionLabeler(ctx, cluster.storage, 5*time.Second)
+	re.NoError(err)
+	cluster.affinityManager, err = affinity.NewManager(ctx, cluster.storage, cluster, cluster.GetOpts(), cluster.regionLabeler)
+	re.NoError(err)
+	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, cluster.BasicCluster, false)
+	t.Cleanup(hbStreams.Close)
+
+	cluster.initCoordinator(cluster.ctx, cluster, hbStreams)
+	inactive := cluster.GetCoordinator()
+
 	limit := &affinityLimitBlocker{
 		CheckerConfigProvider: cluster.GetCheckerConfig(),
 		entered:               make(chan struct{}),
@@ -6342,16 +6322,18 @@ func TestStopSchedulingJobsWaitsForAffinityBalancer(t *testing.T) {
 	release := sync.OnceFunc(func() { close(limit.release) })
 	defer release()
 	cluster.startSchedulingJobs(&affinityLimitCluster{RaftCluster: cluster, limit: limit}, hbStreams)
+	re.NotSame(inactive, cluster.GetCoordinator())
+	re.ErrorIs(inactive.GetOperatorController().Ctx().Err(), context.Canceled)
+
 	select {
 	case <-limit.entered:
 	case <-time.After(10 * time.Second):
 		re.FailNow("the affinity balancer did not run")
 	}
 
-	stopped := make(chan struct{})
+	stopped := make(chan bool, 1)
 	go func() {
-		defer close(stopped)
-		cluster.stopSchedulingJobs()
+		stopped <- cluster.stopSchedulingJobs()
 	}()
 	select {
 	case <-stopped:
@@ -6359,8 +6341,7 @@ func TestStopSchedulingJobsWaitsForAffinityBalancer(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 	release()
-	<-stopped
-	// PD is elected again.
+	re.True(<-stopped)
 	re.NoError(cluster.InitCluster(cluster.id, cluster.opt, nil, nil))
 }
 

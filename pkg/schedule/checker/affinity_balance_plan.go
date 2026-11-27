@@ -630,7 +630,8 @@ func balanceRuleSignature(r *placement.Rule) string {
 // interned per level and compared without case, as in CompareLocation. A
 // missing value is -1.
 func (rc *balanceRuleCache) location(labels []string) [][]int32 {
-	key := strings.Join(labels, ",")
+	encoded, _ := json.Marshal(labels)
+	key := string(encoded)
 	if loc, ok := rc.locations[key]; ok {
 		return loc
 	}
