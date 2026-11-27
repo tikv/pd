@@ -111,6 +111,22 @@ func NewLabelRuleFromJSON(data []byte) (*LabelRule, error) {
 	return lr, nil
 }
 
+// LoadLabelRuleFromJSON validates a stored label rule and removes expired labels.
+// It returns a nil rule and no error when all labels in a valid rule have expired.
+func LoadLabelRuleFromJSON(data []byte) (*LabelRule, error) {
+	rule, err := NewLabelRuleFromJSONWithoutCheck(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := rule.adjust(); err != nil {
+		return nil, err
+	}
+	if len(rule.Labels) == 0 {
+		return nil, nil
+	}
+	return rule, nil
+}
+
 // NewLabelRuleFromJSONWithoutCheck creates a label rule from the JSON data. It will not call checkAndAdjust.
 func NewLabelRuleFromJSONWithoutCheck(data []byte) (*LabelRule, error) {
 	lr := &LabelRule{}
@@ -203,6 +219,17 @@ func (rule *LabelRule) checkAndRemoveExpireLabels(now time.Time) bool {
 }
 
 func (rule *LabelRule) checkAndAdjust() error {
+	if err := rule.adjust(); err != nil {
+		return err
+	}
+	if len(rule.Labels) == 0 {
+		return errs.ErrRegionRuleContent.FastGenByArgs("region label with expired ttl")
+	}
+	return nil
+}
+
+// adjust validates the rule before removing expired labels.
+func (rule *LabelRule) adjust() error {
 	if rule.ID == "" {
 		return errs.ErrRegionRuleContent.FastGenByArgs("empty rule id")
 	}
@@ -221,15 +248,13 @@ func (rule *LabelRule) checkAndAdjust() error {
 			return errs.ErrRegionRuleContent.FastGenByArgs(err)
 		}
 	}
-	rule.checkAndRemoveExpireLabels(time.Now())
-	if len(rule.Labels) == 0 {
-		return errs.ErrRegionRuleContent.FastGenByArgs("region label with expired ttl")
-	}
-
 	// TODO: change it to switch statement once we support more types.
 	if rule.RuleType == KeyRange {
 		var err error
 		rule.Data, err = initKeyRangeRulesFromLabelRuleData(rule.Data)
+		if err == nil {
+			rule.checkAndRemoveExpireLabels(time.Now())
+		}
 		return err
 	}
 	log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
