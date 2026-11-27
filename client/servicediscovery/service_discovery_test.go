@@ -441,14 +441,8 @@ func TestGRPCDialOption(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
-	cli := &serviceDiscovery{
-		callbacks:         newServiceCallbacks(),
-		checkMembershipCh: make(chan struct{}, 1),
-		ctx:               ctx,
-		cancel:            cancel,
-		tlsCfg:            nil,
-		option:            opt.NewOption(),
-	}
+	cli := NewDefaultServiceDiscovery(ctx, cancel, nil, nil).(*serviceDiscovery)
+	defer cli.Close()
 	cli.urls.Store([]string{"tmp://test.url:5255"})
 	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()} //nolint:staticcheck
 	err := cli.updateMember()
@@ -522,105 +516,72 @@ func newMemberProbeTestDiscovery(t *testing.T, urls []string, leaderURL string) 
 	return cli
 }
 
-func TestUpdateMemberWaitsForTimeoutBeforeFallback(t *testing.T) {
-	blocked := func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
-	oldLeader := startMemberProbeTestServer(t, blocked)
-	leaderURL := startMemberProbeTestLeader(t)
-	cli := newMemberProbeTestDiscovery(t, []string{oldLeader, leaderURL}, oldLeader)
-	start := time.Now()
-	err := cli.updateMember()
-	elapsed := time.Since(start)
-	require.NoError(t, err)
-	require.Equal(t, leaderURL, cli.getLeaderURL())
-	// Silent endpoints retain the per-endpoint timeout: speculative requests would
-	// also fan out slow but healthy refreshes during a client burst.
-	require.GreaterOrEqual(t, elapsed, UpdateMemberTimeout)
-}
-
-func TestUpdateMemberHealthyResponseUsesSingleProbe(t *testing.T) {
-	for _, delay := range []time.Duration{0, 300 * time.Millisecond} {
-		t.Run(delay.String(), func(t *testing.T) {
-			var followerCalls atomic.Int32
-			follower := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
-				followerCalls.Add(1)
-				return nil, status.Error(codes.Unavailable, "unavailable")
-			})
-			var response atomic.Pointer[pdpb.GetMembersResponse]
-			leaderURL := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
-				timer := time.NewTimer(delay)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-					return response.Load(), nil
-				case <-ctx.Done():
+func TestUpdateMemberEndpointSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		delay         time.Duration
+		timeout       bool
+		unavailable   bool
+		foreign       bool
+		missingLeader bool
+		probes        int32
+	}{
+		{name: "healthy", probes: 1},
+		{name: "slow-healthy", delay: 300 * time.Millisecond, probes: 1},
+		{name: "timeout", timeout: true, probes: 2},
+		{name: "unavailable", unavailable: true, probes: 2},
+		{name: "foreign-cluster", foreign: true, probes: 2},
+		{name: "missing-leader", missingLeader: true, probes: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			leaderURL := startMemberProbeTestLeader(t)
+			first := startMemberProbeTestServer(t, func(ctx context.Context) (*pdpb.GetMembersResponse, error) {
+				if tc.timeout {
+					<-ctx.Done()
 					return nil, ctx.Err()
 				}
-			})
-			leader := &pdpb.Member{MemberId: 1, ClientUrls: []string{leaderURL}}
-			response.Store(&pdpb.GetMembersResponse{
-				Header: &pdpb.ResponseHeader{ClusterId: 42}, Members: []*pdpb.Member{leader}, Leader: leader,
-			})
-			cli := newMemberProbeTestDiscovery(t, []string{leaderURL, follower}, leaderURL)
-			_, err := cli.getMembers(cli.ctx, leaderURL, UpdateMemberTimeout)
-			require.NoError(t, err)
-			require.NoError(t, cli.updateMember())
-			cli.Close()
-			require.Zero(t, followerCalls.Load(), "a healthy response should not trigger an extra membership RPC")
-		})
-	}
-}
-
-func TestUpdateMemberStopsAfterFirstSuccessfulEndpoint(t *testing.T) {
-	unavailable := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
-		return nil, status.Error(codes.Unavailable, "unavailable")
-	})
-	leaderURL := startMemberProbeTestLeader(t)
-	unused := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
-		return nil, status.Error(codes.Unavailable, "unavailable")
-	})
-	unusedURL, err := url.Parse(unused)
-	require.NoError(t, err)
-	var unusedCalls atomic.Int32
-	cli := newMemberProbeTestDiscovery(t, []string{unavailable, leaderURL, unused}, unavailable)
-	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithUnaryInterceptor(func(
-		ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption,
-	) error {
-		if cc.Target() == unusedURL.Host {
-			unusedCalls.Add(1)
-		}
-		return invoker(ctx, method, req, reply, cc, opts...)
-	})}
-	_, err = cli.getMembers(cli.ctx, leaderURL, UpdateMemberTimeout)
-	require.NoError(t, err)
-	_, err = cli.getMembers(cli.ctx, unused, UpdateMemberTimeout)
-	require.Error(t, err)
-	unusedCalls.Store(0)
-	require.NoError(t, cli.updateMember())
-	require.Equal(t, leaderURL, cli.getLeaderURL())
-	cli.Close()
-	require.Zero(t, unusedCalls.Load(), "a reachable backup should prevent probing the remaining endpoint")
-}
-
-func TestUpdateMemberRejectsInvalidResponses(t *testing.T) {
-	for _, foreign := range []bool{true, false} {
-		name := "missing-leader"
-		if foreign {
-			name = "foreign-cluster"
-		}
-		t.Run(name, func(t *testing.T) {
-			leaderURL := startMemberProbeTestLeader(t)
-			invalid := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
-				if foreign {
-					return &pdpb.GetMembersResponse{Header: &pdpb.ResponseHeader{ClusterId: 99}, Leader: &pdpb.Member{ClientUrls: []string{"http://foreign"}}}, nil
+				if tc.delay > 0 {
+					timer := time.NewTimer(tc.delay)
+					defer timer.Stop()
+					select {
+					case <-timer.C:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
 				}
-				return &pdpb.GetMembersResponse{Header: &pdpb.ResponseHeader{ClusterId: 42}}, nil
+				if tc.unavailable {
+					return nil, status.Error(codes.Unavailable, "unavailable")
+				}
+				leader := &pdpb.Member{MemberId: 1, ClientUrls: []string{leaderURL}}
+				response := &pdpb.GetMembersResponse{
+					Header: &pdpb.ResponseHeader{ClusterId: 42}, Members: []*pdpb.Member{leader}, Leader: leader,
+				}
+				if tc.foreign {
+					response.Header.ClusterId = 99
+				} else if tc.missingLeader {
+					response.Leader = nil
+				}
+				return response, nil
 			})
-			cli := newMemberProbeTestDiscovery(t, []string{invalid, leaderURL}, "")
+			unused := startMemberProbeTestServer(t, func(context.Context) (*pdpb.GetMembersResponse, error) {
+				return nil, status.Error(codes.Unavailable, "unavailable")
+			})
+			cli := newMemberProbeTestDiscovery(t, []string{first, leaderURL, unused}, first)
+			var probes atomic.Int32
+			cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithUnaryInterceptor(func(
+				ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption,
+			) error {
+				probes.Add(1)
+				return invoke(ctx, method, req, reply, cc, opts...)
+			})}
+			start := time.Now()
 			require.NoError(t, cli.updateMember())
+			if tc.timeout {
+				require.GreaterOrEqual(t, time.Since(start), UpdateMemberTimeout)
+			}
 			require.Equal(t, leaderURL, cli.getLeaderURL())
+			cli.Close()
+			require.Equal(t, tc.probes, probes.Load(), "stop probing after the first valid response")
 		})
 	}
 }

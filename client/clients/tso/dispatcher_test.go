@@ -85,9 +85,9 @@ func (m *mockTSOServiceProvider) scheduleUpdateTSOConnectionCtxs() {
 	m.updateConnectionCtxs(context.Background())
 }
 
-func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool {
+func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) {
 	if m.conCtxMgr.Exist(mockStreamURL) {
-		return true
+		return
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	var stream *tsoStream
@@ -98,9 +98,9 @@ func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool 
 	}
 	if stream == nil {
 		cancel()
-		return false
+		return
 	}
-	return m.conCtxMgr.Store(cctx, cancel, mockStreamURL, stream)
+	m.conCtxMgr.Store(cctx, cancel, mockStreamURL, stream)
 }
 
 type testTSODispatcherSuite struct {
@@ -450,6 +450,17 @@ func (b reconnectTestBuilder) build(ctx context.Context, cancel context.CancelFu
 	return b(ctx, cancel, timeout)
 }
 
+func newRecoveryTestClient(t *testing.T, option *opt.Option, discovery sd.ServiceDiscovery, builder tsoStreamBuilderFactory) *Cli {
+	t.Helper()
+	client := NewClient(t.Context(), option, discovery, builder)
+	t.Cleanup(func() {
+		client.cancel()
+		client.wg.Wait()
+		client.conCtxMgr.ReleaseAll()
+	})
+	return client
+}
+
 func TestTSOReconnectSkipsRedundantDiscovery(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		name := "new-stream"
@@ -463,12 +474,8 @@ func TestTSOReconnectSkipsRedundantDiscovery(t *testing.T) {
 				builds++
 				return newTSOStream(ctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
 			})
-			client := NewClient(t.Context(), opt.NewOption(), svc, builder)
+			client := newRecoveryTestClient(t, opt.NewOption(), svc, builder)
 			client.leaderURL.Store(mockStreamURL)
-			t.Cleanup(func() {
-				client.cancel()
-				client.conCtxMgr.GC(func(string) bool { return true })
-			})
 			if existing {
 				ctx, cancel := context.WithCancel(client.ctx)
 				stream, err := builder(ctx, cancel, time.Second)
@@ -496,8 +503,7 @@ func TestTSOReconnectFailureRefreshesBeforeBackoff(t *testing.T) {
 		builds++
 		return nil, errConnect
 	})
-	client := NewClient(t.Context(), opt.NewOption(), svc, builder)
-	defer client.cancel()
+	client := newRecoveryTestClient(t, opt.NewOption(), svc, builder)
 	client.leaderURL.Store(mockStreamURL)
 	svc.onSchedule = client.cancel
 	require.ErrorIs(t, client.tryConnectToTSO(client.ctx), errConnect)
@@ -582,7 +588,7 @@ func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
 			})
 			option := opt.NewOption()
 			option.EnableForwarding = true
-			client = NewClient(t.Context(), option, svc, builder)
+			client = newRecoveryTestClient(t, option, svc, builder)
 			client.leaderURL.Store(leaderURL)
 			if tt.supersededBuild && !tt.switchBack {
 				client.leaderURL.Store("old-leader")
@@ -613,11 +619,6 @@ func TestTSOReconnectTimeoutFallsBackToFollower(t *testing.T) {
 					client.notifyRecoveryChanged()
 				}
 			}
-			t.Cleanup(func() {
-				client.cancel()
-				client.wg.Wait()
-				client.conCtxMgr.ReleaseAll()
-			})
 
 			require.NoError(t, client.tryConnectToTSO(client.ctx))
 			require.Equal(t, constants.MaxRetryTimes, directBuilds)
@@ -732,9 +733,8 @@ func TestDispatcherCanceledStreamRefreshesBeforeReconnect(t *testing.T) {
 			})
 			option := opt.NewOption()
 			option.EnableForwarding = tc.forwarding
-			client := NewClient(t.Context(), option, svc, builder)
+			client := newRecoveryTestClient(t, option, svc, builder)
 			client.leaderURL.Store(tc.leaderURL)
-			t.Cleanup(client.cancel)
 
 			ctx, cancel := context.WithCancel(client.ctx)
 			if tc.forwardedHost != "" {
@@ -769,12 +769,8 @@ func TestTSOLeaderChangeCancelsObsoleteBuild(t *testing.T) {
 		}
 		return newTSOStream(ctx, "new-leader", newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
 	})
-	client = NewClient(t.Context(), opt.NewOption(), svc, builder)
+	client = newRecoveryTestClient(t, opt.NewOption(), svc, builder)
 	client.leaderURL.Store("old-leader")
-	t.Cleanup(func() {
-		client.cancel()
-		client.conCtxMgr.GC(func(string) bool { return true })
-	})
 	finished := make(chan error, 1)
 	go func() { finished <- client.tryConnectToTSO(client.ctx) }()
 	var obsolete context.Context
@@ -977,7 +973,7 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 
 type recoveringTSOServiceProvider struct {
 	*mockTSOServiceProvider
-	update    func(context.Context) bool
+	update    func(context.Context)
 	scheduled chan struct{}
 }
 
@@ -988,8 +984,25 @@ func (p *recoveringTSOServiceProvider) scheduleUpdateTSOConnectionCtxs() {
 	}
 }
 
-func (p *recoveringTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool {
-	return p.update(ctx)
+func waitForRecovery(t *testing.T, signal <-chan struct{}, timeout time.Duration, message string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(timeout):
+		t.Fatal(message)
+	}
+}
+
+func pushRecoveryRequest(td *tsoDispatcher) *Request {
+	req := &Request{
+		requestCtx: td.ctx,
+		clientCtx:  td.ctx,
+		done:       make(chan error, 1),
+		start:      time.Now(),
+		pool:       &sync.Pool{},
+	}
+	td.push(req)
+	return req
 }
 
 func startRecoveryDispatcher(t *testing.T, provider tsoServiceProvider) (*tsoDispatcher, *Request) {
@@ -1022,7 +1035,7 @@ func startRecoveryDispatcher(t *testing.T, provider tsoServiceProvider) (*tsoDis
 				case <-td.ctx.Done():
 					return
 				case <-p.scheduled:
-					p.updateConnectionCtxs(td.ctx)
+					p.update(td.ctx)
 				}
 			}
 		})
@@ -1040,14 +1053,7 @@ func startRecoveryDispatcher(t *testing.T, provider tsoServiceProvider) (*tsoDis
 		td.close()
 		wg.Wait()
 	})
-	req := &Request{
-		requestCtx: td.ctx,
-		clientCtx:  td.ctx,
-		done:       make(chan error, 1),
-		start:      time.Now(),
-		pool:       &sync.Pool{},
-	}
-	td.push(req)
+	req := pushRecoveryRequest(td)
 	return td, req
 }
 
@@ -1064,7 +1070,7 @@ func TestDispatcherUsesBackgroundStream(t *testing.T) {
 			var once sync.Once
 			provider := &recoveringTSOServiceProvider{
 				mockTSOServiceProvider: newMockTSOServiceProvider(opt.NewOption(), nil),
-				update: func(ctx context.Context) bool {
+				update: func(ctx context.Context) {
 					once.Do(func() { close(refreshStarted) })
 					select {
 					case <-ctx.Done():
@@ -1075,22 +1081,13 @@ func TestDispatcherUsesBackgroundStream(t *testing.T) {
 					default:
 						close(refreshFinished)
 					}
-					return false
 				},
 			}
 			td, req := startRecoveryDispatcher(t, provider)
-			select {
-			case <-refreshStarted:
-			case <-time.After(time.Second):
-				t.Fatal("dispatcher did not attempt stream recovery")
-			}
+			waitForRecovery(t, refreshStarted, time.Second, "dispatcher did not attempt stream recovery")
 			if !duringRefresh {
 				close(releaseRefresh)
-				select {
-				case <-refreshFinished:
-				case <-time.After(time.Second):
-					t.Fatal("stream recovery did not return")
-				}
+				waitForRecovery(t, refreshFinished, time.Second, "stream recovery did not return")
 			}
 
 			// A concurrent publisher has established the new leader's stream while
@@ -1157,18 +1154,10 @@ func TestDispatcherUsesBackgroundStreamDuringReconnect(t *testing.T) {
 				}
 				return newTSOStream(ctx, "leader", newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
 			})
-			client = NewClient(t.Context(), opt.NewOption(), svc, builder)
+			client = newRecoveryTestClient(t, opt.NewOption(), svc, builder)
 			client.leaderURL.Store("leader")
-			t.Cleanup(func() {
-				client.cancel()
-				client.conCtxMgr.ReleaseAll()
-			})
 			_, req := startRecoveryDispatcher(t, client)
-			select {
-			case <-scheduled:
-			case <-time.After(time.Second):
-				t.Fatal("stream recovery attempt did not fail")
-			}
+			waitForRecovery(t, scheduled, time.Second, "stream recovery attempt did not fail")
 			if tt.beforeWait {
 				require.NoError(t, <-published)
 			} else {
@@ -1193,7 +1182,7 @@ func TestDispatcherUsesBackgroundStreamDuringReconnect(t *testing.T) {
 func TestDispatcherFindsStreamPublishedBeforeSubscription(t *testing.T) {
 	provider := &recoveringTSOServiceProvider{
 		mockTSOServiceProvider: newMockTSOServiceProvider(opt.NewOption(), nil),
-		update:                 func(context.Context) bool { return false },
+		update:                 func(context.Context) {},
 	}
 	published := make(chan bool, 1)
 	var once sync.Once
@@ -1224,11 +1213,11 @@ func TestDispatcherStreamRecoveryPollingFallback(t *testing.T) {
 	mock := newMockTSOServiceProvider(opt.NewOption(), nil)
 	provider := &recoveringTSOServiceProvider{
 		mockTSOServiceProvider: mock,
-		update: func(ctx context.Context) bool {
+		update: func(ctx context.Context) {
 			if attempts.Add(1) == 1 {
-				return false
+				return
 			}
-			return mock.updateConnectionCtxs(ctx)
+			mock.updateConnectionCtxs(ctx)
 		},
 	}
 	_, req := startRecoveryDispatcher(t, provider)
@@ -1243,17 +1232,12 @@ func TestDispatcherStreamRecoveryShutdown(t *testing.T) {
 	var once sync.Once
 	provider := &recoveringTSOServiceProvider{
 		mockTSOServiceProvider: newMockTSOServiceProvider(opt.NewOption(), nil),
-		update: func(context.Context) bool {
+		update: func(context.Context) {
 			once.Do(func() { close(started) })
-			return false
 		},
 	}
 	td, req := startRecoveryDispatcher(t, provider)
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("dispatcher did not attempt stream recovery")
-	}
+	waitForRecovery(t, started, time.Second, "dispatcher did not attempt stream recovery")
 	td.close()
 	_, _, err := req.waitTimeout(time.Second)
 	require.ErrorIs(t, err, context.Canceled)
@@ -1267,14 +1251,10 @@ func TestDispatcherStreamRecoveryShutdown(t *testing.T) {
 			once.Do(func() { close(started) })
 			<-client.ctx.Done()
 		}
-		client = NewClient(t.Context(), opt.NewOption(), svc, nil)
+		client = newRecoveryTestClient(t, opt.NewOption(), svc, nil)
 		client.leaderURL.Store("leader")
 		_, req := startRecoveryDispatcher(t, client)
-		select {
-		case <-started:
-		case <-time.After(time.Second):
-			t.Fatal("background recovery did not start")
-		}
+		waitForRecovery(t, started, time.Second, "background recovery did not start")
 		closed := make(chan struct{})
 		go func() {
 			client.Close()
@@ -1282,11 +1262,7 @@ func TestDispatcherStreamRecoveryShutdown(t *testing.T) {
 		}()
 		_, _, err := req.waitTimeout(time.Second)
 		require.ErrorIs(t, err, context.Canceled)
-		select {
-		case <-closed:
-		case <-time.After(time.Second):
-			t.Fatal("Close did not join the active updater and dispatcher")
-		}
+		waitForRecovery(t, closed, time.Second, "Close did not join the active updater and dispatcher")
 	})
 }
 
@@ -1296,7 +1272,7 @@ func TestDispatcherStreamRecoveryTimeout(t *testing.T) {
 		option.Timeout = 50 * time.Millisecond
 		provider := &recoveringTSOServiceProvider{
 			mockTSOServiceProvider: newMockTSOServiceProvider(option, nil),
-			update:                 func(context.Context) bool { return false },
+			update:                 func(context.Context) {},
 		}
 		td, req := startRecoveryDispatcher(t, provider)
 		_, _, err := req.waitTimeout(time.Second)
@@ -1350,14 +1326,10 @@ func TestDispatcherStreamRecoveryTimeout(t *testing.T) {
 			builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
 				return newTSOStream(ctx, "leader-ready", newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
 			})
-			client = NewClient(t.Context(), option, svc, builder)
+			client = newRecoveryTestClient(t, option, svc, builder)
 			client.leaderURL.Store("leader-a")
 			td, req := startRecoveryDispatcher(t, client)
-			select {
-			case <-blocked:
-			case <-time.After(time.Second):
-				t.Fatal("background recovery did not reach the blocked lookup")
-			}
+			waitForRecovery(t, blocked, time.Second, "background recovery did not reach the blocked lookup")
 			_, _, err := req.waitTimeout(constants.RetryInterval / 2)
 			require.Error(t, err)
 			require.True(t, errs.ErrClientCreateTSOStream.Equal(err), "background recovery must not hide the batch timeout: %v", err)
@@ -1368,14 +1340,7 @@ func TestDispatcherStreamRecoveryTimeout(t *testing.T) {
 			// Completing recovery after the first batch timed out must still produce
 			// a usable stream for a later request.
 			close(release)
-			next := &Request{
-				requestCtx: td.ctx,
-				clientCtx:  td.ctx,
-				done:       make(chan error, 1),
-				start:      time.Now(),
-				pool:       &sync.Pool{},
-			}
-			td.push(next)
+			next := pushRecoveryRequest(td)
 			physical, _, err := next.waitTimeout(constants.RetryInterval / 2)
 			require.NoError(t, err)
 			require.Positive(t, physical)
@@ -1562,7 +1527,7 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 				// An opaque wrapper exposes only the original discovery interface.
 				discovery = struct{ sd.ServiceDiscovery }{svc}
 			}
-			client = NewClient(t.Context(), option, discovery, builder)
+			client = newRecoveryTestClient(t, option, discovery, builder)
 			svc.ctx = client.ctx
 			client.leaderURL.Store(oldLeader)
 			if tc.published {
@@ -1572,11 +1537,7 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 			}
 			client.Setup()
 			t.Cleanup(client.Close)
-			select {
-			case <-started:
-			case <-time.After(5 * time.Second):
-				t.Fatal("recovery did not reach the blocked operation")
-			}
+			waitForRecovery(t, started, 5*time.Second, "recovery did not reach the blocked operation")
 			changed.Store(true)
 			if tc.changeMembers {
 				svc.members.Store([]string{oldLeader, newLeader})
@@ -1614,11 +1575,7 @@ func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
 				current := client.conCtxMgr.RandomlyPick()
 				require.NotNil(t, current)
 				releaseLegacy()
-				select {
-				case <-legacyReturned:
-				case <-time.After(time.Second):
-					t.Fatal("obsolete lookup did not return")
-				}
+				waitForRecovery(t, legacyReturned, time.Second, "obsolete lookup did not return")
 				// A late connection must not replace the healthy stream or close
 				// discovery's connection. Verify another request before shutdown.
 				next := client.GetTSORequest(t.Context())
@@ -1654,11 +1611,7 @@ func TestTSOLegacyDiscoveryLookupJoinsOnClose(t *testing.T) {
 		_, err := client.getOrCreateGRPCConn(ctx, "old-leader")
 		lookupDone <- err
 	}()
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("legacy lookup did not start")
-	}
+	waitForRecovery(t, started, time.Second, "legacy lookup did not start")
 	cancel()
 	select {
 	case err := <-lookupDone:
@@ -1678,11 +1631,7 @@ func TestTSOLegacyDiscoveryLookupJoinsOnClose(t *testing.T) {
 	case <-time.After(constants.RetryInterval / 2):
 	}
 	releaseLookup()
-	select {
-	case <-closed:
-	case <-time.After(time.Second):
-		t.Fatal("Close did not join the completed legacy lookup")
-	}
+	waitForRecovery(t, closed, time.Second, "Close did not join the completed legacy lookup")
 }
 
 func TestTSOConnectionUpdaterSwitchesProxyDuringLeaderChanges(t *testing.T) {
@@ -1726,14 +1675,10 @@ func TestTSOConnectionUpdaterSwitchesProxyDuringLeaderChanges(t *testing.T) {
 		inner.resGenPhysical += builds.Add(1)
 		return newTSOStream(ctx, client.getLeaderURL(), inner), nil
 	})
-	client = NewClient(t.Context(), option, svc, builder)
+	client = newRecoveryTestClient(t, option, svc, builder)
 	client.leaderURL.Store("leader-a")
 	td, req := startRecoveryDispatcher(t, client)
-	select {
-	case <-proxyStarted:
-	case <-time.After(time.Second):
-		t.Fatal("leader changes prevented switching to proxy recovery")
-	}
+	waitForRecovery(t, proxyStarted, time.Second, "leader changes prevented switching to proxy recovery")
 	physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
 	require.NoError(t, err)
 	require.Positive(t, physical)
@@ -1743,19 +1688,8 @@ func TestTSOConnectionUpdaterSwitchesProxyDuringLeaderChanges(t *testing.T) {
 	client.leaderURL.Store(directURL)
 	client.notifyRecoveryChanged()
 	option.SetEnableTSOFollowerProxy(false)
-	select {
-	case <-directStarted:
-	case <-time.After(time.Second):
-		t.Fatal("updater did not return to direct recovery")
-	}
-	next := &Request{
-		requestCtx: td.ctx,
-		clientCtx:  td.ctx,
-		done:       make(chan error, 1),
-		start:      time.Now(),
-		pool:       &sync.Pool{},
-	}
-	td.push(next)
+	waitForRecovery(t, directStarted, time.Second, "updater did not return to direct recovery")
+	next := pushRecoveryRequest(td)
 	nextPhysical, _, err := next.waitTimeout(constants.RetryInterval / 2)
 	require.NoError(t, err)
 	require.Greater(t, nextPhysical, physical)
@@ -1796,13 +1730,8 @@ func TestTSOConnectionUpdaterRestoresDirectStreamAfterProxyDisabled(t *testing.T
 			option := opt.NewOption()
 			option.EnableForwarding = forwarding
 			option.SetEnableTSOFollowerProxy(true)
-			client := NewClient(t.Context(), option, svc, builder)
+			client := newRecoveryTestClient(t, option, svc, builder)
 			client.leaderURL.Store(leaderURL)
-			t.Cleanup(func() {
-				client.cancel()
-				client.wg.Wait()
-				client.conCtxMgr.ReleaseAll()
-			})
 			client.updateConnectionCtxs(client.ctx)
 			require.False(t, client.conCtxMgr.Exist(leaderURL))
 			follower := client.conCtxMgr.GetConnectionCtx(followerURL)
@@ -1814,11 +1743,7 @@ func TestTSOConnectionUpdaterRestoresDirectStreamAfterProxyDisabled(t *testing.T
 			option.SetEnableTSOFollowerProxy(false)
 			client.scheduleUpdateTSOConnectionCtxs()
 			td, req := startRecoveryDispatcher(t, client)
-			select {
-			case <-directStarted:
-			case <-time.After(time.Second):
-				t.Fatal("disabling follower proxy did not start direct leader recovery")
-			}
+			waitForRecovery(t, directStarted, time.Second, "disabling follower proxy did not start direct leader recovery")
 			physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
 			require.NoError(t, err, "direct recovery must not block requests on the retained follower stream")
 			require.Positive(t, physical)
@@ -1830,14 +1755,7 @@ func TestTSOConnectionUpdaterRestoresDirectStreamAfterProxyDisabled(t *testing.T
 			}, time.Second, 10*time.Millisecond, "disabling follower proxy must restore direct mode")
 			require.Equal(t, int32(1), directBuilds.Load())
 			require.ErrorIs(t, follower.Ctx.Err(), context.Canceled)
-			next := &Request{
-				requestCtx: td.ctx,
-				clientCtx:  td.ctx,
-				done:       make(chan error, 1),
-				start:      time.Now(),
-				pool:       &sync.Pool{},
-			}
-			td.push(next)
+			next := pushRecoveryRequest(td)
 			nextPhysical, _, err := next.waitTimeout(constants.RetryInterval / 2)
 			require.NoError(t, err)
 			require.Greater(t, nextPhysical, physical)
