@@ -17,7 +17,9 @@ package server
 import (
 	"context"
 	"io"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -28,8 +30,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -51,6 +58,138 @@ func TestStopCluster(t *testing.T) {
 	re.Nil(s.GetCluster())
 	re.Nil(cluster.GetHeartbeatStreams())
 	re.Nil(cluster.GetStorage())
+}
+
+type schedulerWithBlockingCleanup struct {
+	schedulers.Scheduler
+	cleanupEntered chan struct{}
+	resumeCleanup  <-chan struct{}
+}
+
+func (s *schedulerWithBlockingCleanup) CleanConfig(cluster sche.SchedulerCluster) {
+	close(s.cleanupEntered)
+	<-s.resumeCleanup
+	s.Scheduler.CleanConfig(cluster)
+}
+
+func TestSchedulerReconciliationDoesNotWaitForRemoval(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	schedulers.Register()
+	cfg, err := GenerateConfig(&config.Config{})
+	re.NoError(err)
+	a := sc.SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.ShuffleLeaderScheduler]}
+	b := sc.SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]}
+	cfg.Schedule.Schedulers = sc.SchedulerConfigs{a, b}
+	persistConfig := config.NewPersistConfig(cfg, nil)
+	basicCluster := core.NewBasicCluster()
+	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	cluster, err := NewCluster(ctx, persistConfig, store, basicCluster, hbStreams, nil, nil, "")
+	re.NoError(err)
+	coordinator := cluster.GetCoordinator()
+	controller := coordinator.GetSchedulersController()
+	t.Cleanup(func() {
+		cluster.StopBackgroundJobs()
+		controller.Wait()
+		cluster.cleanupRuntimeResources()
+	})
+
+	addBlockingScheduler := func(typ types.CheckerSchedulerType) (<-chan struct{}, func()) {
+		t.Helper()
+		scheduler, err := schedulers.CreateScheduler(typ, coordinator.GetOperatorController(), store,
+			schedulers.ConfigSliceDecoder(typ, nil))
+		re.NoError(err)
+		cleanupEntered, resumeCleanup := make(chan struct{}), make(chan struct{})
+		release := sync.OnceFunc(func() { close(resumeCleanup) })
+		t.Cleanup(release)
+		re.NoError(controller.AddScheduler(&schedulerWithBlockingCleanup{
+			Scheduler:      scheduler,
+			cleanupEntered: cleanupEntered,
+			resumeCleanup:  resumeCleanup,
+		}))
+		return cleanupEntered, release
+	}
+	aCleaning, releaseA := addBlockingScheduler(types.ShuffleLeaderScheduler)
+	bCleaning, releaseB := addBlockingScheduler(types.BalanceLeaderScheduler)
+	coordinator.InitSchedulers(true)
+	// Let the initial reconciliation observe A's disable without queuing a
+	// second config notification.
+	a.Disable = true
+	persistConfig.SetSchedulers(sc.SchedulerConfigs{a, b})
+	cluster.heartbeatRunner.Start(ctx)
+	cluster.miscRunner.Start(ctx)
+	cluster.logRunner.Start(ctx)
+	cluster.running.Store(true)
+	cluster.wg.Add(1)
+	go cluster.updateScheduler()
+
+	aName := types.ShuffleLeaderScheduler.String()
+	oldA := controller.GetScheduler(aName)
+	re.NotNil(oldA)
+	waitForCleanup := func(entered <-chan struct{}, name string) {
+		t.Helper()
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("scheduler %s did not start cleanup", name)
+		}
+	}
+
+	waitForCleanup(aCleaning, aName)
+
+	// Reconciliation must see A's re-enable before starting B's removal.
+	// Keep B's cleanup blocked too so only A's completion can wake the next pass.
+	a.Disable, b.Disable = false, true
+	persistConfig.SetSchedulers(sc.SchedulerConfigs{a, b})
+	waitForCleanup(bCleaning, types.BalanceLeaderScheduler.String())
+	re.Same(oldA, controller.GetScheduler(aName))
+
+	// As with the RaftKV2 auto-enable path, this scheduler is added locally
+	// after the removal scan takes its snapshot, without changing PD config.
+	localType := types.EvictSlowTrendScheduler
+	local, err := schedulers.CreateScheduler(localType, coordinator.GetOperatorController(), store,
+		schedulers.ConfigSliceDecoder(localType, nil))
+	re.NoError(err)
+	re.NoError(controller.AddScheduler(local))
+
+	releaseA()
+	testutil.Eventually(re, func() bool {
+		current := controller.GetScheduler(aName)
+		return current != nil && current != oldA
+	}, testutil.WithWaitFor(5*time.Second))
+
+	// Run shutdown without a coordinator job in the cluster's WaitGroup:
+	// the config loop can exit even though B has not finished removal.
+	stopped := make(chan struct{})
+	go func() {
+		cluster.StopBackgroundJobs()
+		close(stopped)
+	}()
+	t.Cleanup(func() {
+		releaseB()
+		<-stopped
+	})
+	<-cluster.ctx.Done()
+	cluster.wg.Wait()
+
+	// The pass that rebuilt A did not start removing the local scheduler.
+	handler, exists := controller.GetSchedulerHandlers()[local.GetName()]
+	re.True(exists, "another scheduler's removal completion must not remove the local scheduler")
+	re.Same(local, handler)
+
+	select {
+	case <-stopped:
+		t.Fatal("shutdown returned before B finished removal")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseB()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown did not return after B finished removal")
+	}
+	re.Nil(controller.GetScheduler(types.BalanceLeaderScheduler.String()))
 }
 
 func TestGetClusterBeforeStoredDoesNotPanic(t *testing.T) {

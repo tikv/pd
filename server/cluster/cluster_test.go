@@ -652,6 +652,101 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	re.NoError(cluster.RemoveStore(3, false))
 }
 
+type evictLeaderWithBlockedLoop struct {
+	schedulers.Scheduler
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *evictLeaderWithBlockedLoop) IsScheduleAllowed(sche.SchedulerCluster) bool {
+	s.once.Do(func() { close(s.entered) })
+	<-s.release
+	return false
+}
+
+func (s *evictLeaderWithBlockedLoop) EvictStoreIDs() []uint64 {
+	return s.Scheduler.(interface{ EvictStoreIDs() []uint64 }).EvictStoreIDs()
+}
+
+func TestOfflineStoreDuringEvictLeaderRemoval(t *testing.T) {
+	newCluster := func(t *testing.T) (*RaftCluster, *schedulers.Controller) {
+		t.Helper()
+		ctx := t.Context()
+		_, opt, err := newTestScheduleConfig()
+		require.NoError(t, err)
+		opt.SetMaxReplicas(1)
+		cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+		cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+		controller := cluster.GetCoordinator().GetSchedulersController()
+		t.Cleanup(func() {
+			controller.Wait()
+			controller.WaitForRemovals()
+		})
+		for _, store := range newTestStores(2, "2.0.0") {
+			require.NoError(t, cluster.PutMetaStore(store.GetMeta()))
+		}
+		return cluster, controller
+	}
+
+	t.Run("running scheduler", func(t *testing.T) {
+		re := require.New(t)
+		cluster, controller := newCluster(t)
+		args := []string{"1"}
+		evict, err := schedulers.CreateScheduler(types.EvictLeaderScheduler, cluster.GetOperatorController(), cluster.storage,
+			schedulers.ConfigSliceDecoder(types.EvictLeaderScheduler, args), controller.RemoveScheduler)
+		re.NoError(err)
+		scheduler := &evictLeaderWithBlockedLoop{Scheduler: evict, entered: make(chan struct{}), release: make(chan struct{})}
+		release := sync.OnceFunc(func() { close(scheduler.release) })
+		t.Cleanup(release)
+		re.NoError(cluster.AddScheduler(scheduler, args...))
+		name := scheduler.GetName()
+		instance := controller.GetScheduler(name)
+		re.NotNil(instance)
+		select {
+		case <-scheduler.entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("scheduler loop did not start")
+		}
+		re.ErrorIs(cluster.RemoveStore(2, false), errs.ErrNoStoreForRegionLeader)
+
+		removed := make(chan error, 1)
+		go func() { removed <- cluster.RemoveScheduler(name) }()
+		select {
+		case <-instance.Ctx().Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("scheduler did not stop")
+		}
+		re.NotContains(controller.GetSchedulerHandlers(), name)
+		re.False(cluster.GetStore(1).AllowLeaderTransferIn())
+		re.ErrorIs(cluster.RemoveStore(2, false), errs.ErrNoStoreForRegionLeader)
+
+		release()
+		select {
+		case err := <-removed:
+			re.NoError(err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("scheduler removal did not finish")
+		}
+		re.True(cluster.GetStore(1).AllowLeaderTransferIn())
+		re.NoError(cluster.RemoveStore(2, false))
+	})
+
+	t.Run("handler only", func(t *testing.T) {
+		re := require.New(t)
+		cluster, controller := newCluster(t)
+		args := []string{"1"}
+		evict, err := schedulers.CreateScheduler(types.EvictLeaderScheduler, cluster.GetOperatorController(), cluster.storage,
+			schedulers.ConfigSliceDecoder(types.EvictLeaderScheduler, args), controller.RemoveSchedulerHandler)
+		re.NoError(err)
+		re.NoError(cluster.AddSchedulerHandler(evict, args...))
+		re.Nil(controller.GetScheduler(evict.GetName()))
+		re.ErrorIs(cluster.RemoveStore(2, false), errs.ErrNoStoreForRegionLeader)
+		re.NoError(cluster.RemoveSchedulerHandler(evict.GetName()))
+		re.NoError(cluster.RemoveStore(2, false))
+	})
+}
+
 func TestRemoveTiFlashStore(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()

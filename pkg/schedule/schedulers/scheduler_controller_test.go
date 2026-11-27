@@ -1,0 +1,149 @@
+// Copyright 2026 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package schedulers
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/errs"
+	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/storage"
+)
+
+type shutdownTestScheduler struct {
+	Scheduler
+	allow func() bool
+	clean func()
+}
+
+func (s *shutdownTestScheduler) IsScheduleAllowed(sche.SchedulerCluster) bool {
+	return s.allow()
+}
+
+func (s *shutdownTestScheduler) CleanConfig(sche.SchedulerCluster) {
+	s.clean()
+}
+
+func TestRemoveSchedulerWaitsForLoopAndCleanup(t *testing.T) {
+	re := require.New(t)
+	clean, _, tc, oc := prepareSchedulersTest()
+	t.Cleanup(clean)
+	ctx, cancel := context.WithCancel(t.Context())
+	store := storage.NewStorageWithMemoryBackend()
+	c := NewController(ctx, tc, store, oc)
+	scheduler, err := CreateScheduler(types.ShuffleLeaderScheduler, oc, store,
+		ConfigSliceDecoder(types.ShuffleLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	name := scheduler.GetName()
+
+	loopEntered, resumeLoop := make(chan struct{}), make(chan struct{})
+	cleanupEntered, resumeCleanup := make(chan struct{}), make(chan struct{})
+	cleanupFinished := make(chan struct{})
+	releaseLoop := sync.OnceFunc(func() { close(resumeLoop) })
+	releaseCleanup := sync.OnceFunc(func() { close(resumeCleanup) })
+	t.Cleanup(func() {
+		cancel()
+		releaseLoop()
+		releaseCleanup()
+		c.Wait()
+	})
+	blockLoop := sync.OnceFunc(func() {
+		close(loopEntered)
+		<-resumeLoop
+	})
+	s := &shutdownTestScheduler{
+		Scheduler: scheduler,
+		allow: func() bool {
+			blockLoop()
+			return false
+		},
+		clean: func() {
+			defer close(cleanupFinished)
+			close(cleanupEntered)
+			<-resumeCleanup
+		},
+	}
+	re.NoError(c.AddScheduler(s))
+	sc := c.GetScheduler(name)
+	initial, err := store.LoadSchedulerConfig(name)
+	re.NoError(err)
+	re.NotEmpty(initial)
+	wait := func(ch <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for scheduler shutdown progress")
+		}
+	}
+	wait(loopEntered)
+	type removalResult struct {
+		err             error
+		cleanupFinished bool
+	}
+	removed := make(chan removalResult, 1)
+	go func() {
+		result := removalResult{err: c.RemoveScheduler(name)}
+		select {
+		case <-cleanupFinished:
+			result.cleanupFinished = true
+		default:
+		}
+		removed <- result
+	}()
+	wait(sc.Ctx().Done())
+
+	// Config deletion succeeds before the loop is canceled.
+	value, err := store.LoadSchedulerConfig(name)
+	re.NoError(err)
+	re.Empty(value)
+	releaseLoop()
+	wait(cleanupEntered)
+	select {
+	case result := <-removed:
+		t.Fatalf("removal returned before cleanup finished: %v", result.err)
+	default:
+	}
+
+	// Pause requests must not mutate the old instance while its name is reserved.
+	paused := make(chan [2]error, 1)
+	go func() {
+		paused <- [2]error{c.PauseOrResumeScheduler(name, 60), c.PauseOrResumeScheduler("all", 60)}
+	}()
+	select {
+	case results := <-paused:
+		re.ErrorIs(results[0], errs.ErrSchedulerNotFound)
+		re.NoError(results[1])
+		re.False(sc.IsPaused())
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pause requests during scheduler removal")
+	}
+
+	releaseCleanup()
+	select {
+	case result := <-removed:
+		re.NoError(result.err)
+		re.True(result.cleanupFinished, "removal must wait for cleanup to finish")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for scheduler removal")
+	}
+	re.Nil(c.GetScheduler(name))
+}
