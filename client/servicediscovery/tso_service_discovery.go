@@ -327,7 +327,12 @@ func (c *tsoServiceDiscovery) GetBackupURLs() []string {
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
+	return c.GetOrCreateGRPCConnWithContext(c.ctx, url)
+}
+
+// GetOrCreateGRPCConnWithContext bounds connection setup by the caller's context.
+func (c *tsoServiceDiscovery) GetOrCreateGRPCConnWithContext(ctx context.Context, url string) (*grpc.ClientConn, error) {
+	return grpcutil.GetOrCreateGRPCConn(ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 }
 
 // RemoveClientConn removes and closes the gRPC connection of the given URL.

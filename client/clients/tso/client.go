@@ -73,6 +73,7 @@ type Client interface {
 
 type pendingStreamBuild struct {
 	url        string
+	proxy      bool
 	cancel     context.CancelFunc
 	superseded bool
 }
@@ -205,12 +206,12 @@ func (c *Cli) getLeaderURL() string {
 }
 
 // getTSOLeaderClientConn returns the TSO leader gRPC client connection.
-func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
+func (c *Cli) getTSOLeaderClientConn(ctx context.Context) (*grpc.ClientConn, string) {
 	url := c.getLeaderURL()
 	if len(url) == 0 {
 		log.Fatal("[tso] the tso leader should exist")
 	}
-	cc, err := c.svcDiscovery.GetOrCreateGRPCConn(url)
+	cc, err := c.getOrCreateGRPCConn(ctx, url)
 	if err != nil {
 		log.Warn("[tso] failed to get tso leader client connection",
 			zap.String("serving-url", url),
@@ -219,6 +220,17 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 		return nil, url
 	}
 	return cc, url
+}
+
+func (c *Cli) getOrCreateGRPCConn(ctx context.Context, url string) (*grpc.ClientConn, error) {
+	// Preserve compatibility with service discovery implementations predating
+	// context-aware dialing. Built-in discovery uses the recovery context.
+	if discovery, ok := c.svcDiscovery.(interface {
+		GetOrCreateGRPCConnWithContext(context.Context, string) (*grpc.ClientConn, error)
+	}); ok {
+		return discovery.GetOrCreateGRPCConnWithContext(ctx, url)
+	}
+	return c.svcDiscovery.GetOrCreateGRPCConn(url)
 }
 
 // newConnectionCtxManager creates the manager of TSO streams. An evicted stream fails its
@@ -246,7 +258,7 @@ func (c *Cli) notifyLeaderSwitched() {
 	defer c.leaderSwitchedMu.Unlock()
 	leaderURL := c.getLeaderURL()
 	for ctx, build := range c.pendingStreamBuilds {
-		if build.url != leaderURL {
+		if build.url != leaderURL || build.proxy != c.option.GetEnableTSOFollowerProxy() {
 			build.superseded = true
 			c.pendingStreamBuilds[ctx] = build
 			build.cancel()
@@ -256,16 +268,16 @@ func (c *Cli) notifyLeaderSwitched() {
 	c.leaderSwitchedCh = make(chan struct{})
 }
 
-func (c *Cli) trackStreamBuild(ctx context.Context, cancel context.CancelFunc, url string) bool {
+func (c *Cli) trackStreamBuild(ctx context.Context, cancel context.CancelFunc, url string, proxy bool) bool {
 	c.leaderSwitchedMu.Lock()
 	defer c.leaderSwitchedMu.Unlock()
-	if c.getLeaderURL() != url {
+	if c.getLeaderURL() != url || c.option.GetEnableTSOFollowerProxy() != proxy {
 		return false
 	}
 	if c.pendingStreamBuilds == nil {
 		c.pendingStreamBuilds = make(map[context.Context]pendingStreamBuild)
 	}
-	c.pendingStreamBuilds[ctx] = pendingStreamBuild{url: url, cancel: cancel}
+	c.pendingStreamBuilds[ctx] = pendingStreamBuild{url: url, proxy: proxy, cancel: cancel}
 	return true
 }
 
@@ -274,7 +286,7 @@ func (c *Cli) finishStreamBuild(ctx context.Context) (valid, superseded bool) {
 	defer c.leaderSwitchedMu.Unlock()
 	build := c.pendingStreamBuilds[ctx]
 	delete(c.pendingStreamBuilds, ctx)
-	superseded = build.superseded || c.getLeaderURL() != build.url
+	superseded = build.superseded || c.getLeaderURL() != build.url || c.option.GetEnableTSOFollowerProxy() != build.proxy
 	return ctx.Err() == nil && !superseded, superseded
 }
 
@@ -289,7 +301,7 @@ func (c *Cli) leaderSwitched() <-chan struct{} {
 // backupClientConn gets a grpc client connection of the current reachable and healthy
 // backup service endpoints randomly. Backup service endpoints are followers in a
 // quorum-based cluster or secondaries in a primary/secondary configured cluster.
-func (c *Cli) backupClientConn() (*grpc.ClientConn, string) {
+func (c *Cli) backupClientConn(ctx context.Context) (*grpc.ClientConn, string) {
 	urls := c.svcDiscovery.GetBackupURLs()
 	if len(urls) < 1 {
 		return nil, ""
@@ -300,10 +312,10 @@ func (c *Cli) backupClientConn() (*grpc.ClientConn, string) {
 	)
 	for range urls {
 		url := urls[rand.IntN(len(urls))]
-		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
+		if cc, err = c.getOrCreateGRPCConn(ctx, url); err != nil {
 			continue
 		}
-		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.Timeout)
+		healthCtx, healthCancel := context.WithTimeout(ctx, c.option.Timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
@@ -338,13 +350,28 @@ func (c *Cli) connectionCtxsUpdater() {
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
+	var updateDone chan struct{}
+	updatePending := true
 	for {
-		c.updateConnectionCtxs(ctx)
+		if updatePending && updateDone == nil {
+			updatePending = false
+			updateDone = make(chan struct{})
+			go func(done chan struct{}) {
+				defer close(done)
+				c.updateConnectionCtxs(ctx)
+			}(updateDone)
+		}
 		select {
 		case <-ctx.Done():
+			if updateDone != nil {
+				<-updateDone
+			}
 			log.Info("[tso] exit tso connection contexts updater")
 			return
 		case <-c.option.EnableTSOFollowerProxyCh:
+			// Wake retry waits and cancel only unpublished work for the old mode.
+			c.notifyLeaderSwitched()
+			updatePending = true
 			enableTSOFollowerProxy := c.option.GetEnableTSOFollowerProxy()
 			log.Info("[tso] tso follower proxy status changed",
 				zap.Bool("enable", enableTSOFollowerProxy))
@@ -362,8 +389,12 @@ func (c *Cli) connectionCtxsUpdater() {
 			}
 		case <-updateTicker.C:
 			// Triggered periodically when the TSO Follower Proxy is enabled.
+			updatePending = true
 		case <-c.updateConCtxsCh:
 			// Triggered by the leader/follower change.
+			updatePending = true
+		case <-updateDone:
+			updateDone = nil
 		}
 	}
 }
@@ -408,38 +439,39 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		// switches, so a slow attempt does not add a full interval on top of itself.
 		timer.Reset(constants.RetryInterval)
 		leaderSwitched := c.leaderSwitched()
-		cc, url = c.getTSOLeaderClientConn()
+		cctx, cancel := context.WithCancel(ctx)
+		if !c.trackStreamBuild(cctx, cancel, c.getLeaderURL(), false) {
+			cancel()
+			continue
+		}
+		cc, url = c.getTSOLeaderClientConn(cctx)
 		if c.conCtxMgr.Exist(url) {
+			c.finishStreamBuild(cctx)
+			cancel()
 			// Just trigger the clean up of the stale connection contexts.
 			c.conCtxMgr.GC(func(curURL string) bool { return curURL != url })
 			return nil
 		}
-		if cc != nil {
-			cctx, cancel := context.WithCancel(ctx)
-			if !c.trackStreamBuild(cctx, cancel, url) {
-				cancel()
-				// No build was attempted for this obsolete lookup. Preserve the retry budget.
-				err = context.Canceled
-				continue
-			}
+		if cc != nil && cctx.Err() == nil {
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
-			valid, superseded := c.finishStreamBuild(cctx)
-			if superseded {
-				cancel()
-				stream = nil
-				err = context.Canceled
-				c.svcDiscovery.ScheduleCheckMemberChanged()
-				continue
+		}
+		valid, superseded := c.finishStreamBuild(cctx)
+		if superseded {
+			cancel()
+			stream = nil
+			err = context.Canceled
+			c.svcDiscovery.ScheduleCheckMemberChanged()
+			continue
+		}
+		if !valid {
+			cancel()
+			stream = nil
+			// Preserve build timeout status for the forwarding retry budget.
+			if err == nil {
+				err = status.FromContextError(cctx.Err()).Err()
 			}
-			if !valid {
-				cancel()
-				stream = nil
-				// Keep the builder's gRPC status so connection timeouts still
-				// count as network errors when deciding whether to forward.
-				if err == nil {
-					err = status.FromContextError(cctx.Err()).Err()
-				}
-			}
+		}
+		if cc != nil {
 			failpoint.Inject("unreachableNetwork", func() {
 				stream = nil
 				err = status.New(codes.Unavailable, "unavailable").Err()
@@ -464,14 +496,10 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 					networkErrNum++
 				}
 			}
-			cancel()
 		} else {
-			if c.getLeaderURL() != url {
-				err = context.Canceled
-				continue
-			}
 			networkErrNum++
 		}
+		cancel()
 		attempts++
 		// Refresh failed attempts before waiting so a leader change can interrupt
 		// the retry interval. The dispatcher can use existing follower streams
@@ -487,8 +515,14 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 	}
 
 	if networkErrNum == constants.MaxRetryTimes {
+		cctx, cancel := context.WithCancel(ctx)
+		if !c.trackStreamBuild(cctx, cancel, c.getLeaderURL(), false) {
+			cancel()
+			return nil
+		}
+		defer c.finishStreamBuild(cctx)
 		// encounter the network error
-		backupClientConn, backupURL := c.backupClientConn()
+		backupClientConn, backupURL := c.backupClientConn(cctx)
 		if backupClientConn != nil {
 			log.Info("[tso] fall back to use follower to forward tso stream", zap.String("follower-url", backupURL))
 			forwardedHost := c.getLeaderURL()
@@ -497,9 +531,13 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 			}
 
 			// create the follower stream
-			cctx, cancel := context.WithCancel(ctx)
-			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
-			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.Timeout)
+			forwardCtx := grpcutil.BuildForwardContext(cctx, forwardedHost)
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(forwardCtx, cancel, c.option.Timeout)
+			valid, _ := c.finishStreamBuild(cctx)
+			if !valid {
+				cancel()
+				return err
+			}
 			if err == nil {
 				forwardedHostTrim := tlsutil.TrimHTTPPrefix(forwardedHost)
 				addr := tlsutil.TrimHTTPPrefix(backupURL)
@@ -513,8 +551,8 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
 				return nil
 			}
-			cancel()
 		}
+		cancel()
 	}
 	return err
 }
@@ -530,7 +568,7 @@ func (c *Cli) checkLeader(
 		forwardCancel()
 		metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(0)
 	}()
-	cc, u := c.getTSOLeaderClientConn()
+	cc, u := c.getTSOLeaderClientConn(ctx)
 	var healthCli healthpb.HealthClient
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -570,7 +608,7 @@ func (c *Cli) checkLeader(
 			return
 		case <-ticker.C:
 			// To ensure we can get the latest tso leader and once it's changed, we can exit this function.
-			cc, u = c.getTSOLeaderClientConn()
+			cc, u = c.getTSOLeaderClientConn(ctx)
 		}
 	}
 }
@@ -578,12 +616,22 @@ func (c *Cli) checkLeader(
 // tryConnectToTSOWithProxy will create multiple streams to all the service endpoints to work as
 // a TSO proxy to reduce the pressure of the main serving service endpoint.
 func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
-	tsoStreamBuilders := c.getAllTSOStreamBuilders()
-	leaderAddr := c.svcDiscovery.GetServingURL()
 	forwardedHost := c.getLeaderURL()
 	if len(forwardedHost) == 0 {
 		return errors.Errorf("cannot find the tso leader")
 	}
+	recoveryCtx, recoveryCancel := context.WithCancel(ctx)
+	if !c.trackStreamBuild(recoveryCtx, recoveryCancel, forwardedHost, true) {
+		recoveryCancel()
+		return nil
+	}
+	defer recoveryCancel()
+	defer c.finishStreamBuild(recoveryCtx)
+	tsoStreamBuilders := c.getAllTSOStreamBuilders(recoveryCtx)
+	if recoveryCtx.Err() != nil {
+		return recoveryCtx.Err()
+	}
+	leaderAddr := c.svcDiscovery.GetServingURL()
 	// GC the stale one.
 	c.conCtxMgr.GC(func(addr string) bool {
 		_, ok := tsoStreamBuilders[addr]
@@ -607,7 +655,15 @@ func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
 		}
 		// Create the TSO stream.
+		// A published stream outlives this refresh; cancellation applies only
+		// until the build is complete and its result is checked.
+		stopCancel := context.AfterFunc(recoveryCtx, cancel)
 		stream, err := tsoStreamBuilder.build(cctx, cancel, c.option.Timeout)
+		stopCancel()
+		if recoveryCtx.Err() != nil {
+			cancel()
+			return recoveryCtx.Err()
+		}
 		if err == nil {
 			if addr != leaderAddr {
 				forwardedHostTrim := tlsutil.TrimHTTPPrefix(forwardedHost)
@@ -629,7 +685,7 @@ func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
 
 // getAllTSOStreamBuilders returns a TSO stream builder for every service endpoint of TSO leader/followers
 // or of keyspace group primary/secondaries.
-func (c *Cli) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
+func (c *Cli) getAllTSOStreamBuilders(ctx context.Context) map[string]tsoStreamBuilder {
 	var (
 		addrs          = c.svcDiscovery.GetServiceURLs()
 		streamBuilders = make(map[string]tsoStreamBuilder, len(addrs))
@@ -640,10 +696,13 @@ func (c *Cli) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 		if len(addrs) == 0 {
 			continue
 		}
-		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
+		if ctx.Err() != nil {
+			break
+		}
+		if cc, err = c.getOrCreateGRPCConn(ctx, addr); err != nil {
 			continue
 		}
-		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.Timeout)
+		healthCtx, healthCancel := context.WithTimeout(ctx, c.option.Timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {

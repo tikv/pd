@@ -28,6 +28,7 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
@@ -1378,6 +1379,134 @@ func TestDispatcherStreamRecoveryTimeout(t *testing.T) {
 			require.NoError(t, err)
 			require.Positive(t, physical)
 			require.NoError(t, client.conCtxMgr.GetConnectionCtx("leader-ready").Ctx.Err())
+		})
+	}
+}
+
+type recoveryTestDiscovery struct {
+	*countingServiceDiscovery
+	ctx     context.Context
+	serving atomic.Value
+	getConn func(context.Context, string) (*grpc.ClientConn, error)
+}
+
+func (s *recoveryTestDiscovery) GetServingURL() string { return s.serving.Load().(string) }
+
+func (s *recoveryTestDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	return s.GetOrCreateGRPCConnWithContext(s.ctx, url)
+}
+
+func (s *recoveryTestDiscovery) GetOrCreateGRPCConnWithContext(ctx context.Context, url string) (*grpc.ClientConn, error) {
+	return s.getConn(ctx, url)
+}
+
+func TestTSOConnectionUpdaterInterruptsObsoleteRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		proxy      bool
+		changeMode bool
+		blocked    string
+	}{
+		{name: "enable-proxy-during-retry", changeMode: true, blocked: "retry"},
+		{name: "enable-proxy-during-build", changeMode: true, blocked: "build"},
+		{name: "disable-proxy-during-health", proxy: true, changeMode: true, blocked: "health"},
+		{name: "disable-proxy-during-build", proxy: true, changeMode: true, blocked: "build"},
+		{name: "new-leader-during-dial", blocked: "dial"},
+		{name: "new-leader-during-proxy-build", proxy: true, blocked: "build"},
+		{name: "new-leader-during-forwarding-health", blocked: "health"},
+		{name: "new-leader-during-forwarding-build", blocked: "forward"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const oldLeader, newLeader, follower = "old-leader", "new-leader", "follower"
+			started := make(chan struct{})
+			release := make(chan struct{})
+			releaseWait := sync.OnceFunc(func() { close(release) })
+			defer releaseWait()
+			var startOnce sync.Once
+			var changed atomic.Bool
+			block := func(ctx context.Context) error {
+				startOnce.Do(func() { close(started) })
+				<-ctx.Done()
+				return status.FromContextError(ctx.Err()).Err()
+			}
+			newHealthConn := func(url string) *grpc.ClientConn {
+				conn, err := grpc.NewClient(url,
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithUnaryInterceptor(func(ctx context.Context, _ string, _, reply any,
+						_ *grpc.ClientConn, _ grpc.UnaryInvoker, _ ...grpc.CallOption,
+					) error {
+						if url == follower && tc.blocked == "health" && !changed.Load() {
+							return block(ctx)
+						}
+						resp := reply.(*healthpb.HealthCheckResponse)
+						resp.Status = healthpb.HealthCheckResponse_SERVING
+						if url == oldLeader && (changed.Load() && !tc.changeMode || tc.changeMode && !tc.proxy) {
+							resp.Status = healthpb.HealthCheckResponse_NOT_SERVING
+						}
+						return nil
+					}))
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, conn.Close()) })
+				return conn
+			}
+			svc := &recoveryTestDiscovery{countingServiceDiscovery: &countingServiceDiscovery{
+				serviceURLs: []string{follower, oldLeader, newLeader},
+				backupURLs:  []string{follower},
+				conns: map[string]*grpc.ClientConn{
+					oldLeader: newHealthConn(oldLeader), newLeader: newHealthConn(newLeader), follower: newHealthConn(follower),
+				},
+			}}
+			svc.serving.Store(oldLeader)
+			svc.getConn = func(ctx context.Context, url string) (*grpc.ClientConn, error) {
+				if url == oldLeader && tc.blocked == "dial" && !changed.Load() {
+					return nil, block(ctx)
+				}
+				return svc.conns[url], nil
+			}
+			svc.onSchedule = func() {
+				if tc.blocked == "retry" && !changed.Load() {
+					startOnce.Do(func() { close(started) })
+					<-release
+				}
+			}
+			var client *Cli
+			builder := reconnectTestBuilder(func(ctx context.Context, _ context.CancelFunc, _ time.Duration) (*tsoStream, error) {
+				forwarded := grpcutil.GetForwardedHost(ctx, metadata.FromOutgoingContext) != ""
+				if !changed.Load() {
+					if tc.blocked == "build" || tc.blocked == "forward" && forwarded {
+						return nil, block(ctx)
+					}
+					return nil, status.Error(codes.Unavailable, "old route unavailable")
+				}
+				return newTSOStream(ctx, client.getLeaderURL(), newMockTSOStreamImpl(ctx, resultModeGenerated)), nil
+			})
+			option := opt.NewOption()
+			option.EnableForwarding = tc.blocked == "health" && !tc.proxy || tc.blocked == "forward"
+			option.SetEnableTSOFollowerProxy(tc.proxy)
+			client = NewClient(t.Context(), option, svc, builder)
+			svc.ctx = client.ctx
+			client.leaderURL.Store(oldLeader)
+			client.Setup()
+			t.Cleanup(client.Close)
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("recovery did not reach the blocked operation")
+			}
+			changed.Store(true)
+			if tc.changeMode {
+				option.SetEnableTSOFollowerProxy(!tc.proxy)
+			} else {
+				svc.serving.Store(newLeader)
+				require.NoError(t, client.updateTSOLeaderURL(newLeader))
+			}
+			releaseWait()
+			req := client.GetTSORequest(t.Context())
+			_, err := client.DispatchRequest(req)
+			require.NoError(t, err)
+			physical, _, err := req.waitTimeout(constants.RetryInterval / 2)
+			require.NoError(t, err, "obsolete recovery must not delay a healthy route")
+			require.Positive(t, physical)
 		})
 	}
 }
