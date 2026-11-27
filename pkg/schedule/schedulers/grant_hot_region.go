@@ -53,7 +53,7 @@ type grantHotRegionSchedulerConfig struct {
 	StoreLeaderID uint64   `json:"store-leader-id"`
 }
 
-func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) {
+func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) []uint64 {
 	conf.Lock()
 	defer conf.Unlock()
 	if !slices.Contains(peers, leaderID) {
@@ -61,6 +61,7 @@ func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uin
 	}
 	conf.StoreLeaderID = leaderID
 	conf.StoreIDs = peers
+	return slices.Clone(peers)
 }
 
 func (conf *grantHotRegionSchedulerConfig) getStoreLeaderID() uint64 {
@@ -200,13 +201,16 @@ func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
 		return
 	}
-	handler.config.setStore(leaderID, storeIDs)
+	appliedStoreIDs := handler.config.setStore(leaderID, storeIDs)
 
 	if err = handler.config.persist(); err != nil {
 		handler.config.setStoreLeaderID(0)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	log.Info("grant-hot-region-scheduler config is updated",
+		zap.Uint64("store-leader-id", leaderID),
+		zap.Uint64s("store-ids", appliedStoreIDs))
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 

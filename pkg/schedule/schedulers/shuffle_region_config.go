@@ -19,6 +19,9 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
@@ -105,5 +108,8 @@ func (conf *shuffleRegionSchedulerConfig) handleSetRoles(w http.ResponseWriter, 
 		rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	log.Info("shuffle-region-scheduler roles are updated",
+		zap.Strings("old-roles", old),
+		zap.Strings("new-roles", roles))
 	rd.Text(w, http.StatusOK, "Config is updated.")
 }

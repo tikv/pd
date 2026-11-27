@@ -15,13 +15,16 @@
 package schedulers
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net/http"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -30,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -255,7 +259,12 @@ func (handler *scatterRangeHandler) updateConfig(w http.ResponseWriter, r *http.
 	err = handler.config.persist()
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
+	log.Info("scatter-range-scheduler config is updated",
+		zap.String("range-name", args[0]),
+		logutil.ZapRedactString("start-key", hex.EncodeToString([]byte(args[1]))),
+		logutil.ZapRedactString("end-key", hex.EncodeToString([]byte(args[2]))))
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 

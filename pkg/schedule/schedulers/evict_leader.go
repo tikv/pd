@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -503,6 +504,15 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	fields := []zap.Field{
+		zap.Uint64s("store-ids", ids),
+		zap.Bool("explicit-ranges", hasRanges),
+		zap.Int("batch", batch),
+	}
+	if hasRanges {
+		fields = append(fields, logutil.ZapRedactString("ranges", formatKeyRanges(explicitRanges)))
+	}
+	log.Info("evict-leader-scheduler config is updated", fields...)
 	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
