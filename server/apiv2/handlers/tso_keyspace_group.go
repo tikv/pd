@@ -93,6 +93,10 @@ func CreateKeyspaceGroups(c *gin.Context) {
 	}
 	err = manager.CreateKeyspaceGroups(createParams.KeyspaceGroups)
 	if err != nil {
+		if errs.ErrKeyspaceGroupInMerging.Equal(err) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -346,6 +350,10 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		id, splitParams.NewID,
 		splitParams.Keyspaces, splitParams.StartKeyspaceID, splitParams.EndKeyspaceID)
 	if err != nil {
+		if errs.ErrKeyspaceGroupInMerging.Equal(err) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

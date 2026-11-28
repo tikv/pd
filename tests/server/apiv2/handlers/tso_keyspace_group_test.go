@@ -358,6 +358,38 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	re.False(kg2.IsSplitting())
 }
 
+func (suite *keyspaceGroupTestSuite) TestMergingSourceIDReuseReturnsBadRequest() {
+	re := suite.Require()
+	MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{ID: 1},
+			{
+				ID:        2,
+				Keyspaces: []uint32{111, 222},
+				Members:   make([]endpoint.KeyspaceGroupMember, mcsconstant.DefaultKeyspaceGroupReplicaCount),
+			},
+			{ID: 3},
+		},
+	})
+	MustMergeKeyspaceGroup(re, suite.server, 3, &handlers.MergeKeyspaceGroupsParams{
+		MergeList: []uint32{1},
+	})
+	FailCreateKeyspaceGroupWithCode(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{{ID: 1}},
+	}, http.StatusBadRequest)
+
+	request, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+keyspaceGroupsPrefix+"/2/split",
+		strings.NewReader(`{"new-id":1,"keyspaces":[222]}`))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(request)
+	re.NoError(err)
+	defer resp.Body.Close()
+	var message string
+	re.NoError(json.NewDecoder(resp.Body).Decode(&message))
+	re.Equal(http.StatusBadRequest, resp.StatusCode, message)
+	re.Equal(errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(1)).Error(), message)
+}
+
 // TestKeyspaceGroupErrorMessage verifies that BindJSON errors return clear error messages.
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupErrorMessage() {
 	re := suite.Require()

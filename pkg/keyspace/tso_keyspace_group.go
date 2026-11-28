@@ -551,6 +551,11 @@ func findNextAvailableKeyspaceGroupID(groups []*endpoint.KeyspaceGroup, maxCount
 		if g.ID < maxCount {
 			used[g.ID] = struct{}{}
 		}
+		if g.IsMerging() {
+			for _, id := range g.MergeState.MergeList {
+				used[id] = struct{}{}
+			}
+		}
 	}
 	for id := uint32(1); id < maxCount; id++ {
 		if _, exists := used[id]; !exists {
@@ -891,19 +896,48 @@ func (m *GroupManager) saveKeyspaceGroupsWithConditions(ctx context.Context, key
 			if oldKG != nil {
 				return errs.ErrKeyspaceGroupExists
 			}
+		}
+		var mergeSources map[uint32]struct{}
+		if len(keyspaceGroups) > 1 || (len(keyspaceGroups) == 1 && keyspaceGroups[0].ID != constant.DefaultKeyspaceGroupID) {
+			var err error
+			mergeSources, err = m.loadMergingSourceIDs()
+			if err != nil {
+				return err
+			}
+		}
+		for _, keyspaceGroup := range keyspaceGroups {
+			if _, merging := mergeSources[keyspaceGroup.ID]; merging {
+				return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(keyspaceGroup.ID)
+			}
 			newKG := &endpoint.KeyspaceGroup{
 				ID:        keyspaceGroup.ID,
 				UserKind:  keyspaceGroup.UserKind,
 				Members:   keyspaceGroup.Members,
 				Keyspaces: keyspaceGroup.Keyspaces,
 			}
-			err = m.store.SaveKeyspaceGroup(txn, newKG)
-			if err != nil {
+			if err := m.store.SaveKeyspaceGroup(txn, newKG); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// loadMergingSourceIDs requires m.Lock to be held by the caller.
+func (m *GroupManager) loadMergingSourceIDs() (map[uint32]struct{}, error) {
+	groups, err := m.store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[uint32]struct{})
+	for _, group := range groups {
+		if group.IsMerging() {
+			for _, id := range group.MergeState.MergeList {
+				ids[id] = struct{}{}
+			}
+		}
+	}
+	return ids, nil
 }
 
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
@@ -1639,6 +1673,13 @@ func (m *GroupManager) splitKeyspaceGroupWithConditions(
 		}
 		if splitTargetKg != nil {
 			return errs.ErrKeyspaceGroupExists
+		}
+		mergeSources, err := m.loadMergingSourceIDs()
+		if err != nil {
+			return err
+		}
+		if _, merging := mergeSources[splitTargetID]; merging {
+			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(splitTargetID)
 		}
 		// Update the old keyspace group.
 		splitSourceKg.Keyspaces = splitSourceKeyspaces
