@@ -16,11 +16,12 @@ package checker
 
 import (
 	"bytes"
+	"context"
+	"iter"
 	"slices"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
-	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -30,69 +31,46 @@ import (
 type balanceStatus uint8
 
 const (
+	// Store checks combine their results in increasing order of severity.
 	balanceAllowed balanceStatus = iota
-	balanceRejected
 	balanceTemporarilyBlocked
+	balanceRejected
 	balanceUnready
 )
 
-// balanceTargetFailure identifies the constraint to learn after final validation.
-// Location failures may enable directed feedback; other placement failures pin
-// the group, and learner occupancy is local to this group's known Regions.
-type balanceTargetFailure uint8
-
-const (
-	balanceTargetValid balanceTargetFailure = iota
-	balanceTargetStoreAction
-	balanceTargetRegionUnready
-	balanceTargetLearnerConflict
-	balanceTargetPlacement
-	balanceTargetLocation
-)
-
-// balanceRegionScan walks the Regions of a group's ranges in key order.
-type balanceRegionScan struct {
-	ranges     []*keyutil.KeyRange
-	rangeIndex int
-	nextKey    []byte
-	started    bool
-	lastRegion uint64
-}
-
-func newBalanceRegionScan(ranges affinity.GroupKeyRanges) balanceRegionScan {
-	merged := keyutil.NewKeyRanges(ranges.KeyRanges)
-	slices.SortFunc(merged.Ranges(), func(a, b *keyutil.KeyRange) int { return bytes.Compare(a.StartKey, b.StartKey) })
-	merged.Merge()
-	return balanceRegionScan{ranges: merged.Ranges()}
-}
-
-// next returns the next known Region, skipping gaps, or nil after the last one.
-func (p *balanceRegionScan) next(cluster sche.CheckerCluster) *core.RegionInfo {
-	for p.rangeIndex < len(p.ranges) {
-		keyRange := p.ranges[p.rangeIndex]
-		if !p.started {
-			p.nextKey, p.started = slices.Clone(keyRange.StartKey), true
+// balanceRegions walks the known Regions of a group's ranges in key order.
+func (c *AffinityChecker) balanceRegions(ctx context.Context, ranges affinity.GroupKeyRanges) iter.Seq[*core.RegionInfo] {
+	return func(yield func(*core.RegionInfo) bool) {
+		merged := keyutil.NewKeyRanges(ranges.KeyRanges)
+		slices.SortFunc(merged.Ranges(), func(a, b *keyutil.KeyRange) int { return bytes.Compare(a.StartKey, b.StartKey) })
+		merged.Merge()
+		var lastRegion uint64
+		for _, keyRange := range merged.Ranges() {
+			nextKey := slices.Clone(keyRange.StartKey)
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				regions := c.cluster.ScanRegions(nextKey, keyRange.EndKey, 1)
+				if len(regions) == 0 {
+					break
+				}
+				region := regions[0]
+				nextKey = slices.Clone(region.GetEndKey())
+				// A Region can span consecutive ranges. ScanRegions releases
+				// the tree lock before the consumer checks the Region.
+				if id := region.GetID(); id != lastRegion {
+					lastRegion = id
+					if !yield(region) {
+						return
+					}
+				}
+				if len(nextKey) == 0 || len(keyRange.EndKey) > 0 && bytes.Compare(nextKey, keyRange.EndKey) >= 0 {
+					break
+				}
+			}
 		}
-		regions := cluster.ScanRegions(p.nextKey, keyRange.EndKey, 1)
-		if len(regions) == 0 {
-			p.rangeIndex++
-			p.started = false
-			continue
-		}
-		region := regions[0]
-		p.nextKey = slices.Clone(region.GetEndKey())
-		if len(p.nextKey) == 0 || len(keyRange.EndKey) > 0 && bytes.Compare(p.nextKey, keyRange.EndKey) >= 0 {
-			p.rangeIndex++
-			p.started = false
-		}
-		// A Region may cover the end of one range and the start of the next.
-		if p.lastRegion == region.GetID() {
-			continue
-		}
-		p.lastRegion = region.GetID()
-		return region
 	}
-	return nil
 }
 
 // balanceRegionReady reports whether a Region of the group is healthy,
@@ -115,7 +93,7 @@ func (c *AffinityChecker) validateBalanceCurrentRegion(group *affinity.GroupStat
 		return nil, balanceUnready
 	}
 	fit := c.ruleManager.FitRegion(c.cluster, region)
-	if c.checkPlacement(region, fit, false, false).status != affinityPlacementReady {
+	if c.checkRegionPlacement(region, fit) != affinityPlacementReady {
 		return nil, balanceUnready
 	}
 	return fit, balanceAllowed
@@ -123,29 +101,27 @@ func (c *AffinityChecker) validateBalanceCurrentRegion(group *affinity.GroupStat
 
 // validateBalanceTarget checks a Region moved to the target: it must keep its
 // learners, satisfy the rules without lower isolation and be at its best location.
-func (c *AffinityChecker) validateBalanceTarget(target *affinity.Group, region *core.RegionInfo, currentFit *placement.RegionFit) (balanceStatus, balanceTargetFailure) {
+func (c *AffinityChecker) validateBalanceTarget(target *affinity.Group, region *core.RegionInfo, currentFit *placement.RegionFit) balanceStatus {
 	for _, learner := range region.GetLearners() {
 		if slices.Contains(target.VoterStoreIDs, learner.GetStoreId()) {
-			return balanceRejected, balanceTargetLearnerConflict
+			return balanceRejected
 		}
 	}
 	virtual := cloneRegionWithReplacePeerStores(region, target.LeaderStoreID, target.VoterStoreIDs...)
 	if virtual == nil {
-		return balanceRejected, balanceTargetPlacement
+		return balanceRejected
 	}
 	fit := c.ruleManager.FitRegionWithoutCache(c.cluster, virtual)
 	if fit == nil || !fit.IsSatisfied() || !placementNotWorse(currentFit, fit) {
-		return balanceRejected, balanceTargetPlacement
+		return balanceRejected
 	}
-	// Final validation needs only the decision. The callback asks the same
-	// placement predicate for replacement hints if this complete plan fails.
-	switch c.checkRegionPlacement(virtual, fit, false).status {
+	switch c.checkRegionPlacement(virtual, fit) {
 	case affinityPlacementReady:
-		return balanceAllowed, balanceTargetValid
+		return balanceAllowed
 	case affinityPlacementTemporary:
-		return balanceTemporarilyBlocked, balanceTargetLocation
+		return balanceTemporarilyBlocked
 	default:
-		return balanceRejected, balanceTargetLocation
+		return balanceRejected
 	}
 }
 
@@ -173,27 +149,24 @@ func (c *AffinityChecker) balanceStoreActionChecker() func(balanceStoreAction) b
 // balanceTargetExecutionStatus checks the store actions that moving a group
 // from its current target to target takes.
 func (c *AffinityChecker) balanceTargetExecutionStatus(current, target *affinity.Group) balanceStatus {
-	var actions []balanceStoreAction
+	status := balanceAllowed
+	check := func(id uint64, leader, source bool) {
+		if status != balanceRejected {
+			status = max(status, c.balanceStoreActionStatus(id, leader, source))
+		}
+	}
 	if current.LeaderStoreID != target.LeaderStoreID {
-		actions = append(actions, balanceStoreAction{current.LeaderStoreID, true, true}, balanceStoreAction{target.LeaderStoreID, true, false})
+		check(current.LeaderStoreID, true, true)
+		check(target.LeaderStoreID, true, false)
 	}
 	for _, id := range current.VoterStoreIDs {
 		if !slices.Contains(target.VoterStoreIDs, id) {
-			actions = append(actions, balanceStoreAction{id, false, true})
+			check(id, false, true)
 		}
 	}
 	for _, id := range target.VoterStoreIDs {
 		if !slices.Contains(current.VoterStoreIDs, id) {
-			actions = append(actions, balanceStoreAction{id, false, false})
-		}
-	}
-	status := balanceAllowed
-	for _, action := range actions {
-		switch c.balanceStoreActionStatus(action.id, action.leader, action.source) {
-		case balanceRejected:
-			return balanceRejected
-		case balanceTemporarilyBlocked:
-			status = balanceTemporarilyBlocked
+			check(id, false, false)
 		}
 	}
 	return status

@@ -74,7 +74,7 @@ func (c *AffinityChecker) moveConflictingLearners(region *core.RegionInfo, group
 			}
 		}
 		layoutFit := c.ruleManager.FitRegionWithoutCache(c.cluster, layout)
-		return c.checkPlacement(layout, layoutFit, false, false).status
+		return c.checkRegionPlacement(layout, layoutFit)
 	}
 	remaining := 64
 	target, temporary := c.placeLearners(region, fit, roles, isolationStores, conflicts, &remaining, accept)

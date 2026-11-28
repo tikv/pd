@@ -61,8 +61,7 @@ func (f *affinityBalanceTest) assertConverged() {
 	re := require.New(f.tb)
 	f.settle()
 	snapshot := f.snapshot()
-	stable, err := f.planBalanceTargets(f.tb.Context(), snapshot)
-	re.NoError(err)
+	stable := f.plan(snapshot)
 	re.Empty(stable.targets)
 	re.Zero(stable.planner.Changed)
 	re.False(f.step())
@@ -71,21 +70,14 @@ func (f *affinityBalanceTest) assertConverged() {
 
 func TestAffinityBalancerIdleLifecycle(t *testing.T) {
 	re := require.New(t)
-	enableFastAffinityAvailabilityCheck(t)
-	f := newAffinityBalanceTest(t, 3)
+	f := newAffinityBalanceTestWithFastStoreScan(t, 3)
 	ids := f.seed("100", 1, 1, 1, 2)
 	f.policy(affinity.BalancePolicyFixed, ids[1:]...)
 	f.waitForStoreScan(ids[0])
 	before := f.snapshot()
 	written := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceWritten])
-	plannedTargets := testutil.ToFloat64(affinityBalanceTargetsPlanned)
-	writtenTargets := testutil.ToFloat64(affinityBalanceTargetsWritten)
-	stops := testutil.ToFloat64(affinityBalancePlannerStops[balanceplan.StopGreedy])
 	re.True(f.step())
 	re.Equal(1.0, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceWritten])-written)
-	re.Equal(1.0, testutil.ToFloat64(affinityBalanceTargetsPlanned)-plannedTargets)
-	re.Equal(1.0, testutil.ToFloat64(affinityBalanceTargetsWritten)-writtenTargets)
-	re.Equal(1.0, testutil.ToFloat64(affinityBalancePlannerStops[balanceplan.StopGreedy])-stops)
 	re.Equal([2]int{27, 3}, balanceTableScore(f.affinityManager, balanceTestTable()))
 	f.settle()
 	b, m := f.balancer, f.affinityManager
@@ -248,8 +240,7 @@ func TestAffinityBalancerWriteAndCancelOutcomes(t *testing.T) {
 
 // Capacity expansion with two Regions per group and distinct learners.
 func TestAffinityBalanceCapacityExpansion(t *testing.T) {
-	enableFastAffinityAvailabilityCheck(t)
-	f := newAffinityBalanceTest(t, 0)
+	f := newAffinityBalanceTestWithFastStoreScan(t, 0)
 	first := make([]uint64, 3)
 	for s := range 18 {
 		z, id := s/6, uint64(s+1)
@@ -263,7 +254,8 @@ func TestAffinityBalanceCapacityExpansion(t *testing.T) {
 	f.setRules(
 		&placement.Rule{ID: "leader", Index: 1, Override: true, Role: placement.Leader, Count: 1, LocationLabels: []string{"zone"},
 			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"z0"}}}},
-		&placement.Rule{ID: "voter", Index: 2, Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"}},
+		&placement.Rule{ID: "voter", Index: 2, Role: placement.Voter, Count: 2, LocationLabels: []string{"zone"},
+			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"z1", "z2"}}}},
 		&placement.Rule{ID: "learner", Index: 3, Role: placement.Learner, Count: 1},
 	)
 	// A target loaded by the watcher is available after the first store scan.
@@ -288,17 +280,15 @@ func TestAffinityBalanceCapacityExpansion(t *testing.T) {
 			}
 		}
 		snapshot := f.snapshot()
-		input := f.balancePlanInput(snapshot, nil, nil)
+		input := f.balancePlanInput(t.Context(), snapshot)
 		for _, rule := range input.input.Groups[0].Rules {
 			if rule.Count == 2 {
-				require.Len(t, rule.Stores, []int{17, 27}[phase])
+				require.Len(t, rule.Stores, []int{12, 18}[phase])
 			}
 		}
 		result := f.plan(snapshot)
 		require.NotEmpty(t, result.targets)
 		require.True(t, result.planner.Score.Less(result.planner.Baseline))
-		require.Greater(t, result.rounds, 1)
-		require.LessOrEqual(t, result.rounds, maxBalanceValidationRounds)
 		require.Equal(t, balanceplan.StopGreedy, result.planner.Stop)
 		written, _, err := f.commitBalancePlan(t.Context(), snapshot, result, f.ruleManager.GetRevision())
 		require.NoError(t, err)
@@ -317,8 +307,7 @@ func TestAffinityBalanceAtScale(t *testing.T) {
 		roundRobin := reverse
 		t.Run(fmt.Sprintf("roundRobin=%v/reverse=%v", roundRobin, reverse), func(t *testing.T) {
 			const stores, groups = 300, 1000
-			enableFastAffinityAvailabilityCheck(t)
-			f := newAffinityBalanceTest(t, 0)
+			f := newAffinityBalanceTestWithFastStoreScan(t, 0)
 			first := make([]uint64, 5)
 			for s := range stores {
 				z, id := s/60, uint64(s+1)
@@ -345,7 +334,6 @@ func TestAffinityBalanceAtScale(t *testing.T) {
 			result := f.plan(snapshot)
 			require.Equal(t, balanceplan.Score{Voter: 33400, Leader: 16680}, result.planner.Score)
 			require.NotEmpty(t, result.targets)
-			require.Equal(t, 1, result.rounds)
 			require.Equal(t, balanceplan.StopGreedy, result.planner.Stop)
 			require.False(t, result.retry)
 			written, _, err := f.commitBalancePlan(t.Context(), snapshot, result, f.ruleManager.GetRevision())
@@ -420,7 +408,7 @@ type balanceBenchShape struct {
 }
 
 // BenchmarkAffinityBalance covers execution of a useful plan, a pinned table,
-// and late learner conflicts. The solver benchmarks cover placement topologies.
+// and learner occupancy. The solver benchmarks cover placement topologies.
 func BenchmarkAffinityBalance(b *testing.B) {
 	level := log.GetLevel()
 	log.SetLevel(zapcore.FatalLevel)
@@ -483,14 +471,6 @@ func benchmarkAffinityBalanceStep(b *testing.B, shape balanceBenchShape) {
 			f.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 		}
 	}
-	stepRounds := func() float64 {
-		var rounds float64
-		for _, counter := range affinityBalancePlannerStops {
-			rounds += testutil.ToFloat64(counter)
-		}
-		return rounds
-	}
-	var rounds, written float64
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -501,15 +481,10 @@ func benchmarkAffinityBalanceStep(b *testing.B, shape balanceBenchShape) {
 		}
 		f.settle()
 		clear(f.balancer.idle)
-		before, writtenBefore := stepRounds(), testutil.ToFloat64(affinityBalanceTargetsWritten)
 		b.StartTimer()
 		re.Equal(shape.improves, f.step())
 		b.StopTimer()
-		rounds += stepRounds() - before
-		written += testutil.ToFloat64(affinityBalanceTargetsWritten) - writtenBefore
 	}
-	b.ReportMetric(rounds/float64(b.N), "rounds/op")
-	b.ReportMetric(written/float64(b.N), "targets/op")
 }
 
 func TestAffinityBalanceRetries(t *testing.T) {
@@ -568,17 +543,16 @@ func TestAffinityBalanceRetries(t *testing.T) {
 	}
 }
 
-func TestAffinityBalanceBulkPinsUnreadyGroups(t *testing.T) {
+func TestAffinityBalancePinsUnreadyGroups(t *testing.T) {
 	for _, scheduleDenied := range []bool{false, true} {
 		t.Run(fmt.Sprintf("schedule-denied=%t", scheduleDenied), func(t *testing.T) {
 			re := require.New(t)
-			enableFastAffinityAvailabilityCheck(t)
-			f := newAffinityBalanceTest(t, 3)
+			f := newAffinityBalanceTestWithFastStoreScan(t, 3)
 			unready, autoGroups, store2, store3 := 10, 10, 9, 8
 			if scheduleDenied {
-				unready, autoGroups, store2, store3 = maxBalanceValidationRounds+1, maxBalanceValidationRounds+2, maxBalanceValidationRounds, maxBalanceValidationRounds
+				unready, autoGroups, store2, store3 = 11, 12, 10, 10
 			}
-			// Fixed groups keep the relaxed plan to one leader transfer per round.
+			// Fixed groups contribute to the score and leave room for one leader transfer.
 			ids := f.seed("100", 1, slices.Concat(
 				slices.Repeat([]uint64{1}, autoGroups),
 				slices.Repeat([]uint64{2}, store2),
@@ -598,12 +572,12 @@ func TestAffinityBalanceBulkPinsUnreadyGroups(t *testing.T) {
 			for _, id := range ids[:autoGroups] {
 				re.Equal(affinity.PhaseStable, before.Group(id).Phase)
 			}
-			input := f.balancePlanInput(before, nil, nil)
-			relaxed := balanceplan.Plan(&input.input, balanceplan.Options{Seed: before.Version})
-			re.Len(input.changedTargets(&relaxed), 1)
+			input := f.balancePlanInput(t.Context(), before)
+			re.Len(input.groups, autoGroups-unready)
+			re.Equal([]int{unready, store2, store3}, input.input.BaseLeaders)
+			re.True(input.retry)
 			res := f.plan(before)
-			re.Equal(2, res.rounds)
-			re.Equal(unready, res.groupCounts[balanceGroupUnready])
+			re.True(res.retry)
 			if scheduleDenied {
 				re.Len(res.targets, 1)
 				re.Equal(ids[unready], res.targets[0].ID)
@@ -611,7 +585,6 @@ func TestAffinityBalanceBulkPinsUnreadyGroups(t *testing.T) {
 				return
 			}
 			re.Empty(res.targets)
-			re.True(res.retry)
 			re.False(f.step())
 			re.Equal(before.Groups, f.snapshot().Groups)
 			re.WithinDuration(time.Now().Add(30*time.Second), f.balancer.idle[balanceTestTable()].until, 2*time.Second)

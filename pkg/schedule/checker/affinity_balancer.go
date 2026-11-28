@@ -156,18 +156,14 @@ func (b *affinityBalancer) step(ctx context.Context, id affinity.TableID, counts
 	result := "skipped"
 	var res balancePlanResult
 	var version uint64
-	var groups, numPlanned, numWritten int
+	var groups int
 	defer func() {
 		duration := time.Since(start)
-		recordAffinityBalanceStepMetrics(result, duration, numPlanned, numWritten)
+		recordAffinityBalanceStepMetrics(result, duration)
 		if ce := log.L().Check(zap.DebugLevel, "planned affinity table"); ce != nil {
 			ce.Write(zap.String("table-id", string(id)), zap.Uint64("version", version), zap.String("result", result),
-				zap.Int("groups", groups), zap.Int("mutable", res.groupCounts[balanceGroupMutable]),
-				zap.Int("fixed", res.groupCounts[balanceGroupFixed]), zap.Int("unready", res.groupCounts[balanceGroupUnready]),
-				zap.Int("unsupported", res.groupCounts[balanceGroupUnsupported]),
-				zap.Any("baseline", res.planner.Baseline), zap.Any("score", res.planner.Score),
-				zap.String("stop", string(res.planner.Stop)), zap.Int64("work", res.work), zap.Int("visits", res.visits),
-				zap.Int("rounds", res.rounds), zap.Duration("duration", duration))
+				zap.Int("groups", groups), zap.Any("baseline", res.planner.Baseline), zap.Any("score", res.planner.Score),
+				zap.String("stop", string(res.planner.Stop)), zap.Duration("duration", duration))
 		}
 	}()
 	c := b.checker
@@ -204,10 +200,8 @@ func (b *affinityBalancer) step(ctx context.Context, id affinity.TableID, counts
 		b.mu.Unlock()
 		return false, nil
 	}
-	numPlanned = len(res.targets)
 	written, reason, err := c.commitBalancePlan(ctx, snapshot, res, revision)
 	writeDeferred := reason == balanceCommitNotReady || reason == balanceCommitUnsupported
-	numWritten = len(written)
 	moveBalanceCounts(counts, snapshot, res.targets, written)
 	if len(written) > 0 {
 		log.Info("balanced affinity table", zap.String("table-id", string(id)),
