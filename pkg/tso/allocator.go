@@ -32,8 +32,9 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -47,6 +48,8 @@ const (
 	// Etcd client retry with `roundRobinQuorumBackoff` (https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/client.go#L488),
 	// whose default interval is 25ms, so we sleep 50ms here. (https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/options.go#L53)
 	updateTSORetryInterval = 50 * time.Millisecond
+
+	primaryCampaignRetryInterval = 200 * time.Millisecond
 )
 
 // Allocator is the global single point TSO allocator.
@@ -305,14 +308,14 @@ func (a *Allocator) primaryElectionLoop() {
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
 		expectedPrimary, err := mcsutils.GetExpectedPrimaryFlag(a.member.Client(), &keypath.MsParam{
-			ServiceName: constant.TSOServiceName,
+			ServiceName: mcs.TSOServiceName,
 			GroupID:     a.keyspaceGroupID,
 		})
 		if err != nil {
 			// Do not campaign on a read failure: an empty flag would be treated as
 			// "no transfer" and skip the affinity guard, so retry instead.
 			log.Warn("failed to get expected primary flag, retry later", append(a.logFields, errs.ZapError(err))...)
-			time.Sleep(200 * time.Millisecond)
+			a.waitPrimaryCampaignRetry()
 			continue
 		}
 		// skip campaign the primary if the expected primary is not empty and not this member.
@@ -321,11 +324,20 @@ func (a *Allocator) primaryElectionLoop() {
 			log.Info("skip campaigning of tso primary and check later", append(a.logFields,
 				zap.String("expected-primary-id", expectedPrimary),
 				zap.String("cur-member-value", m.ParticipantString()))...)
-			time.Sleep(200 * time.Millisecond)
+			a.waitPrimaryCampaignRetry()
 			continue
 		}
 
 		a.campaignPrimary(expectedPrimary)
+	}
+}
+
+func (a *Allocator) waitPrimaryCampaignRetry() {
+	timer := time.NewTimer(primaryCampaignRetryInterval)
+	defer timer.Stop()
+	select {
+	case <-a.ctx.Done():
+	case <-timer.C:
 	}
 }
 
@@ -337,24 +349,32 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 	log.Info("start to campaign the primary", a.logFields...)
 	lease := a.cfg.GetLease()
 	msParam := &keypath.MsParam{
-		ServiceName: constant.TSOServiceName,
+		ServiceName: mcs.TSOServiceName,
 		GroupID:     a.keyspaceGroupID,
 	}
 	m := a.member.(*member.Participant)
 	var cmps []clientv3.Cmp
+	// A lagging membership watcher can leave a deleted group's allocator running.
+	// The default group can campaign before its membership has been persisted.
+	if a.keyspaceGroupID != constant.DefaultKeyspaceGroupID {
+		membershipKey := keypath.KeyspaceGroupIDPath(a.keyspaceGroupID)
+		cmps = append(cmps, clientv3.Compare(clientv3.CreateRevision(membershipKey), ">", 0))
+	}
 	if cmp := mcsutils.ExpectedPrimaryCmp(msParam, expectedPrimary); cmp != nil {
 		cmps = append(cmps, *cmp)
 	}
 	if err := m.CampaignWithCmps(a.ctx, lease, cmps...); err != nil {
 		if errors.Is(err, errs.ErrEtcdTxnConflict) {
-			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
-				a.logFields...)
+			log.Info("campaign tso primary rejected by etcd transaction", a.logFields...)
 		} else if errors.Is(err, errs.ErrCheckCampaign) {
 			log.Info("campaign tso primary meets error due to pre-check campaign failed, the tso keyspace group may be in split",
 				a.logFields...)
 		} else {
 			log.Error("campaign tso primary meets error due to etcd error", append(a.logFields, errs.ZapError(err))...)
 		}
+		// A failed comparison can leave the primary key absent, so the next
+		// election attempt would not wait on a watch.
+		a.waitPrimaryCampaignRetry()
 		return
 	}
 
@@ -405,7 +425,7 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 	}
 	defer resetPrimaryOnce.Do(resetPrimary)
 
-	primaryTicker := time.NewTicker(constant.PrimaryTickInterval)
+	primaryTicker := time.NewTicker(mcs.PrimaryTickInterval)
 	defer primaryTicker.Stop()
 
 	for {
