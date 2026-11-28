@@ -213,7 +213,7 @@ func (manager *Manager) Bootstrap() error {
 				log.Error("[keyspace] failed to create pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
 				return
 			}
-			if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+			if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId()); err != nil {
 				log.Error("[keyspace] failed to update pre-alloc keyspace for group", zap.String("keyspaceName", keyspaceName), zap.Error(err))
 				return
 			}
@@ -251,7 +251,7 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	if err != nil && err != errs.ErrKeyspaceExists {
 		return err
 	}
-	return manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], meta.GetId(), opAdd)
+	return manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], meta.GetId())
 }
 
 // UpdateConfig update keyspace manager's config.
@@ -382,7 +382,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	tracer.OnEnableKeyspaceFinished()
 
 	// Update keyspace group.
-	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId()); err != nil {
 		return nil, err
 	}
 	if assignToMetaServiceGroup {
@@ -510,7 +510,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		)
 		return nil, err
 	}
-	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId()); err != nil {
 		return nil, err
 	}
 	if assignToMetaServiceGroup {

@@ -93,7 +93,7 @@ func CreateKeyspaceGroups(c *gin.Context) {
 		return
 	}
 	err = manager.CreateKeyspaceGroups(createParams.KeyspaceGroups)
-	if goerrors.Is(err, errs.ErrCreateNonEmptyKeyspaceGroup) {
+	if errs.ErrCreateNonEmptyKeyspaceGroup.Equal(err) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}

@@ -45,7 +45,6 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -74,11 +73,6 @@ const (
 	defaultKeyspaceCountSplitThreshold = 40000
 	// autoSplitKeyspaceGroupPatrolInterval is the interval for patrolling keyspace group size for auto-split.
 	autoSplitKeyspaceGroupPatrolInterval = 15 * time.Minute
-)
-
-const (
-	opAdd int = iota
-	opDelete
 )
 
 // GroupManager is the manager of keyspace group related data.
@@ -1434,18 +1428,14 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	return kg, processedIDs, hasMore, nil
 }
 
-// UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
-func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation int) error {
+// UpdateKeyspaceForGroup adds a keyspace to the keyspace group.
+func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32) error {
 	if m == nil {
 		return nil
 	}
 	id, err := strconv.ParseUint(groupID, 10, 64)
 	if err != nil {
 		return err
-	}
-	if mutation == opDelete {
-		m.membershipMutationLock.Lock()
-		defer m.membershipMutationLock.Unlock()
 	}
 
 	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
@@ -1454,10 +1444,10 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	})
 	m.Lock()
 	defer m.Unlock()
-	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)
+	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID)
 }
 
-func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, groupID uint64, keyspaceID uint32, mutation int) error {
+func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, groupID uint64, keyspaceID uint32) error {
 	var kg *endpoint.KeyspaceGroup
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		var err error
@@ -1475,21 +1465,10 @@ func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, 
 			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
 		}
 
-		changed := false
-		switch mutation {
-		case opAdd:
-			if !slices.Contains(kg.Keyspaces, keyspaceID) {
-				kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
-				changed = true
-			}
-		case opDelete:
-			lenOfKeyspaces := len(kg.Keyspaces)
-			kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-			changed = lenOfKeyspaces != len(kg.Keyspaces)
-		}
-		if !changed {
+		if slices.Contains(kg.Keyspaces, keyspaceID) {
 			return nil
 		}
+		kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}); err != nil {
 		return err

@@ -471,7 +471,7 @@ func TestKeyspaceGroupOverwriteDoesNotRecreateDeletedGroup(t *testing.T) {
 	}
 	manager.groups[endpoint.Standard].Put(group)
 
-	err := manager.UpdateKeyspaceForGroup(endpoint.Standard, "1", 43, opAdd)
+	err := manager.UpdateKeyspaceForGroup(endpoint.Standard, "1", 43)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(group.ID).Error())
 	stored, err := manager.GetKeyspaceGroupByID(group.ID)
 	re.NoError(err)
@@ -500,7 +500,7 @@ func TestKeyspaceGroupUpdatesRebaseOnStorage(t *testing.T) {
 			Keyspaces: []uint32{42},
 		})
 
-		re.NoError(manager.UpdateKeyspaceForGroup(endpoint.Standard, "1", 44, opAdd))
+		re.NoError(manager.UpdateKeyspaceForGroup(endpoint.Standard, "1", 44))
 		got, err := manager.GetKeyspaceGroupByID(storedGroup.ID)
 		re.NoError(err)
 		re.Equal([]uint32{42, 43, 44}, got.Keyspaces)
@@ -1072,7 +1072,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersProtecte
 	// Model a stale membership left by older or manually repaired metadata.
 	// Removal must not turn a missing metadata record into a hard failure.
 	re.NoError(suite.kgm.UpdateKeyspaceForGroup(
-		endpoint.Basic, "0", missingID, opAdd))
+		endpoint.Basic, "0", missingID))
 
 	group, err := suite.kgm.removeKeyspacesFromGroupWithConditions(
 		suite.ctx,
@@ -1212,7 +1212,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroupFiltersInBatch(
 	bootstrapID := GetBootstrapKeyspaceID()
 	staleMemberID := uint32(100_000)
 	re.NoError(suite.kgm.UpdateKeyspaceForGroup(
-		endpoint.Basic, "0", staleMemberID, opAdd))
+		endpoint.Basic, "0", staleMemberID))
 
 	store, ok := suite.kg.store.(*endpoint.StorageEndpoint)
 	re.True(ok)
@@ -1501,9 +1501,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.Nil(kg4)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(4).Error())
 	// update the in-split keyspace group
-	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "2", 444, opAdd)
+	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "2", 444)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(2).Error())
-	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "4", 444, opAdd)
+	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "4", 444)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(4).Error())
 
 	// finish the split of keyspace group 4
