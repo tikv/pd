@@ -648,7 +648,9 @@ func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 	patch.commit()
 	m.updateStoreLoadRestrictions()
 	m.ruleList = ruleList
-	m.revision.Add(1)
+	if patch.hasChanges() {
+		m.revision.Add(1)
+	}
 	return nil
 }
 

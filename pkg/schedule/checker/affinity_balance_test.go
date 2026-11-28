@@ -419,21 +419,20 @@ func TestBalanceRuleCache(t *testing.T) {
 	t.Run("location-label-boundaries", func(t *testing.T) {
 		f := newAffinityBalanceTest(t, 1)
 		f.SetStoreLabel(1, map[string]string{"zone": "a", "rack": "b"})
-		cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1}, func(uint64) bool { return true })
+		cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1}, func(uint64, placement.PeerRoleType) bool { return true })
 		require.Equal(t, [][]int32{{-1}}, cache.location([]string{"zone,rack"}))
 		require.Equal(t, [][]int32{{0, 0}}, cache.location([]string{"zone", "rack"}))
 	})
 
 	t.Run("hard-isolation", func(t *testing.T) {
 		f := newAffinityBalanceTest(t, 3, "a", "b", "c")
-		cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1, 2, 3}, func(uint64) bool { return true })
+		cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1, 2, 3}, func(uint64, placement.PeerRoleType) bool { return true })
 		for _, tc := range []struct {
-			level   string
-			witness bool
-			depth   int
-			ok      bool
-		}{{"", false, 0, true}, {"zone", false, 2, true}, {"dc", false, 1, true}, {"rack", false, 0, false}, {"zone", true, 0, false}} {
-			rule := &placement.Rule{Role: placement.Voter, Count: 3, LocationLabels: []string{"dc", "zone"}, IsolationLevel: tc.level, IsWitness: tc.witness}
+			level string
+			depth int
+			ok    bool
+		}{{"", 0, true}, {"zone", 2, true}, {"dc", 1, true}, {"rack", 0, false}} {
+			rule := &placement.Rule{Role: placement.Voter, Count: 3, LocationLabels: []string{"dc", "zone"}, IsolationLevel: tc.level}
 			for range 2 {
 				got, ok := cache.get(rule)
 				require.Equal(t, tc.ok, ok)
@@ -454,7 +453,7 @@ func TestBalanceRuleCache(t *testing.T) {
 		for i := range ids {
 			ids[i] = uint64(i + 1)
 		}
-		locations := newBalanceRuleCache(f.AffinityChecker, ids, func(uint64) bool { return true }).location([]string{"zone"})
+		locations := newBalanceRuleCache(f.AffinityChecker, ids, func(uint64, placement.PeerRoleType) bool { return true }).location([]string{"zone"})
 		for i, a := range values {
 			for j, b := range values {
 				require.Equal(t, strings.EqualFold(a, b), locations[i][0] == locations[j][0], "%q and %q", a, b)
@@ -465,7 +464,7 @@ func TestBalanceRuleCache(t *testing.T) {
 	t.Run("signature-boundaries", func(t *testing.T) {
 		re := require.New(t)
 		f := newAffinityBalanceTest(t, 2, "foo bar", "foo")
-		cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1, 2}, func(uint64) bool { return true })
+		cache := newBalanceRuleCache(f.AffinityChecker, []uint64{1, 2}, func(uint64, placement.PeerRoleType) bool { return true })
 		first := &placement.Rule{Role: placement.Voter, Count: 1,
 			LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: placement.In, Values: []string{"foo bar", "a"}}}}
 		second := first.Clone()
@@ -486,7 +485,7 @@ func TestBalanceRuleCache(t *testing.T) {
 func TestAffinityBalanceLearnerInLaterRegion(t *testing.T) {
 	re := require.New(t)
 	f := newAffinityBalanceTestWithFastStoreScan(t, 6)
-	f.SetEnableUseJointConsensus(false)
+	f.SetEnableUseJointConsensus(true)
 	f.SetStoreLabel(6, map[string]string{"engine": "tiflash"})
 	f.setRules(&placement.Rule{ID: "learner", Role: placement.Learner, Count: 1,
 		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.NotIn, Values: []string{"other"}}}})
@@ -524,8 +523,8 @@ func TestAffinityBalanceLearnerInLaterRegion(t *testing.T) {
 	re.Contains(f.affinityManager.GetAffinityGroupState(ids[1-groupIndex]).VoterStoreIDs, uint64(4))
 	op := f.targetOperator(later, target)
 	re.NotNil(op)
-	operator.ApplyOperator(f.Cluster, op)
-	re.Equal(learner, f.GetRegion(later.GetID()).GetStoreLearner(4))
+	moved := applyLearnerOperator(t, f.Cluster, op)
+	re.Equal(learner, moved.GetStoreLearner(4))
 }
 
 func TestAffinityBalanceRegionHeartbeat(t *testing.T) {
@@ -599,7 +598,7 @@ func TestAffinityBalanceTiFlashRecordRules(t *testing.T) {
 		t.Run(fmt.Sprintf("different-voter-rules=%t", differentVoterRules), func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTestWithFastStoreScan(t, 5)
-			f.SetEnableUseJointConsensus(false)
+			f.SetEnableUseJointConsensus(true)
 			f.SetStoreLabel(5, map[string]string{"engine": "tiflash"})
 			encode := func(key []byte) []byte {
 				if kerneltype.IsNextGen() {
@@ -667,7 +666,7 @@ func TestAffinityBalanceTiFlashRecordRules(t *testing.T) {
 				group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
 				learners := region.GetLearners()
 				if op := f.targetOperator(region, group); op != nil {
-					operator.ApplyOperator(f.Cluster, op)
+					applyLearnerOperator(t, f.Cluster, op)
 				}
 				moved := f.GetRegion(region.GetID())
 				_, aligned := f.affinityManager.GetRegionAffinityGroupState(moved)
@@ -771,7 +770,9 @@ func TestAffinityBalanceCommitRejectsChangedInputs(t *testing.T) {
 				called = true
 				switch change {
 				case "rule":
-					f.setRules(f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID))
+					rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+					rule.LocationLabels = []string{"zone"}
+					f.setRules(rule)
 				case "policy":
 					f.policy(affinity.BalancePolicyFixed, ids[0])
 				case "cancel":
@@ -884,7 +885,7 @@ func TestAffinityBalanceExecutionAfterRegionChanges(t *testing.T) {
 		t.Run(tc.event+"/"+tc.gate, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTestWithFastStoreScan(t, 4, "a", "b", "c", "a")
-			f.SetEnableUseJointConsensus(false)
+			f.SetEnableUseJointConsensus(true)
 			f.SetMaxAffinityMergeRegionSize(0)
 			for id := uint64(1); id <= 4; id++ {
 				f.SetStoreLabel(id, map[string]string{"zone": f.GetStore(id).GetLabelValue("zone"), "disk": "ssd"})
@@ -941,8 +942,9 @@ func TestAffinityBalanceExecutionAfterRegionChanges(t *testing.T) {
 					ops := f.Check(region)
 					re.Len(ops, 1)
 					re.NotEqual(operator.OpKind(0), ops[0].Kind()&operator.OpAffinity)
-					f.applyBalanceMove(ops[0], target.LeaderStoreID)
-					re.True(f.isRegionPlacementRuleSatisfiedWithBestLocation(f.GetRegion(region.GetID()), true))
+					moved := applyLearnerOperator(t, f.Cluster, ops[0])
+					re.Equal(target.LeaderStoreID, moved.GetLeader().GetStoreId())
+					re.True(f.isRegionPlacementRuleSatisfiedWithBestLocation(moved, true))
 				}
 				return
 			}
@@ -1031,6 +1033,62 @@ func TestAffinityBalanceOverlappingRulesAllowLeaderBalance(t *testing.T) {
 	for _, group := range f.snapshot().Groups {
 		re.Equal([]uint64{1, 2, 3, 4}, group.VoterStoreIDs)
 	}
+}
+
+func TestAffinityBalanceCommitsPartialPrimaryRegionPlan(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 5)
+	for id, zone := range []string{"a", "a", "a", "b", "c"} {
+		region := "east"
+		if zone == "c" {
+			region = "west"
+		}
+		f.SetStoreLabel(uint64(id+1), map[string]string{"region": region, "zone": zone})
+	}
+	// PRIMARY_REGION='east' REGIONS='east,west' FOLLOWERS=2
+	// SURVIVAL_PREFERENCES='[region,zone]'.
+	f.setRules(
+		&placement.Rule{ID: "east-leader", Index: 1, Override: true, Role: placement.Leader, Count: 1, LocationLabels: []string{"region", "zone"},
+			LabelConstraints: []placement.LabelConstraint{{Key: "region", Op: placement.In, Values: []string{"east"}}}},
+		&placement.Rule{ID: "east-voter", Index: 2, Role: placement.Voter, Count: 1, LocationLabels: []string{"region", "zone"},
+			LabelConstraints: []placement.LabelConstraint{{Key: "region", Op: placement.In, Values: []string{"east"}}}},
+		&placement.Rule{ID: "west-voter", Index: 3, Role: placement.Voter, Count: 1, LocationLabels: []string{"region", "zone"},
+			LabelConstraints: []placement.LabelConstraint{{Key: "region", Op: placement.In, Values: []string{"west"}}}},
+	)
+	f.seedVoters([]uint64{1, 4, 5}, 1, 1, 1, 1)
+	snapshot := f.snapshot()
+	input := f.balancePlanInput(t.Context(), snapshot)
+	result := balanceplan.Plan(&input.input, balanceplan.Options{Seed: snapshot.Version})
+	var rejected []string
+	for _, target := range input.changedTargets(&result) {
+		if f.validateBalancePlanTarget(t.Context(), snapshot, snapshot.Group(target.ID), target) == balanceRejected {
+			rejected = append(rejected, target.ID)
+		}
+	}
+	re.NotEmpty(rejected)
+	re.Equal([2]int{48, 16}, balanceTableScore(f.affinityManager, balanceTestTable()))
+	re.True(f.step())
+	re.Equal([2]int{48, 10}, balanceTableScore(f.affinityManager, balanceTestTable()))
+	for _, id := range rejected {
+		re.Equal(snapshot.Group(id).Group, f.affinityManager.GetAffinityGroupState(id).Group)
+	}
+}
+
+func TestAffinityBalanceIgnoresUnrelatedBusyStore(t *testing.T) {
+	re := require.New(t)
+	f := newAffinityBalanceTest(t, 4, "a", "b", "c", "d")
+	for id := uint64(1); id <= 4; id++ {
+		f.SetStoreLabel(id, map[string]string{"region": "east", "zone": f.GetStore(id).GetLabelValue("zone")})
+	}
+	rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	rule.LabelConstraints = []placement.LabelConstraint{{Key: "region", Op: placement.In, Values: []string{"east"}}}
+	f.setRules(rule)
+	f.seedVoters([]uint64{1, 2, 3}, 1, 2, 3)
+	f.SetStoreBusy(4, true)
+	f.SetStoreLabel(4, map[string]string{"region": "west", "zone": "d"})
+	re.False(f.plan(f.snapshot()).retry)
+	f.SetStoreLabel(4, map[string]string{"region": "east", "zone": "d"})
+	re.True(f.plan(f.snapshot()).retry)
 }
 
 func TestAffinityBalanceIncludesPersistedLeader(t *testing.T) {

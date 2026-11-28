@@ -831,6 +831,8 @@ func TestRuleManagerRevision(t *testing.T) {
 	re.NoError(manager.SetRuleGroup(&RuleGroup{ID: DefaultGroupID, Index: 1}))
 	re.Greater(manager.GetRevision(), revision)
 	revision = manager.GetRevision()
+	re.NoError(manager.DeleteRule("tiflash", "missing"))
+	re.Equal(revision, manager.GetRevision(), "a no-op delete keeps the revision")
 	re.Error(manager.DeleteRule(DefaultGroupID, DefaultRuleID))
 	re.Equal(revision, manager.GetRevision(), "a failed update keeps the revision")
 }

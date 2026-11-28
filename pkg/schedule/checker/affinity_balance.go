@@ -176,18 +176,23 @@ func (c *AffinityChecker) balanceTargetExecutionStatus(current, target *affinity
 // and Region move. A store that only temporary states block, such as busy or
 // store limit, is temporarily blocked.
 func (c *AffinityChecker) balanceStoreActionStatus(id uint64, leader, source bool) balanceStatus {
-	return c.affinityStoreActionStatus(id, leader, source, true)
-}
-
-func (c *AffinityChecker) affinityStoreActionStatus(id uint64, leader, source, checkPeerLimit bool) balanceStatus {
-	store := c.cluster.GetStore(id)
-	if store == nil || !source && (!store.IsUp() || !store.IsTiKV()) {
+	status, specialUse := c.affinityStoreActionStatus(id, leader, source, true)
+	if specialUse {
 		return balanceRejected
 	}
+	return status
+}
+
+// The second result identifies a new voter store rejected only for special use.
+func (c *AffinityChecker) affinityStoreActionStatus(id uint64, leader, source, checkPeerLimit bool) (balanceStatus, bool) {
+	store := c.cluster.GetStore(id)
+	if store == nil || !source && (!store.IsUp() || !store.IsTiKV()) {
+		return balanceRejected, false
+	}
 	conf := c.cluster.GetSharedConfig()
-	if !leader && !source && (!filter.NewSpecialUseFilter(c.Name()).Target(conf, store).IsOK() ||
-		!filter.NewStorageThresholdFilter(c.Name()).Target(conf, store).IsOK()) {
-		return balanceRejected
+	specialUse := !leader && !source && !filter.NewSpecialUseFilter(c.Name()).Target(conf, store).IsOK()
+	if !leader && !source && !filter.NewStorageThresholdFilter(c.Name()).Target(conf, store).IsOK() {
+		return balanceRejected, false
 	}
 	state := filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: leader, MoveRegion: !leader}
 	check := func() bool {
@@ -205,13 +210,13 @@ func (c *AffinityChecker) affinityStoreActionStatus(id uint64, leader, source, c
 		return status.IsOK()
 	}
 	if check() {
-		return balanceAllowed
+		return balanceAllowed, specialUse
 	}
 	state.AllowTemporaryStates = true
-	if check() {
-		return balanceTemporarilyBlocked
+	if !specialUse && check() {
+		return balanceTemporarilyBlocked, false
 	}
-	return balanceRejected
+	return balanceRejected, false
 }
 
 // balanceAllowed reports whether new balance targets may be written.

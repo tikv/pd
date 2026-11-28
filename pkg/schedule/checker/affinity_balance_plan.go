@@ -42,7 +42,6 @@ const (
 	balanceCommitCanceled      balanceCommitReason = "canceled"
 	balanceCommitAllConflicted balanceCommitReason = "all-conflicted"
 	balanceCommitNotReady      balanceCommitReason = "not_ready"
-	balanceCommitUnsupported   balanceCommitReason = "unsupported"
 	balanceCommitError         balanceCommitReason = "error"
 )
 
@@ -65,8 +64,8 @@ type balancePlanResult struct {
 	retry bool
 }
 
-// planBalanceTargets solves a table once and publishes targets only when
-// every changed group passes final validation.
+// planBalanceTargets solves a table once and keeps validated changes only
+// if they still improve the table's score together.
 func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affinity.BalanceSnapshot) (balancePlanResult, error) {
 	plan := c.balancePlanInput(ctx, snapshot)
 	if err := ctx.Err(); err != nil {
@@ -78,7 +77,7 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 	})
 	res := balancePlanResult{
 		planner: result,
-		retry:   plan.retry || result.TemporarilyBlocked || result.Stop == balanceplan.StopBudget,
+		retry:   plan.retry || result.Stop == balanceplan.StopBudget,
 	}
 	if err := ctx.Err(); err != nil {
 		return res, err
@@ -88,21 +87,53 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 	}
 
 	targets := plan.changedTargets(&result)
-	valid := true
+	validTargets := make([]*affinity.Group, 0, len(targets))
 	for _, target := range targets {
 		status := c.validateBalancePlanTarget(ctx, snapshot, snapshot.Group(target.ID), target)
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
-		if status != balanceAllowed {
-			valid = false
-			res.retry = res.retry || status != balanceRejected
+		switch status {
+		case balanceAllowed:
+			validTargets = append(validTargets, target)
+		case balanceTemporarilyBlocked, balanceUnready:
+			res.retry = true
 		}
 	}
-	if valid {
-		res.targets = targets
+	// The planner baseline includes every group in this table, including
+	// fixed and unmodelled groups, and excludes other tables.
+	if len(validTargets) > 0 && balanceScoreWithTargets(snapshot.Groups, validTargets).Less(result.Baseline) {
+		res.targets = validTargets
 	}
 	return res, nil
+}
+
+func balanceScoreWithTargets(groups []*affinity.GroupState, targets []*affinity.Group) balanceplan.Score {
+	changed := make(map[string]*affinity.Group, len(targets))
+	for _, target := range targets {
+		changed[target.ID] = target
+	}
+	voters, leaders := make(map[uint64]int64), make(map[uint64]int64)
+	for _, group := range groups {
+		target := &group.Group
+		if change := changed[group.ID]; change != nil {
+			target = change
+		}
+		for _, id := range target.VoterStoreIDs {
+			voters[id]++
+		}
+		if target.LeaderStoreID != 0 {
+			leaders[target.LeaderStoreID]++
+		}
+	}
+	var score balanceplan.Score
+	for _, count := range voters {
+		score.Voter += count * count
+	}
+	for _, count := range leaders {
+		score.Leader += count * count
+	}
+	return score
 }
 
 // commitBalancePlan writes a validated plan if balancing is still allowed and
@@ -130,8 +161,6 @@ func (c *AffinityChecker) commitBalancePlan(ctx context.Context, snapshot *affin
 			return written, balanceCommitCanceled, err
 		case errors.Is(err, affinity.ErrTargetWriterNotReady):
 			return written, balanceCommitNotReady, nil
-		case errors.Is(err, affinity.ErrTargetWriterUnsupported):
-			return written, balanceCommitUnsupported, nil
 		default:
 			return written, balanceCommitError, err
 		}
@@ -186,6 +215,9 @@ func (c *AffinityChecker) balancePlanInput(ctx context.Context, snapshot *affini
 	plan := &balancePlan{}
 	ids := slices.Clone(snapshot.Stores)
 	for _, group := range snapshot.Groups {
+		if ctx.Err() != nil {
+			return nil
+		}
 		ids = append(ids, group.VoterStoreIDs...)
 		if group.LeaderStoreID != 0 {
 			ids = append(ids, group.LeaderStoreID)
@@ -223,10 +255,21 @@ func (c *AffinityChecker) balancePlanInput(ctx context.Context, snapshot *affini
 	}
 	canLead := make([]bool, n)
 	for i, id := range plan.stores {
-		canLead[i] = up[id] && allowed(id, true, false)
+		canLead[i] = up[id] && check(balanceStoreAction{id: id, leader: true}) == balanceAllowed
 	}
-	rules := newBalanceRuleCache(c, plan.stores, func(id uint64) bool { return up[id] && allowed(id, false, false) })
+	rules := newBalanceRuleCache(c, plan.stores, func(id uint64, role placement.PeerRoleType) bool {
+		if !up[id] {
+			return false
+		}
+		if role != placement.Follower {
+			allowed(id, true, false)
+		}
+		return allowed(id, false, false)
+	})
 	for _, group := range snapshot.Groups {
+		if ctx.Err() != nil {
+			return nil
+		}
 		// The counts of other tables exclude this table.
 		for _, id := range group.VoterStoreIDs {
 			in.OtherVoters[index[id]]--
@@ -377,12 +420,12 @@ func balanceRuleOf(group *affinity.GroupState, rules []*placement.Rule, fit *pla
 type balanceRuleCache struct {
 	checker   *AffinityChecker
 	stores    []uint64
-	addable   func(uint64) bool
+	addable   func(uint64, placement.PeerRoleType) bool
 	rules     map[string]*balanceplan.Rule
 	locations map[string][][]int32
 }
 
-func newBalanceRuleCache(checker *AffinityChecker, stores []uint64, addable func(uint64) bool) *balanceRuleCache {
+func newBalanceRuleCache(checker *AffinityChecker, stores []uint64, addable func(uint64, placement.PeerRoleType) bool) *balanceRuleCache {
 	return &balanceRuleCache{checker: checker, stores: stores, addable: addable,
 		rules: make(map[string]*balanceplan.Rule), locations: make(map[string][][]int32)}
 }
@@ -390,16 +433,15 @@ func newBalanceRuleCache(checker *AffinityChecker, stores []uint64, addable func
 // balanceRuleSignature describes what a rule requires, without its ID, keys
 // and index.
 func balanceRuleSignature(r *placement.Rule) string {
-	// These fields contain only strings, integers, booleans and slices, so
+	// These fields contain only strings, integers and slices, so
 	// JSON encoding cannot fail and preserves every field boundary.
 	encoded, _ := json.Marshal(struct {
 		Role             placement.PeerRoleType
-		IsWitness        bool
 		Count            int
 		LocationLabels   []string
 		IsolationLevel   string
 		LabelConstraints []placement.LabelConstraint
-	}{r.Role, r.IsWitness, r.Count, r.LocationLabels, r.IsolationLevel, r.LabelConstraints})
+	}{r.Role, r.Count, r.LocationLabels, r.IsolationLevel, r.LabelConstraints})
 	return string(encoded)
 }
 
@@ -459,10 +501,6 @@ func (rc *balanceRuleCache) get(r *placement.Rule) (*balanceplan.Rule, bool) {
 	if rule, ok := rc.rules[key]; ok {
 		return rule, rule != nil
 	}
-	if r.IsWitness {
-		rc.rules[key] = nil
-		return nil, false
-	}
 	isolationDepth := 0
 	if r.IsolationLevel != "" {
 		idx := slices.Index(r.LocationLabels, r.IsolationLevel)
@@ -488,7 +526,7 @@ func (rc *balanceRuleCache) get(r *placement.Rule) (*balanceplan.Rule, bool) {
 	rule := &balanceplan.Rule{Role: role, Count: r.Count, Location: loc, IsolationDepth: isolationDepth}
 	for i, id := range rc.stores {
 		store := rc.checker.cluster.GetStore(id)
-		if store != nil && rc.addable(id) && placement.MatchLabelConstraints(store, r.LabelConstraints) && !slices.Contains(loc[i], -1) {
+		if store != nil && placement.MatchLabelConstraints(store, r.LabelConstraints) && !slices.Contains(loc[i], -1) && rc.addable(id, r.Role) {
 			rule.Stores = append(rule.Stores, i)
 		}
 	}

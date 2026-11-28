@@ -216,6 +216,9 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// Recheck after refetching.
 	if needRefetch {
+		if !c.canLearnAffinityTarget(region) {
+			return nil
+		}
 		c.affinityManager.ObserveAvailableRegion(region, group)
 		group, isAffinity = c.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 	}
@@ -252,13 +255,15 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// Create operator to adjust region according to affinity group
 	op, relearn := c.createAffinityOperator(region, group, fit)
-	if relearn {
-		// Local learner placement is a heuristic. Relearn from this healthy
-		// Region now instead of letting the next Region restore the old target.
+	if relearn != affinityKeepTarget {
 		if fresh, ok := c.affinityManager.ExpireAffinityGroupIf(group); ok {
-			affinityCheckerLearnerPeerConflictCounter.Inc()
-			c.affinityManager.ObserveAvailableRegion(region, fresh)
-			log.Debug("relearn affinity group after learner-voter conflict",
+			if relearn == affinityRelearnLearnerConflict {
+				affinityCheckerLearnerPeerConflictCounter.Inc()
+			}
+			if c.canLearnAffinityTarget(region) {
+				c.affinityManager.ObserveAvailableRegion(region, fresh)
+			}
+			log.Debug("expire unachievable affinity target",
 				zap.Uint64("region-id", region.GetID()), zap.String("group-id", group.ID))
 		}
 		return nil
@@ -271,6 +276,25 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	return nil
 }
 
+func (c *AffinityChecker) canLearnAffinityTarget(region *core.RegionInfo) bool {
+	specialUse := filter.NewSpecialUseFilter(c.Name())
+	for _, voter := range region.GetVoters() {
+		store := c.cluster.GetStore(voter.GetStoreId())
+		if store == nil || !specialUse.Target(c.conf, store).IsOK() {
+			return false
+		}
+	}
+	return true
+}
+
+type affinityRelearnReason uint8
+
+const (
+	affinityKeepTarget affinityRelearnReason = iota
+	affinityRelearnLearnerConflict
+	affinityRelearnSpecialUse
+)
+
 // createAffinityOperator creates an operator to adjust region replicas according to affinity group constraints.
 // It creates a "combo" operator that directly specifies the final leader and voter positions,
 // moving the region to match the expected configuration in one operation.
@@ -282,20 +306,23 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 //
 // Note: This function assumes that regions passed to it already comply with placement rules.
 // The affinity checker focuses solely on adjusting voter peers according to affinity group configuration.
-// It requests relearning only when local learner placement fails without a temporary blocker.
-func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group *affinity.GroupState, fit *placement.RegionFit) (*operator.Operator, bool) {
+// A permanently unachievable target can request relearning.
+func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group *affinity.GroupState, fit *placement.RegionFit) (*operator.Operator, affinityRelearnReason) {
 	currentLeaderStoreID := region.GetLeader().GetStoreId()
 	if currentLeaderStoreID == group.LeaderStoreID && len(region.GetVoters()) == len(group.VoterStoreIDs) &&
 		!slices.ContainsFunc(region.GetVoters(), func(peer *metapb.Peer) bool { return !slices.Contains(group.VoterStoreIDs, peer.GetStoreId()) }) {
-		return nil, false
+		return nil, affinityKeepTarget
 	}
 	roles := affinityRoles(region, group)
-	movedLearners, status := c.moveConflictingLearners(region, group, fit, roles, nil)
+	movedLearners, status := c.moveConflictingLearners(region, group, fit, roles)
 	if status != affinityPlacementReady {
-		return nil, status == affinityPlacementRejected
+		if status == affinityPlacementRejected {
+			return nil, affinityRelearnLearnerConflict
+		}
+		return nil, affinityKeepTarget
 	}
 
-	if status := c.affinityTargetStoreStatus(region, group); status != balanceAllowed {
+	if status, specialUseOnly := c.affinityTargetStoreStatus(region, group); status != balanceAllowed {
 		if status == balanceRejected {
 			affinityCheckerTargetStoreRejectedCounter.Inc()
 		} else {
@@ -305,12 +332,15 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 			zap.Uint64("region-id", region.GetID()),
 			zap.String("group-id", group.ID),
 			zap.Bool("temporary", status == balanceTemporarilyBlocked))
-		return nil, false
+		if specialUseOnly && !group.BalancePolicy.IsFixed() {
+			return nil, affinityRelearnSpecialUse
+		}
+		return nil, affinityKeepTarget
 	}
 
 	split, latest, ready := c.prepareAffinityPeerMove(region, group, roles)
 	if !ready {
-		return split, false
+		return split, affinityKeepTarget
 	}
 
 	// Determine operator kind based on whether leader needs to change
@@ -326,22 +356,25 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 			zap.String("group-id", group.ID),
 			errs.ZapError(err))
 		affinityCheckerCreateOpFailedCounter.Inc()
-		return nil, false
+		return nil, affinityKeepTarget
 	}
 	if movedLearners {
 		affinityCheckerLearnerMoveCounter.Inc()
 	}
 
-	return op, false
+	return op, affinityKeepTarget
 }
 
 // affinityTargetStoreStatus checks the stores that moving region to the target
 // of group touches: both sides of a leader transfer and each new voter store.
 // Peer rate limits are enforced at admission so rejected moves can be retried.
-func (c *AffinityChecker) affinityTargetStoreStatus(region *core.RegionInfo, group *affinity.GroupState) balanceStatus {
+func (c *AffinityChecker) affinityTargetStoreStatus(region *core.RegionInfo, group *affinity.GroupState) (balanceStatus, bool) {
 	status := balanceAllowed
+	rejectedSpecialUse := false
 	check := func(id uint64, leader, source bool) {
-		status = max(status, c.affinityStoreActionStatus(id, leader, source, false))
+		actionStatus, specialUse := c.affinityStoreActionStatus(id, leader, source, false)
+		status = max(status, actionStatus)
+		rejectedSpecialUse = rejectedSpecialUse || specialUse
 	}
 	if source := region.GetLeader().GetStoreId(); source != group.LeaderStoreID {
 		check(source, true, true)
@@ -349,7 +382,7 @@ func (c *AffinityChecker) affinityTargetStoreStatus(region *core.RegionInfo, gro
 	} else {
 		store := c.cluster.GetStore(source)
 		if store == nil || !store.AllowLeaderTransferIn() || c.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) {
-			return balanceRejected
+			return balanceRejected, false
 		}
 	}
 	for _, id := range group.VoterStoreIDs {
@@ -357,7 +390,10 @@ func (c *AffinityChecker) affinityTargetStoreStatus(region *core.RegionInfo, gro
 			check(id, false, false)
 		}
 	}
-	return status
+	if rejectedSpecialUse {
+		return balanceRejected, status == balanceAllowed
+	}
+	return status, false
 }
 
 // mergeCheck verifies if a region can be merged with its adjacent regions within the same affinity group.

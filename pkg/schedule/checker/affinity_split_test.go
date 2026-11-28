@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/keyutil"
-	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -721,24 +720,16 @@ func TestAffinitySplitBeforeLearnerMove(t *testing.T) {
 	for _, test := range []struct {
 		name        string
 		stores      []string
-		joint       bool
-		version4    bool
 		copyToStore uint64
 	}{
-		{name: "copy to another store", stores: []string{"4", "5"}, joint: true, copyToStore: 5},
-		{name: "swap roles with joint consensus", joint: true},
-		{name: "swap roles without joint consensus", copyToStore: 3},
-		{name: "swap roles with joint consensus enabled on 4.0", joint: true, version4: true, copyToStore: 3},
+		{name: "copy to another store", stores: []string{"4", "5"}, copyToStore: 5},
+		{name: "swap roles with joint consensus"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			controller, cluster, _ := newLearnerConflictController(t)
 			setAffinitySplitStoreConfig(cluster)
-			cluster.SetEnableUseJointConsensus(test.joint)
-			if test.version4 {
-				cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-			}
 			require.NoError(t, cluster.GetRuleManager().SetRule(newLearnerRule(test.stores...)))
-			region := putLearners(cluster, 1, 4).Clone(withAffinitySplitTestRange("a", "b"),
+			region := putLearners(cluster, 4).Clone(withAffinitySplitTestRange("a", "b"),
 				core.SetApproximateSize(64), core.SetSource(core.Heartbeat))
 			cluster.PutRegion(region)
 			manager := cluster.GetAffinityManager()

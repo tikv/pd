@@ -16,7 +16,6 @@ package checker
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"sync"
 	"time"
@@ -142,7 +141,7 @@ func (b *affinityBalancer) balance(ctx context.Context) bool {
 		if ctx.Err() != nil {
 			return written
 		}
-		if err != nil && !errors.Is(err, affinity.ErrTargetWriterNotReady) {
+		if err != nil {
 			log.Warn("failed to balance affinity table", zap.String("table-id", string(id)), zap.Error(err))
 		}
 	}
@@ -180,12 +179,8 @@ func (b *affinityBalancer) step(ctx context.Context, id affinity.TableID, counts
 		result = affinityBalanceCreating
 		return false, nil
 	}
-	result = affinityBalanceError
 	res, err := c.planBalanceTargets(ctx, snapshot)
 	if err != nil {
-		if ctx.Err() != nil || errors.Is(err, affinity.ErrTargetWriterNotReady) {
-			result = "skipped"
-		}
 		return false, err
 	}
 	if len(res.targets) == 0 {
@@ -200,8 +195,9 @@ func (b *affinityBalancer) step(ctx context.Context, id affinity.TableID, counts
 		b.mu.Unlock()
 		return false, nil
 	}
+	result = affinityBalanceError
 	written, reason, err := c.commitBalancePlan(ctx, snapshot, res, revision)
-	writeDeferred := reason == balanceCommitNotReady || reason == balanceCommitUnsupported
+	writeDeferred := reason == balanceCommitNotReady
 	moveBalanceCounts(counts, snapshot, res.targets, written)
 	if len(written) > 0 {
 		log.Info("balanced affinity table", zap.String("table-id", string(id)),

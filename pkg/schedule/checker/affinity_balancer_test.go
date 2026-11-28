@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"slices"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -168,8 +167,14 @@ func TestAffinityBalancerCreating(t *testing.T) {
 	re.Empty(f.balancer.idle)
 }
 
+type targetWriterFunc func(context.Context, []affinity.GroupTarget) (affinity.GroupTargetsResponse, error)
+
+func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
+	return f(ctx, targets)
+}
+
 func TestAffinityBalancerWriteAndCancelOutcomes(t *testing.T) {
-	for _, outcome := range []string{"skipped", "changed", "partial", "planning canceled", "write canceled", "not ready", "error"} {
+	for _, outcome := range []string{"skipped", "changed", "partial", "planning canceled", "write canceled", "not ready", "404"} {
 		t.Run(outcome, func(t *testing.T) {
 			re := require.New(t)
 			f := newAffinityBalanceTest(t, 3)
@@ -197,7 +202,7 @@ func TestAffinityBalancerWriteAndCancelOutcomes(t *testing.T) {
 				case "not ready":
 					return affinity.GroupTargetsResponse{}, errors.Annotate(affinity.ErrTargetWriterNotReady, "PD leader missing")
 				default:
-					return affinity.GroupTargetsResponse{}, errors.New("write failed")
+					return affinity.GroupTargetsResponse{}, errors.New("404 Not Found")
 				}
 			}))
 
@@ -225,7 +230,7 @@ func TestAffinityBalancerWriteAndCancelOutcomes(t *testing.T) {
 				before := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceError])
 				re.False(f.balancer.balance(ctx))
 				delta := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceError]) - before
-				if outcome == "error" {
+				if outcome == "404" {
 					re.Equal(1.0, delta)
 					re.Equal(1, logs.FilterMessage("failed to balance affinity table").Len())
 				} else {
@@ -340,63 +345,6 @@ func TestAffinityBalanceAtScale(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, written, len(result.targets))
 			f.assertConverged()
-		})
-	}
-}
-
-func TestAffinityBalancerHonorsUnsupportedTargetCooldown(t *testing.T) {
-	for _, source := range []string{"first-win", "balancer"} {
-		t.Run(source, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				re := require.New(t)
-				f := newAffinityBalanceTest(t, 3)
-				m := f.affinityManager
-				ids := f.seed("100", 1, 1, 1, 1)
-				f.balancer.enqueue(ids[0])
-				other := f.seed("200", 4, 1, 1, 1)
-				f.balancer.enqueue(other[0])
-
-				var calls int
-				m.SetTargetWriter(targetWriterFunc(func(context.Context, []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
-					calls++
-					return affinity.GroupTargetsResponse{}, errors.Annotate(affinity.ErrTargetWriterUnsupported, "404 Not Found")
-				}))
-				core, logs := observer.New(zap.WarnLevel)
-				t.Cleanup(log.ReplaceGlobals(zap.New(core), nil))
-				failures := testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceError])
-
-				const groupID = "new-group"
-				re.NoError(m.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: groupID}}))
-				if source == "first-win" {
-					m.ObserveAvailableRegion(f.GetRegion(1), m.GetAffinityGroupState(groupID))
-					synctest.Wait()
-					re.True(m.GetAffinityGroupState(groupID).HasUnpersistedTarget())
-					re.Equal(1, calls)
-				}
-				re.False(f.balancer.balance(t.Context()))
-				re.Equal(1, calls, "a single 404 covers both tables")
-
-				if source == "balancer" {
-					// Observe the group after the balancer has established the cooldown.
-					m.ObserveAvailableRegion(f.GetRegion(1), m.GetAffinityGroupState(groupID))
-					synctest.Wait()
-				}
-				re.True(m.GetAffinityGroupState(groupID).HasUnpersistedTarget())
-				re.Equal(1, calls)
-				re.Empty(f.balancer.idle, "a skipped write must be retried after the cooldown")
-
-				time.Sleep(time.Second)
-				re.False(f.balancer.balance(t.Context()))
-				re.Equal(2, calls, "the first table can probe again after the cooldown")
-				re.Equal(failures, testutil.ToFloat64(affinityBalancePlanCounters[affinityBalanceError]))
-				re.Zero(logs.Len())
-				for _, id := range append(ids, other...) {
-					state := m.GetAffinityGroupState(id)
-					re.Equal(uint64(1), state.LeaderStoreID)
-					re.Equal([]uint64{1, 2, 3}, state.VoterStoreIDs)
-					re.False(state.HasUnpersistedTarget())
-				}
-			})
 		})
 	}
 }
