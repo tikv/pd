@@ -410,12 +410,23 @@ func (m *Manager) deleteCacheLocked(regionID uint64) {
 	delete(cache.groupInfo.Regions, regionID)
 }
 
+func isRegionSnapshotStale(region, cached *core.RegionInfo) bool {
+	epoch, cachedEpoch := region.GetRegionEpoch(), cached.GetRegionEpoch()
+	if epoch.GetVersion() != cachedEpoch.GetVersion() {
+		return epoch.GetVersion() < cachedEpoch.GetVersion()
+	}
+	return epoch.GetConfVer() < cachedEpoch.GetConfVer()
+}
+
 func (m *Manager) saveCache(cache *regionCache, labelRuleVer uint64) {
 	regionID := cache.region.GetID()
 	m.Lock()
 	defer m.Unlock()
 	// If a label rule has changed since the lookup read the labeler, the result may be outdated.
 	if m.labelRuleVer.Load() != labelRuleVer {
+		return
+	}
+	if current, exists := m.regions[regionID]; exists && isRegionSnapshotStale(cache.region, current.region) {
 		return
 	}
 	// If the Group has changed, update it but do not save it afterward.
@@ -479,6 +490,15 @@ func (m *Manager) calcRegionAffinityGroupState(region *core.RegionInfo, saveCach
 		failpoint.InjectCall("afterRegionLabelLookup")
 		group = m.GetAffinityGroupState(groupID)
 		if group == nil || group.rangeConflict {
+			if saveCache && cache != nil {
+				m.Lock()
+				if m.labelRuleVer.Load() == labelRuleVer {
+					if current, ok := m.regions[region.GetID()]; ok && current.region == cache.region && !isRegionSnapshotStale(region, current.region) {
+						m.deleteCacheLocked(region.GetID())
+					}
+				}
+				m.Unlock()
+			}
 			return nil, false
 		}
 		cache = &regionCache{
