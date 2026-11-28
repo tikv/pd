@@ -25,7 +25,11 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 const (
@@ -39,6 +43,9 @@ var defaultContext = context.Background()
 func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.Leadership) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	storage = NewStorageWithEtcdBackend(client)
+	require.NoError(t, storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return storage.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{ID: testGroupID})
+	}))
 	leadership = election.NewLeadership(client, testLeaderKey, "storage_tso_test", "test_member")
 	err := leadership.Campaign(60, testLeaderValue)
 	require.NoError(t, err)
@@ -47,12 +54,13 @@ func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.
 
 func TestSaveTimestampWithTimeout(t *testing.T) {
 	re := require.New(t)
+	storage, clean, leadership := prepare(t)
+	defer clean()
+
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/slowTxn", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/slowTxn"))
 	}()
-	storage, clean, leadership := prepare(t)
-	defer clean()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := storage.SaveTimestamp(ctx, testGroupID, time.Now().Round(0), leadership)
@@ -69,6 +77,37 @@ func TestSaveLoadTimestamp(t *testing.T) {
 	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(expectedTS, ts)
+}
+
+func TestSaveTimestampRequiresGroupMembership(t *testing.T) {
+	storage, clean, leadership := prepare(t)
+	defer clean()
+	initialTS := time.Now().Round(0)
+	require.NoError(t, storage.SaveTimestamp(t.Context(), testGroupID, initialTS, leadership))
+	require.NoError(t, storage.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return storage.DeleteKeyspaceGroup(txn, testGroupID)
+	}))
+
+	nextTS := initialTS.Add(time.Second)
+	tests := []struct {
+		name    string
+		groupID uint32
+		wantErr error
+		wantTS  time.Time
+	}{
+		{name: "deleted group", groupID: testGroupID, wantErr: errs.ErrEtcdTxnConflict, wantTS: initialTS},
+		{name: "missing group", groupID: testGroupID + 1, wantErr: errs.ErrEtcdTxnConflict, wantTS: typeutil.ZeroTime},
+		{name: "default group before bootstrap", groupID: constant.DefaultKeyspaceGroupID, wantTS: nextTS},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			re.ErrorIs(storage.SaveTimestamp(t.Context(), tt.groupID, nextTS, leadership), tt.wantErr)
+			ts, err := storage.LoadTimestamp(tt.groupID)
+			re.NoError(err)
+			re.Equal(tt.wantTS, ts)
+		})
+	}
 }
 
 func TestTimestampTxn(t *testing.T) {
