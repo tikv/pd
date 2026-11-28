@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
@@ -388,10 +387,9 @@ func TestCommitBalanceTargetsWriterChunks(t *testing.T) {
 
 func TestBalanceTargetWriterFailureMetrics(t *testing.T) {
 	for outcome, writeErr := range map[string]error{
-		"error":       errors.New("failed request"),
-		"not-ready":   errors.Annotate(ErrTargetWriterNotReady, "no PD leader"),
-		"unsupported": errors.Annotate(ErrTargetWriterUnsupported, "404 Not Found"),
-		"cancel":      context.Canceled,
+		"error":     errors.New("failed request"),
+		"not-ready": errors.Annotate(ErrTargetWriterNotReady, "no PD leader"),
+		"cancel":    context.Canceled,
 	} {
 		t.Run(outcome, func(t *testing.T) {
 			test := newTargetTest(t, balanceTestGroupID)
@@ -415,106 +413,48 @@ func TestBalanceTargetWriterFailureMetrics(t *testing.T) {
 	}
 }
 
-func TestUnpersistedTargetPolicyChangeAdvancesBalanceVersion(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		test := newTargetTest(t)
-		const id = balanceTestGroupID
-		ranges := testKeyRanges("a", "b")
-		test.NoError(test.CreateAffinityGroups([]GroupKeyRanges{{GroupID: id, KeyRanges: ranges}}))
-		stored := test.stored(id)
-		stored.BalancePolicy = BalancePolicyFixed
-		test.SyncGroupFromEtcd(stored)
-		test.applyStoreConditions(nil)
-		test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
-			return GroupTargetsResponse{}, ErrTargetWriterUnsupported
-		})
-		region := generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0])
-		test.ObserveAvailableRegion(region, test.GetAffinityGroupState(id))
-		synctest.Wait()
-		_, aligned := test.GetAndCacheRegionAffinityGroupState(region)
-		test.True(aligned)
-		before := test.GetAffinityGroupState(id)
-		test.True(before.HasUnpersistedTarget())
-		test.Equal(PhaseStable, before.Phase)
-		test.Equal(1, before.RegionCount)
-		test.Equal(1, before.AffinityRegionCount)
-		getVersion := func() uint64 {
-			t.Helper()
-			v, exists := test.GetBalanceVersion(balanceTestTableID)
-			test.True(exists)
-			return v
-		}
-		version := getVersion()
-
-		stored.BalancePolicy = BalancePolicyAuto
-		test.SyncGroupFromEtcd(stored)
-		after := test.GetAffinityGroupState(id)
-		want := *before
-		want.BalancePolicy = BalancePolicyAuto
-		test.Equal(want, *after)
-		next := getVersion()
-		test.Greater(next, version, "the balancer must wake an idle table after the policy change")
-
-		test.SyncGroupFromEtcd(stored)
-		test.Equal(next, getVersion())
-		test.SyncGroupFromEtcd(&after.Group)
-		test.False(test.GetAffinityGroupState(id).HasUnpersistedTarget())
-		confirmed := getVersion()
-		test.Greater(confirmed, next, "confirming the local target changes the expected stored group")
-
-		test.SyncGroupFromEtcdWithRevision(&after.Group, 10)
-		revised := getVersion()
-		test.Greater(revised, confirmed, "the stored revision changed with identical group data")
-		test.SyncGroupFromEtcdWithRevision(&after.Group, 10)
-		test.Equal(revised, getVersion())
-	})
-}
-
-func TestSkippedPersistOnlyWritePreservesBalanceConfirmation(t *testing.T) {
+func TestSkippedFirstWinWritePreservesBalanceConfirmation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const id = balanceTestGroupID
 		test := newTargetTest(t, id)
 		test.SyncGroupFromEtcdWithRevision(test.stored(id), 10)
 		test.checkGroupsAvailability()
-		state := func() *GroupState { return test.GetAffinityGroupState(id) }
 		target := test.groupTarget(id, 1, 1, 2)
+		firstWin := test.target(id, 3, 3, 4)
 		releaseSkipped := make(chan struct{})
 		defer close(releaseSkipped)
 		test.useWriter(func(_ context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 			test.Len(targets, 1)
-			switch len(test.calls) {
-			case 1:
-				return GroupTargetsResponse{}, ErrTargetWriterUnsupported
-			case 2:
-				test.Equal(target, targets[0].result())
-				test.Equal(int64(10), targets[0].ExpectedModRevision)
+			test.Equal(int64(10), targets[0].ExpectedModRevision)
+			if len(test.calls) == 1 {
+				test.Equal(firstWin.result(), targets[0].result())
 				<-releaseSkipped
 				return GroupTargetsResponse{}, nil
-			default:
-				test.Equal(target, targets[0].result())
-				return GroupTargetsResponse{
-					WrittenGroupIDs: []string{id}, WrittenRevisions: map[string]int64{id: 11},
-				}, nil
 			}
+			test.Equal(target, targets[0].result())
+			return GroupTargetsResponse{
+				WrittenGroupIDs: []string{id}, WrittenRevisions: map[string]int64{id: 11},
+			}, nil
 		})
-		test.observe(id, 1, 2)
-		local := state()
-		test.True(local.HasUnpersistedTarget())
-		test.Equal(*target, local.Group)
-
-		time.Sleep(time.Second)
-		test.observe(id, 1, 2)
-		test.Len(test.calls, 2)
+		test.observe(id, 3, 4)
+		test.Len(test.calls, 1)
 		written, err := test.CommitBalanceTargets(t.Context(), test.balanceSnapshot(), []*Group{target})
 		test.NoError(err)
 		test.Equal([]string{id}, written)
 		test.Equal(int64(11), test.groups[id].confirmedRevision)
-		test.Equal(local.affinityVer, state().affinityVer)
-		test.Equal(int64(10), state().modRevision)
+		confirmed := test.GetAffinityGroupState(id)
+		test.Equal(int64(10), confirmed.modRevision)
+		test.False(confirmed.AffinitySchedulingAllowed)
 
 		releaseSkipped <- struct{}{}
 		synctest.Wait()
-		test.Equal(local, state(), "the skipped reply must preserve the confirmed local target")
+		test.Equal(confirmed, test.GetAffinityGroupState(id))
+		test.Equal(int64(11), test.groups[id].confirmedRevision)
+		test.True(test.groups[id].awaitingTarget)
+		test.True(test.groups[id].lastSentWritten)
+		test.SyncGroupFromEtcdWithRevision(target, 11)
+		test.Equal(*target, test.GetAffinityGroupState(id).Group)
+		test.True(test.GetAffinityGroupState(id).AffinitySchedulingAllowed)
 	})
 }
 

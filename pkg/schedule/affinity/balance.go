@@ -20,7 +20,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -238,8 +237,7 @@ func (m *Manager) balanceStores() []uint64 {
 // Another group of the table can still change after the final checks, for
 // example when an admin updates the peers of a fixed group. With a
 // partially written plan or such a change, this round may not improve the
-// table; the next round replans from the latest state. If PD lacks the remote
-// target endpoint, the balancer defers writes until the cooldown expires.
+// table; the next round replans from the latest state.
 func (m *Manager) CommitBalanceTargets(ctx context.Context, snapshot *BalanceSnapshot, targets []*Group) ([]string, error) {
 	groupTargets := make([]GroupTarget, 0, len(targets))
 	for _, target := range targets {
@@ -272,7 +270,7 @@ func (m *Manager) CommitBalanceTargets(ctx context.Context, snapshot *BalanceSna
 		result, err := m.writeBalanceTargets(ctx, chunk)
 		written = append(written, result.WrittenGroupIDs...)
 		if err != nil {
-			if ctx.Err() == nil && !errors.Is(err, ErrTargetWriterNotReady) && !errors.Is(err, ErrTargetWriterUnsupported) {
+			if ctx.Err() == nil && !errors.Is(err, ErrTargetWriterNotReady) {
 				if unconfirmed := len(chunk) - len(result.WrittenGroupIDs); unconfirmed > 0 {
 					targetWriteFailureCounter.Add(float64(unconfirmed))
 				}
@@ -290,10 +288,6 @@ func (m *Manager) CommitBalanceTargets(ctx context.Context, snapshot *BalanceSna
 func (m *Manager) writeBalanceTargets(ctx context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 	deletedAt := make([]int64, len(targets))
 	m.targetWriteMutex.Lock()
-	if time.Now().Before(m.targetEndpointUnsupportedUntil) {
-		m.targetWriteMutex.Unlock()
-		return GroupTargetsResponse{}, ErrTargetWriterNotReady
-	}
 	if m.balancingTargets == nil {
 		m.balancingTargets = make(map[string][]*int64)
 	}
@@ -308,9 +302,6 @@ func (m *Manager) writeBalanceTargets(ctx context.Context, targets []GroupTarget
 	defer m.metaMutex.Unlock()
 	m.targetWriteMutex.Lock()
 	defer m.targetWriteMutex.Unlock()
-	if errors.Is(err, ErrTargetWriterUnsupported) {
-		m.recordTargetEndpointUnsupportedLocked(time.Now())
-	}
 	m.Lock()
 	defer m.Unlock()
 	for i, target := range targets {

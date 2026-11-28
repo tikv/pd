@@ -141,19 +141,11 @@ type GroupState struct {
 	// affinityVer is used to mark the version of the cache.
 	affinityVer uint64
 	// modRevision is the watched group-key revision when this state was read.
-	modRevision int64
-	// targetUnpersisted indicates that the active target only exists in memory
-	// and still needs to be persisted to PD.
-	targetUnpersisted bool
-	rangeConflict     bool
+	modRevision   int64
+	rangeConflict bool
 	// groupInfoPtr is a pointer to the original information.
 	// It is used for identity checks and the sender's per-instance cooldown.
 	groupInfoPtr *runtimeGroupInfo
-}
-
-// HasUnpersistedTarget reports whether the group holds a local target that has not been persisted yet.
-func (g *GroupState) HasUnpersistedTarget() bool {
-	return g != nil && g.targetUnpersisted
 }
 
 // MatchesTarget reports whether both states describe the same version and peer
@@ -204,9 +196,6 @@ type runtimeGroupInfo struct {
 	confirmedRevision int64
 	// awaitingTarget suppresses scheduling while the current peers differ from the confirmed target.
 	awaitingTarget bool
-	// persistedGroup holds the last stored group while Group holds a local target.
-	// It is nil when Group itself holds the stored target.
-	persistedGroup *Group
 	// modRevision is the last watched etcd revision of this group's stored target.
 	modRevision int64
 	// Use GetAvailability, SetAvailability, and resetTargetAvailability to access availability
@@ -257,17 +246,9 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
 		modRevision:               g.modRevision,
-		targetUnpersisted:         g.persistedGroup != nil,
 		rangeConflict:             g.rangeConflict,
 		groupInfoPtr:              g,
 	}
-}
-
-func (g *runtimeGroupInfo) storedGroup() Group {
-	if g.persistedGroup != nil {
-		return *g.persistedGroup
-	}
-	return g.Group
 }
 
 // IsAvailable indicates that the Group is currently in the groupAvailable status,
