@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -306,6 +307,64 @@ func TestSaveLoadRule(t *testing.T) {
 		r2 := labeler.GetLabelRule(r.ID)
 		expectSameRules(re, r2, r)
 	}
+}
+
+func TestRejectExpiredLabelRuleWrites(t *testing.T) {
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	regionLabeler, err := NewRegionLabeler(t.Context(), store, time.Hour)
+	require.NoError(t, err)
+	newRule := func() *LabelRule {
+		return &LabelRule{
+			ID: "expired",
+			Labels: []RegionLabel{{
+				Key: "schedule", Value: "deny", TTL: "1h", StartAt: time.Now().Add(-2 * time.Hour).Format(time.UnixDate),
+			}},
+			RuleType: KeyRange,
+			Data:     MakeKeyRanges("", ""),
+		}
+	}
+	err = regionLabeler.SetLabelRule(newRule())
+	require.ErrorContains(t, err, "region label with expired ttl")
+	require.True(t, errs.ErrRegionRuleContent.Equal(err))
+	err = regionLabeler.Patch(LabelRulePatch{SetRules: []*LabelRule{newRule()}})
+	require.ErrorContains(t, err, "region label with expired ttl")
+	require.True(t, errs.ErrRegionRuleContent.Equal(err))
+	require.Empty(t, regionLabeler.GetAllLabelRules())
+	require.NoError(t, store.LoadRegionRules(func(key, _ string) {
+		t.Errorf("unexpected stored rule %q", key)
+	}))
+}
+
+func TestLoadLabelRuleFromJSON(t *testing.T) {
+	expired := RegionLabel{
+		Key: "schedule", Value: "deny", TTL: "1h", StartAt: time.Now().UTC().Add(-2 * time.Hour).Format(time.UnixDate),
+	}
+	rule := LabelRule{
+		ID: "rule", Labels: []RegionLabel{expired}, RuleType: KeyRange, Data: MakeKeyRanges("01", "02"),
+	}
+	load := func(rule LabelRule) (*LabelRule, error) {
+		data, err := json.Marshal(&rule)
+		require.NoError(t, err)
+		return LoadLabelRuleFromJSON(data)
+	}
+
+	loaded, err := load(rule)
+	require.NoError(t, err)
+	require.Nil(t, loaded)
+
+	persistent := RegionLabel{Key: "zone", Value: "test"}
+	mixed := rule
+	mixed.Labels = []RegionLabel{expired, persistent}
+	loaded, err = load(mixed)
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	require.Equal(t, []RegionLabel{persistent}, loaded.Labels)
+
+	_, err = LoadLabelRuleFromJSON([]byte("{"))
+	require.Error(t, err)
+	rule.Data = MakeKeyRanges("not-hex", "02")
+	_, err = load(rule)
+	require.Error(t, err)
 }
 
 func TestLoadRulesLogRedact(t *testing.T) {

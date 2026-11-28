@@ -150,7 +150,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		ctx, w.wg,
 		w.etcdClient,
 		"scheduling-affinity-label-watcher",
-		strings.TrimSuffix(keypath.RegionLabelKeyPath(affinity.LabelRuleIDPrefix), "/"), // Filter: only process affinity group label rules
+		keypath.RegionLabelKeyPath(affinity.LabelRuleIDPrefix), // Filter: only process affinity group label rules
 		func([]*clientv3.Event) error {
 			w.affinityManager.SetLabelRuleBatchInProgress(true)
 			return nil
