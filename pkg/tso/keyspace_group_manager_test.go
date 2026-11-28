@@ -24,7 +24,9 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,11 +34,16 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -146,7 +153,7 @@ func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
 
 			re.True(kgm.TryRLock(), "state lock should remain available while the finish request is in flight")
 			kgm.RUnlock()
-			_, _, currentGroupID, _, err := kgm.FindGroupByKeyspaceID(keyspaceID)
+			_, _, currentGroupID, _, err := kgm.FindGroupByKeyspaceID(req.Context(), keyspaceID)
 			re.NoError(err)
 			re.Equal(groupID, currentGroupID)
 
@@ -327,7 +334,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestInitialLoadSetsModRevision() {
 	re.Len(resp.Kvs, 1)
 
 	re.NoError(mgr.Initialize())
-	_, _, loadedGroupID, loadedRevision, err := mgr.FindGroupByKeyspaceID(keyspaceID)
+	_, _, loadedGroupID, loadedRevision, err := mgr.FindGroupByKeyspaceID(suite.ctx, keyspaceID)
 	re.NoError(err)
 	re.Equal(groupID, loadedGroupID)
 	re.Equal(uint64(resp.Kvs[0].ModRevision), loadedRevision)
@@ -568,43 +575,43 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	re.NoError(err)
 
 	// Should be able to get the allocators for the default/null keyspace and keyspace 1, 2 in keyspace group 0.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, constant.DefaultKeyspaceID, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.NullKeyspaceID, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, constant.NullKeyspaceID, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(1, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, 1, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(2, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, 2, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
 	// Should still succeed even keyspace 3 isn't explicitly assigned to any
 	// keyspace group. It will be assigned to the default keyspace group.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, 3, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
 	// Should succeed and get the meta of keyspace group 0, because keyspace 0
 	// belongs to group 0, though the specified group 1 doesn't exist.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 1)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, constant.DefaultKeyspaceID, 1)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
 	// Should fail because keyspace 3 isn't explicitly assigned to any keyspace
 	// group, and the specified group isn't the default keyspace group.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(3, 100)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, 3, 100)
 	re.Error(err)
 	re.Equal(uint32(100), kgid)
 	re.Nil(allocator)
@@ -649,6 +656,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 
 	// Should be able to get the allocator for keyspace 0 in keyspace group 0.
 	allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(
+		suite.ctx,
 		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
@@ -676,7 +684,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	// Behavior differs between Classic and NextGen modes
 	if kerneltype.IsNextGen() {
 		// In NextGen mode, keyspace 0 should be allowed to move to keyspace group 3
-		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, constant.DefaultKeyspaceID, 3)
 		re.NoError(err)
 		re.Equal(uint32(3), kgid) // Should be in group 3
 		re.NotNil(allocator)
@@ -685,13 +693,14 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	} else {
 		// In Classic mode, keyspace 0 should stay in the default keyspace group 0
 		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(
+			suite.ctx,
 			constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 		re.NoError(err)
 		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 		re.NotNil(allocator)
 		re.NotNil(kg)
 		// Should succeed and return the keyspace group meta from the default keyspace group
-		allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+		allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, constant.DefaultKeyspaceID, 3)
 		re.NoError(err)
 		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 		re.NotNil(allocator)
@@ -740,7 +749,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	re.NoError(err)
 
 	// Should be able to get the allocator for keyspace 10 in keyspace group 0.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, constant.DefaultKeyspaceGroupID)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, 10, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
@@ -753,7 +762,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	re.NoError(err)
 	// Wait until the keyspace 10 is served by keyspace group 1.
 	testutil.Eventually(re, func() bool {
-		_, _, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
+		_, _, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, 10, 1)
 		return err == nil && kgid == 1
 	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
@@ -771,7 +780,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 		return mgr.modRevision >= uint64(resp.Kvs[0].ModRevision)
 	})
 	// Should still be able to get the allocator for keyspace 10 in keyspace group 1.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(suite.ctx, 10, 1)
 	re.NoError(err)
 	re.Equal(uint32(1), kgid)
 	re.NotNil(allocator)
@@ -823,6 +832,126 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(suite.ctx, 100, 1, 1)
 	re.Error(err)
 	re.Equal(uint32(1), keyspaceGroupBelongTo)
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestDefaultGroupFallbackChecksKeyspaceAssignment() {
+	re := suite.Require()
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
+	const (
+		keyspaceID  uint32 = 100
+		readErrorID uint32 = 101
+		groupID     uint32 = 7
+		defaultID          = constant.DefaultKeyspaceGroupID
+	)
+	group := generateKeyspaceGroupPutEvent(groupID, []uint32{keyspaceID}, []string{mgr.tsoServiceID.ServiceAddr}).ksg
+	group.UserKind = endpoint.Standard.String()
+
+	var reads atomic.Int64
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: suite.etcdClient.Endpoints(),
+		DialOptions: []grpc.DialOption{grpc.WithChainUnaryInterceptor(
+			func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				txn, _ := req.(*etcdserverpb.TxnRequest)
+				for _, op := range txn.GetSuccess() {
+					key := string(op.GetRequestRange().GetKey())
+					if !strings.HasPrefix(key, keypath.KeyspaceMetaPrefix()) {
+						continue
+					}
+					reads.Add(1)
+					if key == keypath.KeyspaceMetaPath(readErrorID) {
+						// Let the watcher learn the assignment before the metadata read fails.
+						updated := *group
+						updated.Keyspaces = []uint32{keyspaceID, readErrorID}
+						re.NoError(putKeyspaceGroupToEtcd(ctx, suite.etcdClient, &updated))
+						testutil.Eventually(re, func() bool {
+							mgr.RLock()
+							defer mgr.RUnlock()
+							return mgr.keyspaceLookupTable[readErrorID] == groupID
+						})
+						return status.Error(codes.InvalidArgument, "injected metadata read failure")
+					}
+				}
+				return invoke(ctx, method, req, reply, cc, opts...)
+			},
+		)},
+	})
+	re.NoError(err)
+	defer client.Close()
+	defer mgr.Close()
+	mgr.storage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+
+	saveMeta := func(id uint32, config map[string]string) {
+		re.NoError(mgr.storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			return mgr.storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
+				Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id},
+				Config:   config,
+			})
+		}))
+	}
+	checkGroup := func(id, wantGroupID uint32) {
+		_, _, gotGroupID, _, err := mgr.FindGroupByKeyspaceID(suite.ctx, id)
+		re.NoError(err)
+		re.Equal(wantGroupID, gotGroupID)
+		_, gotGroupID, err = mgr.HandleTSORequest(suite.ctx, id, defaultID, 1)
+		re.NoError(err)
+		re.Equal(wantGroupID, gotGroupID)
+	}
+
+	defaultGroup := mgr.genDefaultKeyspaceGroupMeta()
+	defaultGroup.Keyspaces = nil
+	mgr.updateKeyspaceGroup(defaultGroup)
+	for _, id := range []uint32{constant.NullKeyspaceID, getBootstrapKeyspaceID()} {
+		_, _, gotGroupID, _, err := mgr.FindGroupByKeyspaceID(suite.ctx, id)
+		re.NoError(err)
+		re.Equal(defaultID, gotGroupID)
+	}
+	re.Zero(reads.Load())
+
+	saveMeta(keyspaceID, map[string]string{constant.TSOKeyspaceGroupIDKey: "7"})
+	re.NoError(putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, group))
+
+	canceled, cancel := context.WithCancel(suite.ctx)
+	cancel()
+	_, _, _, _, err = mgr.FindGroupByKeyspaceID(canceled, keyspaceID)
+	re.ErrorIs(err, context.Canceled)
+	_, _, err = mgr.HandleTSORequest(canceled, keyspaceID, defaultID, 1)
+	re.ErrorIs(err, context.Canceled)
+
+	const invalidID uint32 = 102
+	saveMeta(invalidID, map[string]string{constant.TSOKeyspaceGroupIDKey: "invalid"})
+	for _, id := range []uint32{keyspaceID, invalidID} {
+		_, _, _, _, err := mgr.FindGroupByKeyspaceID(suite.ctx, id)
+		re.True(errs.ErrKeyspaceNotAssigned.Equal(err), "unexpected discovery error: %v", err)
+		_, _, err = mgr.HandleTSORequest(suite.ctx, id, defaultID, 1)
+		re.True(errs.ErrKeyspaceNotAssigned.Equal(err), "unexpected TSO error: %v", err)
+	}
+
+	re.NoError(mgr.Initialize())
+	for _, id := range []uint32{defaultID, groupID} {
+		testutil.Eventually(re, func() bool {
+			allocator, err := mgr.GetAllocator(id)
+			return err == nil && allocator.GetMember().IsServing()
+		})
+	}
+	before := reads.Load()
+	checkGroup(keyspaceID, groupID)
+	re.Equal(before, reads.Load())
+
+	checkGroup(readErrorID, groupID)
+	re.NoError(suite.ctx.Err())
+	re.Equal(before+1, reads.Load())
+
+	checkGroup(103, defaultID) // No metadata.
+	for i, config := range []map[string]string{
+		nil,
+		{constant.TSOKeyspaceGroupIDKey: ""},
+		{constant.TSOKeyspaceGroupIDKey: "0"},
+		{constant.TSOKeyspaceGroupIDKey: "00"},
+	} {
+		id := 104 + uint32(i)
+		saveMeta(id, config)
+		checkGroup(id, defaultID)
+	}
 }
 
 type etcdEvent struct {
@@ -1079,8 +1208,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	groupID := uint32(1)
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
-	kgm := &KeyspaceGroupManager{
-		keyspaceLookupTable: make(map[uint32]uint32)}
+	kgm := suite.newUniqueKeyspaceGroupManager(0)
+	defer kgm.Close()
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
 	verifyLocalKeyspaceLookupTable(re, newGroup.KeyspaceLookupTable, newGroup.Keyspaces)
@@ -1933,9 +2062,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestStaleCache() {
 	groupID := uint32(1)
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
-	kgm := &KeyspaceGroupManager{
-		keyspaceLookupTable: make(map[uint32]uint32),
-	}
+	kgm := suite.newUniqueKeyspaceGroupManager(0)
+	defer kgm.Close()
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
 	for _, id := range []uint32{6, 10} {

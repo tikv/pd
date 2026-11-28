@@ -748,7 +748,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	tests.WaitForPrimaryServing(re, map[string]bs.Server{newNode.GetAddr(): newNode})
 	testutil.Eventually(re, func() bool {
 		_, group, groupID, revision, err :=
-			newNode.GetKeyspaceGroupManager().FindGroupByKeyspaceID(setup.keyspaceID)
+			newNode.GetKeyspaceGroupManager().FindGroupByKeyspaceID(suite.ctx, setup.keyspaceID)
 		return err == nil && group != nil && groupID == keyspaceGroupID && revision > 0 &&
 			newNode.IsKeyspaceServingByGroup(setup.keyspaceID, keyspaceGroupID)
 	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))

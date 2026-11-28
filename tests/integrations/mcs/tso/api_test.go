@@ -173,7 +173,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 		if err != nil || group == nil || len(group.Members) != 2 || !slices.Contains(group.Keyspaces, uint32(2)) {
 			return false
 		}
-		_, group, _, _, err = primary.GetKeyspaceGroupManager().FindGroupByKeyspaceID(2)
+		_, group, _, _, err = primary.GetKeyspaceGroupManager().FindGroupByKeyspaceID(ctx, 2)
 		return err == nil && group != nil && slices.Contains(group.Keyspaces, uint32(2))
 	})
 	input := make(map[string]any)

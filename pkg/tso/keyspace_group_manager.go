@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -270,24 +271,14 @@ func (s *state) checkGroupMerge(
 	return errs.ErrKeyspaceGroupIsMerging.FastGenByArgs(groupID)
 }
 
-// getKeyspaceGroupMetaWithCheck returns the keyspace group meta of the given keyspace.
-// It also checks if the keyspace is served by the given keyspace group. If not, it returns the meta
-// of the keyspace group to which the keyspace currently belongs and returns NotServed (by the given
-// keyspace group) error. If the keyspace doesn't belong to any keyspace group, it returns the
-// NotAssigned error, which could happen because loading keyspace group meta isn't atomic when there is
-// keyspace movement between keyspace groups.
-func (s *state) getKeyspaceGroupMetaWithCheck(
+// lookupKeyspaceGroupLocked checks the requested group first, then the latest
+// cached assignment. A nil allocator and nil error mean the assignment is unknown.
+func (s *state) lookupKeyspaceGroupLocked(
 	keyspaceID, keyspaceGroupID uint32,
 ) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
-	s.RLock()
-	defer s.RUnlock()
-
-	if allocator := s.allocators[keyspaceGroupID]; allocator != nil {
-		kg := s.kgs[keyspaceGroupID]
-		if kg != nil {
-			if _, ok := kg.KeyspaceLookupTable[keyspaceID]; ok {
-				return allocator, kg, keyspaceGroupID, s.modRevision, nil
-			}
+	if allocator, kg := s.allocators[keyspaceGroupID], s.kgs[keyspaceGroupID]; allocator != nil && kg != nil {
+		if _, ok := kg.KeyspaceLookupTable[keyspaceID]; ok {
+			return allocator, kg, keyspaceGroupID, s.modRevision, nil
 		}
 	}
 
@@ -299,15 +290,55 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 		}
 		return nil, s.kgs[kgid], kgid, s.modRevision, genNotServedErr(errs.ErrGetAllocator, keyspaceGroupID)
 	}
+	return nil, nil, keyspaceGroupID, s.modRevision, nil
+}
 
-	// The keyspace doesn't belong to any keyspace group but the keyspace has been assigned to a
-	// keyspace group before, which means the keyspace group hasn't initialized yet.
+// getKeyspaceGroupMetaWithCheck resolves the serving group and checks whether an
+// unknown keyspace can fall back to the default group.
+func (kgm *KeyspaceGroupManager) getKeyspaceGroupMetaWithCheck(
+	ctx context.Context,
+	keyspaceID, keyspaceGroupID uint32,
+) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
+	s := &kgm.state
+	s.RLock()
+	allocator, kg, groupID, revision, err := s.lookupKeyspaceGroupLocked(keyspaceID, keyspaceGroupID)
+	if allocator != nil || err != nil {
+		s.RUnlock()
+		return allocator, kg, groupID, revision, err
+	}
 	if keyspaceGroupID != constant.DefaultKeyspaceGroupID {
-		return nil, nil, keyspaceGroupID, s.modRevision, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+		s.RUnlock()
+		return nil, nil, keyspaceGroupID, revision, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 
-	// For migrating the existing keyspaces which have no keyspace group assigned as configured
-	// in the keyspace meta. All these keyspaces will be served by the default keyspace group.
+	if keyspaceID != getBootstrapKeyspaceID() && keyspaceID <= constant.MaxValidKeyspaceID {
+		// Keyspace metadata can change before the group watch delivers the new
+		// assignment. Leave the state unlocked for the etcd read.
+		s.RUnlock()
+		meta, _, readErr := kgm.storage.LoadKeyspaceMetaWithRevision(ctx, keyspaceID)
+		if readErr != nil && ctx.Err() != nil {
+			return nil, nil, keyspaceGroupID, revision, readErr
+		}
+		s.RLock()
+		allocator, kg, groupID, revision, err := s.lookupKeyspaceGroupLocked(keyspaceID, keyspaceGroupID)
+		if allocator != nil || err != nil {
+			s.RUnlock()
+			return allocator, kg, groupID, revision, err
+		}
+		if readErr != nil {
+			s.RUnlock()
+			return nil, nil, keyspaceGroupID, revision, readErr
+		}
+		if raw := meta.GetConfig()[constant.TSOKeyspaceGroupIDKey]; raw != "" {
+			parsed, err := strconv.ParseUint(raw, 10, 32)
+			if err != nil || uint32(parsed) != constant.DefaultKeyspaceGroupID {
+				s.RUnlock()
+				return nil, nil, keyspaceGroupID, revision, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+			}
+		}
+	}
+	defer s.RUnlock()
+
 	if s.allocators[constant.DefaultKeyspaceGroupID] == nil {
 		return nil, nil, constant.DefaultKeyspaceGroupID, s.modRevision,
 			errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
@@ -1076,10 +1107,11 @@ func (kgm *KeyspaceGroupManager) GetAllocator(keyspaceGroupID uint32) (*Allocato
 
 // FindGroupByKeyspaceID returns the keyspace group that contains the keyspace with the given ID.
 func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
+	ctx context.Context,
 	keyspaceID uint32,
 ) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
 	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err :=
-		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID)
+		kgm.getKeyspaceGroupMetaWithCheck(ctx, keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
 		return nil, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err
 	}
@@ -1093,7 +1125,7 @@ func (kgm *KeyspaceGroupManager) GetMember(
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
-	allocator, _, _, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
+	allocator, _, _, _, err := kgm.getKeyspaceGroupMetaWithCheck(kgm.ctx, keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -1151,7 +1183,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return pdpb.Timestamp{}, keyspaceGroupID, err
 	}
-	allocator, _, curKeyspaceGroupID, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
+	allocator, _, curKeyspaceGroupID, _, err := kgm.getKeyspaceGroupMetaWithCheck(ctx, keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
