@@ -17,6 +17,7 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -477,6 +478,8 @@ type LoopWatcher struct {
 	// reconcileDeletedKeys indicates whether a full load should delete keys that
 	// existed in the previous successfully applied state but not in the snapshot.
 	reconcileDeletedKeys bool
+	// additionalDeleteKeys returns keys still tracked by the consumer after a watch deletion.
+	additionalDeleteKeys func() []string
 	// loadedKeys tracks successfully applied keys only when reconcileDeletedKeys is enabled.
 	loadedKeys map[string]struct{}
 }
@@ -947,7 +950,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 			if !resp.More {
 				if callbackErr == nil {
-					reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
+					reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys, snapshotRevision)
 				}
 				loadCompleted = true
 				return snapshotRevision + 1, callbackErr
@@ -985,24 +988,32 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	}
 }
 
-func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) ([]string, error) {
+func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}, revision int64) ([]string, error) {
 	if !lw.reconcileDeletedKeys {
 		return nil, nil
 	}
+	trackedKeys := lw.loadedKeys
+	if lw.additionalDeleteKeys != nil {
+		if keys := lw.additionalDeleteKeys(); len(keys) > 0 {
+			trackedKeys = maps.Clone(trackedKeys)
+			for _, key := range keys {
+				trackedKeys[key] = struct{}{}
+			}
+		}
+	}
 	var firstErr error
 	var reconciledDeletedKeys []string
-	for key := range lw.loadedKeys {
+	for key := range trackedKeys {
 		if _, ok := snapshotKeys[key]; ok {
 			continue
 		}
-		kv := &mvccpb.KeyValue{Key: []byte(key)}
+		kv := &mvccpb.KeyValue{Key: []byte(key), ModRevision: revision}
 		if err := lw.deleteFn(kv); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
 			log.Warn("delete failed in watch loop when reconciling loaded keys",
-				zap.String("name", lw.name), zap.String("watch-key", lw.key),
-				zap.String("key", key), zap.Error(err))
+				zap.String("name", lw.name), zap.String("key", key), zap.Error(err))
 			continue
 		}
 		reconciledDeletedKeys = append(reconciledDeletedKeys, key)
@@ -1145,4 +1156,10 @@ func (lw *LoopWatcher) SetReconcileDeletedKeys() {
 	lw.reconcileDeletedKeys = true
 	lw.loadedKeys = make(map[string]struct{})
 	lw.reloadOnCompaction = true
+}
+
+// SetAdditionalDeleteKeys adds keys to full-snapshot deletion reconciliation.
+// Call it with SetReconcileDeletedKeys before starting the watch loop.
+func (lw *LoopWatcher) SetAdditionalDeleteKeys(keys func() []string) {
+	lw.additionalDeleteKeys = keys
 }

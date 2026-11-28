@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,9 +34,12 @@ func TestTargetWriterFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, wantError string
 		status                int
+		written               []string
 	}{
 		{name: "not found", status: http.StatusNotFound, body: "404 page not found", wantError: "404 Not Found 404 page not found"},
 		{name: "internal error", status: http.StatusInternalServerError, body: "rejected", wantError: "500 Internal Server Error rejected"},
+		{name: "unavailable", status: http.StatusServiceUnavailable, body: "rejected", wantError: "503 Service Unavailable rejected"},
+		{name: "partial commit", status: http.StatusInternalServerError, body: `{"written_group_ids":["g"],"error":"transaction failed"}`, wantError: "500 Internal Server Error", written: []string{"g"}},
 		{name: "invalid response", status: http.StatusOK, body: "invalid JSON", wantError: "decode affinity group targets response"},
 		{name: "timeout", wantError: "context deadline exceeded"},
 		{name: "unreachable", wantError: "connect"},
@@ -72,15 +76,33 @@ func TestTargetWriterFailures(t *testing.T) {
 			if tc.name == "canceled" {
 				cancel()
 			}
-			written, err := writer.WriteGroupTargets(ctx, []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}})
+			result, err := writer.WriteGroupTargets(ctx, []affinity.GroupTarget{{Expected: affinity.Group{ID: "g"}, LeaderStoreID: 1, VoterStoreIDs: []uint64{1}}})
 			re.ErrorContains(err, tc.wantError)
-			re.Empty(written)
+			re.Equal(tc.written, result.WrittenGroupIDs)
 			re.Equal(1, failures)
 			re.Equal(tc.name == "no leader", errors.Is(err, affinity.ErrTargetWriterNotReady))
-			re.Equal(tc.status == http.StatusNotFound, errors.Is(err, affinity.ErrTargetWriterUnsupported))
 			if tc.name == "no leader" {
 				re.Zero(requests.Load())
 			}
 		})
+	}
+}
+
+type targetTransport func(*http.Request) (*http.Response, error)
+
+func (f targetTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestTargetWriterBatchTimeout(t *testing.T) {
+	for _, size := range []int{1, 120} {
+		client := &http.Client{Transport: targetTransport(func(r *http.Request) (*http.Response, error) {
+			deadline, ok := r.Context().Deadline()
+			require.True(t, ok)
+			require.WithinDuration(t, time.Now().Add(writeTimeout), deadline, time.Second)
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"written_group_ids":["g"]}`))}, nil
+		})}
+		writer := NewTargetWriter(client, func() (string, error) { return "http://pd", nil }, func() { t.Fatal("unexpected write failure") })
+		result, err := writer.WriteGroupTargets(t.Context(), make([]affinity.GroupTarget, size))
+		require.NoError(t, err)
+		require.Equal(t, []string{"g"}, result.WrittenGroupIDs)
 	}
 }

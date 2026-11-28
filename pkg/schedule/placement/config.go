@@ -198,6 +198,10 @@ func (p *RuleConfigPatch) trim() {
 	}
 }
 
+func (p *RuleConfigPatch) hasChanges() bool {
+	return len(p.mut.rules) != 0 || len(p.mut.groups) != 0
+}
+
 // merge all mutations to ruleConfig.
 func (p *RuleConfigPatch) commit() {
 	for key, rule := range p.mut.rules {

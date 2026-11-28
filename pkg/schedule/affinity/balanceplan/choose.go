@@ -15,8 +15,6 @@
 package balanceplan
 
 import (
-	"cmp"
-	"encoding/binary"
 	"slices"
 )
 
@@ -88,41 +86,33 @@ type solution struct {
 	leader        int
 }
 
-// Bounds for one rule search. Directed repairs share the node bound but each
-// fixed target has its own assignment-step budget.
+// Bounds for one rule search.
 const (
 	maxSearchNodes = 64
 	maxAssignSteps = 1024
 )
 
-// ruleSearch counts the work of a rule search and records any cutoff.
+// ruleSearch counts the work of a rule search.
 type ruleSearch struct {
 	p            *planner
 	nodes, steps int
-	limited      bool
 }
 
 func (rs *ruleSearch) done() bool {
-	if rs.nodes >= maxSearchNodes || rs.steps >= maxAssignSteps || rs.p.stopped() {
-		rs.limited = true
-		return true
-	}
-	return false
+	return rs.nodes >= maxSearchNodes || rs.steps >= maxAssignSteps || rs.p.stopped()
 }
 
-// choose collects improving complete rule assignments before checking or
-// repairing any of them. Without CheckTarget, a search within its bounds is
-// exact. Counts must already exclude the group's working target.
+// choose keeps the lowest-cost complete rule assignment if it improves the
+// current target. Counts must already exclude the group's working target.
 func (p *planner) choose(g *groupState) (voters, rules []int, leader int, ok bool) {
-	current := solution{voters: g.cur, rules: g.curRule, leader: g.lead}
+	best := solution{voters: g.cur, rules: g.curRule, leader: g.lead}
 	for _, s := range g.cur {
-		current.c = current.c.add(p.costOf(g, s, s == g.lead))
+		best.c = best.c.add(p.costOf(g, s, s == g.lead))
 	}
-	var leaves []solution
 	collect := func(sol solution) {
-		current.ok = true
-		if sol.c.cmp(current.c) < 0 {
-			leaves = append(leaves, sol)
+		best.ok = true
+		if sol.c.cmp(best.c) < 0 {
+			best = sol
 		}
 	}
 	var forced []int
@@ -142,9 +132,9 @@ func (p *planner) choose(g *groupState) (voters, rules []int, leader int, ok boo
 		if rs.done() {
 			break
 		}
-		p.assignForced(g, forced, make([][]int, len(g.Rules)), &rs, func(must [][]int) bool {
+		p.assignForced(g, forced, make([][]int, len(g.Rules)), &rs, func(must [][]int) {
 			if g.LeaderPinned && !slices.Contains(must[host], g.Leader) {
-				return false
+				return
 			}
 			forbid := make([][]int, len(g.Rules))
 			for ri := range g.Rules {
@@ -155,16 +145,7 @@ func (p *planner) choose(g *groupState) (voters, rules []int, leader int, ok boo
 				}
 			}
 			p.searchRules(g, host, must, forbid, make([]choice, len(g.Rules)), &rs, collect)
-			return false
 		})
-	}
-	if len(leaves) == 0 {
-		return current.voters, current.rules, current.leader, current.ok
-	}
-	slices.SortStableFunc(leaves, func(a, b solution) int { return a.c.cmp(b.c) })
-	best := leaves[0]
-	if g.CheckTarget != nil {
-		best = p.repairTargets(g, leaves, current.c, &rs)
 	}
 	return best.voters, best.rules, best.leader, best.ok
 }
@@ -173,10 +154,13 @@ func (p *planner) choose(g *groupState) (voters, rules []int, leader int, ok boo
 // that accept them, within each rule's count, until the search is cut off.
 // Every store tries its current rule first. The callback borrows must until
 // it returns, when backtracking can reuse the per-rule slices.
-func (p *planner) assignForced(g *groupState, forced []int, must [][]int, rs *ruleSearch, f func([][]int) bool) bool {
+func (p *planner) assignForced(g *groupState, forced []int, must [][]int, rs *ruleSearch, f func([][]int)) {
 	rs.steps++
 	if len(forced) == 0 {
-		return !rs.done() && f(must)
+		if !rs.done() {
+			f(must)
+		}
+		return
 	}
 	s := forced[0]
 	current := 0
@@ -186,20 +170,16 @@ func (p *planner) assignForced(g *groupState, forced []int, must [][]int, rs *ru
 	for i := range g.Rules {
 		ri := (current + i) % len(g.Rules)
 		if rs.done() {
-			return false
+			return
 		}
 		p.work++
 		if len(must[ri]) >= g.Rules[ri].Count || !p.accepts(g, ri, s) {
 			continue
 		}
 		must[ri] = append(must[ri], s)
-		ok := p.assignForced(g, forced[1:], must, rs, f)
+		p.assignForced(g, forced[1:], must, rs, f)
 		must[ri] = must[ri][:len(must[ri])-1]
-		if ok {
-			return true
-		}
 	}
-	return false
 }
 
 // accepts reports whether s is a candidate of rule ri for g.
@@ -273,236 +253,9 @@ func combine(sels []choice) solution {
 	return sol
 }
 
-// repairTargets checks every collected leaf before spending the remaining
-// bounds on repairs. Each physical target is checked once per choice.
-func (p *planner) repairTargets(g *groupState, leaves []solution, current cost, rs *ruleSearch) solution {
-	type rejected struct {
-		sol      solution
-		feedback TargetFeedback
-		repairs  []repair
-	}
-	var queue []rejected
-	var checked [][]int
-	var targetRejected bool
-	// A check can finish the search by accepting a target or observing a stop.
-	check := func(sol solution) (solution, bool) {
-		key := slices.Clone(sol.voters)
-		slices.Sort(key)
-		key = append(key, sol.leader)
-		if slices.ContainsFunc(checked, func(k []int) bool { return slices.Equal(key, k) }) {
-			return solution{}, false
-		}
-		if p.stopped() {
-			p.placementLimited = p.placementLimited || targetRejected
-			return solution{}, true
-		}
-		checked = append(checked, key)
-		feedback := p.runTargetCheck(g, sol.voters, sol.leader)
-		switch feedback.Status {
-		case TargetSatisfied:
-			if sol.c.cmp(current) < 0 {
-				return sol, true
-			}
-		case TargetRejected:
-			targetRejected = true
-			if len(feedback.Replace) > 0 {
-				queue = append(queue, rejected{sol: sol, feedback: feedback})
-			}
-		}
-		return solution{}, false
-	}
-	for _, sol := range leaves {
-		if result, done := check(sol); done {
-			return result
-		}
-	}
-	// A cutoff while collecting leaves may hide alternatives even without repairs.
-	if rs.limited && targetRejected {
-		p.placementLimited = true
-		return solution{}
-	}
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-		if node.repairs == nil {
-			node.repairs = p.repairs(g, node.sol, node.feedback)
-		}
-		// Let children take a second step without letting a deep rejected
-		// chain or one wide parent consume every remaining node.
-		for range min(4, len(node.repairs)) {
-			if rs.done() {
-				p.placementLimited = true
-				return solution{}
-			}
-			replacement := node.repairs[0]
-			node.repairs = node.repairs[1:]
-			voters := slices.Clone(node.sol.voters)
-			voters[slices.Index(voters, replacement.old)] = replacement.next
-			rs.nodes++
-			candidate := p.assignTarget(g, voters, rs)
-			if candidate.ok {
-				if result, done := check(candidate); done {
-					return result
-				}
-			}
-		}
-		if len(node.repairs) > 0 {
-			queue = append(queue, node)
-		}
-	}
-	return solution{}
-}
-
-type repair struct {
-	old, next int
-	delta     cost
-}
-
-// repairs orders the cheapest representative of each (old store, domain
-// signature) before the rest. Same-domain alternatives remain reachable.
-func (p *planner) repairs(g *groupState, sol solution, feedback TargetFeedback) []repair {
-	var repairs []repair
-	seen := make(map[[2]int]bool)
-	for _, replacement := range feedback.Replace {
-		if !slices.Contains(sol.voters, replacement.Old) || g.isForced(replacement.Old) {
-			continue
-		}
-		for _, next := range replacement.Candidates {
-			if p.stopped() {
-				p.placementLimited = true
-				return nil
-			}
-			p.work++
-			key := [2]int{replacement.Old, next}
-			if next < 0 || next >= p.n || slices.Contains(sol.voters, next) || slices.Contains(g.Exclude, next) || seen[key] {
-				continue
-			}
-			seen[key] = true
-			leader := replacement.Old == sol.leader
-			repairs = append(repairs, repair{replacement.Old, next, p.costOf(g, next, leader).sub(p.costOf(g, replacement.Old, leader))})
-		}
-	}
-	slices.SortFunc(repairs, func(a, b repair) int {
-		return cmp.Or(a.delta.cmp(b.delta), cmp.Compare(a.old, b.old), cmp.Compare(a.next, b.next))
-	})
-	var primary, secondary []repair
-	domains := make(map[string]bool)
-	for _, r := range repairs {
-		key := binary.AppendVarint(nil, int64(r.old))
-		for ri, rule := range g.Rules {
-			domain := int64(-1) // Stores outside this rule share a separate class.
-			if p.accepts(g, ri, r.next) {
-				domain = 0 // No differing location level means one domain.
-				if rule.level < rule.depth() {
-					domain = int64(rule.domainOf[r.next])
-				}
-			}
-			key = binary.AppendVarint(key, domain)
-		}
-		if domains[string(key)] {
-			secondary = append(secondary, r)
-		} else {
-			domains[string(key)] = true
-			primary = append(primary, r)
-		}
-	}
-	return append(primary, secondary...)
-}
-
-// assignTarget reuses the bounded rule assignment for a fixed physical target.
-// The checker's fitted rule need not be the planner's previous assignment.
-func (p *planner) assignTarget(g *groupState, voters []int, rs *ruleSearch) solution {
-	if p.stopped() {
-		p.placementLimited = true
-		return solution{}
-	}
-	hosts := p.leaderHosts(g)
-	if len(hosts) == 0 {
-		return solution{}
-	}
-	// Charge one repair attempt to the caller; its internal assignments cannot
-	// exhaust the step budget needed to reach subsequent repair candidates.
-	rs.steps++
-	if len(g.Rules) > 1 {
-		// Try the least flexible voters first. A voter with no matching rule
-		// rules out the whole target before any assignments are enumerated.
-		type voterRules struct{ store, count int }
-		order := make([]voterRules, len(voters))
-		for i, s := range voters {
-			order[i].store = s
-			for ri := range g.Rules {
-				if p.stopped() {
-					p.placementLimited = true
-					return solution{}
-				}
-				p.work++
-				if p.accepts(g, ri, s) {
-					order[i].count++
-				}
-			}
-			if order[i].count == 0 {
-				return solution{}
-			}
-		}
-		slices.SortStableFunc(order, func(a, b voterRules) int { return cmp.Compare(a.count, b.count) })
-		voters = make([]int, len(order))
-		for i, v := range order {
-			voters[i] = v.store
-		}
-	}
-	local := &ruleSearch{p: p}
-	var best solution
-	assignments := 0
-	p.assignForced(g, voters, make([][]int, len(g.Rules)), local, func(must [][]int) bool {
-		if p.stopped() {
-			p.placementLimited = true
-			return true
-		}
-		sels := make([]choice, len(g.Rules))
-		for ri := range g.Rules {
-			c, ok := p.pickRule(g, ri, must[ri], nil, false)
-			if !ok {
-				return false
-			}
-			sels[ri] = c
-		}
-		if assignments >= maxSearchNodes {
-			p.placementLimited = true
-			return true
-		}
-		assignments++
-		for _, host := range hosts {
-			if p.stopped() {
-				p.placementLimited = true
-				return true
-			}
-			if g.LeaderPinned && !slices.Contains(must[host], g.Leader) {
-				continue
-			}
-			leadChoice, ok := p.pickRule(g, host, must[host], nil, true)
-			if !ok {
-				continue
-			}
-			base := sels[host]
-			sels[host] = leadChoice
-			sol := combine(sels)
-			sels[host] = base
-			if !best.ok || sol.c.cmp(best.c) < 0 {
-				best = sol
-			}
-		}
-		return false
-	})
-	if local.limited {
-		p.placementLimited = true
-	}
-	return best
-}
-
 // pickRule selects one rule's stores, with the leader when host is set. The
 // selection must reach the rule's best isolation over all its candidates.
-// This does not enforce PD's best-location check across rules with the same
-// role; the caller can supply Group.CheckTarget for that. Competing rules may
+// The caller validates PD's best location across rules with the same role. Competing rules may
 // have no complete target that meets their independent optima; visit then
 // keeps voters and only picks a leader.
 func (p *planner) pickRule(g *groupState, ri int, must, forbid []int, host bool) (choice, bool) {

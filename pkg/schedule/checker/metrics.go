@@ -14,7 +14,11 @@
 
 package checker
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 var (
 	checkerCounter = prometheus.NewCounterVec(
@@ -86,12 +90,46 @@ var (
 			Name:      "split_scatter_pending",
 			Help:      "Number of split-scatter pending entries.",
 		})
+	affinityBalancePlanCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "affinity_balance_plan_total",
+			Help:      "Counter of affinity table balance steps by result, or disabled ticks with registered tables.",
+		}, []string{"result"})
+	affinityBalanceDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "affinity_balance_duration_seconds",
+			Help:      "Duration of an affinity table balance step.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 16),
+		})
+)
+
+const (
+	affinityBalanceWritten       = "written"
+	affinityBalanceNoImprovement = "no_improvement"
+	affinityBalanceBlocked       = "blocked"
+	affinityBalanceRejected      = "rejected"
+	affinityBalanceCreating      = "creating"
+	affinityBalanceError         = "error"
+	affinityBalanceDisabled      = "disabled"
 )
 
 // WithLabelValues is a heavy operation, pre-cache the label handles.
 var (
 	splitScatterPendingExpiredAttemptedCounter   = splitScatterPendingExpiredCounter.WithLabelValues("true")
 	splitScatterPendingExpiredUnattemptedCounter = splitScatterPendingExpiredCounter.WithLabelValues("false")
+	affinityBalancePlanCounters                  = map[string]prometheus.Counter{
+		affinityBalanceWritten:       affinityBalancePlanCounter.WithLabelValues(affinityBalanceWritten),
+		affinityBalanceNoImprovement: affinityBalancePlanCounter.WithLabelValues(affinityBalanceNoImprovement),
+		affinityBalanceBlocked:       affinityBalancePlanCounter.WithLabelValues(affinityBalanceBlocked),
+		affinityBalanceRejected:      affinityBalancePlanCounter.WithLabelValues(affinityBalanceRejected),
+		affinityBalanceCreating:      affinityBalancePlanCounter.WithLabelValues(affinityBalanceCreating),
+		affinityBalanceError:         affinityBalancePlanCounter.WithLabelValues(affinityBalanceError),
+		affinityBalanceDisabled:      affinityBalancePlanCounter.WithLabelValues(affinityBalanceDisabled),
+	}
 )
 
 func init() {
@@ -104,6 +142,16 @@ func init() {
 	prometheus.MustRegister(splitScatterPendingExpiredCounter)
 	prometheus.MustRegister(splitScatterPendingDroppedCounter)
 	prometheus.MustRegister(splitScatterPendingGauge)
+	prometheus.MustRegister(affinityBalancePlanCounter)
+	prometheus.MustRegister(affinityBalanceDuration)
+}
+
+func recordAffinityBalanceStepMetrics(result string, duration time.Duration) {
+	// Tables that disappeared or became ineligible before planning have no result.
+	if counter := affinityBalancePlanCounters[result]; counter != nil {
+		counter.Inc()
+		affinityBalanceDuration.Observe(duration.Seconds())
+	}
 }
 
 const (
@@ -306,6 +354,8 @@ var (
 	affinityCheckerLearnerMoveCounter             = checkerCounter.WithLabelValues(affinityChecker, "learner-move")
 	affinityCheckerLearnerPeerConflictCounter     = checkerCounter.WithLabelValues(affinityChecker, "learner-peer-conflict")
 	affinityCheckerSplitTimeoutCounter            = checkerCounter.WithLabelValues(affinityChecker, "split-timeout-fallback")
+	affinityCheckerTargetStoreRejectedCounter     = checkerCounter.WithLabelValues(affinityChecker, "target-store-rejected")
+	affinityCheckerTargetStoreBlockedCounter      = checkerCounter.WithLabelValues(affinityChecker, "target-store-blocked")
 
 	// Affinity merge checker metrics
 	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")

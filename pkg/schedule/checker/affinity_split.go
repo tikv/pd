@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -215,9 +214,8 @@ func (c *AffinityChecker) pruneSplitAttempts(now time.Time) {
 // prepareAffinityPeerMove lets NextGen moves proceed because their snapshots
 // reference shared files. On Classic, a move that adds a peer waits for size
 // statistics or requests a SCAN split if the Region exceeds TiKV's split
-// thresholds. Without joint consensus, demoting a voter also adds a peer by
-// removing and recreating it. Each child is checked after its heartbeat reports
-// it. A move can proceed after the wait times out and the cooldown has passed.
+// thresholds. Each child is checked after its heartbeat reports it. A move
+// can proceed after the wait times out and the cooldown has passed.
 // Attempts are scoped to a Region version and target voters. When capacity
 // is full, Regions can wait for a slot in the bounded FIFO queue.
 func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group *affinity.GroupState,
@@ -249,11 +247,9 @@ func (c *AffinityChecker) prepareAffinityPeerMove(region *core.RegionInfo, group
 		return nil, nil, false
 	}
 
-	useJointConsensus := versioninfo.IsFeatureSupported(c.conf.GetClusterVersion(), versioninfo.ConfChangeV2) && c.conf.IsUseJointConsensus()
 	addsPeer := false
-	for storeID, role := range roles {
-		peer := region.GetStorePeer(storeID)
-		if peer == nil || (!useJointConsensus && role == placement.Learner && !core.IsLearner(peer)) {
+	for storeID := range roles {
+		if region.GetStorePeer(storeID) == nil {
 			addsPeer = true
 			break
 		}

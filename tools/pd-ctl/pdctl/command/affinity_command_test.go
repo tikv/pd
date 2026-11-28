@@ -86,7 +86,7 @@ func TestAffinityRangeShowMissingLabelRule(t *testing.T) {
 }
 
 func TestAffinityCommandsRejectPositionalArgs(t *testing.T) {
-	for _, args := range [][]string{{"show"}, {"create"}, {"delete"}, {"update"}, {"range", "show"}, {"range", "add"}, {"range", "remove"}} {
+	for _, args := range [][]string{{"show"}, {"create"}, {"delete"}, {"update"}, {"policy"}, {"range", "show"}, {"range", "add"}, {"range", "remove"}} {
 		t.Run(args[len(args)-1], func(t *testing.T) {
 			re := require.New(t)
 			cmd := NewAffinityCommand()
@@ -221,6 +221,11 @@ func (c *affinityTestClient) UpdateAffinityGroupPeers(_ context.Context, groupID
 	return &pd.AffinityGroupState{ID: groupID}, nil
 }
 
+func (c *affinityTestClient) UpdateAffinityGroupPolicy(_ context.Context, groupID string, _ string) (*pd.AffinityGroupState, error) {
+	c.calledID = groupID
+	return &pd.AffinityGroupState{ID: groupID}, nil
+}
+
 func TestAffinityCreateTiDBTableGroupRepairGuidance(t *testing.T) {
 	previous := PDCli
 	t.Cleanup(func() { PDCli = previous })
@@ -273,6 +278,7 @@ func TestAffinityStructuredSelectorValidation(t *testing.T) {
 		{"range_remove_table", []string{"range", "remove", "--table-id", "9001", "--force", "--range", sampleRange}, "_tidb_t_9001"},
 		{"range_remove_partition", []string{"range", "remove", "--table-id", "9001", "--partition-id", "9002", "--force", "--range", sampleRange}, "_tidb_pt_9001_p9002"},
 		{"create_keyspace_table", []string{"create", "--table-id", "9001", "--keyspace-id", "1"}, "_tidb_ks1_t_9001"},
+		{"policy_keyspace_table", []string{"policy", "--table-id", "9001", "--keyspace-id", "1", "--balance-policy", "fixed"}, "_tidb_ks1_t_9001"},
 		{"range_add_keyspace_table", []string{"range", "add", "--table-id", "9001", "--keyspace-id", "1", "--force", "--range", sampleRange}, "_tidb_ks1_t_9001"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -283,7 +289,7 @@ func TestAffinityStructuredSelectorValidation(t *testing.T) {
 		})
 	}
 
-	// Create, update, and range add require --keyspace-id in NextGen.
+	// Create, update, policy, and range add require --keyspace-id in NextGen.
 	for _, tc := range []struct {
 		name   string
 		args   []string
@@ -293,6 +299,8 @@ func TestAffinityStructuredSelectorValidation(t *testing.T) {
 		{"create_unscoped_partition", []string{"create", "--table-id", "9001", "--partition-id", "9002"}, "_tidb_pt_9001_p9002"},
 		{"range_add_unscoped_table", []string{"range", "add", "--table-id", "9001", "--force", "--range", sampleRange}, "_tidb_t_9001"},
 		{"update_unscoped_table", []string{"update", "--table-id", "9001", "--leader", "1", "--voters", "1,2,3"}, "_tidb_t_9001"},
+		{"policy_unscoped_table", []string{"policy", "--table-id", "9001", "--balance-policy", "fixed"}, "_tidb_t_9001"},
+		{"policy_legacy_group_id", []string{"policy", "--group-id", "_tidb_t_9001", "--balance-policy", "fixed"}, "_tidb_t_9001"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)

@@ -30,7 +30,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "affinity",
 			Name:      "target_write_failures_total",
-			Help:      "Number of failed or skipped first-win target writes from scheduling to PD.",
+			Help:      "Counter of failed remote affinity target writes.",
 		})
 )
 
