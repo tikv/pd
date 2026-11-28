@@ -116,15 +116,16 @@ func calcGroupAvailability(
 	return worstCondition.groupAvailability()
 }
 
-// ObserveAvailableRegion uses a healthy region's peer distribution to update an
-// affinity target if the observed group instance, version, and revision are still current.
+// ObserveAvailableRegion uses a healthy region's peer distribution to recover
+// or update an affinity target if the observed group instance, version, and
+// revision are still current.
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// In the future, we may want to use a more sophisticated strategy rather than first-win.
 	if group == nil {
 		return
 	}
-	if group.AffinitySchedulingAllowed && (!group.targetUnpersisted || !group.isRegionAffinity(region)) {
+	if group.AffinitySchedulingAllowed {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()

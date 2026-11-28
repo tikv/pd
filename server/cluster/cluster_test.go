@@ -58,6 +58,7 @@ import (
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -6269,6 +6270,79 @@ func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream)
 		res := stream.Recv()
 		return res == nil
 	})
+}
+
+// affinityLimitBlocker blocks the first read of the affinity schedule limit.
+// Without Regions, only the affinity balancer reads it.
+type affinityLimitBlocker struct {
+	sc.CheckerConfigProvider
+	once             sync.Once
+	entered, release chan struct{}
+}
+
+func (c *affinityLimitBlocker) GetAffinityScheduleLimit() uint64 {
+	c.once.Do(func() {
+		close(c.entered)
+		<-c.release
+	})
+	return c.CheckerConfigProvider.GetAffinityScheduleLimit()
+}
+
+type affinityLimitCluster struct {
+	*RaftCluster
+	limit *affinityLimitBlocker
+}
+
+func (c *affinityLimitCluster) GetCheckerConfig() sc.CheckerConfigProvider { return c.limit }
+
+// TestSchedulingCoordinatorAndAffinityBalancerLifecycle checks that taking
+// scheduling jobs back cancels the inactive coordinator and that stopping
+// scheduling jobs waits for the affinity balancer before re-election.
+func TestSchedulingCoordinatorAndAffinityBalancerLifecycle(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.regionLabeler, err = labeler.NewRegionLabeler(ctx, cluster.storage, 5*time.Second)
+	re.NoError(err)
+	cluster.affinityManager, err = affinity.NewManager(ctx, cluster.storage, cluster, cluster.GetOpts(), cluster.regionLabeler)
+	re.NoError(err)
+	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, cluster.BasicCluster, false)
+	t.Cleanup(hbStreams.Close)
+
+	cluster.initCoordinator(cluster.ctx, cluster, hbStreams)
+	inactive := cluster.GetCoordinator()
+
+	limit := &affinityLimitBlocker{
+		CheckerConfigProvider: cluster.GetCheckerConfig(),
+		entered:               make(chan struct{}),
+		release:               make(chan struct{}),
+	}
+	release := sync.OnceFunc(func() { close(limit.release) })
+	defer release()
+	cluster.startSchedulingJobs(&affinityLimitCluster{RaftCluster: cluster, limit: limit}, hbStreams)
+	re.NotSame(inactive, cluster.GetCoordinator())
+	re.ErrorIs(inactive.GetOperatorController().Ctx().Err(), context.Canceled)
+
+	select {
+	case <-limit.entered:
+	case <-time.After(10 * time.Second):
+		re.FailNow("the affinity balancer did not run")
+	}
+
+	stopped := make(chan bool, 1)
+	go func() {
+		stopped <- cluster.stopSchedulingJobs()
+	}()
+	select {
+	case <-stopped:
+		re.FailNow("the scheduling jobs stopped while the affinity balancer was running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	re.True(<-stopped)
+	re.NoError(cluster.InitCluster(cluster.id, cluster.opt, nil, nil))
 }
 
 func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {

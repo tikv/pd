@@ -577,11 +577,16 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		affinityRuleIDs = affinityRuleIDs[:0]
 		return nil
 	}
+	var deleteFn func(*mvccpb.KeyValue) error
 	putFn := func(kv *mvccpb.KeyValue) error {
 		log.Debug("update region label rule", zap.String("key", string(kv.Key)), logutil.ZapRedactByteString("value", kv.Value))
-		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
+		rule, err := labeler.LoadLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			return err
+		}
+		if rule == nil {
+			// Etcd can retain expired rules until PD's label GC runs.
+			return deleteFn(kv)
 		}
 		err = rw.regionLabeler.SetLabelRuleLocked(rule)
 		if err == nil {
@@ -595,7 +600,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		}
 		return err
 	}
-	deleteFn := func(kv *mvccpb.KeyValue) error {
+	deleteFn = func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Debug("delete region label rule", zap.String("key", key))
 		id := strings.TrimPrefix(key, rw.regionLabelPathPrefix)

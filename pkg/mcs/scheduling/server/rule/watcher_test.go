@@ -69,6 +69,60 @@ func TestLoadLargeRules(t *testing.T) {
 	runWatcherLoadLabelRule(ctx, re, client, fixture.checkerController)
 }
 
+func TestRegionLabelWatcherEvictsExpiredRule(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	fixture := newRuleWatcherTestFixture(ctx, t)
+	regionLabeler := fixture.cluster.GetRegionLabeler()
+	watchCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                   watchCtx,
+		cancel:                cancel,
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
+		etcdClient:            client,
+		checkerController:     fixture.checkerController,
+		regionLabeler:         regionLabeler,
+	}
+	defer rw.Close()
+
+	putRule := func(id, start, end, startAt string) {
+		rule := &labeler.LabelRule{
+			ID:       id,
+			Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny", TTL: "1h", StartAt: startAt}},
+			RuleType: labeler.KeyRange,
+			Data:     labeler.MakeKeyRanges(start, end),
+		}
+		value, err := json.Marshal(rule)
+		re.NoError(err)
+		_, err = client.Put(ctx, keypath.RegionLabelKeyPath(id), string(value))
+		re.NoError(err)
+	}
+	now := time.Now().Format(time.UnixDate)
+	expired := time.Now().Add(-2 * time.Hour).Format(time.UnixDate)
+	// The expired rule sorts before the valid rules in the initial snapshot.
+	putRule("already-expired", "01", "02", expired)
+	putRule("affinity_group_extra", "03", "04", now)
+	putRule("updated", "05", "06", now)
+	re.NoError(rw.initializeRegionLabelWatcher())
+	re.Nil(regionLabeler.GetLabelRule("already-expired"))
+	re.NotNil(regionLabeler.GetLabelRule("affinity_group_extra"))
+	re.NotNil(regionLabeler.GetLabelRule("updated"))
+
+	putRule("updated", "05", "06", expired)
+	testutil.Eventually(re, func() bool {
+		return regionLabeler.GetLabelRule("updated") == nil
+	})
+	re.Empty(regionLabeler.GetSplitKeys([]byte{0x04}, []byte{0x07}))
+	re.NotNil(regionLabeler.GetLabelRule("affinity_group_extra"))
+	for _, id := range []string{"already-expired", "updated"} {
+		resp, err := client.Get(ctx, keypath.RegionLabelKeyPath(id))
+		re.NoError(err)
+		re.Len(resp.Kvs, 1)
+	}
+}
+
 func TestRegionLabelWatcherReloadsAfterCompaction(t *testing.T) {
 	re := require.New(t)
 	ctx, client, clean := prepare(t, false)
@@ -111,16 +165,21 @@ func TestRegionLabelWatcherReloadsAfterCompaction(t *testing.T) {
 	}
 	keepRule := makeRule("compaction-keep", "1234", "5678")
 	deleteRule := makeRule("compaction-delete", "9abc", "def0")
+	expireRule := makeRule("compaction-expire", "def0", "ffff")
 	putRule(keepRule)
 	putRule(deleteRule)
+	putRule(expireRule)
 	re.NoError(rw.initializeRegionLabelWatcher())
-	re.Len(regionLabeler.GetAllLabelRules(), 2)
+	re.Len(regionLabeler.GetAllLabelRules(), 3)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
 	failpointEnabled = true
 
 	updatedKeepRule := makeRule(keepRule.ID, "1234", "5678", "9abc", "def0")
 	putRule(updatedKeepRule)
+	expireRule.Labels[0].TTL = "1h"
+	expireRule.Labels[0].StartAt = time.Now().Add(-2 * time.Hour).Format(time.UnixDate)
+	putRule(expireRule)
 	deleteResp, err := client.Delete(ctx, keypath.RegionLabelKeyPath(deleteRule.ID))
 	re.NoError(err)
 	_, err = client.Compact(ctx, deleteResp.Header.Revision)
@@ -129,7 +188,8 @@ func TestRegionLabelWatcherReloadsAfterCompaction(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		rw.labelWatcher.ForceLoad()
 		updated := regionLabeler.GetLabelRule(keepRule.ID)
-		return updated != nil && len(updated.GetKeyRanges()) == 2 && regionLabeler.GetLabelRule(deleteRule.ID) == nil
+		return updated != nil && len(updated.GetKeyRanges()) == 2 &&
+			regionLabeler.GetLabelRule(deleteRule.ID) == nil && regionLabeler.GetLabelRule(expireRule.ID) == nil
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
 	failpointEnabled = false

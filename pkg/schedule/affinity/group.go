@@ -107,6 +107,13 @@ type Group struct {
 	LeaderStoreID uint64 `json:"leader_store_id,omitempty"`
 	// VoterStoreIDs indicates which stores Voters should be on.
 	VoterStoreIDs []uint64 `json:"voter_store_ids,omitempty"`
+	// BalancePolicy controls whether balancing or first-win may change the target.
+	// An empty value is treated as auto for backward compatibility.
+	BalancePolicy BalancePolicy `json:"balance_policy,omitempty"`
+}
+
+func (g *Group) hasTarget() bool {
+	return g.LeaderStoreID != 0 || len(g.VoterStoreIDs) > 0
 }
 
 func (g *Group) String() string {
@@ -134,19 +141,11 @@ type GroupState struct {
 	// affinityVer is used to mark the version of the cache.
 	affinityVer uint64
 	// modRevision is the watched group-key revision when this state was read.
-	modRevision int64
-	// targetUnpersisted indicates that the active target only exists in memory
-	// and still needs to be persisted to PD.
-	targetUnpersisted bool
-	rangeConflict     bool
+	modRevision   int64
+	rangeConflict bool
 	// groupInfoPtr is a pointer to the original information.
 	// It is used for identity checks and the sender's per-instance cooldown.
 	groupInfoPtr *runtimeGroupInfo
-}
-
-// HasUnpersistedTarget reports whether the group holds a local target that has not been persisted yet.
-func (g *GroupState) HasUnpersistedTarget() bool {
-	return g != nil && g.targetUnpersisted
 }
 
 // MatchesTarget reports whether both states describe the same version and peer
@@ -191,9 +190,12 @@ type runtimeGroupInfo struct {
 	// Manager.RWMutex protects the confirmation, which stays set until
 	// metadata reconciliation even if availability or range changes advance AffinityVer.
 	lastSentWritten bool
-	// persistedGroup holds the last stored group while Group holds a local target.
-	// It is nil when Group itself holds the stored target.
-	persistedGroup *Group
+	// Block further writes at the stale revision until the watcher catches up.
+	lastSentPolicyMismatch bool
+	// confirmedRevision is the first etcd revision that can supersede a confirmed target.
+	confirmedRevision int64
+	// awaitingTarget suppresses scheduling while the current peers differ from the confirmed target.
+	awaitingTarget bool
 	// modRevision is the last watched etcd revision of this group's stored target.
 	modRevision int64
 	// Use GetAvailability, SetAvailability, and resetTargetAvailability to access availability
@@ -201,7 +203,7 @@ type runtimeGroupInfo struct {
 	availability groupAvailability
 	// degradedExpiredAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
 	degradedExpiredAt uint64
-	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
+	// AffinityVer tracks changes to Region affinity; policy-only updates preserve it.
 	AffinityVer uint64
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
 	AffinityRegionCount int
@@ -235,6 +237,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		CreateTimestamp:           g.CreateTimestamp,
 		LeaderStoreID:             g.LeaderStoreID,
 		VoterStoreIDs:             slices.Clone(g.VoterStoreIDs),
+		BalancePolicy:             g.BalancePolicy,
 		RegularSchedulingAllowed:  g.IsRegularSchedulingAllowed(),
 		AffinitySchedulingAllowed: affinitySchedulingAllowed,
 		Phase:                     phase,
@@ -243,17 +246,9 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 		AffinityRegionCount:       g.AffinityRegionCount,
 		affinityVer:               g.AffinityVer,
 		modRevision:               g.modRevision,
-		targetUnpersisted:         g.persistedGroup != nil,
 		rangeConflict:             g.rangeConflict,
 		groupInfoPtr:              g,
 	}
-}
-
-func (g *runtimeGroupInfo) storedGroup() Group {
-	if g.persistedGroup != nil {
-		return *g.persistedGroup
-	}
-	return g.Group
 }
 
 // IsAvailable indicates that the Group is currently in the groupAvailable status,
@@ -327,7 +322,7 @@ func newDegradedExpiredAtFromNow() uint64 {
 
 // IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
 func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
-	return !g.rangeConflict && g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
+	return !g.awaitingTarget && !g.rangeConflict && g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
 }
 
 // IsRegularSchedulingAllowed indicates whether balance scheduling is allowed.
@@ -352,6 +347,9 @@ func validateGroupStructure(g *Group) error {
 	if err := ValidateGroupID(g.ID); err != nil {
 		return err
 	}
+	if err := validateBalancePolicy(g.BalancePolicy); err != nil {
+		return err
+	}
 	// If no distribution is provided, we will use the default distribution.
 	if g.LeaderStoreID == 0 && len(g.VoterStoreIDs) == 0 {
 		return nil
@@ -371,10 +369,22 @@ func validateGroupStructure(g *Group) error {
 	return nil
 }
 
+func validateBalancePolicy(policy BalancePolicy) error {
+	switch policy {
+	case "", BalancePolicyAuto, BalancePolicyFixed:
+		return nil
+	default:
+		return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("invalid balance policy %q", policy))
+	}
+}
+
 // GroupKeyRanges represents key ranges with group id.
 type GroupKeyRanges struct {
 	KeyRanges []keyutil.KeyRange
 	GroupID   string
+	// InheritPolicyFrom copies the stored policy on creation, including unknown
+	// values. Missing sources use the default; existing groups keep their policy.
+	InheritPolicyFrom string
 }
 
 // ValidateGroupID checks the ID format and requires keyspace-aware TiDB IDs in NextGen.
@@ -385,18 +395,9 @@ func ValidateGroupID(id string) error {
 	return err
 }
 
-// ValidateExistingGroupID checks the character set and length of a stored group ID.
-// It permits IDs persisted before NextGen required keyspace-aware TiDB IDs.
-func ValidateExistingGroupID(id string) error {
-	if !idRegexp.MatchString(id) {
-		return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
-	}
-	return nil
-}
-
 func parseGroupID(id string) (uint32, bool, error) {
-	if err := ValidateExistingGroupID(id); err != nil {
-		return 0, false, err
+	if !idRegexp.MatchString(id) {
+		return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
 	}
 	if !kerneltype.IsNextGen() {
 		return 0, false, nil
@@ -425,10 +426,37 @@ func parseGroupID(id string) (uint32, bool, error) {
 	return uint32(keyspaceID), true, nil
 }
 
+// ValidateKeyRange checks the endpoints of a range in a create, add, or remove request.
+func ValidateKeyRange(groupID string, startKey, endKey []byte) error {
+	// Both empty represents the entire key space.
+	if len(startKey) == 0 && len(endKey) == 0 {
+		return nil
+	}
+	if len(startKey) == 0 || len(endKey) == 0 {
+		if !kerneltype.IsNextGen() && !strings.HasPrefix(groupID, "_tidb_") {
+			return nil
+		}
+		return errs.ErrAffinityGroupContent.FastGenByArgs("key range must have both start_key and end_key, or both empty for entire key space")
+	}
+	if bytes.Compare(startKey, endKey) >= 0 {
+		return errs.ErrAffinityGroupContent.FastGenByArgs("start_key must be less than end_key")
+	}
+	return nil
+}
+
 func validateGroupKeyRanges(group GroupKeyRanges) error {
 	keyspaceID, scoped, err := parseGroupID(group.GroupID)
 	if err != nil {
 		return err
+	}
+	if group.InheritPolicyFrom != "" {
+		sourceKeyspaceID, sourceScoped, err := parseGroupID(group.InheritPolicyFrom)
+		if err != nil {
+			return err
+		}
+		if kerneltype.IsNextGen() && (!scoped || !sourceScoped || keyspaceID != sourceKeyspaceID) {
+			return errs.ErrAffinityGroupContent.FastGenByArgs("policy inheritance requires scoped TiDB groups in the same keyspace")
+		}
 	}
 	return validateKeyspaceRanges(group, keyspaceID, scoped)
 }
