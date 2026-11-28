@@ -470,13 +470,10 @@ func TestAffinityWatcherSkipsEventsBeforePDConfirmation(t *testing.T) {
 	stored := mustGetGroupKV(ctx, re, client, group.ID)
 	pd := newManager(kv.NewEtcdKVBase(client))
 
-	var confirmedMu sync.Mutex
-	var confirmed affinity.GroupTargetsResponse
+	response := make(chan affinity.GroupTargetsResponse, 1)
 	mcs.SetTargetWriter(targetWriterFunc(func(ctx context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
 		result, err := pd.UpdateAffinityGroupTargets(ctx, targets)
-		confirmedMu.Lock()
-		confirmed = result
-		confirmedMu.Unlock()
+		response <- result
 		return result, err
 	}))
 	peers := []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}}
@@ -485,10 +482,9 @@ func TestAffinityWatcherSkipsEventsBeforePDConfirmation(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return slices.Equal(mcs.GroupIDsAwaitingTargetRevision(), []string{group.ID})
 	})
-	confirmedMu.Lock()
+	confirmed := <-response
 	re.Equal([]string{group.ID}, confirmed.WrittenGroupIDs)
 	re.Equal(stored.ModRevision, confirmed.WrittenRevisions[group.ID])
-	confirmedMu.Unlock()
 
 	for applied := 0; applied < 3; {
 		select {

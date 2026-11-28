@@ -253,11 +253,18 @@ func TestAffinityCheckerPaused(t *testing.T) {
 // TestAffinityCheckerGroupState tests the full flow:
 // Manager detects unhealthy store -> invalidates group -> checker skips operators -> store recovers -> checker creates operators
 func TestAffinityCheckerGroupState(t *testing.T) {
+	synctest.Test(t, verifyAffinityCheckerGroupState)
+}
+
+func verifyAffinityCheckerGroupState(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
+	const scanIntervalHook = "github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval"
+	re.NoError(failpoint.Enable(scanIntervalHook, "return(true)"))
 	tc := mockcluster.NewCluster(ctx, opt)
+	re.NoError(failpoint.Disable(scanIntervalHook))
 
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -283,6 +290,12 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	re.NotNil(groupInfo)
 	re.True(groupInfo.AffinitySchedulingAllowed)
 	re.Equal(affinity.PhasePreparing, groupInfo.Phase)
+
+	// Wait for a store scan to restore the healthy group before simulating later degradation.
+	affinityManager.DegradeAffinityGroup("test_group")
+	synctest.Sleep(100 * time.Millisecond)
+	synctest.Wait()
+	re.True(affinityManager.GetAffinityGroupState("test_group").AffinitySchedulingAllowed)
 
 	// For cases where the Region and Group voter store IDs do not fully overlap.
 	// Checker should create operator for move peer (4 -> 1) and leader transfer (4 -> 2)
@@ -313,6 +326,7 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	// If the voter store IDs remain unchanged, a valid Region will cause the Group to restore.
 	ops = affinityChecker.Check(tc.GetRegion(200))
 	re.True(affinityManager.GetAffinityGroupState("test_group").AffinitySchedulingAllowed)
+	re.Equal(uint64(1), affinityManager.GetAffinityGroupState("test_group").LeaderStoreID)
 	re.Nil(ops, "Checker should not create operator for same peers")
 }
 

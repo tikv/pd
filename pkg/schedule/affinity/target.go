@@ -134,11 +134,12 @@ func (m *Manager) UpdateAffinityGroupTargets(ctx context.Context, targets []Grou
 func (m *Manager) updateGroupTarget(ctx context.Context, target GroupTarget) (written bool, confirmedRevision int64, policyMismatch bool, err error) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
-	return m.updateGroupTargetLocked(ctx, target, false)
+	return m.updateGroupTargetLocked(ctx, target, nil)
 }
 
 // updateGroupTargetLocked requires metaMutex to serialize metadata changes.
-func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarget, confirmBeforeScan bool) (written bool, confirmedRevision int64, policyMismatch bool, err error) {
+// A non-nil observation comes from Classic patrol and can confirm a healthy target before the first store scan.
+func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarget, observed *GroupState) (written bool, confirmedRevision int64, policyMismatch bool, err error) {
 	failpoint.InjectCall("afterLockGroupTarget")
 	if err := ctx.Err(); err != nil {
 		return false, 0, false, err
@@ -146,13 +147,21 @@ func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarge
 	if err := m.ctx.Err(); err != nil {
 		return false, 0, false, err
 	}
-	m.RLock()
-	initialGroup := m.groups[target.Expected.ID]
-	var initialVer uint64
-	if initialGroup != nil {
-		initialVer = initialGroup.AffinityVer
+	confirmBeforeScan := observed != nil
+	var (
+		initialGroup *runtimeGroupInfo
+		initialVer   uint64
+	)
+	if confirmBeforeScan {
+		initialGroup, initialVer = observed.groupInfoPtr, observed.affinityVer
+	} else {
+		m.RLock()
+		initialGroup = m.groups[target.Expected.ID]
+		if initialGroup != nil {
+			initialVer = initialGroup.AffinityVer
+		}
+		m.RUnlock()
 	}
-	m.RUnlock()
 
 	var stored *Group
 	err = m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
@@ -175,12 +184,14 @@ func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarge
 		case revisionMatches && sameStoredGroup(group, &target.Expected):
 			m.RLock()
 			current := m.groups[group.ID]
-			conflict := current != nil && current.rangeConflict
-			m.RUnlock()
-			if conflict {
+			if (current != nil && current.rangeConflict) ||
+				(confirmBeforeScan && (current != initialGroup || current.AffinityVer != initialVer || (!m.storeConditionsKnown && !observed.RegularSchedulingAllowed))) {
+				m.RUnlock()
 				return nil
 			}
-			if err := m.checkHasUnavailableStore(target.LeaderStoreID, target.VoterStoreIDs); err != nil {
+			storeErr := m.checkHasUnavailableStoreLocked(target.LeaderStoreID, target.VoterStoreIDs)
+			m.RUnlock()
+			if storeErr != nil {
 				return nil
 			}
 			if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
@@ -217,7 +228,7 @@ func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarge
 				m.checkHasUnavailableStoreLocked(group.LeaderStoreID, group.VoterStoreIDs) == nil {
 				switch {
 				case changed && !m.storeConditionsKnown && confirmBeforeScan:
-					// Publish Classic first-win availability with the new affinity version.
+					// Publish availability for the new Classic target with its affinity version.
 					group.SetAvailability(groupAvailable)
 				case !changed && !group.IsAvailable() && group.AffinityVer == initialVer:
 					prevAvail, prevDeadline := group.GetAvailability(), group.degradedExpiredAt

@@ -387,31 +387,27 @@ func TestCommitBalanceTargetsWriterChunks(t *testing.T) {
 }
 
 func TestBalanceTargetWriterFailureMetrics(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		err     error
-		counted bool
-	}{
-		{"error", errors.New("failed request"), true},
-		{"not-ready", errors.Annotate(ErrTargetWriterNotReady, "no PD leader"), false},
-		{"unsupported", errors.Annotate(ErrTargetWriterUnsupported, "404 Not Found"), false},
-		{"cancel", context.Canceled, false},
+	for outcome, writeErr := range map[string]error{
+		"error":       errors.New("failed request"),
+		"not-ready":   errors.Annotate(ErrTargetWriterNotReady, "no PD leader"),
+		"unsupported": errors.Annotate(ErrTargetWriterUnsupported, "404 Not Found"),
+		"cancel":      context.Canceled,
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(outcome, func(t *testing.T) {
 			test := newTargetTest(t, balanceTestGroupID)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			test.useWriter(func(context.Context, []GroupTarget) (GroupTargetsResponse, error) {
-				if tc.name == "cancel" {
+				if outcome == "cancel" {
 					cancel()
 				}
-				return GroupTargetsResponse{}, tc.err
+				return GroupTargetsResponse{}, writeErr
 			})
 			before := testutil.ToFloat64(targetWriteFailureCounter)
 			_, err := test.CommitBalanceTargets(ctx, test.balanceSnapshot(), []*Group{test.groupTarget(balanceTestGroupID, 1, 1, 2)})
 			test.Error(err)
 			want := before
-			if tc.counted {
+			if outcome == "error" {
 				want++
 			}
 			test.Equal(want, testutil.ToFloat64(targetWriteFailureCounter))

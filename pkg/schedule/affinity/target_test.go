@@ -210,6 +210,84 @@ func TestClassicFirstWinBeforeStoreScan(t *testing.T) {
 	test.Equal(state.Group, *test.stored("g"))
 }
 
+func TestClassicLeaderSwitchPreservesTargetBeforeStoreScan(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		previous := newTargetTest(t, "loaded", "empty")
+		_, err := previous.UpdateAffinityGroupPolicy("loaded", BalancePolicyAuto)
+		previous.NoError(err)
+		_, err = previous.UpdateAffinityGroupPeers("loaded", 1, []uint64{1, 2, 3})
+		previous.NoError(err)
+		persisted := previous.stored("loaded")
+
+		test := newTargetTestWithStorage(t, t.Context(), previous.store)
+		state := test.GetAffinityGroupState
+		test.False(test.storeConditionsKnown)
+		test.Equal(*persisted, state("loaded").Group)
+		test.False(state("loaded").AffinitySchedulingAllowed)
+		test.False(state("loaded").RegularSchedulingAllowed)
+
+		test.observe("loaded", 3, 1, 2)
+		test.Equal(persisted, test.stored("loaded"))
+		test.Equal(*persisted, state("loaded").Group)
+		test.False(state("loaded").AffinitySchedulingAllowed)
+
+		stores := test.storeSetInformer.(*core.StoresInfo)
+		stores.PutStore(stores.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute))))
+		test.observe("loaded", 1, 2, 3)
+		test.False(state("loaded").AffinitySchedulingAllowed)
+		test.Equal(persisted, test.stored("loaded"))
+
+		stores.PutStore(stores.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now())))
+		test.observe("loaded", 1, 2, 3)
+		test.True(state("loaded").AffinitySchedulingAllowed)
+		test.Equal(*persisted, state("loaded").Group)
+		test.Equal(persisted, test.stored("loaded"))
+
+		test.False(state("empty").hasTarget())
+		test.observe("empty", 3, 1, 2)
+		test.True(state("empty").AffinitySchedulingAllowed)
+		test.Equal(uint64(3), state("empty").LeaderStoreID)
+		test.Equal(state("empty").Group, *test.stored("empty"))
+		test.False(test.storeConditionsKnown)
+
+		test.ExpireAffinityGroup("empty")
+		expired := state("empty")
+		test.True(expired.RegularSchedulingAllowed)
+		test.False(expired.AffinitySchedulingAllowed)
+		test.ObserveAvailableRegion(targetRegion(1, 2, 4), expired)
+		relearned := state("empty")
+		test.True(relearned.AffinitySchedulingAllowed)
+		test.Equal(uint64(1), relearned.LeaderStoreID)
+		test.Equal([]uint64{1, 2, 4}, relearned.VoterStoreIDs)
+		test.Equal(relearned.Group, *test.stored("empty"))
+		test.False(test.storeConditionsKnown)
+
+		test.DegradeAffinityGroup("loaded")
+		staleObserved := state("loaded")
+		test.False(staleObserved.AffinitySchedulingAllowed)
+		test.checkGroupsAvailability()
+		test.True(test.storeConditionsKnown)
+		afterScan := state("loaded")
+		test.True(afterScan.AffinitySchedulingAllowed)
+		test.Greater(afterScan.affinityVer, staleObserved.affinityVer)
+		test.ObserveAvailableRegion(targetRegion(3, 1, 2), staleObserved)
+		test.Equal(*persisted, state("loaded").Group)
+		test.Equal(persisted, test.stored("loaded"))
+
+		test.DegradeAffinityGroup("loaded")
+		test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+			// Publish a store scan after patrol has validated its observation.
+			stores.PutStore(stores.GetStore(4).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute))))
+			test.checkGroupsAvailability()
+			return test.store.RunInTxn(ctx, apply)
+		})
+		test.observe("loaded", 3, 1, 2)
+		test.True(state("loaded").AffinitySchedulingAllowed)
+		test.Equal(*persisted, state("loaded").Group)
+		test.Equal(persisted, test.stored("loaded"))
+	})
+}
+
 func TestClassicFirstWinReplayPreservesExpirationWithEvictedLeader(t *testing.T) {
 	test := newTargetTest(t, "g")
 	test.checkGroupsAvailability()

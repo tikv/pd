@@ -169,7 +169,6 @@ func (m *Manager) GetBalanceCounts() BalanceCounts {
 
 // BalanceSnapshot is a copy of the state of a table to plan its targets from.
 type BalanceSnapshot struct {
-	TableID TableID
 	Version uint64
 	// Groups is sorted by ID.
 	Groups []*GroupState
@@ -195,7 +194,6 @@ func (m *Manager) GetBalanceSnapshot(tableID TableID, counts BalanceCounts) *Bal
 		return nil
 	}
 	snapshot := &BalanceSnapshot{
-		TableID: tableID,
 		Version: table.version,
 		Groups:  make([]*GroupState, 0, len(table.groups)),
 		Ranges:  make(map[string]GroupKeyRanges, len(table.groups)),
