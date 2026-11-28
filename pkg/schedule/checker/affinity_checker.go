@@ -156,6 +156,16 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		// Region doesn't belong to any affinity group.
 		return nil
 	}
+	// A merge can invalidate the cache before this snapshot is cached or refetched.
+	regionID := region.GetID()
+	defer func() {
+		if c.cluster.GetRegion(regionID) == nil {
+			c.affinityManager.InvalidCache(regionID)
+		}
+	}()
+	if c.cluster.GetRegion(regionID) == nil {
+		return nil
+	}
 
 	fit := c.ruleManager.FitRegion(c.cluster, region)
 	if c.checkRegionPlacement(region, fit) != affinityPlacementReady {
@@ -201,6 +211,9 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 				}
 			}
 			if rejected {
+				if c.cluster.GetRegion(regionID) == nil {
+					return nil
+				}
 				expired, ok := c.affinityManager.ExpireAffinityGroupIf(group)
 				if !ok {
 					return nil
@@ -219,15 +232,15 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		if !c.canLearnAffinityTarget(region) {
 			return nil
 		}
+		if c.cluster.GetRegion(regionID) == nil {
+			return nil
+		}
 		c.affinityManager.ObserveAvailableRegion(region, group)
 		group, isAffinity = c.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 	}
 
-	// A Region may no longer exist in the RegionTree due to a merge.
-	// In this case, clear the cache in affinity manager for that Region and skip processing it.
-	current := c.cluster.GetRegion(region.GetID())
+	current := c.cluster.GetRegion(regionID)
 	if current == nil {
-		c.affinityManager.InvalidCache(region.GetID())
 		return nil
 	}
 
@@ -256,11 +269,14 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	// Create operator to adjust region according to affinity group
 	op, relearn := c.createAffinityOperator(region, group, fit)
 	if relearn != affinityKeepTarget {
+		if c.cluster.GetRegion(regionID) == nil {
+			return nil
+		}
 		if fresh, ok := c.affinityManager.ExpireAffinityGroupIf(group); ok {
 			if relearn == affinityRelearnLearnerConflict {
 				affinityCheckerLearnerPeerConflictCounter.Inc()
 			}
-			if c.canLearnAffinityTarget(region) {
+			if c.canLearnAffinityTarget(region) && c.cluster.GetRegion(regionID) != nil {
 				c.affinityManager.ObserveAvailableRegion(region, fresh)
 			}
 			log.Debug("expire unachievable affinity target",

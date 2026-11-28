@@ -1066,6 +1066,8 @@ func TestAffinityBalanceCommitsPartialPrimaryRegionPlan(t *testing.T) {
 		}
 	}
 	re.NotEmpty(rejected)
+	res := f.plan(snapshot)
+	re.Equal(balanceplan.Score{Voter: 48, Leader: 10}, res.score)
 	re.Equal([2]int{48, 16}, balanceTableScore(f.affinityManager, balanceTestTable()))
 	re.True(f.step())
 	re.Equal([2]int{48, 10}, balanceTableScore(f.affinityManager, balanceTestTable()))
