@@ -97,15 +97,17 @@ func (s *raftClusterTestSuite) TestAskSplit() {
 }
 
 func (s *raftClusterTestSuite) TestAskBatchSplitCountAdmission() {
-	oldLevel := log.GetLevel()
-	log.SetLevel(zapcore.ErrorLevel)
-	defer log.SetLevel(oldLevel)
 	env := tests.NewSchedulingTestEnvironment(s.T())
 	env.PDCount = 2
 	const responseLimit = 8 << 20
 	defer env.Cleanup()
 	env.RunTest(func(cluster *tests.TestCluster) {
 		re := s.Require()
+		// Cluster initialization may replace the global logger, so adjust its level
+		// after startup to avoid logging every ID in the boundary response.
+		oldLevel := log.GetLevel()
+		log.SetLevel(zapcore.ErrorLevel)
+		defer log.SetLevel(oldLevel)
 		leader := cluster.GetLeaderServer()
 		re.NoError(leader.GetServer().SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.BatchSplit).String()))
 		regions := leader.GetRegions()
