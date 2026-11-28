@@ -474,6 +474,63 @@ func TestRegionCountStaleCache(t *testing.T) {
 	re.Equal(1, groupInfo.AffinityRegionCount)
 	re.Len(groupInfo.Regions, 1)
 
+	t.Run("cached region leaves group", func(t *testing.T) {
+		re := require.New(t)
+		other := generateRegionForTest(101, []uint64{1, 2, 3}, ranges[1]).Clone(core.WithIncVersion())
+		group, isAffinity := manager.GetAndCacheRegionAffinityGroupState(other)
+		re.NotNil(group)
+		re.True(isAffinity)
+		state := manager.GetAffinityGroupState("g")
+		re.Equal(2, state.RegionCount)
+		re.Equal(2, state.AffinityRegionCount)
+
+		outside := other.Clone(core.WithStartKey(keyForTest(nonOverlappingRange.StartKey)),
+			core.WithEndKey(keyForTest(nonOverlappingRange.EndKey)), core.WithIncVersion())
+		group, isAffinity = manager.GetRegionAffinityGroupState(outside)
+		re.Nil(group)
+		re.False(isAffinity)
+		re.Equal(2, manager.GetAffinityGroupState("g").RegionCount)
+
+		newer := other.Clone(core.WithIncConfVer())
+		t.Run("cache refreshed during lookup", func(t *testing.T) {
+			re := require.New(t)
+			const lookupHook = "github.com/tikv/pd/pkg/schedule/affinity/afterRegionLabelLookup"
+			refreshed := false
+			re.NoError(failpoint.EnableCall(lookupHook, func() {
+				if !refreshed {
+					refreshed = true
+					manager.GetAndCacheRegionAffinityGroupState(newer)
+				}
+			}))
+			defer func() { re.NoError(failpoint.Disable(lookupHook)) }()
+			group, _ := manager.GetAndCacheRegionAffinityGroupState(outside)
+			re.Nil(group)
+			re.Same(newer, getGroupForTest(re, manager, "g").Regions[other.GetID()].region)
+		})
+
+		// An older range snapshot cannot evict the entry, even with a higher ConfVer.
+		stale := outside.Clone(core.WithDecVersion(), core.WithDecVersion(),
+			core.WithIncConfVer(), core.WithIncConfVer())
+		group, _ = manager.GetAndCacheRegionAffinityGroupState(stale)
+		re.Nil(group)
+		re.Same(newer, getGroupForTest(re, manager, "g").Regions[other.GetID()].region)
+		manager.GetAndCacheRegionAffinityGroupState(other) // Same Version, older ConfVer.
+		re.Same(newer, getGroupForTest(re, manager, "g").Regions[other.GetID()].region)
+
+		group, isAffinity = manager.GetAndCacheRegionAffinityGroupState(outside)
+		re.Nil(group)
+		re.False(isAffinity)
+		manager.RLock()
+		_, cached := manager.regions[other.GetID()]
+		manager.RUnlock()
+		re.False(cached)
+		re.NotContains(getGroupForTest(re, manager, "g").Regions, other.GetID())
+		state = manager.GetAffinityGroupState("g")
+		re.Equal(1, state.RegionCount)
+		re.Equal(1, state.AffinityRegionCount)
+		re.Equal(PhaseStable, state.Phase)
+	})
+
 	// Change peers, which bumps AffinityVer and invalidates affinity for the cached region.
 	_, err = manager.UpdateAffinityGroupPeers("g", 4, []uint64{4, 5, 6})
 	re.NoError(err)

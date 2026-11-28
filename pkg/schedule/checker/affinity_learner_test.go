@@ -167,31 +167,107 @@ func TestAffinityCheckerLearnerSwap(t *testing.T) {
 }
 
 func TestAffinityCheckerLearnerSwapIsolation(t *testing.T) {
-	for _, isolation := range []string{"", "zone"} {
-		t.Run("isolation="+isolation, func(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		isolation string
+		voters    []uint64
+		learner   uint64
+		zone6     string
+	}{
+		{name: "soft zone swap", voters: []uint64{2, 4, 6}, learner: 3, zone6: "z3"},
+		{name: "hard zone swap", isolation: "zone", voters: []uint64{2, 4, 6}, learner: 3, zone6: "z3"},
+		{name: "soft zone add", voters: []uint64{2, 3, 4}, learner: 6, zone6: "z5"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			re := require.New(t)
 			c, tc, _ := newLearnerConflictController(t)
 			tc.AddRegionStore(6, 10)
-			for i, zone := range []string{"z1", "z2", "z3", "z4", "z1", "z3"} {
+			for i, zone := range []string{"z1", "z2", "z3", "z4", "z1", test.zone6} {
 				tc.SetStoreLabel(uint64(i+1), map[string]string{"zone": zone})
 			}
 			rule := newLearnerRule()
-			rule.Count, rule.LocationLabels, rule.IsolationLevel = 2, []string{"zone"}, isolation
+			rule.Count, rule.LocationLabels, rule.IsolationLevel = 2, []string{"zone"}, test.isolation
 			re.NoError(tc.GetRuleManager().SetRule(rule))
 			region := putLearners(tc, 4, 5)
 			manager := tc.GetAffinityManager()
 			const id = "learner-swap-isolation"
 			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
-				ID: id, LeaderStoreID: 2, VoterStoreIDs: []uint64{2, 4, 6},
+				ID: id, LeaderStoreID: 2, VoterStoreIDs: test.voters,
 			}, affinityTestRange("a", "b")))
 
 			ops := c.CheckRegion(region)
 			re.Len(ops, 1)
 			moved := applyLearnerOperator(t, tc, ops[0])
-			re.Equal(region.GetStoreVoter(3).GetId(), moved.GetStoreLearner(3).GetId(),
-				"store 1 shares a zone with the retained learner")
+			re.Nil(moved.GetStorePeer(1), "store 1 shares a zone with the retained learner")
+			re.NotNil(moved.GetStoreLearner(test.learner))
+			if old := region.GetStoreVoter(test.learner); old != nil {
+				re.Equal(old.GetId(), moved.GetStoreLearner(test.learner).GetId())
+			}
 			re.Equal(region.GetStoreLearner(5), moved.GetStoreLearner(5))
 			re.True(c.affinityChecker.isRegionPlacementRuleSatisfiedWithBestLocation(moved, false))
+		})
+	}
+}
+
+func TestAffinityCheckerLearnerOverlappingConstraints(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		a, b uint64
+		add  bool
+	}{
+		{name: "swap", a: 2, b: 3},
+		{name: "add", a: 8, b: 7, add: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			re := require.New(t)
+			c, tc, _ := newLearnerConflictController(t)
+			tc.AddRegionStore(6, 10)
+			if test.add {
+				// Prefer store 7 for the first learner by giving it a lower score.
+				tc.AddRegionStore(7, 10)
+				tc.AddRegionStore(8, 20)
+			}
+			tc.SetStoreLabel(6, map[string]string{"a": "yes"})
+			tc.SetStoreLabel(4, map[string]string{"a": "yes", "b": "yes"})
+			tc.SetStoreLabel(test.a, map[string]string{"a": "yes"})
+			tc.SetStoreLabel(test.b, map[string]string{"a": "yes", "b": "yes"})
+			for _, label := range []string{"a", "b"} {
+				rule := newLearnerRule()
+				rule.ID = "learner-" + label
+				rule.LabelConstraints = []placement.LabelConstraint{{Key: label, Op: placement.In, Values: []string{"yes"}}}
+				re.NoError(tc.GetRuleManager().SetRule(rule))
+			}
+			regionA := tc.MockRegionInfo(1, 1, []uint64{4, 6}, []uint64{test.a, test.b}, nil).Clone(withAffinityTestRange("a", "b"), core.SetApproximateSize(1))
+			// The first candidate (store 3 or 7) matches both rules and is
+			// the only destination for the second learner, which requires b=yes.
+			regionB := tc.MockRegionInfo(2, 1, []uint64{3, 2}, []uint64{6, 4}, nil).Clone(withAffinityTestRange("b", "c"), core.SetApproximateSize(1))
+			tc.PutRegion(regionA)
+			tc.PutRegion(regionB)
+			manager := tc.GetAffinityManager()
+			const id = "learner-overlap"
+			target := []uint64{1, 4, 6}
+			re.NoError(createAffinityGroupForTest(manager, &affinity.Group{
+				ID: id, LeaderStoreID: 1, VoterStoreIDs: target,
+			}, affinityTestRange("a", "c")))
+
+			re.Empty(c.CheckRegion(regionA))
+			ops := c.CheckRegion(regionB)
+			re.Len(ops, 1)
+			re.Equal(target, manager.GetAffinityGroupState(id).VoterStoreIDs)
+			moved := applyLearnerOperator(t, tc, ops[0])
+			re.NotNil(moved.GetStoreLearner(test.a))
+			re.NotNil(moved.GetStoreLearner(test.b))
+			if test.add {
+				re.NotZero(ops[0].Kind() & operator.OpRegion)
+			} else {
+				re.Zero(ops[0].Kind()&operator.OpRegion, "both conflicts can reuse existing peers")
+				re.Equal(regionB.GetStoreVoter(test.a).GetId(), moved.GetStoreLearner(test.a).GetId())
+				re.Equal(regionB.GetStoreVoter(test.b).GetId(), moved.GetStoreLearner(test.b).GetId())
+			}
+			re.Empty(c.CheckRegion(moved))
+			state := manager.GetAffinityGroupState(id)
+			re.Equal(target, state.VoterStoreIDs)
+			re.Equal(affinity.PhaseStable, state.Phase)
 		})
 	}
 }
