@@ -50,8 +50,8 @@ const (
 	AllocStep = uint64(100)
 	// UserKindKey is the key for user kind in keyspace config.
 	UserKindKey = "user_kind"
-	// TSOKeyspaceGroupIDKey is the key for the initial TSO group assignment
-	// in keyspace config. Group splits and merges do not update this value.
+	// TSOKeyspaceGroupIDKey is the key for the TSO keyspace group ID in keyspace
+	// config. Group splits and merges do not update this value.
 	TSOKeyspaceGroupIDKey = constant.TSOKeyspaceGroupIDKey
 	// GCManagementType is the key for gc_management_type in keyspace config.
 	// If `gc_management_type` is `unified`, it means the current keyspace requires a tidb without 'keyspace-name'

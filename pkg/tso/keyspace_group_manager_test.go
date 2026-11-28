@@ -24,17 +24,23 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"golang.org/x/time/rate"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -828,16 +834,49 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 	re.Equal(uint32(1), keyspaceGroupBelongTo)
 }
 
-func (suite *keyspaceGroupManagerTestSuite) TestDefaultGroupFallbackChecksKeyspaceMeta() {
+func (suite *keyspaceGroupManagerTestSuite) TestDefaultGroupFallbackChecksKeyspaceAssignment() {
 	re := suite.Require()
 	mgr := suite.newUniqueKeyspaceGroupManager(1)
-	defer mgr.Close()
 
 	const (
 		keyspaceID = uint32(100)
+		orderedID  = uint32(200)
 		groupID    = uint32(7)
 		defaultID  = constant.DefaultKeyspaceGroupID
 	)
+	var reads atomic.Int64
+	var holdFirstRead atomic.Bool
+	readFinished := make(chan struct{})
+	readCanceled := make(chan struct{})
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: suite.etcdClient.Endpoints(),
+		DialOptions: []grpc.DialOption{grpc.WithChainUnaryInterceptor(
+			func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				txn, _ := req.(*etcdserverpb.TxnRequest)
+				hold := false
+				for _, op := range txn.GetSuccess() {
+					key := string(op.GetRequestRange().GetKey())
+					if strings.HasPrefix(key, keypath.KeyspaceMetaPrefix()) {
+						reads.Add(1)
+						hold = key == keypath.KeyspaceMetaPath(orderedID) && holdFirstRead.CompareAndSwap(true, false)
+					}
+				}
+				err := invoke(ctx, method, req, reply, cc, opts...)
+				if hold {
+					close(readFinished)
+					<-ctx.Done()
+					close(readCanceled)
+					return ctx.Err()
+				}
+				return err
+			},
+		)},
+	})
+	re.NoError(err)
+	defer client.Close()
+	defer mgr.Close()
+	mgr.storage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+
 	saveMeta := func(id uint32, config map[string]string) {
 		re.NoError(mgr.storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 			return mgr.storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
@@ -848,7 +887,16 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultGroupFallbackChecksKeyspa
 	}
 
 	// Start serving the default group before loading the custom group from etcd.
-	mgr.updateKeyspaceGroup(mgr.genDefaultKeyspaceGroupMeta())
+	defaultGroup := mgr.genDefaultKeyspaceGroupMeta()
+	defaultGroup.Keyspaces = nil
+	mgr.updateKeyspaceGroup(defaultGroup)
+	for _, id := range []uint32{constant.NullKeyspaceID, constant.MaxValidKeyspaceID + 1, getBootstrapKeyspaceID()} {
+		_, _, gotGroupID, _, err := mgr.FindGroupByKeyspaceID(suite.ctx, id)
+		re.NoError(err)
+		re.Equal(defaultID, gotGroupID)
+	}
+	re.Zero(reads.Load())
+
 	saveMeta(keyspaceID, map[string]string{constant.TSOKeyspaceGroupIDKey: "7"})
 	group := generateKeyspaceGroupPutEvent(groupID, []uint32{keyspaceID}, []string{mgr.tsoServiceID.ServiceAddr}).ksg
 	group.UserKind = endpoint.Standard.String()
@@ -856,7 +904,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultGroupFallbackChecksKeyspa
 
 	canceled, cancel := context.WithCancel(suite.ctx)
 	cancel()
-	_, _, _, _, err := mgr.FindGroupByKeyspaceID(canceled, keyspaceID)
+	_, _, _, _, err = mgr.FindGroupByKeyspaceID(canceled, keyspaceID)
 	re.ErrorIs(err, context.Canceled)
 	_, _, err = mgr.HandleTSORequest(canceled, keyspaceID, defaultID, 1)
 	re.ErrorIs(err, context.Canceled)
@@ -873,20 +921,16 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultGroupFallbackChecksKeyspa
 			return err == nil && allocator.GetMember().IsServing()
 		})
 	}
+	before := reads.Load()
 	_, _, gotGroupID, _, err := mgr.FindGroupByKeyspaceID(suite.ctx, keyspaceID)
 	re.NoError(err)
 	re.Equal(groupID, gotGroupID)
 	_, gotGroupID, err = mgr.HandleTSORequest(suite.ctx, keyspaceID, defaultID, 1)
 	re.NoError(err)
 	re.Equal(groupID, gotGroupID)
+	re.Equal(before, reads.Load())
 
-	for i, config := range []map[string]string{
-		nil,
-		{constant.TSOKeyspaceGroupIDKey: ""},
-		{constant.TSOKeyspaceGroupIDKey: "0"},
-	} {
-		id := keyspaceID + uint32(i) + 1
-		saveMeta(id, config)
+	checkDefault := func(id uint32) {
 		_, _, gotGroupID, _, err := mgr.FindGroupByKeyspaceID(suite.ctx, id)
 		re.NoError(err)
 		re.Equal(defaultID, gotGroupID)
@@ -894,6 +938,149 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultGroupFallbackChecksKeyspa
 		re.NoError(err)
 		re.Equal(defaultID, gotGroupID)
 	}
+	for i, config := range []map[string]string{
+		nil,
+		{constant.TSOKeyspaceGroupIDKey: ""},
+		{constant.TSOKeyspaceGroupIDKey: "0"},
+	} {
+		id := keyspaceID + uint32(i) + 1
+		saveMeta(id, config)
+		before := reads.Load()
+		checkDefault(id)
+		re.Equal(before+2, reads.Load())
+	}
+
+	// Change just the metadata, leaving the group watch unaware of the new assignment.
+	legacyID := keyspaceID + 2
+	saveMeta(legacyID, map[string]string{constant.TSOKeyspaceGroupIDKey: "2"})
+	_, _, _, _, err = mgr.FindGroupByKeyspaceID(suite.ctx, legacyID)
+	re.True(errs.ErrKeyspaceNotAssigned.Equal(err), "unexpected discovery error: %v", err)
+	_, _, err = mgr.HandleTSORequest(suite.ctx, legacyID, defaultID, 1)
+	re.True(errs.ErrKeyspaceNotAssigned.Equal(err), "unexpected TSO error: %v", err)
+
+	mgr.updateKeyspaceGroup(&endpoint.KeyspaceGroup{ID: groupID + 1, Keyspaces: []uint32{legacyID}})
+	_, _, gotGroupID, _, err = mgr.FindGroupByKeyspaceID(suite.ctx, legacyID)
+	re.Error(err)
+	re.Equal(groupID+1, gotGroupID)
+
+	// Hold an absent response in flight across creation. A request that
+	// arrives after the commit must start its own read before it can return.
+	ctx, cancel := context.WithTimeout(suite.ctx, 5*time.Second)
+	defer cancel()
+	firstCtx, cancelFirst := context.WithCancel(ctx)
+	defer cancelFirst()
+	results := make(chan error, 1)
+	holdFirstRead.Store(true)
+	go func() {
+		_, _, _, _, err := mgr.FindGroupByKeyspaceID(firstCtx, orderedID)
+		results <- err
+	}()
+	select {
+	case <-readFinished:
+	case <-ctx.Done():
+		re.FailNow("metadata read did not finish")
+	}
+	saveMeta(orderedID, map[string]string{constant.TSOKeyspaceGroupIDKey: "7"})
+	_, _, _, _, err = mgr.FindGroupByKeyspaceID(ctx, orderedID)
+	re.True(errs.ErrKeyspaceNotAssigned.Equal(err), "unexpected discovery error: %v", err)
+	cancelFirst()
+	re.ErrorIs(<-results, context.Canceled)
+	select {
+	case <-readCanceled:
+	case <-ctx.Done():
+		re.FailNow("metadata read was not canceled")
+	}
+}
+
+// absentKeyspaceMetaKV counts reads of absent metadata without involving network I/O.
+type absentKeyspaceMetaKV struct {
+	kv.Base
+	kv.RawTxn
+	reads atomic.Int64
+}
+
+func (s *absentKeyspaceMetaKV) CreateRawTxnWithContext(context.Context) kv.RawTxn {
+	return s
+}
+
+func (s *absentKeyspaceMetaKV) Then(...kv.RawTxnOp) kv.RawTxn {
+	return s
+}
+
+func (s *absentKeyspaceMetaKV) Commit() (kv.RawTxnResponse, error) {
+	s.reads.Add(1)
+	return kv.RawTxnResponse{Succeeded: true, Responses: []kv.RawTxnResponseItem{{}}}, nil
+}
+
+func TestKeyspaceMetaReadBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		re := require.New(t)
+		const (
+			interval = 5 * time.Millisecond
+			burst    = 16
+			callers  = 80
+			horizon  = 200 * time.Millisecond
+			queued   = int(horizon / interval)
+		)
+		ctx := t.Context()
+		storage := &absentKeyspaceMetaKV{}
+		manager := &KeyspaceGroupManager{
+			ctx:                 ctx,
+			storage:             endpoint.NewStorageEndpoint(storage, nil),
+			keyspaceMetaFlights: make(map[uint32]*keyspaceMetaFlight),
+			keyspaceMetaLimiter: rate.NewLimiter(rate.Every(interval), burst),
+		}
+		results := make(chan error, callers)
+
+		// Exhaust the initial tokens so every caller can join before the read starts.
+		re.True(manager.keyspaceMetaLimiter.AllowN(time.Now(), burst))
+		for range callers {
+			go func() {
+				_, err := manager.loadKeyspaceMeta(ctx, 100)
+				results <- err
+			}()
+		}
+		synctest.Wait()
+		re.Zero(storage.reads.Load())
+		for range callers {
+			re.NoError(<-results)
+		}
+		re.EqualValues(1, storage.reads.Load())
+
+		synctest.Sleep(burst * interval)
+		floodCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		for i := range uint32(callers) {
+			go func() {
+				_, err := manager.loadKeyspaceMeta(floodCtx, 200+i)
+				results <- err
+			}()
+		}
+		synctest.Wait()
+		re.EqualValues(1+burst, storage.reads.Load())
+		re.Len(results, callers-queued)
+		rejected := 0
+		for range callers - queued {
+			if err := <-results; err != nil {
+				re.True(errs.ErrKeyspaceNotAssigned.Equal(err), "unexpected overload error: %v", err)
+				rejected++
+			}
+		}
+		re.Equal(callers-burst-queued, rejected)
+		cancel()
+		for range queued {
+			re.ErrorIs(<-results, context.Canceled)
+		}
+		re.EqualValues(1+burst, storage.reads.Load())
+
+		// Rejections must not push the next available slot beyond the queue horizon.
+		synctest.Sleep(horizon)
+		nextCtx, cancelNext := context.WithTimeout(ctx, 2*interval)
+		defer cancelNext()
+		_, err := manager.loadKeyspaceMeta(nextCtx, 300)
+		re.NoError(err)
+		re.EqualValues(2+burst, storage.reads.Load())
+	})
 }
 
 type etcdEvent struct {
@@ -1150,8 +1337,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	groupID := uint32(1)
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
-	kgm := &KeyspaceGroupManager{
-		keyspaceLookupTable: make(map[uint32]uint32)}
+	kgm := suite.newUniqueKeyspaceGroupManager(0)
+	defer kgm.Close()
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
 	verifyLocalKeyspaceLookupTable(re, newGroup.KeyspaceLookupTable, newGroup.Keyspaces)
@@ -2004,9 +2191,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestStaleCache() {
 	groupID := uint32(1)
 	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
 	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
-	kgm := &KeyspaceGroupManager{
-		keyspaceLookupTable: make(map[uint32]uint32),
-	}
+	kgm := suite.newUniqueKeyspaceGroupManager(0)
+	defer kgm.Close()
 
 	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
 	for _, id := range []uint32{6, 10} {

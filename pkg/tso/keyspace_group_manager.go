@@ -31,9 +31,11 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
@@ -74,6 +76,7 @@ const (
 	keyspaceGroupMetricsSyncInterval = 15 * time.Second
 	// finishKeyspaceGroupPerEndpointTimeout is the deadline for each backend endpoint attempt.
 	finishKeyspaceGroupPerEndpointTimeout = 3 * time.Second
+	maxKeyspaceMetaWait                   = 200 * time.Millisecond
 )
 
 // getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
@@ -310,12 +313,11 @@ func (kgm *KeyspaceGroupManager) getKeyspaceGroupMetaWithCheck(
 		return nil, nil, keyspaceGroupID, revision, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 
-	var initialGroup string
-	if keyspaceID != getBootstrapKeyspaceID() && keyspaceID != constant.NullKeyspaceID {
-		// Keyspace creation can persist a custom group assignment before the
-		// group watch delivers it. Leave the state unlocked for the etcd read.
+	if keyspaceID != getBootstrapKeyspaceID() && keyspaceID <= constant.MaxValidKeyspaceID {
+		// Keyspace metadata can change before the group watch delivers the new
+		// assignment. Leave the state unlocked for the etcd read.
 		s.RUnlock()
-		meta, _, err := kgm.storage.LoadKeyspaceMetaWithRevision(ctx, keyspaceID)
+		meta, err := kgm.loadKeyspaceMeta(ctx, keyspaceID)
 		if err != nil {
 			return nil, nil, keyspaceGroupID, revision, err
 		}
@@ -325,17 +327,110 @@ func (kgm *KeyspaceGroupManager) getKeyspaceGroupMetaWithCheck(
 			s.RUnlock()
 			return allocator, kg, groupID, revision, err
 		}
-		initialGroup = meta.GetConfig()[constant.TSOKeyspaceGroupIDKey]
+		if group := meta.GetConfig()[constant.TSOKeyspaceGroupIDKey]; group != "" && group != "0" {
+			s.RUnlock()
+			return nil, nil, keyspaceGroupID, revision, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+		}
 	}
 	defer s.RUnlock()
 
-	if (initialGroup != "" && initialGroup != "0") || s.allocators[constant.DefaultKeyspaceGroupID] == nil {
+	if s.allocators[constant.DefaultKeyspaceGroupID] == nil {
 		return nil, nil, constant.DefaultKeyspaceGroupID, s.modRevision,
 			errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 	return s.allocators[constant.DefaultKeyspaceGroupID],
 		s.kgs[constant.DefaultKeyspaceGroupID],
 		constant.DefaultKeyspaceGroupID, s.modRevision, nil
+}
+
+type keyspaceMetaFlight struct {
+	done    chan struct{}
+	cancel  context.CancelFunc
+	waiters int
+	sealed  bool
+
+	// The read result is published by closing done.
+	meta *keyspacepb.KeyspaceMeta
+	err  error
+}
+
+func (kgm *KeyspaceGroupManager) loadKeyspaceMeta(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	kgm.keyspaceMetaMu.Lock()
+	flight := kgm.keyspaceMetaFlights[keyspaceID]
+	if flight == nil {
+		// Cancel rejected reservations before another flight can reserve a slot.
+		now := time.Now()
+		reservation := kgm.keyspaceMetaLimiter.ReserveN(now, 1)
+		delay := reservation.DelayFrom(now)
+		if delay > maxKeyspaceMetaWait {
+			reservation.CancelAt(now)
+			kgm.keyspaceMetaMu.Unlock()
+			return nil, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+		}
+		if deadline, ok := ctx.Deadline(); ok && now.Add(delay).After(deadline) {
+			reservation.CancelAt(now)
+			kgm.keyspaceMetaMu.Unlock()
+			return nil, context.DeadlineExceeded
+		}
+		execCtx, cancel := context.WithCancel(kgm.ctx)
+		flight = &keyspaceMetaFlight{done: make(chan struct{}), cancel: cancel}
+		kgm.keyspaceMetaFlights[keyspaceID] = flight
+		go kgm.runKeyspaceMetaFlight(execCtx, keyspaceID, flight, delay)
+	}
+	flight.waiters++
+	kgm.keyspaceMetaMu.Unlock()
+
+	defer func() {
+		kgm.keyspaceMetaMu.Lock()
+		defer kgm.keyspaceMetaMu.Unlock()
+		flight.waiters--
+		if flight.waiters == 0 {
+			if !flight.sealed {
+				delete(kgm.keyspaceMetaFlights, keyspaceID)
+			}
+			flight.cancel()
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-flight.done:
+		return flight.meta, flight.err
+	}
+}
+
+func (kgm *KeyspaceGroupManager) runKeyspaceMetaFlight(
+	ctx context.Context, keyspaceID uint32, flight *keyspaceMetaFlight, delay time.Duration,
+) {
+	defer close(flight.done)
+	defer flight.cancel()
+
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+		}
+	}
+	kgm.keyspaceMetaMu.Lock()
+	if kgm.keyspaceMetaFlights[keyspaceID] == flight {
+		delete(kgm.keyspaceMetaFlights, keyspaceID)
+	}
+	// A later caller needs a read ordered after its arrival, even if this read
+	// has not yet returned an absent keyspace.
+	flight.sealed = true
+	kgm.keyspaceMetaMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		flight.err = err
+		return
+	}
+	flight.meta, _, flight.err = kgm.storage.LoadKeyspaceMetaWithRevision(ctx, keyspaceID)
 }
 
 func (s *state) getNextPrimaryToReset(
@@ -393,6 +488,10 @@ type KeyspaceGroupManager struct {
 	// "electionNamePrefix:keyspace-group-id"
 	electionNamePrefix string
 	storage            *endpoint.StorageEndpoint
+	// keyspaceMetaMu guards pending flights and serializes their reservations.
+	keyspaceMetaMu      sync.Mutex
+	keyspaceMetaFlights map[uint32]*keyspaceMetaFlight
+	keyspaceMetaLimiter *rate.Limiter
 	// cfg is the TSO config
 	cfg ServiceConfig
 
@@ -448,6 +547,8 @@ func NewKeyspaceGroupManager(
 		etcdClient:                   etcdClient,
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
+		keyspaceMetaFlights:          make(map[uint32]*keyspaceMetaFlight),
+		keyspaceMetaLimiter:          rate.NewLimiter(rate.Every(5*time.Millisecond), 16),
 		primaryPriorityCheckInterval: defaultPrimaryPriorityCheckInterval,
 		cfg:                          cfg,
 		groupUpdateRetryList:         make(map[uint32]*endpoint.KeyspaceGroup),
