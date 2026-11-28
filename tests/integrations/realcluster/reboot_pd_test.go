@@ -39,7 +39,10 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	re := s.Require()
 	ctx := context.Background()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	pdEndpoints := s.cluster.pdEndpoints()
+	re.NotEmpty(pdEndpoints)
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", pdEndpoints)
+	re.NotNil(pdHTTPCli)
 	defer pdHTTPCli.Close()
 	resp, err := pdHTTPCli.GetStores(ctx)
 	re.NoError(err)
@@ -70,7 +73,16 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	defer func() {
 		// The restarted client is closed before this cleanup runs because defers
 		// run in LIFO order, so use a fresh client to restore the store labels.
-		cleanupCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+		endpoints := s.cluster.pdEndpoints()
+		if len(endpoints) == 0 {
+			s.T().Log("skip restoring store labels: no PD endpoints available")
+			return
+		}
+		cleanupCli := http.NewClient("pd-real-cluster-test", endpoints)
+		if cleanupCli == nil {
+			s.T().Log("skip restoring store labels: failed to initialize PD HTTP client")
+			return
+		}
 		defer cleanupCli.Close()
 		if hasOriginalZone {
 			re.NoError(cleanupCli.SetStoreLabels(ctx, firstStore.Store.ID, map[string]string{
@@ -98,7 +110,10 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	checkLabelsAreEqual()
 	// Restart to reload the label
 	s.cluster.restart()
-	pdHTTPCli = http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	pdEndpoints = s.cluster.pdEndpoints()
+	re.NotEmpty(pdEndpoints)
+	pdHTTPCli = http.NewClient("pd-real-cluster-test", pdEndpoints)
+	re.NotNil(pdHTTPCli)
 	defer pdHTTPCli.Close()
 	checkLabelsAreEqual()
 }
