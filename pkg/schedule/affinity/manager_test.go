@@ -294,99 +294,67 @@ func TestSyncLabelRuleBeforeGroup(t *testing.T) {
 
 func TestSyncGroupFromEtcdUpdatesBalancePolicy(t *testing.T) {
 	re := require.New(t)
-	ctx := t.Context()
-
-	store := storage.NewStorageWithMemoryBackend()
-	storeInfos := core.NewStoresInfo()
-	for id := uint64(1); id <= 3; id++ {
-		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("test%d", id)}))
-	}
-	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	m := newTargetTest(t).Manager
+	ranges := createGroupForTest(re, m, "policy", 1)
+	m.checkGroupsAvailability()
+	re.True(m.storeConditionsKnown)
+	_, err := m.UpdateAffinityGroupPeers("policy", 1, []uint64{1, 2, 3})
 	re.NoError(err)
-	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	re.NoError(err)
-
-	ranges := createGroupForTest(re, manager, "policy", 1)
-	manager.applyStoreConditions(map[uint64]storeCondition{})
-	_, err = manager.UpdateAffinityGroupPeers("policy", 1, []uint64{1, 2, 3})
-	re.NoError(err)
-	region := generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0])
-	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
+	_, isAffinity := m.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0]))
 	re.True(isAffinity)
-	before := manager.GetAffinityGroupState("policy")
+	before := m.GetAffinityGroupState("policy")
 	re.Equal(PhaseStable, before.Phase)
 
+	// A policy update must neither mutate watcher input nor recompute availability from newly known conditions.
+	m.Lock()
+	m.unavailableStores[1] = storeDown
+	m.Unlock()
 	input := &Group{ID: "policy", CreateTimestamp: before.CreateTimestamp, BalancePolicy: BalancePolicyFixed, LeaderStoreID: 1, VoterStoreIDs: []uint64{3, 1, 2}}
-	manager.SyncGroupFromEtcd(input)
-	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("policy").BalancePolicy)
-	re.Equal([]uint64{1, 2, 3}, manager.GetAffinityGroupState("policy").VoterStoreIDs)
+	m.SyncGroupFromEtcd(input)
+	re.Equal([]uint64{1, 2, 3}, m.GetAffinityGroupState("policy").VoterStoreIDs)
 	re.Equal([]uint64{3, 1, 2}, input.VoterStoreIDs, "watcher input must not be mutated")
 	for _, policy := range []BalancePolicy{BalancePolicyFixed, BalancePolicyAuto} {
 		updated := *input
 		updated.BalancePolicy = policy
-		manager.SyncGroupFromEtcd(&updated)
-		after := manager.GetAffinityGroupState("policy")
+		m.SyncGroupFromEtcd(&updated)
+		after := m.GetAffinityGroupState("policy")
 		re.Equal(policy, after.BalancePolicy)
 		re.Equal(PhaseStable, after.Phase)
 		re.Equal(before.affinityVer, after.affinityVer)
 		re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
 		re.Equal(before.RegionCount, after.RegionCount)
-		manager.RLock()
-		count := manager.affinityRegionCount
-		manager.RUnlock()
-		re.Equal(1, count)
+		re.Equal(before.AffinitySchedulingAllowed, after.AffinitySchedulingAllowed)
+		m.RLock()
+		re.Equal(1, m.affinityRegionCount)
+		m.RUnlock()
 	}
-	manager.DegradeAffinityGroup("policy")
-	observed := manager.GetAffinityGroupState("policy")
-	manager.SyncGroupFromEtcd(input)
+
+	m.applyStoreConditions(map[uint64]storeCondition{})
+	m.DegradeAffinityGroup("policy")
+	observed := m.GetAffinityGroupState("policy")
+	m.SyncGroupFromEtcd(input)
 	auto := *input
 	auto.BalancePolicy = BalancePolicyAuto
-	manager.SyncGroupFromEtcd(&auto)
-	updated, err := manager.updateAffinityGroupPeersWithState("policy", observed, 2, observed.VoterStoreIDs)
+	m.SyncGroupFromEtcd(&auto)
+	updatedPeers, err := m.updateAffinityGroupPeersWithState("policy", observed, 2, observed.VoterStoreIDs)
 	re.NoError(err)
-	re.Equal(uint64(2), updated.LeaderStoreID, "policy-only updates must not discard an in-flight peer update")
-}
-
-func TestSyncGroupPolicyKeepsRuntimeState(t *testing.T) {
-	re := require.New(t)
-	manager := newTargetTest(t).Manager
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{targetTestRange}}}))
-	manager.checkGroupsAvailability()
-	re.True(manager.storeConditionsKnown)
-	_, err := manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
-	re.NoError(err)
-	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, targetTestRange))
-	re.True(isAffinity)
-	before := manager.GetAffinityGroupState("g")
-	re.Equal(1, before.AffinityRegionCount)
-
-	// A policy update must not recompute availability from newly known conditions.
-	manager.Lock()
-	manager.unavailableStores[1] = storeDown
-	manager.Unlock()
-	updated := before.Group
-	updated.BalancePolicy = BalancePolicyFixed
-	manager.SyncGroupFromEtcd(&updated)
-	after := manager.GetAffinityGroupState("g")
-	re.Equal(BalancePolicyFixed, after.BalancePolicy)
-	re.Equal(before.affinityVer, after.affinityVer)
-	re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
-	re.Equal(before.RegionCount, after.RegionCount)
-	re.Equal(before.AffinitySchedulingAllowed, after.AffinitySchedulingAllowed)
+	re.Equal(uint64(2), updatedPeers.LeaderStoreID, "policy-only updates must not discard an in-flight peer update")
 
 	// Changing the target still resets Region affinity and applies the conditions.
-	updated.LeaderStoreID = 2
-	manager.SyncGroupFromEtcd(&updated)
-	after = manager.GetAffinityGroupState("g")
-	re.Greater(after.affinityVer, before.affinityVer)
+	m.Lock()
+	m.unavailableStores[3] = storeDown
+	m.Unlock()
+	changed := updatedPeers.Group
+	changed.LeaderStoreID = 3
+	m.SyncGroupFromEtcd(&changed)
+	after := m.GetAffinityGroupState("policy")
+	re.Greater(after.affinityVer, updatedPeers.affinityVer)
 	re.Zero(after.AffinityRegionCount)
 	re.False(after.AffinitySchedulingAllowed)
 }
 
 func TestBalancePolicyValidationAtMetadataEntrypoints(t *testing.T) {
 	re := require.New(t)
-	ctx := t.Context()
 	store := storage.NewStorageWithMemoryBackend()
 	for _, group := range []*Group{
 		{ID: "empty"},
@@ -394,16 +362,12 @@ func TestBalancePolicyValidationAtMetadataEntrypoints(t *testing.T) {
 		{ID: "fixed", BalancePolicy: BalancePolicyFixed},
 		{ID: "invalid", BalancePolicy: BalancePolicy("manual")},
 	} {
-		re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
 			return store.SaveAffinityGroup(txn, group.ID, group)
 		}))
 	}
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
-	re.NoError(err)
-	manager, err := NewManager(ctx, store, core.NewStoresInfo(), mockconfig.NewTestOptions(), regionLabeler)
-	re.NoError(err)
-	// A group with an unknown policy, for example one that a newer version
-	// writes, is still loaded and keeps its target.
+	manager := newTargetTestWithStorage(t, t.Context(), store).Manager
+	// A group with an unknown policy written by a newer version is still loaded and keeps its target.
 	re.Equal(4, manager.GetAffinityGroupCount())
 	for id, fixed := range map[string]bool{"empty": false, "auto": false, "fixed": true, "invalid": true} {
 		re.Equal(fixed, manager.GetAffinityGroupState(id).BalancePolicy.IsFixed(), id)
@@ -422,21 +386,12 @@ func TestBalancePolicyValidationAtMetadataEntrypoints(t *testing.T) {
 
 func TestUpdateAffinityGroupPolicy(t *testing.T) {
 	re := require.New(t)
-	ctx := t.Context()
-	store := storage.NewStorageWithMemoryBackend()
-	storeInfos := core.NewStoresInfo()
-	for id := uint64(1); id <= 3; id++ {
-		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("test%d", id)}, core.SetLastHeartbeatTS(time.Now())))
-	}
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
-	re.NoError(err)
-	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
-	re.NoError(err)
-
+	test := newTargetTest(t)
+	manager := test.Manager
 	ranges := createGroupForTest(re, manager, "policy", 1)
 	manager.checkGroupsAvailability()
 	re.True(manager.storeConditionsKnown)
-	_, err = manager.UpdateAffinityGroupPeers("policy", 1, []uint64{1, 2, 3})
+	_, err := manager.UpdateAffinityGroupPeers("policy", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0]))
 	re.True(isAffinity)
@@ -446,25 +401,18 @@ func TestUpdateAffinityGroupPolicy(t *testing.T) {
 	for _, policy := range []BalancePolicy{BalancePolicyFixed, BalancePolicyFixed, BalancePolicyAuto} {
 		state, err := manager.UpdateAffinityGroupPolicy("policy", policy)
 		re.NoError(err)
-		want := policy
-		re.Equal(want, state.BalancePolicy)
-		// The target and the runtime state are kept.
+		re.Equal(policy, state.BalancePolicy)
 		re.Equal(before.LeaderStoreID, state.LeaderStoreID)
 		re.Equal(before.VoterStoreIDs, state.VoterStoreIDs)
 		re.Equal(PhaseStable, state.Phase)
 		re.Equal(before.affinityVer, state.affinityVer)
 		re.Equal(before.AffinityRegionCount, state.AffinityRegionCount)
-		// The policy is persisted with the target.
-		value, err := store.LoadAffinityGroup("policy")
-		re.NoError(err)
-		var persisted Group
-		re.NoError(json.Unmarshal([]byte(value), &persisted))
-		re.Equal(want, persisted.BalancePolicy)
+		persisted := test.stored("policy")
+		re.Equal(policy, persisted.BalancePolicy)
 		re.Equal(before.LeaderStoreID, persisted.LeaderStoreID)
 		re.Equal(before.VoterStoreIDs, persisted.VoterStoreIDs)
 	}
 
-	// A request must name a valid policy; an empty one does not reset it.
 	for _, policy := range []BalancePolicy{"", BalancePolicy("manual")} {
 		_, err = manager.UpdateAffinityGroupPolicy("policy", policy)
 		re.ErrorIs(err, errs.ErrAffinityGroupContent)
@@ -475,27 +423,17 @@ func TestUpdateAffinityGroupPolicy(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPolicy("invalid/id", BalancePolicyFixed)
 	re.ErrorIs(err, errs.ErrInvalidGroupID)
 
-	// A commit that returned an error leaves memory behind storage. Policy and
-	// peer updates keep the stored fields that they do not change.
-	lost := &lostReplyStorage{AffinityStorage: store}
+	// A commit that returned an error leaves memory behind storage; subsequent updates preserve stored fields.
+	lost := &lostReplyStorage{AffinityStorage: test.store, lose: true}
 	manager.storage = lost
-	stored := func() Group {
-		value, err := store.LoadAffinityGroup("policy")
-		re.NoError(err)
-		var group Group
-		re.NoError(json.Unmarshal([]byte(value), &group))
-		return group
-	}
-	lost.lose = true
 	_, err = manager.UpdateAffinityGroupPeers("policy", 2, []uint64{1, 2, 3})
 	re.Error(err)
-	// The stored target is checked against the store conditions known now.
 	manager.Lock()
 	manager.unavailableStores = map[uint64]storeCondition{2: storeLeaderEvicted}
 	manager.Unlock()
 	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyFixed)
 	re.NoError(err)
-	re.Equal(uint64(2), stored().LeaderStoreID)
+	re.Equal(uint64(2), test.stored("policy").LeaderStoreID)
 	re.Equal(uint64(2), manager.GetAffinityGroupState("policy").LeaderStoreID)
 	re.False(manager.GetAffinityGroupState("policy").AffinitySchedulingAllowed)
 	manager.Lock()
@@ -507,16 +445,15 @@ func TestUpdateAffinityGroupPolicy(t *testing.T) {
 	re.Error(err)
 	_, err = manager.UpdateAffinityGroupPeers("policy", 3, []uint64{1, 2, 3})
 	re.NoError(err)
-	re.Equal(BalancePolicyAuto, stored().BalancePolicy)
+	re.Equal(BalancePolicyAuto, test.stored("policy").BalancePolicy)
 	re.Equal(BalancePolicyAuto, manager.GetAffinityGroupState("policy").BalancePolicy)
 
-	// The stored policy is checked even if memory already has the requested one.
 	lost.lose = true
 	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyFixed)
 	re.Error(err)
 	_, err = manager.UpdateAffinityGroupPolicy("policy", BalancePolicyAuto)
 	re.NoError(err)
-	re.Equal(BalancePolicyAuto, stored().BalancePolicy)
+	re.Equal(BalancePolicyAuto, test.stored("policy").BalancePolicy)
 }
 
 // lostReplyStorage returns an error after a transaction commits, like a reply

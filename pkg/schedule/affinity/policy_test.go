@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
@@ -325,60 +326,76 @@ func TestObserveAvailableRegionIgnoresRecreatedGroup(t *testing.T) {
 }
 
 func TestObserveAvailableRegionKeepsFixedTarget(t *testing.T) {
-	re := require.New(t)
-	manager := newTargetTest(t, "g").Manager
-	leaderOn1 := generateRegionForTest(10, []uint64{1, 2}, nonOverlappingRange)
-	leaderOn2 := generateRegionForTest(20, []uint64{2, 1}, nonOverlappingRange)
-	observe := func(region *core.RegionInfo) *GroupState {
-		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
-		return manager.GetAffinityGroupState("g")
+	for _, mcs := range []bool{false, true} {
+		t.Run(fmt.Sprintf("mcs-%t", mcs), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				pd := newTargetTest(t, "g")
+				test := pd
+				if mcs {
+					test = newTargetTestWithStorage(t, t.Context(), pd.store)
+					test.useWriter(pd.UpdateAffinityGroupTargets)
+				}
+				test.checkGroupsAvailability()
+				leaderOn1, leaderOn2 := targetRegion(1, 2), targetRegion(2, 1)
+				setPolicy := func(policy BalancePolicy) {
+					_, err := pd.UpdateAffinityGroupPolicy("g", policy)
+					pd.NoError(err)
+					if mcs {
+						test.SyncGroupFromEtcd(pd.stored("g"))
+					}
+				}
+				observe := func(region *core.RegionInfo) *GroupState {
+					test.ObserveAvailableRegion(region, test.GetAffinityGroupState("g"))
+					synctest.Wait()
+					if mcs {
+						test.SyncGroupFromEtcd(pd.stored("g"))
+					}
+					return test.GetAffinityGroupState("g")
+				}
+
+				setPolicy(BalancePolicyFixed)
+				state := observe(leaderOn1)
+				test.True(state.AffinitySchedulingAllowed)
+				test.Equal(uint64(1), state.LeaderStoreID)
+
+				test.DegradeAffinityGroup("g")
+				calls := len(test.calls)
+				state = observe(leaderOn2)
+				test.Len(test.calls, calls)
+				test.False(state.AffinitySchedulingAllowed)
+				test.Equal(uint64(1), state.LeaderStoreID)
+				state = observe(leaderOn1)
+				test.True(state.AffinitySchedulingAllowed)
+				test.Equal(uint64(1), state.LeaderStoreID)
+
+				setPolicy(BalancePolicyAuto)
+				test.DegradeAffinityGroup("g")
+				time.Sleep(time.Second)
+				state = observe(leaderOn2)
+				test.True(state.AffinitySchedulingAllowed)
+				test.Equal(uint64(2), state.LeaderStoreID)
+
+				setPolicy(BalancePolicyFixed)
+				test.ExpireAffinityGroup("g")
+				time.Sleep(time.Second)
+				state = observe(leaderOn1)
+				test.True(state.AffinitySchedulingAllowed)
+				test.Equal(uint64(1), state.LeaderStoreID)
+
+				setPolicy(BalancePolicyAuto)
+				test.DegradeAffinityGroup("g")
+				stale := test.GetAffinityGroupState("g")
+				setPolicy(BalancePolicyFixed)
+				calls = len(test.calls)
+				test.ObserveAvailableRegion(leaderOn2, stale)
+				synctest.Wait()
+				test.Len(test.calls, calls)
+				state = test.GetAffinityGroupState("g")
+				test.False(state.AffinitySchedulingAllowed)
+				test.Equal(uint64(1), state.LeaderStoreID)
+			})
+		})
 	}
-	setPolicy := func(policy BalancePolicy) {
-		_, err := manager.UpdateAffinityGroupPolicy("g", policy)
-		re.NoError(err)
-	}
-
-	// A fixed group without a target takes the layout of the first Region.
-	manager.checkGroupsAvailability()
-	setPolicy(BalancePolicyFixed)
-	state := observe(leaderOn1)
-	re.True(state.AffinitySchedulingAllowed)
-	re.Equal(uint64(1), state.LeaderStoreID)
-
-	// A degraded fixed group keeps its leader, and a Region with the same layout
-	// confirms the target.
-	manager.DegradeAffinityGroup("g")
-	state = observe(leaderOn2)
-	re.False(state.AffinitySchedulingAllowed)
-	re.Equal(uint64(1), state.LeaderStoreID)
-	state = observe(leaderOn1)
-	re.True(state.AffinitySchedulingAllowed)
-	re.Equal(uint64(1), state.LeaderStoreID)
-
-	// A degraded auto group takes the leader of the Region.
-	setPolicy(BalancePolicyAuto)
-	manager.DegradeAffinityGroup("g")
-	state = observe(leaderOn2)
-	re.True(state.AffinitySchedulingAllowed)
-	re.Equal(uint64(2), state.LeaderStoreID)
-
-	// An expired fixed group takes a new target.
-	setPolicy(BalancePolicyFixed)
-	manager.ExpireAffinityGroup("g")
-	state = observe(leaderOn1)
-	re.True(state.AffinitySchedulingAllowed)
-	re.Equal(uint64(1), state.LeaderStoreID)
-
-	// An observation of an auto group does not move the leader once the policy
-	// is fixed. A policy update keeps the version that the observation carries.
-	setPolicy(BalancePolicyAuto)
-	manager.DegradeAffinityGroup("g")
-	stale := manager.GetAffinityGroupState("g")
-	setPolicy(BalancePolicyFixed)
-	manager.ObserveAvailableRegion(leaderOn2, stale)
-	state = manager.GetAffinityGroupState("g")
-	re.False(state.AffinitySchedulingAllowed)
-	re.Equal(uint64(1), state.LeaderStoreID)
 }
 
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {

@@ -163,6 +163,24 @@ func TestEmptyTargetRevisionMismatchIsNotPolicyMismatch(t *testing.T) {
 }
 
 func TestClassicFirstWinKeepsCommittedPolicy(t *testing.T) {
+	t.Run("explicit auto", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			test := newTargetTest(t, "g")
+			test.storage = &lostReplyStorage{AffinityStorage: test.store, lose: true}
+			_, err := test.UpdateAffinityGroupPolicy("g", BalancePolicyAuto)
+			test.Error(err)
+			test.storage = test.store
+			before := test.GetAffinityGroupState("g")
+			test.Empty(before.BalancePolicy)
+			test.Equal(BalancePolicyAuto, test.stored("g").BalancePolicy)
+			test.ObserveAvailableRegion(targetRegion(1, 2), before)
+			state := test.GetAffinityGroupState("g")
+			test.Equal(BalancePolicyAuto, state.BalancePolicy)
+			test.Equal([]uint64{1, 2}, state.VoterStoreIDs)
+			test.Equal(state.Group, *test.stored("g"))
+		})
+	})
+
 	for _, hasTarget := range []bool{false, true} {
 		t.Run(fmt.Sprintf("has-target-%t", hasTarget), func(t *testing.T) {
 			test := newTargetTest(t, "g")

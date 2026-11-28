@@ -191,6 +191,7 @@ func (m *Manager) updateGroupTargetLocked(ctx context.Context, target GroupTarge
 			if storeErr != nil {
 				return nil
 			}
+			result.BalancePolicy = group.BalancePolicy
 			if err := m.storage.SaveAffinityGroup(txn, group.ID, result); err != nil {
 				return err
 			}
