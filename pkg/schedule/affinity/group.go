@@ -382,6 +382,9 @@ func validateBalancePolicy(policy BalancePolicy) error {
 type GroupKeyRanges struct {
 	KeyRanges []keyutil.KeyRange
 	GroupID   string
+	// InheritPolicyFrom copies the stored policy on creation, including unknown
+	// values. Missing sources use the default; existing groups keep their policy.
+	InheritPolicyFrom string
 }
 
 // ValidateGroupID checks the ID format and requires keyspace-aware TiDB IDs in NextGen.
@@ -392,18 +395,9 @@ func ValidateGroupID(id string) error {
 	return err
 }
 
-// ValidateExistingGroupID checks the character set and length of a stored group ID.
-// It permits IDs persisted before NextGen required keyspace-aware TiDB IDs.
-func ValidateExistingGroupID(id string) error {
-	if !idRegexp.MatchString(id) {
-		return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
-	}
-	return nil
-}
-
 func parseGroupID(id string) (uint32, bool, error) {
-	if err := ValidateExistingGroupID(id); err != nil {
-		return 0, false, err
+	if !idRegexp.MatchString(id) {
+		return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
 	}
 	if !kerneltype.IsNextGen() {
 		return 0, false, nil
@@ -432,10 +426,37 @@ func parseGroupID(id string) (uint32, bool, error) {
 	return uint32(keyspaceID), true, nil
 }
 
+// ValidateKeyRange checks the endpoints of a range in a create, add, or remove request.
+func ValidateKeyRange(groupID string, startKey, endKey []byte) error {
+	// Both empty represents the entire key space.
+	if len(startKey) == 0 && len(endKey) == 0 {
+		return nil
+	}
+	if len(startKey) == 0 || len(endKey) == 0 {
+		if !kerneltype.IsNextGen() && !strings.HasPrefix(groupID, "_tidb_") {
+			return nil
+		}
+		return errs.ErrAffinityGroupContent.FastGenByArgs("key range must have both start_key and end_key, or both empty for entire key space")
+	}
+	if bytes.Compare(startKey, endKey) >= 0 {
+		return errs.ErrAffinityGroupContent.FastGenByArgs("start_key must be less than end_key")
+	}
+	return nil
+}
+
 func validateGroupKeyRanges(group GroupKeyRanges) error {
 	keyspaceID, scoped, err := parseGroupID(group.GroupID)
 	if err != nil {
 		return err
+	}
+	if group.InheritPolicyFrom != "" {
+		sourceKeyspaceID, sourceScoped, err := parseGroupID(group.InheritPolicyFrom)
+		if err != nil {
+			return err
+		}
+		if kerneltype.IsNextGen() && (!scoped || !sourceScoped || keyspaceID != sourceKeyspaceID) {
+			return errs.ErrAffinityGroupContent.FastGenByArgs("policy inheritance requires scoped TiDB groups in the same keyspace")
+		}
 	}
 	return validateKeyspaceRanges(group, keyspaceID, scoped)
 }

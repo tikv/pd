@@ -211,17 +211,6 @@ func (m *Manager) setGroupLocked(group *Group) {
 	m.touchBalanceTableLocked(group.ID)
 }
 
-func (m *Manager) noGroupsExist(groups []*Group) error {
-	m.RLock()
-	defer m.RUnlock()
-	for _, group := range groups {
-		if _, ok := m.groups[group.ID]; ok {
-			return errs.ErrAffinityGroupExist.GenWithStackByArgs(group.ID)
-		}
-	}
-	return nil
-}
-
 func (m *Manager) allGroupsExist(groupIDs []string) error {
 	m.RLock()
 	defer m.RUnlock()
@@ -231,15 +220,6 @@ func (m *Manager) allGroupsExist(groupIDs []string) error {
 		}
 	}
 	return nil
-}
-
-func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule) {
-	m.Lock()
-	defer m.Unlock()
-	for i, group := range groups {
-		m.initGroupLocked(group)
-		m.updateGroupLabelRuleLocked(group.ID, labelRules[i], false)
-	}
 }
 
 func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
@@ -519,7 +499,7 @@ func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 
 // CheckAndGetAffinityGroupState returns the group state after validating the ID and presence.
 func (m *Manager) CheckAndGetAffinityGroupState(groupID string) (*GroupState, error) {
-	if err := ValidateExistingGroupID(groupID); err != nil {
+	if err := ValidateGroupID(groupID); err != nil {
 		return nil, err
 	}
 	state := m.GetAffinityGroupState(groupID)

@@ -23,7 +23,6 @@ import (
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -138,6 +137,14 @@ func TestAffinityCommands(t *testing.T) {
 	}
 	_, err = tests.ExecuteCommand(ctl.GetRootCmd(), append(slices.Clone(policyArgs), "--balance-policy", "manual")...)
 	re.ErrorContains(err, "balance-policy must be")
+
+	var batch pd.AffinityGroupsResponse
+	tests.MustExec(re, ctl.GetRootCmd(), []string{"-u", pdAddr, "config", "affinity", "policy",
+		"--group-ids", tableGroup + "," + partitionGroup, "--balance-policy", "fixed"}, &batch)
+	re.Len(batch.AffinityGroups, 2)
+	for _, id := range []string{tableGroup, partitionGroup} {
+		re.Equal("fixed", batch.AffinityGroups[id].BalancePolicy)
+	}
 
 	// Keep groups with identical table/partition IDs in multiple keyspaces alive
 	// together, so updating or deleting one must preserve every other group's peers.
@@ -441,44 +448,27 @@ func TestAffinityCommands(t *testing.T) {
 		mustRun(re, &groups, "range", "add", "--group-id", "poc-one", "--range", table(1, 110))
 		re.Equal(2, groups["poc-one"].RangeCount)
 	})
-	t.Run("NextGen legacy cleanup", func(t *testing.T) {
+	t.Run("orphan rule cleanup", func(t *testing.T) {
 		re := require.New(t)
-		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
-		re.NoError(failpoint.Enable(modeFlag, "return(false)"))
-		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
-		const groupID, orphanID = "_tidb_t_9001", "_tidb_tg_9002"
-		kr := keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}
-		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: groupID, KeyRanges: []keyutil.KeyRange{kr}}}))
-		re.NoError(regionLabeler.SetLabelRule(affinity.MakeLabelRule(affinity.GroupKeyRanges{GroupID: orphanID, KeyRanges: []keyutil.KeyRange{kr}})))
-		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
-		out, err := run("show", "--group-id", groupID)
+		const id = "_tidb_ks1_tg_9002"
+		start, end := tableKey(1, 9002), tableKey(1, 9003)
+		rule := affinity.MakeLabelRule(affinity.GroupKeyRanges{
+			GroupID:   id,
+			KeyRanges: []keyutil.KeyRange{{StartKey: start, EndKey: end}},
+		})
+		re.NoError(regionLabeler.SetLabelRule(rule))
+
+		out, err := run("range", "show", "--group-id", id)
 		re.NoError(err)
-		re.Contains(string(out), groupID)
-		for _, id := range []string{groupID, orphanID} {
-			out, err := run("range", "show", "--group-id", id)
-			re.NoError(err)
-			re.Contains(string(out), `"start_key": "61"`)
-			if id == groupID {
-				for _, args := range [][]string{
-					{"create", "--group-id", id},
-					{"update", "--group-id", id, "--leader", "1", "--voters", "1"},
-					{"range", "add", "--group-id", id, "--range", "63,64", "--force"},
-				} {
-					_, err := run(args...)
-					re.ErrorContains(err, "pd-ctl --keyspace-id")
-				}
-				_, err := run("range", "remove", "--group-id", id, "--range", "61,62", "--force")
-				re.NoError(err)
-				re.Zero(manager.GetAffinityGroupState(id).RangeCount)
-			} else {
-				_, err := run("delete", "--group-id", id)
-				re.ErrorContains(err, "ErrAffinityGroupNotFound")
-				re.NotNil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID(id)))
-			}
+		re.Contains(string(out), hex.EncodeToString(start))
+
+		_, err = run("delete", "--group-id", id)
+		re.ErrorContains(err, "ErrAffinityGroupNotFound")
+		re.NotNil(regionLabeler.GetLabelRule(rule.ID))
+		for range 2 {
 			_, err = run("delete", "--group-id", id, "--force")
 			re.NoError(err)
-			re.False(manager.IsGroupExist(id))
-			re.Nil(regionLabeler.GetLabelRule(affinity.GetLabelRuleID(id)))
+			re.Nil(regionLabeler.GetLabelRule(rule.ID))
 		}
 	})
 }

@@ -39,6 +39,8 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -179,41 +181,6 @@ func TestBasicGroupOperations(t *testing.T) {
 	err = manager.DeleteAffinityGroups([]string{"group1"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group1"))
-}
-
-type stubGroupStateProvider map[string]*GroupState
-
-func (p stubGroupStateProvider) GetAllAffinityGroupStates() []*GroupState {
-	return slices.Collect(maps.Values(p))
-}
-
-func (p stubGroupStateProvider) GetAffinityGroupState(id string) *GroupState {
-	return p[id]
-}
-
-func TestCollectGroupStatesWithCustomProvider(t *testing.T) {
-	re := require.New(t)
-	first := &GroupState{ID: "first"}
-	second := &GroupState{ID: "second"}
-	provider := stubGroupStateProvider{"first": first, "second": second}
-	all := map[string]*GroupState{"first": first, "second": second}
-
-	re.Equal(all, CollectAllGroupStates(provider))
-
-	states, err := CollectGroupStates(provider, nil)
-	re.NoError(err)
-	re.Equal(all, states)
-
-	states, err = CollectGroupStates(provider, []string{" second ", "second", "", "missing"})
-	re.NoError(err)
-	re.Equal(map[string]*GroupState{"second": second}, states)
-
-	states, err = CollectGroupStates(provider, []string{" "})
-	re.NoError(err)
-	re.Empty(states)
-
-	_, err = CollectGroupStates(provider, []string{"bad id"})
-	re.ErrorIs(err, errs.ErrInvalidGroupID)
 }
 
 func TestCollectGroupStatesByQuery(t *testing.T) {
@@ -1442,4 +1409,166 @@ func TestExpireAffinityGroupIf(t *testing.T) {
 	re.False(ok)
 	re.Nil(expired)
 	re.True(manager.GetAffinityGroupState(groupID).AffinitySchedulingAllowed)
+}
+
+func TestUpdateAffinityGroupPolicies(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client)
+	test := newTargetTestWithStorage(t, t.Context(), store)
+	manager := test.Manager
+
+	ranges := createGroupForTest(re, manager, "a", 1)
+	createGroupForTest(re, manager, "b", 1)
+	manager.checkGroupsAvailability()
+	_, err := manager.UpdateAffinityGroupPeers("a", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0]))
+	re.True(isAffinity)
+	before := manager.GetAffinityGroupState("a")
+
+	// Duplicates are written once, and writing the same policy again keeps the stored groups.
+	revisions := make(map[string]int64, 2)
+	for attempt := range 2 {
+		states, err := manager.UpdateAffinityGroupPolicies([]string{"a", "b", "a"}, BalancePolicyFixed)
+		re.NoError(err)
+		re.Len(states, 2)
+		for _, state := range states {
+			re.Equal(BalancePolicyFixed, state.BalancePolicy)
+			re.Equal(BalancePolicyFixed, test.stored(state.ID).BalancePolicy)
+			resp, err := client.Get(t.Context(), keypath.AffinityGroupPath(state.ID))
+			re.NoError(err)
+			re.Len(resp.Kvs, 1)
+			if attempt == 0 {
+				revisions[state.ID] = resp.Kvs[0].ModRevision
+			} else {
+				re.Equal(revisions[state.ID], resp.Kvs[0].ModRevision)
+			}
+		}
+	}
+	// The target and the runtime state are kept.
+	after := manager.GetAffinityGroupState("a")
+	re.Equal(before.LeaderStoreID, after.LeaderStoreID)
+	re.Equal(before.VoterStoreIDs, after.VoterStoreIDs)
+	re.Equal(before.CreateTimestamp, after.CreateTimestamp)
+	re.Equal(PhaseStable, after.Phase)
+	re.Equal(before.affinityVer, after.affinityVer)
+	re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
+	re.Equal(before.LeaderStoreID, test.stored("a").LeaderStoreID)
+
+	// Invalid or missing requests fail before anything is written.
+	_, err = manager.UpdateAffinityGroupPolicies([]string{"a", "missing"}, BalancePolicyAuto)
+	re.ErrorIs(err, errs.ErrAffinityGroupNotFound)
+	for _, policy := range []BalancePolicy{"", BalancePolicy("manual")} {
+		_, err = manager.UpdateAffinityGroupPolicies([]string{"a"}, policy)
+		re.ErrorIs(err, errs.ErrAffinityGroupContent)
+	}
+	_, err = manager.UpdateAffinityGroupPolicies(nil, BalancePolicyAuto)
+	re.ErrorIs(err, errs.ErrEmptyRequest)
+	_, err = manager.UpdateAffinityGroupPolicies([]string{"bad id"}, BalancePolicyAuto)
+	re.ErrorIs(err, errs.ErrInvalidGroupID)
+	for _, id := range []string{"a", "b"} {
+		re.Equal(BalancePolicyFixed, test.stored(id).BalancePolicy)
+		re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState(id).BalancePolicy)
+	}
+	re.NoError(manager.DeleteAffinityGroups([]string{"a", "b"}, true))
+
+	// More groups than one etcd transaction can hold.
+	ids, changes := makeTestGroupBatch(130, "", false)
+	re.NoError(manager.CreateAffinityGroups(changes))
+	states, err := manager.UpdateAffinityGroupPolicies(ids, BalancePolicyFixed)
+	re.NoError(err)
+	re.Len(states, len(ids))
+	for _, id := range ids {
+		re.Equal(BalancePolicyFixed, test.stored(id).BalancePolicy)
+	}
+
+	// A failed chunk keeps the chunks written before it.
+	remaining := 2
+	test.interceptTxns(func(ctx context.Context, f func(kv.Txn) error) error {
+		remaining--
+		if remaining == 0 {
+			return errAffinityTxn
+		}
+		return store.RunInTxn(ctx, f)
+	})
+	_, err = manager.UpdateAffinityGroupPolicies(ids, BalancePolicyAuto)
+	re.ErrorContains(err, fmt.Sprintf("updated the balance policy of %d of %d affinity groups before the failure", maxAffinityTxnOps, len(ids)))
+	for i, id := range ids {
+		want := BalancePolicyAuto
+		if i >= maxAffinityTxnOps {
+			want = BalancePolicyFixed
+		}
+		re.Equal(want, test.stored(id).BalancePolicy, id)
+		re.Equal(want, manager.GetAffinityGroupState(id).BalancePolicy, id)
+	}
+	// Repeating the request finishes it.
+	_, err = manager.UpdateAffinityGroupPolicies(ids, BalancePolicyAuto)
+	re.NoError(err)
+	for _, id := range ids {
+		re.Equal(BalancePolicyAuto, test.stored(id).BalancePolicy, id)
+	}
+}
+
+func TestCreateAffinityGroupsInheritPolicy(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client)
+	test := newTargetTestWithStorage(t, ctx, store, "_tidb_ks1_t_1", "_tidb_ks1_t_9")
+	manager := test.Manager
+
+	_, err := manager.UpdateAffinityGroupPolicy("_tidb_ks1_t_1", BalancePolicyFixed)
+	re.NoError(err)
+	// A policy that this version does not know is copied as stored.
+	future := &Group{ID: "_tidb_ks1_t_2", CreateTimestamp: 1, BalancePolicy: BalancePolicy("future")}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error { return store.SaveAffinityGroup(txn, future.ID, future) }))
+	manager.SyncGroupFromEtcd(future)
+	re.Equal(BalancePolicy("future"), manager.GetAffinityGroupState("_tidb_ks1_t_2").BalancePolicy)
+
+	// The batch spans multiple transactions.
+	_, batch := makeTestGroupBatch(130, "_tidb_ks1_t_2", true)
+	changes := append([]GroupKeyRanges{
+		{GroupID: "_tidb_ks1_t_4", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1004)}, InheritPolicyFrom: "_tidb_ks1_t_1"},
+		{GroupID: "_tidb_ks1_t_5", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1005)}, InheritPolicyFrom: "_tidb_ks1_t_2"},
+		{GroupID: "_tidb_ks1_t_6", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1006)}, InheritPolicyFrom: "_tidb_ks1_t_3"},
+		{GroupID: "_tidb_ks1_t_7", KeyRanges: []keyutil.KeyRange{transactionRangeForTest(1, 1007)}},
+	}, batch...)
+	re.NoError(manager.CreateAffinityGroupsIfNotExists(changes))
+	for _, change := range batch {
+		re.Equal(BalancePolicy("future"), manager.GetAffinityGroupState(change.GroupID).BalancePolicy)
+		re.Equal(BalancePolicy("future"), test.stored(change.GroupID).BalancePolicy)
+	}
+	for id, want := range map[string]BalancePolicy{
+		"_tidb_ks1_t_4": BalancePolicyFixed,
+		"_tidb_ks1_t_5": BalancePolicy("future"),
+		"_tidb_ks1_t_6": "",
+		"_tidb_ks1_t_7": "",
+	} {
+		re.Equal(want, manager.GetAffinityGroupState(id).BalancePolicy, id)
+		re.Equal(want, test.stored(id).BalancePolicy, id)
+	}
+
+	// A group that already exists keeps its policy, as a retried request finds it.
+	re.NoError(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{
+		GroupID: "_tidb_ks1_t_7", KeyRanges: changes[3].KeyRanges, InheritPolicyFrom: "_tidb_ks1_t_1",
+	}}))
+	re.Empty(manager.GetAffinityGroupState("_tidb_ks1_t_7").BalancePolicy)
+	re.Empty(test.stored("_tidb_ks1_t_7").BalancePolicy)
+
+	// The source must be a valid group ID.
+	re.ErrorIs(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_8", InheritPolicyFrom: "bad id"}}), errs.ErrInvalidGroupID)
+	re.False(manager.IsGroupExist("_tidb_ks1_t_8"))
+
+	// Inheritance reads the committed source policy from storage even after a lost policy reply.
+	test.loseNextTxnReply()
+	_, err = manager.UpdateAffinityGroupPolicy("_tidb_ks1_t_9", BalancePolicyFixed)
+	re.ErrorIs(err, errAffinityTxn)
+	re.Equal(BalancePolicyFixed, test.stored("_tidb_ks1_t_9").BalancePolicy)
+	re.Empty(manager.GetAffinityGroupState("_tidb_ks1_t_9").BalancePolicy)
+	re.NoError(manager.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: "_tidb_ks1_t_10", InheritPolicyFrom: "_tidb_ks1_t_9"}}))
+	re.Equal(BalancePolicyFixed, test.stored("_tidb_ks1_t_10").BalancePolicy)
+	re.Equal(BalancePolicyFixed, manager.GetAffinityGroupState("_tidb_ks1_t_10").BalancePolicy)
 }

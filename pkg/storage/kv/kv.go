@@ -130,6 +130,15 @@ type Txn interface {
 	BaseReadWrite
 }
 
+// Prefetch batches point reads when the transaction supports it. Later loads
+// use the same values and retain their commit comparisons.
+func Prefetch(txn Txn, keys []string) error {
+	if batch, ok := txn.(interface{ Prefetch([]string) error }); ok && len(keys) > 0 {
+		return batch.Prefetch(keys)
+	}
+	return nil
+}
+
 // RevisionTxn is a transaction that can guard a point read by the key's mod revision
 // instead of its value. It avoids copying a large value into the commit request and
 // detects same-value rewrites as conflicts.

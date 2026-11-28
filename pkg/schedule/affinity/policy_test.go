@@ -17,6 +17,8 @@ package affinity
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -27,12 +29,16 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func (m *Manager) applyStoreConditions(unavailableStores map[uint64]storeCondition) bool {
@@ -759,4 +765,73 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 	re.True(manager.applyStoreConditions(unavailable))
 	groupInfo = getGroupForTest(re, manager, "priority")
 	re.Equal(groupExpired, groupInfo.GetAvailability())
+}
+
+func TestPolicyInheritanceScope(t *testing.T) {
+	test := newTargetTest(t, "custom-source", "_tidb_ks1_t_1")
+	_, err := test.UpdateAffinityGroupPolicies([]string{"custom-source", "_tidb_ks1_t_1"}, BalancePolicyFixed)
+	test.NoError(err)
+	// Even ranges proving membership cannot authorize a custom ID.
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 1)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 2)
+	for _, pair := range [][2]string{
+		{"custom-target", "custom-source"},
+		{"custom-target", "_tidb_ks1_t_1"},
+		{"_tidb_ks1_t_2", "custom-source"},
+		{"_tidb_ks2_t_2", "_tidb_ks1_t_1"},
+		{"_tidb_ks1_t_2", "_tidb_ks1_t_1"},
+	} {
+		t.Run(pair[1]+"-to-"+pair[0], func(t *testing.T) {
+			re := require.New(t)
+			for _, ranges := range [][]keyutil.KeyRange{nil, {{StartKey: lower[:], EndKey: upper[:]}}} {
+				err := test.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: pair[0], InheritPolicyFrom: pair[1], KeyRanges: ranges}})
+				if kerneltype.IsNextGen() && (pair[0] != "_tidb_ks1_t_2" || pair[1] != "_tidb_ks1_t_1") {
+					re.ErrorIs(err, errs.ErrAffinityGroupContent)
+					re.False(test.IsGroupExist(pair[0]))
+					val, loadErr := test.store.LoadAffinityGroup(pair[0])
+					re.NoError(loadErr)
+					re.Empty(val)
+				} else {
+					re.NoError(err)
+					re.Equal(BalancePolicyFixed, test.GetAffinityGroupState(pair[0]).BalancePolicy)
+					re.Equal(BalancePolicyFixed, test.stored(pair[0]).BalancePolicy)
+					re.NoError(test.DeleteAffinityGroups([]string{pair[0]}, true))
+				}
+			}
+		})
+	}
+}
+
+func TestPolicyInheritanceRejectsSameRequestSource(t *testing.T) {
+	const original = "_tidb_ks1_t_999"
+	test := newTargetTest(t, original)
+	_, err := test.UpdateAffinityGroupPolicy(original, BalancePolicyFixed)
+	test.NoError(err)
+	_, base := makeTestGroupBatch(etcdutil.MaxEtcdTxnOps+2, "", false)
+	for _, skipExisting := range []bool{false, true} {
+		for _, sourceIndex := range []int{0, 1, etcdutil.MaxEtcdTxnOps} {
+			t.Run(fmt.Sprintf("skip-%t-source-%d", skipExisting, sourceIndex), func(t *testing.T) {
+				re := require.New(t)
+				changes := slices.Clone(base)
+				source := changes[sourceIndex].GroupID
+				changes[sourceIndex].InheritPolicyFrom = original
+				// Source after destination, same chunk, cross-chunk and multi-hop.
+				changes[0].InheritPolicyFrom = source
+				changes[len(changes)-1].InheritPolicyFrom = source
+				expected := []string{original}
+				if skipExisting {
+					re.NoError(test.CreateAffinityGroups([]GroupKeyRanges{{GroupID: source}}))
+					t.Cleanup(func() { re.NoError(test.DeleteAffinityGroups([]string{source}, true)) })
+					expected = append(expected, source)
+				}
+				_, err := test.createGroupsWithSkipExisting(t.Context(), changes, skipExisting, false)
+				re.ErrorIs(err, errs.ErrAffinityGroupContent)
+				re.Equal(len(expected), test.GetAffinityGroupCount())
+				re.ElementsMatch(expected, slices.Collect(maps.Keys(test.GetAffinityGroupStates(nil, ""))))
+				var stored []string
+				re.NoError(test.store.LoadAllAffinityGroups(func(id, _ string) { stored = append(stored, id) }))
+				re.ElementsMatch(expected, stored, "validation must precede all chunk writes")
+			})
+		}
+	}
 }
