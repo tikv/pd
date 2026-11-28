@@ -32,7 +32,7 @@ import (
 const (
 	// groupTargetsPath is the PD API that writes group targets.
 	groupTargetsPath = "/pd/api/v2/affinity-groups/targets"
-	writeTimeout     = 3 * time.Second
+	writeTimeout     = 5 * time.Second
 )
 
 // TargetWriter sends the targets decided by the scheduling service to PD, which
@@ -55,7 +55,7 @@ func NewTargetWriter(httpClient *http.Client, getLeaderURL func() (string, error
 
 // WriteGroupTargets sends one request to the tracked PD leader. If it has become a
 // follower, the v2 API Redirector forwards the request to the leader, adding one hop.
-func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) (written []string, err error) {
+func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) (result affinity.GroupTargetsResponse, err error) {
 	defer func() {
 		if err != nil {
 			w.onFailure()
@@ -63,32 +63,31 @@ func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity
 	}()
 	leaderURL, err := w.getLeaderURL()
 	if err != nil {
-		return nil, errors.Annotate(affinity.ErrTargetWriterNotReady, err.Error())
+		return result, errors.Annotate(affinity.ErrTargetWriterNotReady, err.Error())
 	}
 	body, err := json.Marshal(&affinity.GroupTargetsRequest{Targets: targets})
 	if err != nil {
-		return nil, errors.Trace(err)
+		return result, errors.Trace(err)
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, w.timeout)
 	defer cancel()
 	resp, err := apiutil.PostJSONWithContext(reqCtx, w.httpClient, strings.TrimSuffix(leaderURL, "/")+groupTargetsPath, body)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return result, errors.Trace(err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return result, errors.Trace(err)
 		}
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, errors.Wrapf(affinity.ErrTargetWriterUnsupported, "write affinity group targets to %s: %s %s", leaderURL, resp.Status, bytes.TrimSpace(data))
+		if err := json.Unmarshal(data, &result); err != nil {
+			result = affinity.GroupTargetsResponse{}
 		}
-		return nil, errors.Errorf("write affinity group targets to %s: %s %s", leaderURL, resp.Status, bytes.TrimSpace(data))
+		return result, errors.Errorf("write affinity group targets to %s: %s %s", leaderURL, resp.Status, bytes.TrimSpace(data))
 	}
-	var result affinity.GroupTargetsResponse
 	if err := apiutil.ReadJSON(resp.Body, &result); err != nil {
-		return nil, errors.Annotate(err, "decode affinity group targets response")
+		return result, errors.Annotate(err, "decode affinity group targets response")
 	}
-	return result.WrittenGroupIDs, nil
+	return result, nil
 }

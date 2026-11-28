@@ -44,12 +44,6 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-type targetWriterFunc func(context.Context, []affinity.GroupTarget) ([]string, error)
-
-func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
-	return f(ctx, targets)
-}
-
 func newAffinityTestOptions() *config.PersistOptions {
 	opt := mockconfig.NewTestOptions()
 	cfg := opt.GetScheduleConfig().Clone()
@@ -253,11 +247,18 @@ func TestAffinityCheckerPaused(t *testing.T) {
 // TestAffinityCheckerGroupState tests the full flow:
 // Manager detects unhealthy store -> invalidates group -> checker skips operators -> store recovers -> checker creates operators
 func TestAffinityCheckerGroupState(t *testing.T) {
+	synctest.Test(t, verifyAffinityCheckerGroupState)
+}
+
+func verifyAffinityCheckerGroupState(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
 
 	opt := newAffinityTestOptions()
+	const scanIntervalHook = "github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval"
+	re.NoError(failpoint.Enable(scanIntervalHook, "return(true)"))
 	tc := mockcluster.NewCluster(ctx, opt)
+	re.NoError(failpoint.Disable(scanIntervalHook))
 
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -283,6 +284,12 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	re.NotNil(groupInfo)
 	re.True(groupInfo.AffinitySchedulingAllowed)
 	re.Equal(affinity.PhasePreparing, groupInfo.Phase)
+
+	// Wait for a store scan to restore the healthy group before simulating later degradation.
+	affinityManager.DegradeAffinityGroup("test_group")
+	synctest.Sleep(100 * time.Millisecond)
+	synctest.Wait()
+	re.True(affinityManager.GetAffinityGroupState("test_group").AffinitySchedulingAllowed)
 
 	// For cases where the Region and Group voter store IDs do not fully overlap.
 	// Checker should create operator for move peer (4 -> 1) and leader transfer (4 -> 2)
@@ -313,44 +320,8 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	// If the voter store IDs remain unchanged, a valid Region will cause the Group to restore.
 	ops = affinityChecker.Check(tc.GetRegion(200))
 	re.True(affinityManager.GetAffinityGroupState("test_group").AffinitySchedulingAllowed)
+	re.Equal(uint64(1), affinityManager.GetAffinityGroupState("test_group").LeaderStoreID)
 	re.Nil(ops, "Checker should not create operator for same peers")
-}
-
-func TestAffinityCheckerPersistsUnpersistedTarget(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		re := require.New(t)
-		opt := newAffinityTestOptions()
-		cluster := mockcluster.NewCluster(t.Context(), opt)
-		for id := uint64(1); id <= 3; id++ {
-			cluster.AddRegionStore(id, 10)
-		}
-		keyRange := testutil.TxnKeyspaceRange([]byte("a"), []byte("z"))
-		cluster.AddLeaderRegionWithRange(100, string(keyRange.StartKey), string(keyRange.EndKey), 1, 2, 3)
-		region := cluster.GetRegion(100)
-		manager := cluster.GetAffinityManager()
-		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{keyRange}}}))
-		created := manager.GetAffinityGroupState("g")
-		var requests []affinity.GroupTarget
-		manager.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []affinity.GroupTarget) ([]string, error) {
-			requests = append(requests, targets...)
-			if len(requests) == 1 {
-				return nil, affinity.ErrTargetWriterUnsupported
-			}
-			return []string{"g"}, nil
-		}))
-		manager.ObserveAvailableRegion(region, created)
-		synctest.Wait()
-		local := manager.GetAffinityGroupState("g")
-		re.True(local.HasUnpersistedTarget())
-		re.True(local.AffinitySchedulingAllowed)
-		re.Len(requests, 1)
-
-		synctest.Sleep(time.Second)
-		re.Empty(newTestAffinityChecker(t.Context(), cluster, opt).Check(region))
-		synctest.Wait()
-		want := affinity.GroupTarget{Expected: created.Group, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-		re.Equal([]affinity.GroupTarget{want, want}, requests)
-	})
 }
 
 // TestAffinityAvailabilityCheckWithOfflineStore tests that groups are invalidated when stores go offline.

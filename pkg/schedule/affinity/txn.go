@@ -17,6 +17,7 @@ package affinity
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -25,6 +26,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
@@ -395,6 +397,10 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 		if !group.RegularSchedulingAllowed && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
 		}
+		// Policy updates preserve affinityVer, so use the current policy under metaMutex.
+		if group.BalancePolicy.IsFixed() && !group.RegularSchedulingAllowed && leaderStoreID != group.LeaderStoreID {
+			return group, nil
+		}
 		if group.AffinitySchedulingAllowed && leaderStoreID != group.LeaderStoreID {
 			return group, nil
 		}
@@ -407,7 +413,6 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 				},
 				groupInfoPtr: observed.groupInfoPtr,
 				affinityVer:  observed.affinityVer,
-				persistOnly:  group.AffinitySchedulingAllowed && group.targetUnpersisted,
 			}
 			m.RLock()
 			current := m.groups[groupID]
@@ -416,35 +421,135 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 				return m.GetAffinityGroupState(groupID), nil
 			}
 			conditionsKnown := m.storeConditionsKnown
-			observation.target.Expected = current.storedGroup()
+			observation.target.Expected = current.Group
 			observation.target.Expected.VoterStoreIDs = slices.Clone(observation.target.Expected.VoterStoreIDs)
 			m.RUnlock()
-			if !conditionsKnown && !group.targetUnpersisted && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
+			if !conditionsKnown && group.LeaderStoreID != 0 && len(group.VoterStoreIDs) != 0 {
 				return group, nil
 			}
-			result := observation.target.result()
-			matchesStored := sameStoredGroup(&observation.target.Expected, result)
-			if !group.AffinitySchedulingAllowed && (matchesStored || sameStoredGroup(&group.Group, result)) {
-				m.recoverLocalObservedTarget(&observation, matchesStored)
+			matchesStored := sameStoredGroup(&observation.target.Expected, observation.target.result())
+			if !group.AffinitySchedulingAllowed && matchesStored {
+				observation.localOnly = true
+				m.recoverLocalObservedTarget(&observation)
 			}
 			if !matchesStored {
 				m.sendObservedTarget(observation)
 			}
 			return m.GetAffinityGroupState(groupID), nil
 		}
+		m.RLock()
+		current := m.groups[groupID]
+		if current == nil || current != observed.groupInfoPtr || current.AffinityVer != observed.affinityVer || current.rangeConflict {
+			m.RUnlock()
+			return m.GetAffinityGroupState(groupID), nil
+		}
+		conditionsKnown := m.storeConditionsKnown
+		m.RUnlock()
+		// Before the first scan, patrol may confirm a healthy target or learn one for an empty or expired group.
+		if !conditionsKnown && !group.RegularSchedulingAllowed &&
+			(leaderStoreID != group.LeaderStoreID || !slices.Equal(voterStoreIDs, group.VoterStoreIDs)) {
+			return group, nil
+		}
+		// Recheck the persisted target and policy before a classic first-win write.
+		target := GroupTarget{Expected: group.Group, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
+		if _, _, _, err := m.updateGroupTargetLocked(m.ctx, target, observed); err != nil {
+			return nil, err
+		}
+		return m.GetAffinityGroupState(groupID), nil
 	}
 
 	// Step 2: Save the Group in storage.
-	group.LeaderStoreID = leaderStoreID
-	group.VoterStoreIDs = voterStoreIDs
 	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		stored, err := m.loadAffinityGroupInTxn(txn, groupID)
+		if err != nil {
+			return err
+		}
+		group.Group = *stored
+		group.LeaderStoreID = leaderStoreID
+		group.VoterStoreIDs = slices.Clone(voterStoreIDs)
 		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
 	}); err != nil {
 		return nil, err
 	}
 
 	// Step 3: Save the information in memory.
-	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
+	m.targetWriteMutex.Lock()
+	defer m.targetWriteMutex.Unlock()
+	m.Lock()
+	defer m.Unlock()
+	groupInfo := m.groups[groupID]
+	groupInfo.lastSentWritten = false
+	groupInfo.confirmedRevision = 0
+	groupInfo.awaitingTarget = false
+	delete(m.sendingTargets, groupID)
+	changed := m.syncGroupTargetLocked(groupInfo, &group.Group)
+	groupInfo = m.groups[groupID]
+	if !sameGroupTarget(&groupInfo.Group, &group.Group) {
+		m.applyGroupTargetLocked(groupInfo, &group.Group)
+		changed = true
+	}
+	if m.storeConditionsKnown {
+		m.setTargetAvailabilityLocked(groupInfo)
+	} else {
+		groupInfo.SetAvailability(groupAvailable)
+	}
+	if !changed {
+		m.resetCountLocked(groupInfo)
+	}
+	return newGroupState(groupInfo), nil
+}
+
+// UpdateAffinityGroupPolicy updates the balance policy while preserving the target.
+func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy) (*GroupState, error) {
+	if err := ValidateGroupID(groupID); err != nil {
+		return nil, err
+	}
+	if policy != BalancePolicyAuto && policy != BalancePolicyFixed {
+		return nil, errs.ErrAffinityGroupContent.FastGenByArgs(
+			fmt.Sprintf("invalid balance policy %q, it must be %q or %q", policy, BalancePolicyAuto, BalancePolicyFixed))
+	}
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	if !m.IsGroupExist(groupID) {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	var updated *Group
+	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		var err error
+		updated, err = m.loadAffinityGroupInTxn(txn, groupID)
+		if err != nil {
+			return err
+		}
+		if updated.BalancePolicy == policy {
+			return nil
+		}
+		updated.BalancePolicy = policy
+		return m.storage.SaveAffinityGroup(txn, groupID, updated)
+	}); err != nil {
+		return nil, err
+	}
+
+	m.Lock()
+	defer m.Unlock()
+	m.syncGroupTargetLocked(m.groups[groupID], updated)
+	return newGroupState(m.groups[groupID]), nil
+}
+
+func (m *Manager) loadAffinityGroupInTxn(txn kv.Txn, groupID string) (*Group, error) {
+	value, _, err := m.storage.LoadAffinityGroupInTxn(txn, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if value == "" {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	var group Group
+	if err := json.Unmarshal([]byte(value), &group); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	group.VoterStoreIDs = sortedStoreIDs(group.VoterStoreIDs)
+	return &group, nil
 }
 
 type plannedRangeUpdate struct {
