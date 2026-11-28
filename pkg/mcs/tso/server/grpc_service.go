@@ -131,7 +131,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 
 // FindGroupByKeyspaceID returns the keyspace group that the keyspace belongs to.
 func (s *Service) FindGroupByKeyspaceID(
-	_ context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
+	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
 ) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
 	if s.IsClosed() {
 		return nil, errs.ErrNotStarted
@@ -144,7 +144,7 @@ func (s *Service) FindGroupByKeyspaceID(
 	}
 
 	keyspaceID := request.GetKeyspaceId()
-	allocator, keyspaceGroup, keyspaceGroupID, modRevision, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	allocator, keyspaceGroup, keyspaceGroupID, modRevision, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(ctx, keyspaceID)
 	if request.GetModRevision() > modRevision {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: wrapErrorToHeader(tsopb.ErrorType_INVALID_VALUE, errs.ErrKeyspaceGroupModRevisionStale.Error(), respKeyspaceGroup),

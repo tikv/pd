@@ -42,6 +42,10 @@ const (
 	// DefaultKeyspaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
 	DefaultKeyspaceGroupID = uint32(0)
+
+	// TSOKeyspaceGroupIDKey is the key for the initial TSO group assignment
+	// in keyspace config. Group splits and merges do not update this value.
+	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
 )
 
 // only for next gen
