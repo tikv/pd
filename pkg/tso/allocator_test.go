@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
@@ -44,7 +45,7 @@ import (
 )
 
 func TestAllocatorCampaignRequiresGroupMembership(t *testing.T) {
-	var campaignConflicts atomic.Int32
+	var txnConflicts atomic.Int32
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdutil.TestEtcdClusterOptions{
 		ClientCfgModifier: func(cfg *clientv3.Config) {
 			cfg.DialOptions = append(cfg.DialOptions, grpc.WithChainUnaryInterceptor(
@@ -54,7 +55,7 @@ func TestAllocatorCampaignRequiresGroupMembership(t *testing.T) {
 				) error {
 					err := invoker(ctx, method, req, reply, cc, opts...)
 					if response, ok := reply.(*etcdserverpb.TxnResponse); err == nil && ok && !response.Succeeded {
-						campaignConflicts.Add(1)
+						txnConflicts.Add(1)
 					}
 					return err
 				},
@@ -65,15 +66,19 @@ func TestAllocatorCampaignRequiresGroupMembership(t *testing.T) {
 	store := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
 
 	tests := []struct {
-		name             string
-		groupID          uint32
-		deleteMembership bool
-		transfer         bool
+		name                 string
+		groupID              uint32
+		deleteBeforeCampaign bool
+		deleteWhileServing   bool
+		deleteWindow         bool
+		transfer             bool
 	}{
 		{name: "existing group", groupID: 1},
 		{name: "existing group with transfer", groupID: 2, transfer: true},
-		{name: "deleted group", groupID: 3, deleteMembership: true},
-		{name: "deleted group with transfer", groupID: 4, deleteMembership: true, transfer: true},
+		{name: "deleted group", groupID: 3, deleteBeforeCampaign: true},
+		{name: "deleted group with transfer", groupID: 4, deleteBeforeCampaign: true, transfer: true},
+		{name: "group deleted while serving", groupID: 5, deleteWhileServing: true},
+		{name: "group and window deleted while serving", groupID: 6, deleteWhileServing: true, deleteWindow: true},
 		{name: "default group before bootstrap", groupID: constant.DefaultKeyspaceGroupID},
 	}
 	for _, tt := range tests {
@@ -96,7 +101,7 @@ func TestAllocatorCampaignRequiresGroupMembership(t *testing.T) {
 			}, keyspaceGroupPrimaryElectionPurpose(tt.groupID))
 			allocator := NewAllocator(ctx, tt.groupID, participant, store, &TestServiceConfig{
 				LeaderLease:               mcs.DefaultLease,
-				TSOSaveInterval:           time.Duration(mcs.DefaultLease) * time.Second,
+				TSOSaveInterval:           time.Minute,
 				TSOUpdatePhysicalInterval: 50 * time.Millisecond,
 			})
 			t.Cleanup(allocator.Close)
@@ -109,7 +114,7 @@ func TestAllocatorCampaignRequiresGroupMembership(t *testing.T) {
 				_, err := client.Put(ctx, keypath.ExpectedPrimaryPath(&msParam), expectedPrimary)
 				re.NoError(err)
 			}
-			if tt.deleteMembership {
+			if tt.deleteBeforeCampaign {
 				// The watcher has not removed this allocator when the membership is deleted.
 				re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 					return store.DeleteKeyspaceGroup(txn, tt.groupID)
@@ -119,7 +124,7 @@ func TestAllocatorCampaignRequiresGroupMembership(t *testing.T) {
 				re.False(checkAgain)
 			}
 
-			conflictsBeforeCampaign := campaignConflicts.Load()
+			conflictsBeforeCampaign := txnConflicts.Load()
 			campaignDone := make(chan struct{})
 			allocator.wg.Go(func() {
 				defer close(campaignDone)
@@ -133,11 +138,11 @@ func TestAllocatorCampaignRequiresGroupMembership(t *testing.T) {
 			re.NoError(err)
 			window, err := store.LoadTimestamp(tt.groupID)
 			re.NoError(err)
-			if tt.deleteMembership {
+			if tt.deleteBeforeCampaign {
 				re.Empty(primary.Kvs)
 				re.Equal(previousWindow, window.UnixNano())
 				re.True(isSignaled(campaignDone))
-				re.Equal(conflictsBeforeCampaign+1, campaignConflicts.Load(), "etcd must reject the campaign transaction")
+				re.Equal(conflictsBeforeCampaign+1, txnConflicts.Load(), "etcd must reject the campaign transaction")
 			} else {
 				re.Len(primary.Kvs, 1)
 				re.Positive(primary.Kvs[0].Lease)
@@ -145,27 +150,66 @@ func TestAllocatorCampaignRequiresGroupMembership(t *testing.T) {
 				re.Greater(window.UnixNano(), previousWindow)
 			}
 
-			if tt.deleteMembership && !tt.transfer {
-				allocator.startPrimaryElectionLoop()
-				waitForConflictAfter := func(previous int32) {
-					testutil.Eventually(re, func() bool {
-						return campaignConflicts.Load() > previous
-					}, testutil.WithTickInterval(time.Millisecond))
+			if tt.deleteWhileServing {
+				re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+					if err := store.DeleteKeyspaceGroup(txn, tt.groupID); err != nil {
+						return err
+					}
+					if tt.deleteWindow {
+						return txn.Remove(keypath.TimestampPath(tt.groupID))
+					}
+					return nil
+				}))
+				re.True(participant.IsServing(), "deleting the group leaves the primary lease intact")
+				conflictsBeforeUpdate := txnConflicts.Load()
+				// Move the updater's clock past the current window to force a save.
+				const fp = "github.com/tikv/pd/pkg/tso/fallBackUpdate"
+				re.NoError(failpoint.Enable(fp, "return(true)"))
+				t.Cleanup(func() { re.NoError(failpoint.Disable(fp)) })
+				testutil.Eventually(re, func() bool { return isSignaled(campaignDone) })
+				re.Greater(txnConflicts.Load(), conflictsBeforeUpdate, "etcd must reject the timestamp update")
+				re.False(participant.IsServing())
+				re.False(allocator.IsInitialize())
+				wantWindow := window
+				if tt.deleteWindow {
+					wantWindow = typeutil.ZeroTime
 				}
-				conflictsBeforeLoop := conflictsBeforeCampaign + 1
-				waitForConflictAfter(conflictsBeforeLoop)
-				time.Sleep(250 * time.Millisecond)
-				conflictsAfterObservation := campaignConflicts.Load()
-				re.LessOrEqual(conflictsAfterObservation-conflictsBeforeLoop, int32(3), "campaign retries must be bounded")
+				window, err = store.LoadTimestamp(tt.groupID)
+				re.NoError(err)
+				re.Equal(wantWindow, window)
+			}
 
-				// Cancel just after a new conflict, while the retry delay is still pending.
-				waitForConflictAfter(conflictsAfterObservation)
-				start := time.Now()
-				allocator.Close()
-				re.Less(time.Since(start), 150*time.Millisecond, "Close must interrupt the retry delay")
+			if tt.deleteBeforeCampaign && !tt.transfer {
+				allocator.startPrimaryElectionLoop()
+				conflictsBeforeLoop := conflictsBeforeCampaign + 1
+				testutil.Eventually(re, func() bool {
+					return txnConflicts.Load() > conflictsBeforeLoop
+				}, testutil.WithTickInterval(time.Millisecond))
+				time.Sleep(250 * time.Millisecond)
+				re.LessOrEqual(txnConflicts.Load()-conflictsBeforeLoop, int32(3), "campaign retries must be bounded")
 			}
 		})
 	}
+}
+
+func TestWaitPrimaryCampaignRetryCanceled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		allocator := &Allocator{ctx: ctx}
+		retryDone := make(chan struct{})
+		go func() {
+			allocator.waitPrimaryCampaignRetry()
+			close(retryDone)
+		}()
+		synctest.Wait()
+		require.False(t, isSignaled(retryDone))
+
+		start := time.Now()
+		cancel()
+		<-retryDone
+		require.Zero(t, time.Since(start), "cancellation must end the retry wait without waiting for the timer")
+	})
 }
 
 type staleUpdateElection struct {

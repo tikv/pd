@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -70,8 +71,8 @@ func (se *StorageEndpoint) LoadTimestamp(groupID uint32) (time.Time, error) {
 	return tsWindow, nil
 }
 
-// SaveTimestamp saves the timestamp to the storage. The leadership is used to check if the current server is leader
-// before saving the timestamp to ensure a strong consistency for persistence of the TSO timestamp window.
+// SaveTimestamp saves the timestamp window only while the leadership is valid
+// and the non-default keyspace group, if any, still exists.
 func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error {
 	logFilds := []zap.Field{
 		zap.Uint32("group-id", groupID),
@@ -85,7 +86,12 @@ func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts
 	if len(leadership.GetLeaderValue()) == 0 {
 		return errors.Errorf("%s due to leadership has not been granted yet", errs.NotLeaderErr)
 	}
-	return se.RunInTxn(ctx, func(txn kv.Txn) error {
+	var conditions []clientv3.Cmp
+	if groupID != constant.DefaultKeyspaceGroupID {
+		membershipKey := keypath.KeyspaceGroupIDPath(groupID)
+		conditions = []clientv3.Cmp{clientv3.Compare(clientv3.CreateRevision(membershipKey), ">", 0)}
+	}
+	return se.RunInTxnWithConditions(ctx, conditions, func(txn kv.Txn) error {
 		// Ensure the current server is leader by reading and comparing the leader value.
 		leaderValue, err := txn.Load(leadership.GetLeaderKey())
 		if err != nil {
