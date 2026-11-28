@@ -60,6 +60,7 @@ type balancePlan struct {
 type balancePlanResult struct {
 	targets []*affinity.Group
 	planner balanceplan.Result
+	score   balanceplan.Score
 	// retry reports that the table may improve soon without a metadata change.
 	retry bool
 }
@@ -77,6 +78,7 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 	})
 	res := balancePlanResult{
 		planner: result,
+		score:   result.Baseline,
 		retry:   plan.retry || result.Stop == balanceplan.StopBudget,
 	}
 	if err := ctx.Err(); err != nil {
@@ -102,8 +104,12 @@ func (c *AffinityChecker) planBalanceTargets(ctx context.Context, snapshot *affi
 	}
 	// The planner baseline includes every group in this table, including
 	// fixed and unmodelled groups, and excludes other tables.
-	if len(validTargets) > 0 && balanceScoreWithTargets(snapshot.Groups, validTargets).Less(result.Baseline) {
-		res.targets = validTargets
+	if len(validTargets) > 0 {
+		validatedScore := balanceScoreWithTargets(snapshot.Groups, validTargets)
+		if validatedScore.Less(result.Baseline) {
+			res.targets = validTargets
+			res.score = validatedScore
+		}
 	}
 	return res, nil
 }

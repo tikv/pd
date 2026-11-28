@@ -104,45 +104,63 @@ func withAffinityTestRange(start, end string) core.RegionCreateOption {
 }
 
 func TestAffinityCheckerInvalidCache(t *testing.T) {
-	re := require.New(t)
-	ctx := t.Context()
+	for _, name := range []string{"valid", "abnormal-replica", "temporary", "specialUse", "rejected-target", "first-win"} {
+		t.Run(name, func(t *testing.T) {
+			re := require.New(t)
+			f := newAffinityBalanceTest(t, 4)
+			manager := f.affinityManager
+			id := balanceTestGroupID("_tidb_pt_100_p1")
+			f.group(id, 1, 1, []uint64{1, 2, 3}, "a", "b", "c")
+			f.AddLeaderRegionWithRange(2, balanceTestKey("b"), balanceTestKey("c"), 4, 1, 3)
+			stale := f.GetRegion(2)
+			switch name {
+			case "abnormal-replica":
+				stale = stale.Clone(core.WithRemoveStorePeer(3))
+				f.PutRegion(stale)
+			case "temporary":
+				for i, zone := range []string{"a", "a", "b", "c"} {
+					f.SetStoreLabel(uint64(i+1), map[string]string{"zone": zone})
+				}
+				rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+				rule.LocationLabels = []string{"zone"}
+				f.setRules(rule)
+				f.SetStoreBusy(4, true)
+			case "specialUse":
+				f.SetStoreLabel(4, map[string]string{filter.SpecialUseKey: filter.SpecialUseHotRegion})
+				manager.ExpireAffinityGroup(id)
+			case "rejected-target":
+				f.SetStoreLabel(2, map[string]string{"zone": "excluded"})
+				rule := f.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+				rule.LabelConstraints = []placement.LabelConstraint{{Key: "zone", Op: placement.NotIn, Values: []string{"excluded"}}}
+				f.setRules(rule)
+			case "first-win":
+				manager.ExpireAffinityGroup(id)
+			}
 
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	tc.AddRegionStore(4, 10)
+			survivor := f.GetRegion(1)
+			f.PutRegion(survivor.Clone(core.WithEndKey(stale.GetEndKey()), core.WithIncVersion()))
+			manager.InvalidCache(stale.GetID()) // The overlap handler has already run.
+			re.Nil(f.GetRegion(stale.GetID()))
 
-	affinityManager := tc.GetAffinityManager()
-	checker := newTestAffinityChecker(ctx, tc, opt)
+			before := manager.GetAffinityGroupState(id)
+			re.Equal(1, before.RegionCount)
+			if before.AffinitySchedulingAllowed {
+				re.Equal(affinity.PhaseStable, before.Phase)
+			}
+			saved, err := f.GetStorage().LoadAffinityGroup(id)
+			re.NoError(err)
 
-	// Create affinity group
-	err := createAffinityGroupForTest(affinityManager, &affinity.Group{ID: "test_group"}, affinityTestRange("", ""))
-	re.NoError(err)
-
-	addAffinityTestRegion(tc, 100, 1, 2, 3)
-	addAffinityTestRegion(tc, 101, 4, 2, 3)
-	region1 := tc.GetRegion(100)
-	region2 := tc.GetRegion(101)
-	regionMerge := region1.Clone(core.WithEndKey(region2.GetEndKey()), core.WithIncVersion(), core.WithIncConfVer())
-
-	// Check Region 1 first
-	checker.Check(region1)
-	group := affinityManager.GetAffinityGroupState("test_group")
-	re.NotNil(group)
-	re.Equal(1, group.RegionCount)
-	re.Equal(1, group.AffinityRegionCount)
-
-	// Merge Region 1 and 2 before Region 2 is checked
-	tc.PutRegion(regionMerge)
-
-	// In this case, checking Region 2 will not increase the counter.
-	checker.Check(region2)
-	group = affinityManager.GetAffinityGroupState("test_group")
-	re.NotNil(group)
-	re.Equal(1, group.RegionCount)
-	re.Equal(1, group.AffinityRegionCount)
+			re.Empty(f.Check(stale))
+			after := manager.GetAffinityGroupState(id)
+			re.Equal(before.RegionCount, after.RegionCount)
+			re.Equal(before.AffinityRegionCount, after.AffinityRegionCount)
+			re.Equal(before.Phase, after.Phase)
+			re.True(before.MatchesTarget(after))
+			persisted, err := f.GetStorage().LoadAffinityGroup(id)
+			re.NoError(err)
+			re.Equal(saved, persisted)
+		})
+	}
 }
 
 func TestAffinityCheckerTransferLeader(t *testing.T) {

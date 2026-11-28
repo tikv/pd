@@ -161,7 +161,7 @@ func (b *affinityBalancer) step(ctx context.Context, id affinity.TableID, counts
 		recordAffinityBalanceStepMetrics(result, duration)
 		if ce := log.L().Check(zap.DebugLevel, "planned affinity table"); ce != nil {
 			ce.Write(zap.String("table-id", string(id)), zap.Uint64("version", version), zap.String("result", result),
-				zap.Int("groups", groups), zap.Any("baseline", res.planner.Baseline), zap.Any("score", res.planner.Score),
+				zap.Int("groups", groups), zap.Any("baseline", res.planner.Baseline), zap.Any("score", res.score),
 				zap.String("stop", string(res.planner.Stop)), zap.Duration("duration", duration))
 		}
 	}()
@@ -202,8 +202,8 @@ func (b *affinityBalancer) step(ctx context.Context, id affinity.TableID, counts
 	if len(written) > 0 {
 		log.Info("balanced affinity table", zap.String("table-id", string(id)),
 			zap.Int("planned", len(res.targets)), zap.Int("written", len(written)), zap.Uint64("version", version),
-			zap.Any("baseline", res.planner.Baseline), zap.Any("score", res.planner.Score),
-			zap.String("stop", string(res.planner.Stop)), zap.Int("changed", res.planner.Changed), zap.Duration("duration", time.Since(start)))
+			zap.Any("baseline", res.planner.Baseline), zap.Any("score", res.score),
+			zap.String("stop", string(res.planner.Stop)), zap.Int("changed", len(res.targets)), zap.Duration("duration", time.Since(start)))
 	} else if !writeDeferred {
 		log.Info("affinity balance plan not written", zap.String("table-id", string(id)),
 			zap.Int("planned", len(res.targets)), zap.String("reason", string(reason)))
