@@ -74,15 +74,14 @@ type Manager struct {
 	// as in the scheduling service. When it is nil, the Manager writes its own storage.
 	targetWriter TargetWriter
 	// targetWriteMutex protects the queue, backoff, and per-group state for background first-win requests.
-	targetWriteMutex               syncutil.Mutex
-	pendingTargets                 map[string][]observedTarget // FIFO candidates by group ID
-	pendingTargetIDs               []string
-	sendingTargets                 map[string]inFlightTarget
-	targetDrainRunning             bool
-	targetDrainWake                chan struct{}
-	targetWriteRetryAt             time.Time
-	targetEndpointUnsupportedUntil time.Time
-	balancingTargets               map[string][]*int64
+	targetWriteMutex   syncutil.Mutex
+	pendingTargets     map[string][]observedTarget // FIFO candidates by group ID
+	pendingTargetIDs   []string
+	sendingTargets     map[string]inFlightTarget
+	targetDrainRunning bool
+	targetDrainWake    chan struct{}
+	targetWriteRetryAt time.Time
+	balancingTargets   map[string][]*int64
 
 	// labelRuleVer is increased while holding RWMutex whenever a group's label rule may change.
 	// A lookup reads it before the region labeler and saves its result only if it is unchanged,
@@ -608,8 +607,7 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 			m.RUnlock()
 			return
 		}
-		stored := existingGroup.storedGroup()
-		matchesStored = sameGroupTarget(&stored, group) && stored.BalancePolicy == group.BalancePolicy
+		matchesStored = sameGroupTarget(&existingGroup.Group, group) && existingGroup.BalancePolicy == group.BalancePolicy
 		if modRevision == 0 && matchesStored {
 			m.RUnlock()
 			return
@@ -652,14 +650,9 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 			delete(m.sendingTargets, group.ID)
 		}
 	}
-	switch {
-	case !exists:
+	if !exists {
 		m.initGroupLocked(group)
-	case matchesStored && existingGroup.persistedGroup != nil:
-		// A newer etcd write can reassert the stored target after a local replacement.
-		// Apply it and invalidate observations made before the write.
-		m.applyGroupTargetLocked(existingGroup, group)
-	default:
+	} else {
 		changed := m.syncGroupTargetLocked(existingGroup, group)
 		if !changed && matchesStored && existingGroup.IsExpired() && m.storeConditionsKnown &&
 			m.allVotersExist(existingGroup.VoterStoreIDs) &&
@@ -676,26 +669,6 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 		m.groups[group.ID].modRevision = modRevision
 		if exists && m.lastBalanceVersion == prevBalanceVer {
 			m.touchBalanceTableLocked(group.ID)
-		}
-	}
-	var revalidate observedTarget
-	if existingGroup := m.groups[group.ID]; exists && existingGroup.persistedGroup != nil && m.targetWriter != nil {
-		existingGroup.lastSentTarget = nil
-		existingGroup.targetSendAfter = time.Time{}
-		if existingGroup.IsAvailable() && !existingGroup.rangeConflict {
-			stored := existingGroup.storedGroup()
-			stored.VoterStoreIDs = slices.Clone(stored.VoterStoreIDs)
-			revalidate = observedTarget{
-				target: GroupTarget{
-					Expected:            stored,
-					ExpectedModRevision: existingGroup.modRevision,
-					LeaderStoreID:       existingGroup.LeaderStoreID,
-					VoterStoreIDs:       slices.Clone(existingGroup.VoterStoreIDs),
-				},
-				groupInfoPtr: existingGroup,
-				affinityVer:  existingGroup.AffinityVer,
-				persistOnly:  true,
-			}
 		}
 	}
 	if !exists {
@@ -717,9 +690,6 @@ func (m *Manager) SyncGroupFromEtcdWithRevision(group *Group, modRevision int64)
 	}
 	m.Unlock()
 	m.targetWriteMutex.Unlock()
-	if revalidate.groupInfoPtr != nil {
-		m.sendObservedTarget(revalidate)
-	}
 }
 
 // syncGroupTargetLocked applies the stored target and returns whether it
@@ -736,26 +706,10 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 		return true
 	}
 	policyChanged := groupInfo.BalancePolicy != group.BalancePolicy
-	// Keep an unpersisted local replacement across policy-only updates unless
-	// the update pins a nonempty stored target.
-	if groupInfo.persistedGroup != nil && sameGroupTarget(groupInfo.persistedGroup, group) &&
-		(!group.BalancePolicy.IsFixed() || !group.hasTarget()) {
+	// Preserve runtime state when the target and voter order match.
+	if sameGroupTarget(&groupInfo.Group, group) && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
 		groupInfo.BalancePolicy = group.BalancePolicy
-		groupInfo.persistedGroup.BalancePolicy = group.BalancePolicy
 		if policyChanged {
-			m.touchBalanceTableLocked(groupInfo.ID)
-		}
-		return false
-	}
-
-	// A duplicate or a healthy local confirmation preserves runtime state
-	// if the voter order also matches.
-	if (groupInfo.persistedGroup == nil || groupInfo.IsAvailable()) &&
-		sameGroupTarget(&groupInfo.Group, group) && slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
-		groupInfo.BalancePolicy = group.BalancePolicy
-		wasUnpersisted := groupInfo.persistedGroup != nil
-		groupInfo.persistedGroup = nil
-		if policyChanged || wasUnpersisted {
 			m.touchBalanceTableLocked(groupInfo.ID)
 		}
 		return false
@@ -769,7 +723,6 @@ func (m *Manager) syncGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Grou
 func (m *Manager) applyGroupTargetLocked(groupInfo *runtimeGroupInfo, group *Group) {
 	groupInfo.Group = *group
 	groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
-	groupInfo.persistedGroup = nil
 	m.setTargetAvailabilityLocked(groupInfo)
 	m.resetCountLocked(groupInfo)
 }

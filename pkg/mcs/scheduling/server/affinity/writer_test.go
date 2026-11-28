@@ -81,7 +81,6 @@ func TestTargetWriterFailures(t *testing.T) {
 			re.Equal(tc.written, result.WrittenGroupIDs)
 			re.Equal(1, failures)
 			re.Equal(tc.name == "no leader", errors.Is(err, affinity.ErrTargetWriterNotReady))
-			re.Equal(tc.status == http.StatusNotFound, errors.Is(err, affinity.ErrTargetWriterUnsupported))
 			if tc.name == "no leader" {
 				re.Zero(requests.Load())
 			}

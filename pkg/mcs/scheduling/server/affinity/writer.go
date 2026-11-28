@@ -81,9 +81,6 @@ func (w *TargetWriter) WriteGroupTargets(ctx context.Context, targets []affinity
 		if err != nil {
 			return result, errors.Trace(err)
 		}
-		if resp.StatusCode == http.StatusNotFound {
-			return result, errors.Wrapf(affinity.ErrTargetWriterUnsupported, "write affinity group targets to %s: %s %s", leaderURL, resp.Status, bytes.TrimSpace(data))
-		}
 		if err := json.Unmarshal(data, &result); err != nil {
 			result = affinity.GroupTargetsResponse{}
 		}

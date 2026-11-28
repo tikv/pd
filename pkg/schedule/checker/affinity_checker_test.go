@@ -44,12 +44,6 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-type targetWriterFunc func(context.Context, []affinity.GroupTarget) (affinity.GroupTargetsResponse, error)
-
-func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
-	return f(ctx, targets)
-}
-
 func newAffinityTestOptions() *config.PersistOptions {
 	opt := mockconfig.NewTestOptions()
 	cfg := opt.GetScheduleConfig().Clone()
@@ -328,43 +322,6 @@ func verifyAffinityCheckerGroupState(t *testing.T) {
 	re.True(affinityManager.GetAffinityGroupState("test_group").AffinitySchedulingAllowed)
 	re.Equal(uint64(1), affinityManager.GetAffinityGroupState("test_group").LeaderStoreID)
 	re.Nil(ops, "Checker should not create operator for same peers")
-}
-
-func TestAffinityCheckerPersistsUnpersistedTarget(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		re := require.New(t)
-		opt := newAffinityTestOptions()
-		cluster := mockcluster.NewCluster(t.Context(), opt)
-		for id := uint64(1); id <= 3; id++ {
-			cluster.AddRegionStore(id, 10)
-		}
-		keyRange := testutil.TxnKeyspaceRange([]byte("a"), []byte("z"))
-		cluster.AddLeaderRegionWithRange(100, string(keyRange.StartKey), string(keyRange.EndKey), 1, 2, 3)
-		region := cluster.GetRegion(100)
-		manager := cluster.GetAffinityManager()
-		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{keyRange}}}))
-		created := manager.GetAffinityGroupState("g")
-		var requests []affinity.GroupTarget
-		manager.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
-			requests = append(requests, targets...)
-			if len(requests) == 1 {
-				return affinity.GroupTargetsResponse{}, affinity.ErrTargetWriterUnsupported
-			}
-			return affinity.GroupTargetsResponse{WrittenGroupIDs: []string{"g"}}, nil
-		}))
-		manager.ObserveAvailableRegion(region, created)
-		synctest.Wait()
-		local := manager.GetAffinityGroupState("g")
-		re.True(local.HasUnpersistedTarget())
-		re.True(local.AffinitySchedulingAllowed)
-		re.Len(requests, 1)
-
-		synctest.Sleep(time.Second)
-		re.Empty(newTestAffinityChecker(t.Context(), cluster, opt).Check(region))
-		synctest.Wait()
-		want := affinity.GroupTarget{Expected: created.Group, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-		re.Equal([]affinity.GroupTarget{want, want}, requests)
-	})
 }
 
 // TestAffinityAvailabilityCheckWithOfflineStore tests that groups are invalidated when stores go offline.
