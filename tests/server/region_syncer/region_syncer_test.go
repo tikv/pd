@@ -524,24 +524,28 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	err = pd2.Run()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
-	// waiting for synchronization to complete
+	// Wait for both region metadata and leaders to be synchronized to the follower.
 	testutil.Eventually(re, func() bool {
-		return len(pd2.GetServer().GetBasicCluster().GetRegions()) == regionLen
+		bc := pd2.GetServer().GetBasicCluster()
+		return bc.GetTotalRegionCount() == regionLen &&
+			bc.GetNotFromStorageRegionsCnt() == regionLen &&
+			bc.GetStoreLeaderCount(1) == regionLen
 	})
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeaderChange(leaderServer.GetServer().Name()))
 	rc = cluster.GetLeaderServer().GetRaftCluster()
-	re.True(rc.IsPrepared())
+	// The coordinator checks preparation asynchronously, without fresh heartbeats.
+	testutil.Eventually(re, rc.IsPrepared)
 
-	// transfer leader, can start coordinator immediately.
+	// Transfer leadership again and verify preparation without fresh heartbeats.
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeaderChange(leaderServer.GetServer().Name()))
 	rc = cluster.GetLeaderServer().GetServer().GetRaftCluster()
-	re.True(rc.IsPrepared())
+	testutil.Eventually(re, rc.IsPrepared)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
