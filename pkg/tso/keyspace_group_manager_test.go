@@ -1120,6 +1120,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	}
 }
 
+func TestGroupDeletionPreservesCurrentKeyspaceOwners(t *testing.T) {
+	manager := &KeyspaceGroupManager{}
+	manager.initialize()
+	manager.updateKeyspaceGroupMembership(nil, &endpoint.KeyspaceGroup{ID: 7, Keyspaces: []uint32{7, 42, 43}}, true)
+	manager.updateKeyspaceGroupMembership(nil, &endpoint.KeyspaceGroup{ID: 9, Keyspaces: []uint32{7, 42}}, true)
+	manager.deleteKeyspaceGroup(7)
+	require.Equal(t, map[uint32]uint32{7: 9, 42: 9}, manager.keyspaceLookupTable)
+}
+
 func verifyLocalKeyspaceLookupTable(
 	re *require.Assertions, keyspaceLookupTable map[uint32]struct{}, newKeyspaces []uint32,
 ) {
