@@ -45,7 +45,6 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -74,11 +73,6 @@ const (
 	defaultKeyspaceCountSplitThreshold = 40000
 	// autoSplitKeyspaceGroupPatrolInterval is the interval for patrolling keyspace group size for auto-split.
 	autoSplitKeyspaceGroupPatrolInterval = 15 * time.Minute
-)
-
-const (
-	opAdd int = iota
-	opDelete
 )
 
 // GroupManager is the manager of keyspace group related data.
@@ -784,10 +778,16 @@ func (m *GroupManager) removeKeyspaceGroupFromCacheLocked(groupID uint32) {
 	}
 }
 
-// CreateKeyspaceGroups creates keyspace groups.
+// CreateKeyspaceGroups creates empty keyspace groups.
 func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
-	m.membershipMutationLock.Lock()
-	defer m.membershipMutationLock.Unlock()
+	for _, group := range keyspaceGroups {
+		// The default group can serve keyspaces without explicit membership.
+		// Assigning any such keyspace here would bypass the TSO handoff.
+		if len(group.Keyspaces) != 0 {
+			return errs.ErrCreateNonEmptyKeyspaceGroup
+		}
+	}
+
 	m.Lock()
 	defer m.Unlock()
 	if err := m.saveKeyspaceGroups(keyspaceGroups); err != nil {
@@ -1428,18 +1428,14 @@ func (m *GroupManager) removeKeyspacesFromGroupBatch(
 	return kg, processedIDs, hasMore, nil
 }
 
-// UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
-func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation int) error {
+// UpdateKeyspaceForGroup adds a keyspace to the keyspace group.
+func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32) error {
 	if m == nil {
 		return nil
 	}
 	id, err := strconv.ParseUint(groupID, 10, 64)
 	if err != nil {
 		return err
-	}
-	if mutation == opDelete {
-		m.membershipMutationLock.Lock()
-		defer m.membershipMutationLock.Unlock()
 	}
 
 	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
@@ -1448,10 +1444,10 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	})
 	m.Lock()
 	defer m.Unlock()
-	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)
+	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID)
 }
 
-func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, groupID uint64, keyspaceID uint32, mutation int) error {
+func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, groupID uint64, keyspaceID uint32) error {
 	var kg *endpoint.KeyspaceGroup
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		var err error
@@ -1469,112 +1465,15 @@ func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, 
 			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
 		}
 
-		changed := false
-		switch mutation {
-		case opAdd:
-			if !slices.Contains(kg.Keyspaces, keyspaceID) {
-				kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
-				changed = true
-			}
-		case opDelete:
-			lenOfKeyspaces := len(kg.Keyspaces)
-			kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-			changed = lenOfKeyspaces != len(kg.Keyspaces)
-		}
-		if !changed {
+		if slices.Contains(kg.Keyspaces, keyspaceID) {
 			return nil
 		}
+		kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	}); err != nil {
 		return err
 	}
 	m.putKeyspaceGroupToCacheLocked(kg)
-	return nil
-}
-
-// UpdateKeyspaceGroup updates the keyspace group.
-func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUserKind, newUserKind endpoint.UserKind, keyspaceID uint32) error {
-	if m == nil {
-		return nil
-	}
-	m.membershipMutationLock.Lock()
-	defer m.membershipMutationLock.Unlock()
-	return m.updateKeyspaceGroupWithMembershipLockHeld(oldGroupID, newGroupID, oldUserKind, newUserKind, keyspaceID)
-}
-
-// updateKeyspaceGroupWithMembershipLockHeld updates the keyspace group while
-// the caller holds membershipMutationLock for writing.
-func (m *GroupManager) updateKeyspaceGroupWithMembershipLockHeld(
-	oldGroupID, newGroupID string,
-	oldUserKind, newUserKind endpoint.UserKind,
-	keyspaceID uint32,
-) error {
-	oldID, err := strconv.ParseUint(oldGroupID, 10, 64)
-	if err != nil {
-		return err
-	}
-	newID, err := strconv.ParseUint(newGroupID, 10, 64)
-	if err != nil {
-		return err
-	}
-
-	m.Lock()
-	defer m.Unlock()
-	var (
-		oldKG *endpoint.KeyspaceGroup
-		newKG *endpoint.KeyspaceGroup
-	)
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		var err error
-		oldKG, err = m.store.LoadKeyspaceGroup(txn, uint32(oldID))
-		if err != nil {
-			return err
-		}
-		if oldKG == nil || endpoint.StringUserKind(oldKG.UserKind) != oldUserKind {
-			return errors.Errorf("keyspace group %s not found in %s group", oldGroupID, oldUserKind)
-		}
-		if oldID == newID {
-			newKG = oldKG
-		} else {
-			newKG, err = m.store.LoadKeyspaceGroup(txn, uint32(newID))
-			if err != nil {
-				return err
-			}
-		}
-		if newKG == nil || endpoint.StringUserKind(newKG.UserKind) != newUserKind {
-			return errors.Errorf("keyspace group %s not found in %s group", newGroupID, newUserKind)
-		}
-		if oldKG.IsSplitting() {
-			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(uint32(oldID))
-		} else if newKG.IsSplitting() {
-			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(uint32(newID))
-		} else if oldKG.IsMerging() {
-			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(oldID))
-		} else if newKG.IsMerging() {
-			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(newID))
-		}
-
-		if !slices.Contains(newKG.Keyspaces, keyspaceID) {
-			newKG.Keyspaces = append(newKG.Keyspaces, keyspaceID)
-			slices.Sort(newKG.Keyspaces)
-		}
-		oldKG.Keyspaces = slice.Remove(oldKG.Keyspaces, keyspaceID)
-		if oldID == newID {
-			return m.store.SaveKeyspaceGroup(txn, oldKG)
-		}
-		if err = m.store.SaveKeyspaceGroup(txn, oldKG); err != nil {
-			return err
-		}
-		return m.store.SaveKeyspaceGroup(txn, newKG)
-	}); err != nil {
-		return err
-	}
-
-	m.putKeyspaceGroupToCacheLocked(oldKG)
-	if oldID != newID {
-		m.putKeyspaceGroupToCacheLocked(newKG)
-	}
-
 	return nil
 }
 

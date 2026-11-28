@@ -311,6 +311,7 @@ func LoadAllKeyspaces(c *gin.Context) {
 // A Map of string to string pointer is used to differentiate between json null and "",
 // which will both be set to "" if value type is string during binding.
 type UpdateConfigParams struct {
+	// Config cannot update tso_keyspace_group_id or user_kind.
 	Config map[string]*string `json:"config"`
 	// Preconditions specifies prerequisites for updating config, using a JSON-merge-patch-like encoding:
 	// - key -> null means the key must be absent.
@@ -369,6 +370,7 @@ func keyspaceConfigErrorStatus(err error) int {
 		return http.StatusConflict
 	case goerrors.Is(err, errs.ErrKeyspaceGCConfigInvalid), goerrors.Is(err, errs.ErrKeyspaceGCModeMismatch),
 		goerrors.Is(err, errs.ErrKeyspaceGCModeImmutable), goerrors.Is(err, errs.ErrKeyspaceLegacyGCConfigUnsupported),
+		goerrors.Is(err, errs.ErrReadOnlyTSOGroupConfig),
 		goerrors.Is(err, errs.ErrUnknownMetaServiceGroup), goerrors.Is(err, errs.ErrMetaServiceGroupDisabled):
 		return http.StatusBadRequest
 	default:

@@ -896,7 +896,11 @@ func (s *gcStateManagerTestSuite) TestBarrierMetricsRemovalFencesInflightPublica
 	advance()
 	groupManager := keyspace.NewKeyspaceGroupManager(context.Background(), s.storage, nil)
 	defer groupManager.Close()
-	re.NoError(groupManager.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{2}}}))
+	re.NoError(s.storage.RunInTxn(s.T().Context(), func(txn kv.Txn) error {
+		return s.storage.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{2},
+		})
+	}))
 	counted := &barrierMetricsTestKV{Base: s.storage.Base}
 	m.gcMetaStorage = endpoint.NewStorageEndpoint(counted, nil).GetGCStateProvider()
 	// Remove metadata after the GC commit succeeds but before metrics publication.

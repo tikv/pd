@@ -145,7 +145,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 				// served by default keyspace group.
 				continue
 			}
-			handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
+			handlersutil.MustCreateKeyspaceGroupsWithNewKeyspaces(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 				KeyspaceGroups: []*endpoint.KeyspaceGroup{
 					{
 						ID:        param.keyspaceGroupID,

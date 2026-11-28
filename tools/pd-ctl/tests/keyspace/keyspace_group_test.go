@@ -169,27 +169,27 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	suite.checkKeyspaceContains(constant.DefaultKeyspaceGroupID, constant.DefaultKeyspaceID)
 	args := []string{"-u", suite.pdAddr, "keyspace-group"}
 
-	// Split keyspace group.
+	// Keep these IDs outside the preallocated keyspace range.
 	keyspaceGroupID, _, err := suite.idAllocator.Alloc(1)
 	re.NoError(err)
 	keyspaceGroupIDStr := strconv.FormatUint(keyspaceGroupID, 10)
-	handlersutil.MustCreateKeyspaceGroup(re, leaderServer, &handlers.CreateKeyspaceGroupParams{
+	handlersutil.MustCreateKeyspaceGroupsWithNewKeyspaces(re, leaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
 			{
 				ID:        uint32(keyspaceGroupID),
 				UserKind:  endpoint.Standard.String(),
 				Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount),
-				Keyspaces: []uint32{111, 222, 333},
+				Keyspaces: []uint32{10111, 10222, 10333},
 			},
 		},
 	})
 	newKeyspaceGroupID, _, err := suite.idAllocator.Alloc(1)
 	re.NoError(err)
 	newKeyspaceGroupIDStr := strconv.FormatUint(newKeyspaceGroupID, 10)
-	_, err = tests.ExecuteCommand(cmd, append(args, "split", keyspaceGroupIDStr, newKeyspaceGroupIDStr, "222", "333")...)
+	_, err = tests.ExecuteCommand(cmd, append(args, "split", keyspaceGroupIDStr, newKeyspaceGroupIDStr, "10222", "10333")...)
 	re.NoError(err)
-	suite.checkKeyspaceContains(uint32(keyspaceGroupID), 111)
-	suite.checkKeyspaceContains(uint32(newKeyspaceGroupID), 222, 333)
+	suite.checkKeyspaceContains(uint32(keyspaceGroupID), 10111)
+	suite.checkKeyspaceContains(uint32(newKeyspaceGroupID), 10222, 10333)
 }
 
 func TestExternalAllocNodeWhenStart(t *testing.T) {

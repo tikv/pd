@@ -1078,7 +1078,7 @@ func (suite *keyspaceTestSuite) TestGCBarrierRemovalInvalidationAfterCommit() {
 	m := suite.manager
 	meta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 20000}, Name: "barrier-remove", State: keyspacepb.KeyspaceState_TOMBSTONE}
 	re.NoError(m.saveNewKeyspace(meta))
-	re.NoError(m.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{20000}}}))
+	seedKeyspaceGroups(re, m.kgm, []*endpoint.KeyspaceGroup{{ID: 101, UserKind: endpoint.Standard.String(), Keyspaces: []uint32{20000}}})
 	calls := 0
 	m.SetGCBarrierInvalidator(func(id uint32) {
 		calls++
@@ -1674,6 +1674,9 @@ func (suite *keyspaceTestSuite) TestGCConfigPolicyBeforeGroupChanges() {
 	m := suite.manager
 	created, err := m.CreateKeyspace(&CreateKeyspaceRequest{Name: "gc_group_policy"})
 	re.NoError(err)
+	metaServiceGroupStore, ok := m.store.(endpoint.MetaServiceGroupStorage)
+	re.True(ok)
+	m.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, nil, nil)
 	re.NoError(m.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{ID: 123, UserKind: endpoint.Basic.String()}}))
 	oldGroups, err := m.kgm.GetKeyspaceGroups(0, 0)
 	re.NoError(err)
@@ -1682,7 +1685,6 @@ func (suite *keyspaceTestSuite) TestGCConfigPolicyBeforeGroupChanges() {
 		opposite = UnifiedGC
 	}
 	_, err = m.UpdateKeyspaceConfig(created.Name, []*Mutation{
-		{Op: OpPut, Key: TSOKeyspaceGroupIDKey, Value: "123"},
 		{Op: OpPut, Key: MetaServiceGroupIDKey, Value: "missing"},
 		{Op: OpPut, Key: GCManagementType, Value: opposite},
 	})
@@ -1695,8 +1697,8 @@ func (suite *keyspaceTestSuite) TestGCConfigPolicyBeforeGroupChanges() {
 	re.Equal(created.Config, loaded.Config)
 	// A group validation failure must not persist successful normalization.
 	history := suite.saveHistoricalGCConfig(3300, map[string]string{TSOKeyspaceGroupIDKey: "0", UserKindKey: endpoint.Basic.String()})
-	_, err = m.UpdateKeyspaceConfig(history.Name, []*Mutation{{Op: OpPut, Key: TSOKeyspaceGroupIDKey, Value: "missing"}})
-	re.Error(err)
+	_, err = m.UpdateKeyspaceConfig(history.Name, []*Mutation{{Op: OpPut, Key: MetaServiceGroupIDKey, Value: "missing"}})
+	re.ErrorIs(err, errs.ErrUnknownMetaServiceGroup)
 	loaded, err = m.LoadKeyspace(history.Name)
 	re.NoError(err)
 	re.Equal(history.Config, loaded.Config)

@@ -324,7 +324,7 @@ func (suite *memberTestSuite) TestEvictPrimary() {
 	for i := range groupCount {
 		id := uint32(i + 1)
 		groupIDs = append(groupIDs, id)
-		handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		handlersutil.MustCreateKeyspaceGroupsWithNewKeyspaces(re, suite.server, &handlers.CreateKeyspaceGroupParams{
 			KeyspaceGroups: []*endpoint.KeyspaceGroup{
 				{
 					ID:        id,
@@ -587,7 +587,7 @@ func (suite *memberTestSuite) TestEvictPrimaryRejectedWhileSplitting() {
 	)
 	// A normal (non-splitting) group, used to prove the eviction is rejected
 	// before any transfer side effect.
-	handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+	handlersutil.MustCreateKeyspaceGroupsWithNewKeyspaces(re, suite.server, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
 			{
 				ID:        normalID,
@@ -599,7 +599,7 @@ func (suite *memberTestSuite) TestEvictPrimaryRejectedWhileSplitting() {
 	})
 	// Create a keyspace group on all tso nodes, then split it. Both source and
 	// target stay in the splitting state while the failpoint is active.
-	handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+	handlersutil.MustCreateKeyspaceGroupsWithNewKeyspaces(re, suite.server, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
 			{
 				ID:        srcID,
@@ -751,7 +751,7 @@ func (suite *memberTestSuite) TestEvictPrimaryRejectedForInvalidCandidate() {
 		// outsider is a member of each of these groups, so it passes their
 		// pre-check.
 		for i, id := range normalIDs {
-			handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+			handlersutil.MustCreateKeyspaceGroupsWithNewKeyspaces(re, suite.server, &handlers.CreateKeyspaceGroupParams{
 				KeyspaceGroups: []*endpoint.KeyspaceGroup{
 					{
 						ID:        id,
@@ -764,7 +764,7 @@ func (suite *memberTestSuite) TestEvictPrimaryRejectedForInvalidCandidate() {
 		}
 		// outsider is not a member of this group, so evicting target with
 		// new_primary=outsider must be rejected for it.
-		handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		handlersutil.MustCreateKeyspaceGroupsWithNewKeyspaces(re, suite.server, &handlers.CreateKeyspaceGroupParams{
 			KeyspaceGroups: []*endpoint.KeyspaceGroup{
 				{
 					ID:        restrictedID,
