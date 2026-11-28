@@ -151,6 +151,10 @@ type Client interface {
 	GetAffinityGroupsByPrefix(ctx context.Context, prefix string) (map[string]*AffinityGroupState, error)
 	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
 	UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error)
+	// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+	UpdateAffinityGroupPolicy(ctx context.Context, groupID string, balancePolicy string) (*AffinityGroupState, error)
+	// UpdateAffinityGroupPolicies updates the balance policy of several affinity groups.
+	UpdateAffinityGroupPolicies(ctx context.Context, groupIDs []string, balancePolicy string) (map[string]*AffinityGroupState, error)
 	// DeleteAffinityGroup deletes an affinity group by group ID.
 	DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error
 	// BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
@@ -1244,7 +1248,8 @@ func (c *client) DeleteGCSafePoint(ctx context.Context, serviceID string) (strin
 }
 
 type createAffinityGroupsOptions struct {
-	skipExistCheck bool
+	skipExistCheck    bool
+	inheritPolicyFrom map[string]string
 }
 
 // CreateAffinityGroupsOption customizes CreateAffinityGroups behavior.
@@ -1260,6 +1265,15 @@ func WithSkipExistCheck() CreateAffinityGroupsOption {
 	}
 }
 
+// WithInheritPolicyFrom maps the ID of a group to create to the ID of the group
+// whose balance policy it takes, such as the group that a TRUNCATE replaces.
+// PD ignores a source group that does not exist and a group that already exists.
+func WithInheritPolicyFrom(sources map[string]string) CreateAffinityGroupsOption {
+	return func(opts *createAffinityGroupsOptions) {
+		opts.inheritPolicyFrom = sources
+	}
+}
+
 // CreateAffinityGroups creates one or more affinity groups with key ranges.
 func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange, opts ...CreateAffinityGroupsOption) (map[string]*AffinityGroupState, error) {
 	options := &createAffinityGroupsOptions{}
@@ -1272,7 +1286,7 @@ func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[st
 
 	reqGroups := make(map[string]CreateAffinityGroupInput, len(affinityGroups))
 	for groupID, ranges := range affinityGroups {
-		reqGroups[groupID] = CreateAffinityGroupInput{Ranges: ranges}
+		reqGroups[groupID] = CreateAffinityGroupInput{Ranges: ranges, InheritPolicyFrom: options.inheritPolicyFrom[groupID]}
 	}
 	req := CreateAffinityGroupsRequest{AffinityGroups: reqGroups}
 
@@ -1405,6 +1419,49 @@ func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, l
 		return nil, err
 	}
 	return &state, nil
+}
+
+// UpdateAffinityGroupPolicy updates the balance policy of an affinity group.
+func (c *client) UpdateAffinityGroupPolicy(ctx context.Context, groupID string, balancePolicy string) (*AffinityGroupState, error) {
+	if err := validateAffinityGroupID(groupID); err != nil {
+		return nil, err
+	}
+	req := UpdateAffinityGroupPolicyRequest{BalancePolicy: balancePolicy}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var state AffinityGroupState
+	err = c.request(ctx, newRequestInfo().
+		WithName("UpdateAffinityGroupPolicy").
+		WithURI(AffinityGroupPolicyByIDPath(groupID)).
+		WithMethod(http.MethodPatch).
+		WithBody(reqJSON).
+		WithResp(&state))
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// UpdateAffinityGroupPolicies updates the balance policy of several affinity groups.
+func (c *client) UpdateAffinityGroupPolicies(ctx context.Context, groupIDs []string, balancePolicy string) (map[string]*AffinityGroupState, error) {
+	req := UpdateAffinityGroupPoliciesRequest{IDs: groupIDs, BalancePolicy: balancePolicy}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var resp AffinityGroupsResponse
+	err = c.request(ctx, newRequestInfo().
+		WithName("UpdateAffinityGroupPolicies").
+		WithURI(AffinityGroupPolicies).
+		WithMethod(http.MethodPatch).
+		WithBody(reqJSON).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
 }
 
 // DeleteAffinityGroup deletes an affinity group by group ID.

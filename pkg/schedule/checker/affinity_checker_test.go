@@ -44,9 +44,9 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-type targetWriterFunc func(context.Context, []affinity.GroupTarget) ([]string, error)
+type targetWriterFunc func(context.Context, []affinity.GroupTarget) (affinity.GroupTargetsResponse, error)
 
-func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
 	return f(ctx, targets)
 }
 
@@ -331,12 +331,12 @@ func TestAffinityCheckerPersistsUnpersistedTarget(t *testing.T) {
 		re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{keyRange}}}))
 		created := manager.GetAffinityGroupState("g")
 		var requests []affinity.GroupTarget
-		manager.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []affinity.GroupTarget) ([]string, error) {
+		manager.SetTargetWriter(targetWriterFunc(func(_ context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
 			requests = append(requests, targets...)
 			if len(requests) == 1 {
-				return nil, affinity.ErrTargetWriterUnsupported
+				return affinity.GroupTargetsResponse{}, affinity.ErrTargetWriterUnsupported
 			}
-			return []string{"g"}, nil
+			return affinity.GroupTargetsResponse{WrittenGroupIDs: []string{"g"}}, nil
 		}))
 		manager.ObserveAvailableRegion(region, created)
 		synctest.Wait()

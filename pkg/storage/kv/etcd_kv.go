@@ -20,6 +20,7 @@ import (
 	"slices"
 	"time"
 
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -217,6 +218,13 @@ type etcdTxn struct {
 	ctx        context.Context
 	conditions []clientv3.Cmp
 	operations []clientv3.Op
+	loaded     map[string]txnRead
+}
+
+type txnRead struct {
+	value       string
+	modRevision int64
+	condition   int
 }
 
 // RunInTxn runs user provided function f in a transaction.
@@ -265,6 +273,41 @@ func (txn *etcdTxn) Load(key string) (string, error) {
 	return value, err
 }
 
+// Prefetch reads point keys together and adds their comparisons to the commit.
+func (txn *etcdTxn) Prefetch(keys []string) error {
+	unique := make([]string, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		if _, ok := txn.loaded[key]; ok {
+			continue
+		}
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			unique = append(unique, key)
+		}
+	}
+	if len(txn.conditions)+len(unique) > etcdutil.MaxEtcdTxnOps {
+		return fmt.Errorf("prefetch exceeds transaction comparison limit %d: %d existing, %d new keys", etcdutil.MaxEtcdTxnOps, len(txn.conditions), len(unique))
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+	ops := make([]clientv3.Op, len(unique))
+	for i, key := range unique {
+		ops[i] = clientv3.OpGet(key)
+	}
+	resp, err := NewSlowLogTxnWithContext(txn.ctx, txn.kv.client).Then(ops...).Commit()
+	if err != nil {
+		return err
+	}
+	for i, key := range unique {
+		if _, _, err := txn.recordRead(key, resp.Responses[i].GetResponseRange().Kvs, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // LoadWithRevision returns the value and its mod revision and compares that revision
 // at commit time, keeping large values out of the transaction request.
 func (txn *etcdTxn) LoadWithRevision(key string) (string, int64, error) {
@@ -272,22 +315,32 @@ func (txn *etcdTxn) LoadWithRevision(key string) (string, int64, error) {
 }
 
 func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, int64, error) {
+	if read, ok := txn.loaded[key]; ok {
+		if compareRevision && read.modRevision != 0 {
+			txn.conditions[read.condition] = clientv3.Compare(clientv3.ModRevision(key), "=", read.modRevision)
+		}
+		return read.value, read.modRevision, nil
+	}
 	resp, err := etcdutil.EtcdKVGetWithContext(txn.ctx, txn.kv.client, key)
 	if err != nil {
 		return "", 0, err
 	}
+	return txn.recordRead(key, resp.Kvs, compareRevision)
+}
+
+func (txn *etcdTxn) recordRead(key string, values []*mvccpb.KeyValue, compareRevision bool) (string, int64, error) {
 	var condition clientv3.Cmp
 	var value string
 	var revision int64
-	switch respLen := len(resp.Kvs); respLen {
+	switch len(values) {
 	case 0:
 		// If target key does not contain a value, pin the CreateRevision of the key to 0.
 		// Returned value should be empty string.
 		value = ""
 		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
 	case 1:
-		value = string(resp.Kvs[0].Value)
-		revision = resp.Kvs[0].ModRevision
+		value = string(values[0].Value)
+		revision = values[0].ModRevision
 		if compareRevision {
 			condition = clientv3.Compare(clientv3.ModRevision(key), "=", revision)
 		} else {
@@ -296,9 +349,13 @@ func (txn *etcdTxn) loadValue(key string, compareRevision bool) (string, int64, 
 		}
 	default:
 		// If response contains multiple kvs, error occurred.
-		return "", 0, errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+		return "", 0, errs.ErrEtcdKVGetResponse.GenWithStackByArgs(values)
 	}
 	// Append the check condition to transaction.
+	if txn.loaded == nil {
+		txn.loaded = make(map[string]txnRead)
+	}
+	txn.loaded[key] = txnRead{value: value, modRevision: revision, condition: len(txn.conditions)}
 	txn.conditions = append(txn.conditions, condition)
 	return value, revision, nil
 }

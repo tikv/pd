@@ -61,6 +61,63 @@ func TestConfigWithTrailingSlash(t *testing.T) {
 	}
 }
 
+func newJSONTestClient(t *testing.T, method, uri, wantBody, response string) Client {
+	t.Helper()
+	re := require.New(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		re.Equal(method, r.Method)
+		re.Equal(uri, r.RequestURI)
+		body, err := io.ReadAll(r.Body)
+		re.NoError(err)
+		if wantBody == "" {
+			re.Empty(body)
+		} else {
+			re.JSONEq(wantBody, string(body))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, err = io.WriteString(w, response)
+		re.NoError(err)
+	}))
+	t.Cleanup(server.Close)
+	c := newClientWithMockServiceDiscovery(t.Name(), []string{server.URL})
+	t.Cleanup(c.Close)
+	return c
+}
+
+func TestUpdateAffinityGroupPolicy(t *testing.T) {
+	re := require.New(t)
+	c := newJSONTestClient(t, http.MethodPatch, "/pd/api/v2/affinity-groups/_tidb_t_1/policy",
+		`{"balance_policy":"fixed"}`, `{"id":"_tidb_t_1","balance_policy":"fixed"}`)
+	state, err := c.UpdateAffinityGroupPolicy(t.Context(), "_tidb_t_1", "fixed")
+	re.NoError(err)
+	re.Equal("_tidb_t_1", state.ID)
+	re.Equal("fixed", state.BalancePolicy)
+}
+
+func TestUpdateAffinityGroupPolicies(t *testing.T) {
+	re := require.New(t)
+	c := newJSONTestClient(t, http.MethodPatch, "/pd/api/v2/affinity-groups/policies",
+		`{"ids":["_tidb_pt_1_p2","_tidb_pt_1_p3"],"balance_policy":"fixed"}`,
+		`{"affinity_groups":{"_tidb_pt_1_p2":{"id":"_tidb_pt_1_p2","balance_policy":"fixed"},"_tidb_pt_1_p3":{"id":"_tidb_pt_1_p3","balance_policy":"fixed"}}}`)
+	states, err := c.UpdateAffinityGroupPolicies(t.Context(), []string{"_tidb_pt_1_p2", "_tidb_pt_1_p3"}, "fixed")
+	re.NoError(err)
+	re.Len(states, 2)
+	re.Equal("fixed", states["_tidb_pt_1_p3"].BalancePolicy)
+}
+
+func TestCreateAffinityGroupsWithInheritPolicyFrom(t *testing.T) {
+	c := newJSONTestClient(t, http.MethodPost, "/pd/api/v2/affinity-groups?skip_exist_check=true",
+		`{"affinity_groups":{
+			"_tidb_t_2":{"ranges":[{"start_key":"YQ==","end_key":"Yg=="}],"inherit_policy_from":"_tidb_t_1"},
+			"_tidb_t_3":{"ranges":[{"start_key":"Yg==","end_key":"Yw=="}]}}}`,
+		`{"affinity_groups":{}}`)
+	_, err := c.CreateAffinityGroups(t.Context(), map[string][]AffinityGroupKeyRange{
+		"_tidb_t_2": {{StartKey: []byte("a"), EndKey: []byte("b")}},
+		"_tidb_t_3": {{StartKey: []byte("b"), EndKey: []byte("c")}},
+	}, WithSkipExistCheck(), WithInheritPolicyFrom(map[string]string{"_tidb_t_2": "_tidb_t_1"}))
+	require.NoError(t, err)
+}
+
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	re := require.New(t)
 	checked := 0
@@ -150,28 +207,34 @@ func TestWithTargetURL(t *testing.T) {
 
 func TestGetAffinityGroupsByPrefix(t *testing.T) {
 	re := require.New(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		re.Equal(http.MethodGet, r.Method)
-		re.Equal("/pd/api/v2/affinity-groups?prefix=_tidb_ks1_pt_100_p", r.RequestURI)
-		w.Header().Set("Content-Type", "application/json")
-		_, err := io.WriteString(w, `{"affinity_groups":{"_tidb_ks1_pt_100_p101":{"id":"_tidb_ks1_pt_100_p101"}}}`)
-		re.NoError(err)
-	}))
-	defer server.Close()
-
-	c := newClientWithMockServiceDiscovery("test-affinity-prefix", []string{server.URL})
-	defer c.Close()
+	c := newJSONTestClient(t, http.MethodGet, "/pd/api/v2/affinity-groups?prefix=_tidb_ks1_pt_100_p", "",
+		`{"affinity_groups":{"_tidb_ks1_pt_100_p101":{"id":"_tidb_ks1_pt_100_p101"}}}`)
 	groups, err := c.GetAffinityGroupsByPrefix(context.Background(), "_tidb_ks1_pt_100_p")
 	re.NoError(err)
 	re.Len(groups, 1)
 	re.Contains(groups, "_tidb_ks1_pt_100_p101")
 }
 
+func TestAffinityGroupPathEscaping(t *testing.T) {
+	for _, tc := range []struct{ id, escaped string }{
+		{"group", "group"},
+		{"g1?force=true", "g1%3Fforce=true"},
+		{"../affinity-groups?force=true", "..%2Faffinity-groups%3Fforce=true"},
+		{"a/b#c% d", "a%2Fb%23c%25%20d"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			path := AffinityGroups + "/" + tc.escaped
+			require.Equal(t, path, AffinityGroupByIDPath(tc.id))
+			require.Equal(t, path+"/policy", AffinityGroupPolicyByIDPath(tc.id))
+		})
+	}
+}
+
 func TestAffinityGroupPathValidation(t *testing.T) {
 	validID := "Group_1-" + strings.Repeat("g", 56)
 	for _, tc := range []struct {
 		method string
-		query  string
+		suffix string
 		send   func(Client, string) error
 	}{
 		{http.MethodGet, "", func(c Client, id string) error {
@@ -180,6 +243,10 @@ func TestAffinityGroupPathValidation(t *testing.T) {
 		}},
 		{http.MethodPut, "", func(c Client, id string) error {
 			_, err := c.UpdateAffinityGroupPeers(t.Context(), id, 1, []uint64{1})
+			return err
+		}},
+		{http.MethodPatch, "/policy", func(c Client, id string) error {
+			_, err := c.UpdateAffinityGroupPolicy(t.Context(), id, "fixed")
 			return err
 		}},
 		{http.MethodDelete, "", func(c Client, id string) error {
@@ -193,7 +260,7 @@ func TestAffinityGroupPathValidation(t *testing.T) {
 		transport := NewHTTPClientWithRequestChecker(func(req *http.Request) error {
 			calls++
 			require.Equal(t, tc.method, req.Method)
-			require.Equal(t, "/pd/api/v2/affinity-groups/"+validID+tc.query, req.URL.RequestURI())
+			require.Equal(t, "/pd/api/v2/affinity-groups/"+validID+tc.suffix, req.URL.RequestURI())
 			return nil
 		})
 		c := newClientWithMockServiceDiscovery("affinity-path", []string{"http://127.0.0.1"}, WithHTTPClient(transport))

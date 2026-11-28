@@ -17,6 +17,8 @@ package affinity
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -26,12 +28,16 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func (m *Manager) applyStoreConditions(unavailableStores map[uint64]storeCondition) bool {
@@ -322,6 +328,83 @@ func TestObserveAvailableRegionIgnoresRecreatedGroup(t *testing.T) {
 	var group Group
 	re.NoError(json.Unmarshal([]byte(persisted), &group))
 	re.Equal(adminLeaderStoreID, group.LeaderStoreID)
+}
+
+func TestObserveAvailableRegionKeepsFixedTarget(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for _, id := range []uint64{1, 2} {
+		s := core.NewStoreInfo(&metapb.Store{Id: id, Address: fmt.Sprintf("s%d", id), NodeState: metapb.NodeState_Serving})
+		storeInfos.PutStore(s.Clone(core.SetLastHeartbeatTS(time.Now())))
+	}
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, mockconfig.NewTestOptions(), regionLabeler)
+	re.NoError(err)
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+
+	// Both Regions have voters on stores 1 and 2, with the leader on the given store.
+	newRegion := func(id, leaderStoreID uint64) *core.RegionInfo {
+		peers := []*metapb.Peer{
+			{Id: id + 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: id + 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+		}
+		return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[leaderStoreID-1])
+	}
+	leaderOn1, leaderOn2 := newRegion(10, 1), newRegion(20, 2)
+	observe := func(region *core.RegionInfo) *GroupState {
+		manager.ObserveAvailableRegion(region, manager.GetAffinityGroupState("g"))
+		return manager.GetAffinityGroupState("g")
+	}
+	setPolicy := func(policy BalancePolicy) {
+		_, err := manager.UpdateAffinityGroupPolicy("g", policy)
+		re.NoError(err)
+	}
+
+	// A fixed group without a target takes the layout of the first Region.
+	manager.checkGroupsAvailability()
+	setPolicy(BalancePolicyFixed)
+	state := observe(leaderOn1)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+
+	// A degraded fixed group keeps its leader, and a Region with the same layout
+	// confirms the target.
+	manager.DegradeAffinityGroup("g")
+	state = observe(leaderOn2)
+	re.False(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+	state = observe(leaderOn1)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+
+	// A degraded auto group takes the leader of the Region.
+	setPolicy(BalancePolicyAuto)
+	manager.DegradeAffinityGroup("g")
+	state = observe(leaderOn2)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(2), state.LeaderStoreID)
+
+	// An expired fixed group takes a new target.
+	setPolicy(BalancePolicyFixed)
+	manager.ExpireAffinityGroup("g")
+	state = observe(leaderOn1)
+	re.True(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
+
+	// An observation of an auto group does not move the leader once the policy
+	// is fixed. A policy update keeps the version that the observation carries.
+	setPolicy(BalancePolicyAuto)
+	manager.DegradeAffinityGroup("g")
+	stale := manager.GetAffinityGroupState("g")
+	setPolicy(BalancePolicyFixed)
+	manager.ObserveAvailableRegion(leaderOn2, stale)
+	state = manager.GetAffinityGroupState("g")
+	re.False(state.AffinitySchedulingAllowed)
+	re.Equal(uint64(1), state.LeaderStoreID)
 }
 
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
@@ -685,4 +768,73 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 	re.True(manager.applyStoreConditions(unavailable))
 	groupInfo = getGroupForTest(re, manager, "priority")
 	re.Equal(groupExpired, groupInfo.GetAvailability())
+}
+
+func TestPolicyInheritanceScope(t *testing.T) {
+	test := newTargetTest(t, "custom-source", "_tidb_ks1_t_1")
+	_, err := test.UpdateAffinityGroupPolicies([]string{"custom-source", "_tidb_ks1_t_1"}, BalancePolicyFixed)
+	test.NoError(err)
+	// Even ranges proving membership cannot authorize a custom ID.
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 1)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 2)
+	for _, pair := range [][2]string{
+		{"custom-target", "custom-source"},
+		{"custom-target", "_tidb_ks1_t_1"},
+		{"_tidb_ks1_t_2", "custom-source"},
+		{"_tidb_ks2_t_2", "_tidb_ks1_t_1"},
+		{"_tidb_ks1_t_2", "_tidb_ks1_t_1"},
+	} {
+		t.Run(pair[1]+"-to-"+pair[0], func(t *testing.T) {
+			re := require.New(t)
+			for _, ranges := range [][]keyutil.KeyRange{nil, {{StartKey: lower[:], EndKey: upper[:]}}} {
+				err := test.CreateAffinityGroupsIfNotExists([]GroupKeyRanges{{GroupID: pair[0], InheritPolicyFrom: pair[1], KeyRanges: ranges}})
+				if kerneltype.IsNextGen() && (pair[0] != "_tidb_ks1_t_2" || pair[1] != "_tidb_ks1_t_1") {
+					re.ErrorIs(err, errs.ErrAffinityGroupContent)
+					re.False(test.IsGroupExist(pair[0]))
+					val, loadErr := test.store.LoadAffinityGroup(pair[0])
+					re.NoError(loadErr)
+					re.Empty(val)
+				} else {
+					re.NoError(err)
+					re.Equal(BalancePolicyFixed, test.GetAffinityGroupState(pair[0]).BalancePolicy)
+					re.Equal(BalancePolicyFixed, test.stored(pair[0]).BalancePolicy)
+					re.NoError(test.DeleteAffinityGroups([]string{pair[0]}, true))
+				}
+			}
+		})
+	}
+}
+
+func TestPolicyInheritanceRejectsSameRequestSource(t *testing.T) {
+	const original = "_tidb_ks1_t_999"
+	test := newTargetTest(t, original)
+	_, err := test.UpdateAffinityGroupPolicy(original, BalancePolicyFixed)
+	test.NoError(err)
+	_, base := makeTestGroupBatch(etcdutil.MaxEtcdTxnOps+2, "", false)
+	for _, skipExisting := range []bool{false, true} {
+		for _, sourceIndex := range []int{0, 1, etcdutil.MaxEtcdTxnOps} {
+			t.Run(fmt.Sprintf("skip-%t-source-%d", skipExisting, sourceIndex), func(t *testing.T) {
+				re := require.New(t)
+				changes := slices.Clone(base)
+				source := changes[sourceIndex].GroupID
+				changes[sourceIndex].InheritPolicyFrom = original
+				// Source after destination, same chunk, cross-chunk and multi-hop.
+				changes[0].InheritPolicyFrom = source
+				changes[len(changes)-1].InheritPolicyFrom = source
+				expected := []string{original}
+				if skipExisting {
+					re.NoError(test.CreateAffinityGroups([]GroupKeyRanges{{GroupID: source}}))
+					t.Cleanup(func() { re.NoError(test.DeleteAffinityGroups([]string{source}, true)) })
+					expected = append(expected, source)
+				}
+				_, err := test.createGroupsWithSkipExisting(t.Context(), changes, skipExisting, false)
+				re.ErrorIs(err, errs.ErrAffinityGroupContent)
+				re.Equal(len(expected), test.GetAffinityGroupCount())
+				re.ElementsMatch(expected, slices.Collect(maps.Keys(test.GetAffinityGroupStates(nil, ""))))
+				var stored []string
+				re.NoError(test.store.LoadAllAffinityGroups(func(id, _ string) { stored = append(stored, id) }))
+				re.ElementsMatch(expected, stored, "validation must precede all chunk writes")
+			})
+		}
+	}
 }

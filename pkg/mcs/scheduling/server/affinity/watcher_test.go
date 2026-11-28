@@ -47,9 +47,9 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
-type targetWriterFunc func(context.Context, []affinity.GroupTarget) ([]string, error)
+type targetWriterFunc func(context.Context, []affinity.GroupTarget) (affinity.GroupTargetsResponse, error)
 
-func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+func (f targetWriterFunc) WriteGroupTargets(ctx context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
 	return f(ctx, targets)
 }
 
@@ -456,23 +456,23 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 	sent := make(chan affinity.GroupTarget, 2)
 	allowAdminRetry := make(chan struct{})
 	adminDone := make(chan struct{})
-	var adminWritten []string
+	var adminWritten affinity.GroupTargetsResponse
 	var adminErr error
-	manager.SetTargetWriter(targetWriterFunc(func(ctx context.Context, targets []affinity.GroupTarget) ([]string, error) {
+	manager.SetTargetWriter(targetWriterFunc(func(ctx context.Context, targets []affinity.GroupTarget) (affinity.GroupTargetsResponse, error) {
 		if !upgraded.Load() {
-			return nil, affinity.ErrTargetWriterUnsupported
+			return affinity.GroupTargetsResponse{}, affinity.ErrTargetWriterUnsupported
 		}
 		target := targets[0]
 		select {
 		case sent <- target:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return affinity.GroupTargetsResponse{}, ctx.Err()
 		}
 		if target.Expected.ID == adminID {
 			select {
 			case <-allowAdminRetry:
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return affinity.GroupTargetsResponse{}, ctx.Err()
 			}
 			adminWritten, adminErr = pd.UpdateAffinityGroupTargets(ctx, targets)
 			close(adminDone)
@@ -543,7 +543,7 @@ func TestAffinityWatcherReconcilesLocalTargets(t *testing.T) {
 	select {
 	case <-adminDone:
 		re.NoError(adminErr)
-		re.Empty(adminWritten, "the in-flight retry must not overwrite the admin target")
+		re.Empty(adminWritten.WrittenGroupIDs, "the in-flight retry must not overwrite the admin target")
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for in-flight retry")
 	}

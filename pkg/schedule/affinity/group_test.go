@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestTiDBGroupIDValidation(t *testing.T) {
@@ -170,4 +171,22 @@ func TestAdjustGroup(t *testing.T) {
 	group.LeaderStoreID = 1
 	group.VoterStoreIDs = []uint64{1, 4}
 	re.Error(manager.AdjustGroup(group))
+}
+
+func TestCustomGroupPolicyInheritanceKeyspace(t *testing.T) {
+	re := require.New(t)
+	re.Error(validateGroupKeyRanges(GroupKeyRanges{GroupID: "custom", InheritPolicyFrom: "bad id"}))
+	lower := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 42)
+	upper := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, 43)
+	for _, source := range []string{"_tidb_ks42_t_1", "_tidb_ks43_t_1", "_tidb_t_1"} {
+		err := validateGroupKeyRanges(GroupKeyRanges{
+			GroupID: "custom", InheritPolicyFrom: source,
+			KeyRanges: []keyutil.KeyRange{{StartKey: lower[:], EndKey: upper[:]}},
+		})
+		if kerneltype.IsNextGen() {
+			re.ErrorIs(err, errs.ErrAffinityGroupContent, source)
+		} else {
+			re.NoError(err, source)
+		}
+	}
 }
