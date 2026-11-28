@@ -17,6 +17,7 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -991,11 +992,20 @@ func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}, rev
 	if !lw.reconcileDeletedKeys {
 		return nil, nil
 	}
+	trackedKeys := lw.loadedKeys
+	if lw.additionalDeleteKeys != nil {
+		if keys := lw.additionalDeleteKeys(); len(keys) > 0 {
+			trackedKeys = maps.Clone(trackedKeys)
+			for _, key := range keys {
+				trackedKeys[key] = struct{}{}
+			}
+		}
+	}
 	var firstErr error
 	var reconciledDeletedKeys []string
-	reconcile := func(key string) {
+	for key := range trackedKeys {
 		if _, ok := snapshotKeys[key]; ok {
-			return
+			continue
 		}
 		kv := &mvccpb.KeyValue{Key: []byte(key), ModRevision: revision}
 		if err := lw.deleteFn(kv); err != nil {
@@ -1004,19 +1014,9 @@ func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}, rev
 			}
 			log.Warn("delete failed in watch loop when reconciling loaded keys",
 				zap.String("name", lw.name), zap.String("key", key), zap.Error(err))
-			return
+			continue
 		}
 		reconciledDeletedKeys = append(reconciledDeletedKeys, key)
-	}
-	for key := range lw.loadedKeys {
-		reconcile(key)
-	}
-	if lw.additionalDeleteKeys != nil {
-		for _, key := range lw.additionalDeleteKeys() {
-			if _, tracked := lw.loadedKeys[key]; !tracked {
-				reconcile(key)
-			}
-		}
 	}
 	return reconciledDeletedKeys, firstErr
 }

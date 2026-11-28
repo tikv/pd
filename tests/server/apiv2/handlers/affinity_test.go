@@ -1785,22 +1785,14 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 
 		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, endpoint, []byte(`{}`), testutil.Status(re, http.StatusBadRequest)))
 
-		manager, err := cluster.GetLeaderServer().GetServer().GetAffinityManager()
+		data, err := json.Marshal(affinity.GroupTargetsRequest{Targets: []affinity.GroupTarget{
+			{Expected: want, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+			{Expected: expected, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}},
+		}})
 		re.NoError(err)
-		changes := []affinity.GroupKeyRanges{{GroupID: "cancel-first"}, {GroupID: "cancel-second"}}
-		re.NoError(manager.CreateAffinityGroups(changes))
-		targets := make([]affinity.GroupTarget, 0, len(changes))
-		for _, change := range changes {
-			targets = append(targets, affinity.GroupTarget{
-				Expected:      manager.GetAffinityGroupState(change.GroupID).Group,
-				LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3},
-			})
-		}
-		data, err := json.Marshal(affinity.GroupTargetsRequest{Targets: targets})
-		re.NoError(err)
-		for _, want := range [][]string{nil, {changes[0].GroupID}} {
+		for _, wantWritten := range [][]string{nil, {"targets"}} {
 			ctx, cancel := context.WithCancel(suite.T().Context())
-			if len(want) == 0 {
+			if len(wantWritten) == 0 {
 				cancel()
 			} else {
 				const fp = "github.com/tikv/pd/pkg/schedule/affinity/afterAffinityTargetWritten"
@@ -1817,9 +1809,9 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupTargets() {
 			var result affinity.GroupTargetsResponse
 			re.NoError(json.Unmarshal(response.Body.Bytes(), &result))
 			re.Contains(result.Error, "context canceled")
-			re.ElementsMatch(want, result.WrittenGroupIDs)
-			re.Len(result.WrittenRevisions, len(want))
-			re.Zero(manager.GetAffinityGroupState(changes[1].GroupID).LeaderStoreID)
+			re.ElementsMatch(wantWritten, result.WrittenGroupIDs)
+			re.Len(result.WrittenRevisions, len(wantWritten))
+			re.Equal(expected, mustGetAffinityGroup(re, serverAddr, scopedID).Group)
 		}
 	})
 }

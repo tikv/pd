@@ -438,9 +438,22 @@ func (m *Manager) updateAffinityGroupPeersWithState(groupID string, observed *Gr
 			}
 			return m.GetAffinityGroupState(groupID), nil
 		}
+		m.RLock()
+		current := m.groups[groupID]
+		if current == nil || current != observed.groupInfoPtr || current.AffinityVer != observed.affinityVer || current.rangeConflict {
+			m.RUnlock()
+			return m.GetAffinityGroupState(groupID), nil
+		}
+		conditionsKnown := m.storeConditionsKnown
+		m.RUnlock()
+		// Before the first scan, patrol may confirm a healthy target or learn one for an empty or expired group.
+		if !conditionsKnown && !group.RegularSchedulingAllowed &&
+			(leaderStoreID != group.LeaderStoreID || !slices.Equal(voterStoreIDs, group.VoterStoreIDs)) {
+			return group, nil
+		}
 		// Recheck the persisted target and policy before a classic first-win write.
 		target := GroupTarget{Expected: group.Group, LeaderStoreID: leaderStoreID, VoterStoreIDs: voterStoreIDs}
-		if _, _, _, err := m.updateGroupTargetLocked(m.ctx, target, true); err != nil {
+		if _, _, _, err := m.updateGroupTargetLocked(m.ctx, target, observed); err != nil {
 			return nil, err
 		}
 		return m.GetAffinityGroupState(groupID), nil

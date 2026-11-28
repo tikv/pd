@@ -210,6 +210,84 @@ func TestClassicFirstWinBeforeStoreScan(t *testing.T) {
 	test.Equal(state.Group, *test.stored("g"))
 }
 
+func TestClassicLeaderSwitchPreservesTargetBeforeStoreScan(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		previous := newTargetTest(t, "loaded", "empty")
+		_, err := previous.UpdateAffinityGroupPolicy("loaded", BalancePolicyAuto)
+		previous.NoError(err)
+		_, err = previous.UpdateAffinityGroupPeers("loaded", 1, []uint64{1, 2, 3})
+		previous.NoError(err)
+		persisted := previous.stored("loaded")
+
+		test := newTargetTestWithStorage(t, t.Context(), previous.store)
+		state := test.GetAffinityGroupState
+		test.False(test.storeConditionsKnown)
+		test.Equal(*persisted, state("loaded").Group)
+		test.False(state("loaded").AffinitySchedulingAllowed)
+		test.False(state("loaded").RegularSchedulingAllowed)
+
+		test.observe("loaded", 3, 1, 2)
+		test.Equal(persisted, test.stored("loaded"))
+		test.Equal(*persisted, state("loaded").Group)
+		test.False(state("loaded").AffinitySchedulingAllowed)
+
+		stores := test.storeSetInformer.(*core.StoresInfo)
+		stores.PutStore(stores.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute))))
+		test.observe("loaded", 1, 2, 3)
+		test.False(state("loaded").AffinitySchedulingAllowed)
+		test.Equal(persisted, test.stored("loaded"))
+
+		stores.PutStore(stores.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now())))
+		test.observe("loaded", 1, 2, 3)
+		test.True(state("loaded").AffinitySchedulingAllowed)
+		test.Equal(*persisted, state("loaded").Group)
+		test.Equal(persisted, test.stored("loaded"))
+
+		test.False(state("empty").hasTarget())
+		test.observe("empty", 3, 1, 2)
+		test.True(state("empty").AffinitySchedulingAllowed)
+		test.Equal(uint64(3), state("empty").LeaderStoreID)
+		test.Equal(state("empty").Group, *test.stored("empty"))
+		test.False(test.storeConditionsKnown)
+
+		test.ExpireAffinityGroup("empty")
+		expired := state("empty")
+		test.True(expired.RegularSchedulingAllowed)
+		test.False(expired.AffinitySchedulingAllowed)
+		test.ObserveAvailableRegion(targetRegion(1, 2, 4), expired)
+		relearned := state("empty")
+		test.True(relearned.AffinitySchedulingAllowed)
+		test.Equal(uint64(1), relearned.LeaderStoreID)
+		test.Equal([]uint64{1, 2, 4}, relearned.VoterStoreIDs)
+		test.Equal(relearned.Group, *test.stored("empty"))
+		test.False(test.storeConditionsKnown)
+
+		test.DegradeAffinityGroup("loaded")
+		staleObserved := state("loaded")
+		test.False(staleObserved.AffinitySchedulingAllowed)
+		test.checkGroupsAvailability()
+		test.True(test.storeConditionsKnown)
+		afterScan := state("loaded")
+		test.True(afterScan.AffinitySchedulingAllowed)
+		test.Greater(afterScan.affinityVer, staleObserved.affinityVer)
+		test.ObserveAvailableRegion(targetRegion(3, 1, 2), staleObserved)
+		test.Equal(*persisted, state("loaded").Group)
+		test.Equal(persisted, test.stored("loaded"))
+
+		test.DegradeAffinityGroup("loaded")
+		test.interceptTxns(func(ctx context.Context, apply func(kv.Txn) error) error {
+			// Publish a store scan after patrol has validated its observation.
+			stores.PutStore(stores.GetStore(4).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute))))
+			test.checkGroupsAvailability()
+			return test.store.RunInTxn(ctx, apply)
+		})
+		test.observe("loaded", 3, 1, 2)
+		test.True(state("loaded").AffinitySchedulingAllowed)
+		test.Equal(*persisted, state("loaded").Group)
+		test.Equal(persisted, test.stored("loaded"))
+	})
+}
+
 func TestClassicFirstWinReplayPreservesExpirationWithEvictedLeader(t *testing.T) {
 	test := newTargetTest(t, "g")
 	test.checkGroupsAvailability()
@@ -1000,6 +1078,24 @@ func TestFirstWinRetainsStoredTargetInPatrolOrder(t *testing.T) {
 }
 
 func TestFirstWinStoreRecoveryWaitsForReconciliation(t *testing.T) {
+	t.Run("same peers", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			test := newTargetTest(t, "g")
+			test.write([]string{"g"}, test.target("g", 1, 1, 2))
+			test.checkGroupsAvailability()
+			test.applyStoreConditions(map[uint64]storeCondition{1: storeBusy})
+			stored := test.stored("g")
+			test.Lock()
+			test.groups["g"].lastSentWritten = true
+			test.Unlock()
+
+			test.checkGroupsAvailability()
+			test.Equal(groupDegraded, test.groups["g"].GetAvailability())
+			test.SyncGroupFromEtcdWithRevision(stored, 2)
+			test.Equal(groupAvailable, test.groups["g"].GetAvailability())
+		})
+	})
+
 	synctest.Test(t, func(t *testing.T) {
 		pd := newTargetTest(t, "g")
 		pd.write([]string{"g"}, pd.target("g", 1, 1, 2))
@@ -1028,8 +1124,8 @@ func TestRemoteTargetConfirmationRevision(t *testing.T) {
 			t.Run(path+"/"+event, func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					test := newTargetTest(t)
-					initial := Group{ID: "_tidb_ks1_pt_100_p1", CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
-					id := initial.ID
+					const id, confirmed = balanceTestGroupID, int64(13)
+					initial := Group{ID: id, CreateTimestamp: 1, LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2, 3}}
 					test.SyncGroupFromEtcdWithRevision(&initial, 10)
 					test.checkGroupsAvailability()
 					if path == "first-win" {
@@ -1037,7 +1133,6 @@ func TestRemoteTargetConfirmationRevision(t *testing.T) {
 					}
 					intermediate := initial
 					intermediate.LeaderStoreID = 3
-					const confirmed = 13
 					test.useWriter(func(_ context.Context, targets []GroupTarget) (GroupTargetsResponse, error) {
 						test.Len(targets, 1)
 						test.Equal(int64(10), targets[0].ExpectedModRevision)
@@ -1051,16 +1146,12 @@ func TestRemoteTargetConfirmationRevision(t *testing.T) {
 						case "newer delete before reply":
 							test.SyncGroupDeleteFromEtcdWithRevision(id, 14)
 						}
-						return GroupTargetsResponse{
-							WrittenGroupIDs:  []string{id},
-							WrittenRevisions: map[string]int64{id: confirmed},
-						}, nil
+						return GroupTargetsResponse{WrittenGroupIDs: []string{id}, WrittenRevisions: map[string]int64{id: confirmed}}, nil
 					})
 					if path == "first-win" {
 						test.observe(id, 2, 1, 3)
 					} else {
-						snapshot := test.GetBalanceSnapshot("_tidb_ks1_pt_100", test.GetBalanceCounts())
-						written, err := test.CommitBalanceTargets(t.Context(), snapshot, []*Group{test.target(id, 2, 1, 2, 3).result()})
+						written, err := test.CommitBalanceTargets(t.Context(), test.balanceSnapshot(), []*Group{test.groupTarget(id, 2, 1, 2, 3)})
 						test.NoError(err)
 						test.Equal([]string{id}, written)
 					}
@@ -1083,7 +1174,7 @@ func TestRemoteTargetConfirmationRevision(t *testing.T) {
 					test.SyncGroupFromEtcdWithRevision(test.calls[0].result(), confirmed)
 					test.checkGroupsAvailability()
 					current := test.GetAffinityGroupState(id)
-					test.Equal(int64(confirmed), current.modRevision)
+					test.Equal(confirmed, current.modRevision)
 					test.Equal(uint64(2), current.LeaderStoreID)
 					test.True(current.AffinitySchedulingAllowed)
 					test.SyncGroupDeleteFromEtcdWithRevision(id, confirmed+1)
@@ -1489,7 +1580,7 @@ func TestFirstWinDuringBalanceCooldown(t *testing.T) {
 	for _, confirmed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("confirmed=%t", confirmed), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				test := newTargetTest(t, "g", "h", "balance")
+				test := newTargetTest(t, "g", "h", balanceTestGroupID)
 				test.checkGroupsAvailability()
 				request := "h"
 				if confirmed {
@@ -1508,8 +1599,7 @@ func TestFirstWinDuringBalanceCooldown(t *testing.T) {
 
 				test.observe(request, 1, 2)
 				test.observe("g", 2, 3)
-				snapshot := &BalanceSnapshot{Groups: []*GroupState{test.GetAffinityGroupState("balance")}}
-				_, err := test.CommitBalanceTargets(t.Context(), snapshot, []*Group{test.target("balance", 1, 1, 2).result()})
+				_, err := test.CommitBalanceTargets(t.Context(), test.balanceSnapshot(), []*Group{test.groupTarget(balanceTestGroupID, 1, 1, 2)})
 				test.ErrorIs(err, ErrTargetWriterUnsupported)
 				test.observe("g", 3, 4)
 				close(release)

@@ -58,6 +58,8 @@ var partitionAffinityGroupIDRegexp = regexp.MustCompile(`^_tidb_(ks[0-9]+_)?pt_[
 
 // TableIDForGroup returns the table of a TiDB partition affinity group. Other groups
 // belong to no table and are not balanced.
+// Group IDs are validated against the cluster's kernel mode at creation and clusters never switch
+// between Classic and NextGen, so matching the partition ID pattern suffices without rerunning ValidateGroupID.
 func TableIDForGroup(groupID string) (TableID, bool) {
 	if !partitionAffinityGroupIDRegexp.MatchString(groupID) {
 		return "", false
@@ -167,7 +169,6 @@ func (m *Manager) GetBalanceCounts() BalanceCounts {
 
 // BalanceSnapshot is a copy of the state of a table to plan its targets from.
 type BalanceSnapshot struct {
-	TableID TableID
 	Version uint64
 	// Groups is sorted by ID.
 	Groups []*GroupState
@@ -193,7 +194,6 @@ func (m *Manager) GetBalanceSnapshot(tableID TableID, counts BalanceCounts) *Bal
 		return nil
 	}
 	snapshot := &BalanceSnapshot{
-		TableID: tableID,
 		Version: table.version,
 		Groups:  make([]*GroupState, 0, len(table.groups)),
 		Ranges:  make(map[string]GroupKeyRanges, len(table.groups)),
