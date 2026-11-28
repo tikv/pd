@@ -2402,16 +2402,13 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitUs
 			Members:   testKeyspaceGroupMembers(),
 		},
 		&endpoint.KeyspaceGroup{
-			ID:        1,
-			UserKind:  endpoint.Standard.String(),
-			Keyspaces: []uint32{101},
-			Members:   testKeyspaceGroupMembers(),
-		},
-		&endpoint.KeyspaceGroup{
 			ID:        2,
 			UserKind:  endpoint.Standard.String(),
 			Keyspaces: []uint32{102},
 			Members:   testKeyspaceGroupMembers(),
+			MergeState: &endpoint.MergeState{
+				MergeList: []uint32{1},
+			},
 		},
 		&endpoint.KeyspaceGroup{
 			ID:        3,
@@ -2438,6 +2435,9 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitUs
 
 	kgm.doPatrolKeyspaceGroupSizeForAutoSplit(suite.ctx)
 
+	kg1, err := kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Nil(kg1)
 	kg5, err := kgm.GetKeyspaceGroupByID(5)
 	re.NoError(err)
 	re.NotNil(kg5)

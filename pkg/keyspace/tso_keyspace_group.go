@@ -887,9 +887,6 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 
 func (m *GroupManager) saveKeyspaceGroupsWithConditions(ctx context.Context, keyspaceGroups []*endpoint.KeyspaceGroup, conditions []clientv3.Cmp) error {
 	return m.runKeyspaceGroupTxn(ctx, conditions, func(txn kv.Txn) error {
-		if len(keyspaceGroups) == 0 {
-			return nil
-		}
 		for _, keyspaceGroup := range keyspaceGroups {
 			// Check if keyspace group has already existed.
 			oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
@@ -900,9 +897,13 @@ func (m *GroupManager) saveKeyspaceGroupsWithConditions(ctx context.Context, key
 				return errs.ErrKeyspaceGroupExists
 			}
 		}
-		mergeSources, err := loadMergingSourceIDs(txn)
-		if err != nil {
-			return err
+		var mergeSources map[uint32]struct{}
+		if len(keyspaceGroups) > 1 || (len(keyspaceGroups) == 1 && keyspaceGroups[0].ID != constant.DefaultKeyspaceGroupID) {
+			var err error
+			mergeSources, err = m.loadMergingSourceIDs()
+			if err != nil {
+				return err
+			}
 		}
 		for _, keyspaceGroup := range keyspaceGroups {
 			if _, merging := mergeSources[keyspaceGroup.ID]; merging {
@@ -914,8 +915,7 @@ func (m *GroupManager) saveKeyspaceGroupsWithConditions(ctx context.Context, key
 				Members:   keyspaceGroup.Members,
 				Keyspaces: keyspaceGroup.Keyspaces,
 			}
-			err = m.store.SaveKeyspaceGroup(txn, newKG)
-			if err != nil {
+			if err := m.store.SaveKeyspaceGroup(txn, newKG); err != nil {
 				return err
 			}
 		}
@@ -923,8 +923,9 @@ func (m *GroupManager) saveKeyspaceGroupsWithConditions(ctx context.Context, key
 	})
 }
 
-func loadMergingSourceIDs(txn kv.Txn) (map[uint32]struct{}, error) {
-	groups, err := endpoint.LoadKeyspaceGroupsInTxn(txn)
+// loadMergingSourceIDs requires m.Lock to be held by the caller.
+func (m *GroupManager) loadMergingSourceIDs() (map[uint32]struct{}, error) {
+	groups, err := m.store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1673,7 +1674,7 @@ func (m *GroupManager) splitKeyspaceGroupWithConditions(
 		if splitTargetKg != nil {
 			return errs.ErrKeyspaceGroupExists
 		}
-		mergeSources, err := loadMergingSourceIDs(txn)
+		mergeSources, err := m.loadMergingSourceIDs()
 		if err != nil {
 			return err
 		}

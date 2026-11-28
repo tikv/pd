@@ -336,17 +336,19 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 	if !patrolKeyspaceAssignmentState.patrolled {
 		// Patrol keyspace assignment before splitting keyspace group.
 		err = manager.PatrolKeyspaceAssignment(splitParams.StartKeyspaceID, splitParams.EndKeyspaceID)
-		if err == nil {
-			patrolKeyspaceAssignmentState.patrolled = true
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			patrolKeyspaceAssignmentState.Unlock()
+			return
 		}
+		patrolKeyspaceAssignmentState.patrolled = true
 	}
 	patrolKeyspaceAssignmentState.Unlock()
 
-	if err == nil {
-		err = groupManager.SplitKeyspaceGroupByID(
-			id, splitParams.NewID,
-			splitParams.Keyspaces, splitParams.StartKeyspaceID, splitParams.EndKeyspaceID)
-	}
+	// Split keyspace group.
+	err = groupManager.SplitKeyspaceGroupByID(
+		id, splitParams.NewID,
+		splitParams.Keyspaces, splitParams.StartKeyspaceID, splitParams.EndKeyspaceID)
 	if err != nil {
 		if errs.ErrKeyspaceGroupInMerging.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
