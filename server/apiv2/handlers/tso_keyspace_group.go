@@ -274,6 +274,7 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 	kg, err := manager.DeleteKeyspaceGroupByID(id)
 	if err != nil {
 		if errs.ErrModifyDefaultKeyspaceGroup.Equal(err) ||
+			errs.ErrKeyspaceGroupInSplit.Equal(err) ||
 			errs.ErrKeyspaceGroupInMerging.Equal(err) ||
 			errs.ErrKeyspaceGroupNotEmpty.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())

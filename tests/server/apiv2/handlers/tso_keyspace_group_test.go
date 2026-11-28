@@ -369,6 +369,14 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	// They should have the same user kind and members.
 	re.Equal(kg1.UserKind, kg2.UserKind)
 	re.Equal(kg1.Members, kg2.Members)
+
+	request, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%d", suite.server.GetAddr(), keyspaceGroupsPrefix, kg2.ID), http.NoBody)
+	re.NoError(err)
+	response, err := tests.TestDialClient.Do(request)
+	re.NoError(err)
+	defer response.Body.Close()
+	re.Equal(http.StatusBadRequest, response.StatusCode)
+
 	// Finish the split and check the split state.
 	MustFinishSplitKeyspaceGroup(re, suite.server, 2)
 	kg1 = MustLoadKeyspaceGroupByID(re, suite.server, 1)
