@@ -100,30 +100,19 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 		manager, err := leader.GetServer().GetAffinityManager()
 		re.NoError(err)
 		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
-		re.NoError(failpoint.Enable(modeFlag, "return(false)"))
-		legacy := []string{"_tidb_t_1001", "_tidb_pt_1001_p3", "_tidb_tg_100"}
-		defer func() {
-			re.NoError(manager.DeleteAffinityGroups(legacy, true))
-			re.NoError(failpoint.Disable(modeFlag))
-		}()
-		legacyRange := handlers.AffinityKeyRange{
-			StartKey: codec.EncodeBytes(codec.GenerateTableKey(1001)),
-			EndKey:   codec.EncodeBytes(codec.GenerateTableKey(1002)),
-		}
-		for i, id := range legacy {
-			group := affinity.GroupKeyRanges{GroupID: id}
-			if i == 0 {
-				group.KeyRanges = []keyutil.KeyRange{{StartKey: legacyRange.StartKey, EndKey: legacyRange.EndKey}}
-			}
-			re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{group}))
-		}
 		re.NoError(failpoint.Enable(modeFlag, "return(true)"))
+		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
 		url := getAffinityGroupURL(leader.GetAddr())
-		for _, id := range legacy {
+		for _, id := range []string{"_tidb_t_1001", "_tidb_pt_1001_p3", "_tidb_tg_100"} {
 			for _, req := range []struct{ method, path, body string }{
 				{http.MethodPost, "", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
 				{http.MethodPost, "?skip_exist_check=true", fmt.Sprintf(`{"affinity_groups":{"%s":{}}}`, id)},
 				{http.MethodPatch, "", fmt.Sprintf(`{"add":[{"id":"%s","ranges":[]}]}`, id)},
+				{http.MethodPatch, "", fmt.Sprintf(`{"remove":[{"id":"%s","ranges":[]}]}`, id)},
+				{http.MethodGet, "/" + id, ""},
+				{http.MethodGet, "?ids=" + id, ""},
+				{http.MethodDelete, "/" + id, ""},
+				{http.MethodPost, "?delete", fmt.Sprintf(`{"ids":["%s"],"force":true}`, id)},
 				{http.MethodPut, "/" + id, `{"leader_store_id":1,"voter_store_ids":[1]}`},
 				{http.MethodPatch, "/" + id + "/policy", `{"balance_policy":"fixed"}`},
 				{http.MethodPatch, "/policies", fmt.Sprintf(`{"ids":["%s"],"balance_policy":"fixed"}`, id)},
@@ -131,29 +120,8 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 				status, body := doAffinityJSON(re, req.method, url+req.path, req.body, nil)
 				re.Equal(http.StatusBadRequest, status, "%s %s: %s", req.method, req.path, body)
 				re.Contains(body, "pd-ctl --keyspace-id")
-				re.Len(manager.GetAllAffinityGroupStates(), len(legacy))
-				re.True(manager.IsGroupExist(id))
+				re.False(manager.IsGroupExist(id))
 			}
-		}
-		for i, id := range legacy {
-			re.Equal(id, mustGetAffinityGroup(re, leader.GetAddr(), id).ID)
-			filtered, _, ok := tryGetAffinityGroups(url + "?ids=" + id)
-			re.True(ok)
-			re.Contains(filtered.AffinityGroups, id)
-			switch i {
-			case 0:
-				resp := mustBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
-					Remove: []handlers.GroupRangesModification{{ID: id, Ranges: []handlers.AffinityKeyRange{legacyRange}}},
-				})
-				re.Zero(resp.AffinityGroups[id].RangeCount)
-				mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
-			case 1:
-				mustBatchDeleteAffinityGroups(re, leader.GetAddr(), &handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{id}, Force: true})
-			default:
-				// Empty legacy groups also support ordinary deletion in NextGen.
-				mustDeleteAffinityGroup(re, leader.GetAddr(), id, false)
-			}
-			re.False(manager.IsGroupExist(id))
 		}
 		// A scoped table group uses the keyspace encoded in its ID.
 		for _, id := range []string{"_tidb_ks42_t_1001", "_tidb_ks42_tg_100"} {
@@ -173,40 +141,7 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDs() {
 			status, state, message := doUpdateAffinityGroupPolicy(re, leader.GetAddr(), id, affinity.BalancePolicyFixed)
 			re.Equal(http.StatusOK, status, "%s", message)
 			re.Equal(affinity.BalancePolicyFixed, state.BalancePolicy)
-			mustDeleteAffinityGroup(re, leader.GetAddr(), id, true)
-		}
-	})
-}
-
-func (suite *affinityHandlerTestSuite) TestRemoveLegacyHalfUnboundedRanges() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
-		re := suite.Require()
-		leader := cluster.GetLeaderServer()
-		manager, err := leader.GetServer().GetAffinityManager()
-		re.NoError(err)
-		key := func(table int64) []byte {
-			return codec.EncodeBytes(append(codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 1), codec.GenerateTableKey(table)...))
-		}
-		const modeFlag = "github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"
-		defer func() { re.NoError(failpoint.Disable(modeFlag)) }()
-		for i, legacy := range []keyutil.KeyRange{{EndKey: key(100)}, {StartKey: key(300)}} {
-			id := fmt.Sprintf("legacy-half-%d", i)
-			valid := keyutil.KeyRange{StartKey: key(200), EndKey: key(201)}
-			re.NoError(failpoint.Enable(modeFlag, "return(false)"))
-			re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: id, KeyRanges: []keyutil.KeyRange{legacy, valid}}}))
-			re.NoError(failpoint.Disable(modeFlag))
-			before := manager.GetAffinityGroupState(id)
-			ranges := []handlers.AffinityKeyRange{{StartKey: legacy.StartKey, EndKey: legacy.EndKey}}
-			status, _ := doBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
-				Add: []handlers.GroupRangesModification{{ID: id, Ranges: ranges}},
-			})
-			re.Equal(http.StatusBadRequest, status)
-			resp := mustBatchModifyAffinityGroups(re, leader.GetAddr(), &handlers.BatchModifyAffinityGroupsRequest{
-				Remove: []handlers.GroupRangesModification{{ID: id, Ranges: ranges}},
-			})
-			re.Equal(1, resp.AffinityGroups[id].RangeCount)
-			re.Equal(before.CreateTimestamp, resp.AffinityGroups[id].CreateTimestamp)
-			re.NoError(manager.DeleteAffinityGroups([]string{id}, true))
+			mustForceDeleteAffinityGroup(re, leader.GetAddr(), id)
 		}
 	})
 }
@@ -481,12 +416,9 @@ func doUpdateAffinityGroupPolicy(re *require.Assertions, serverAddr, groupID str
 	return code, &state, msg
 }
 
-// mustDeleteAffinityGroup deletes an affinity group and expects success.
-func mustDeleteAffinityGroup(re *require.Assertions, serverAddr, groupID string, force bool) {
-	url := getAffinityGroupURL(serverAddr, groupID)
-	if force {
-		url += "?force=true"
-	}
+// mustForceDeleteAffinityGroup force deletes an affinity group and expects success.
+func mustForceDeleteAffinityGroup(re *require.Assertions, serverAddr, groupID string) {
+	url := getAffinityGroupURL(serverAddr, groupID) + "?force=true"
 	err := testutil.CheckDelete(tests.TestDialClient, url, testutil.StatusOK(re))
 	re.NoError(err)
 }
@@ -574,7 +506,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		statusCode, _ = doDeleteAffinityGroup(re, serverAddr, "group-1", false)
 		re.Equal(http.StatusBadRequest, statusCode)
 
-		mustDeleteAffinityGroup(re, serverAddr, "group-1", true)
+		mustForceDeleteAffinityGroup(re, serverAddr, "group-1")
 
 		// Batch delete the remaining empty group.
 		batchDeleteReq := handlers.BatchDeleteAffinityGroupsRequest{IDs: []string{"group-2"}}
@@ -730,6 +662,12 @@ func (suite *affinityHandlerTestSuite) TestAffinityUpdatePolicy() {
 		re.Equal(affinity.BalancePolicyFixed, mustGetAffinityGroup(re, serverAddr, "policy").BalancePolicy)
 		statusCode, _, _ := doUpdateAffinityGroupPolicy(re, serverAddr, "missing", affinity.BalancePolicyFixed)
 		re.Equal(http.StatusNotFound, statusCode)
+		const invalidID = "bad@id"
+		for _, policy := range []affinity.BalancePolicy{affinity.BalancePolicyFixed, ""} {
+			statusCode, _, errorMsg := doUpdateAffinityGroupPolicy(re, serverAddr, invalidID, policy)
+			re.Equal(http.StatusBadRequest, statusCode)
+			re.EqualError(affinity.ValidateGroupID(invalidID), errorMsg)
+		}
 	})
 }
 
@@ -1158,7 +1096,11 @@ func (suite *affinityHandlerTestSuite) TestAffinityOpenEndedKeyRanges() {
 				continue
 			}
 			re.Equal(http.StatusOK, status, message)
-			mustDeleteAffinityGroup(re, serverAddr, tc.groupID, true)
+			resp := mustBatchModifyAffinityGroups(re, serverAddr, &handlers.BatchModifyAffinityGroupsRequest{
+				Remove: []handlers.GroupRangesModification{{ID: tc.groupID, Ranges: []handlers.AffinityKeyRange{tc.keyRange}}},
+			})
+			re.Zero(resp.AffinityGroups[tc.groupID].RangeCount)
+			mustForceDeleteAffinityGroup(re, serverAddr, tc.groupID)
 		}
 	})
 }
@@ -1249,7 +1191,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityForceParameterVariants() {
 		re.Equal(http.StatusBadRequest, statusCode)
 
 		// Test force=1 (should succeed with bool parsing)
-		mustDeleteAffinityGroup(re, serverAddr, "force-test", true)
+		mustForceDeleteAffinityGroup(re, serverAddr, "force-test")
 	})
 }
 
@@ -1315,7 +1257,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityForceDeleteLeftoverLabelRule(
 			re.Contains(storedRuleIDs(), affinity.GetLabelRuleID(groupID))
 		}
 
-		for _, id := range []string{"leftover-single", "_tidb_t_9999"} {
+		for _, id := range []string{"leftover-single", "_tidb_ks1_t_9999"} {
 			putLeftover(id, 0x01, 0x02)
 			status, message := doDeleteAffinityGroup(re, serverAddr, id, false)
 			re.Equal(http.StatusNotFound, status, message)
@@ -1420,6 +1362,7 @@ func (suite *affinityHandlerTestSuite) TestBatchDeleteWithInvalidIDs() {
 		statusCode, errorMsg := doBatchDeleteAffinityGroups(re, serverAddr, &batchDeleteReq)
 		re.Equal(http.StatusBadRequest, statusCode)
 		re.Contains(errorMsg, "invalid group id")
+		re.EqualError(affinity.ValidateGroupID("bad@id"), errorMsg)
 	})
 }
 
@@ -1761,12 +1704,18 @@ func (suite *affinityHandlerTestSuite) TestNextGenTiDBGroupIDQueriesMCS() {
 			getAffinityGroupURL(cluster.GetLeaderServer().GetAddr()),
 		}
 		for _, url := range urls {
-			for _, id := range []string{"_tidb_t_123", "_tidb_pt_123_p456", "_tidb_ks42_t_123"} {
-				re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url+"/"+id, nil, testutil.Status(re, http.StatusNotFound)))
-				var result handlers.AffinityGroupsResponse
-				re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url+"?ids="+id, &result))
-				re.Empty(result.AffinityGroups)
+			for _, id := range []string{"_tidb_t_123", "_tidb_pt_123_p456"} {
+				for _, query := range []string{"/" + id, "?ids=" + id} {
+					status, message := doAffinityJSON(re, http.MethodGet, url+query, nil, nil)
+					re.Equal(http.StatusBadRequest, status, message)
+					re.Contains(message, "nextgen requires keyspace-aware TiDB affinity group IDs")
+				}
 			}
+			const missing = "_tidb_ks42_t_123"
+			re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url+"/"+missing, nil, testutil.Status(re, http.StatusNotFound)))
+			var result handlers.AffinityGroupsResponse
+			re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url+"?ids="+missing, &result))
+			re.Empty(result.AffinityGroups)
 		}
 	})
 }

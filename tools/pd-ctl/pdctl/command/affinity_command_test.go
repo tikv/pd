@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/hex"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -26,7 +27,6 @@ import (
 
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/schedule/affinity"
-	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestAffinityRangeAddDoesNotReadLabelRules(t *testing.T) {
@@ -251,13 +251,14 @@ func TestAffinityCreateTiDBTableGroupRepairGuidance(t *testing.T) {
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
 			cmd.SetArgs([]string{"create", "--group-id", groupID, "--range", "0a,0b"})
-			re.ErrorContains(cmd.Execute(), "repair it with ADMIN REPAIR AFFINITY TABLE GROUP")
+			err := cmd.Execute()
+			re.ErrorContains(err, "repair it with ADMIN REPAIR AFFINITY TABLE GROUP")
 			re.Empty(client.calledID)
 		})
 	}
 }
 
-func TestAffinityStructuredSelectorValidation(t *testing.T) {
+func TestAffinityGroupSelectors(t *testing.T) {
 	previous := PDCli
 	t.Cleanup(func() { PDCli = previous })
 
@@ -275,12 +276,17 @@ func TestAffinityStructuredSelectorValidation(t *testing.T) {
 
 	const sampleRange = "7800000174800000ff0000000064000000fc,7800000174800000ff0000000065000000fc"
 
-	// Lookups and removals accept unscoped --table-id / --partition-id in both Classic and NextGen.
+	// Both ID forms are sent to the target PD regardless of how pd-ctl was built.
 	for _, tc := range []struct {
 		name   string
 		args   []string
 		wantID string
 	}{
+		{"create_keyspace_table", []string{"create", "--table-id", "9001", "--keyspace-id", "1"}, "_tidb_ks1_t_9001"},
+		{"policy_keyspace_table", []string{"policy", "--table-id", "9001", "--keyspace-id", "1", "--balance-policy", "fixed"}, "_tidb_ks1_t_9001"},
+		{"range_add_keyspace_table", []string{"range", "add", "--table-id", "9001", "--keyspace-id", "1", "--force", "--range", sampleRange}, "_tidb_ks1_t_9001"},
+		{"show_keyspace_group_id", []string{"show", "--group-id", "_tidb_ks1_t_9001"}, "_tidb_ks1_t_9001"},
+		{"show_long_group_id", []string{"show", "--group-id", "a-0_" + strings.Repeat("z", 60)}, "a-0_" + strings.Repeat("z", 60)},
 		{"show_table", []string{"show", "--table-id", "9001"}, "_tidb_t_9001"},
 		{"show_partition", []string{"show", "--table-id", "9001", "--partition-id", "9002"}, "_tidb_pt_9001_p9002"},
 		{"range_show_table", []string{"range", "show", "--table-id", "9001"}, affinity.GetLabelRuleID("_tidb_t_9001")},
@@ -288,9 +294,12 @@ func TestAffinityStructuredSelectorValidation(t *testing.T) {
 		{"delete_force_table", []string{"delete", "--table-id", "9001", "--force"}, "_tidb_t_9001"},
 		{"range_remove_table", []string{"range", "remove", "--table-id", "9001", "--force", "--range", sampleRange}, "_tidb_t_9001"},
 		{"range_remove_partition", []string{"range", "remove", "--table-id", "9001", "--partition-id", "9002", "--force", "--range", sampleRange}, "_tidb_pt_9001_p9002"},
-		{"create_keyspace_table", []string{"create", "--table-id", "9001", "--keyspace-id", "1"}, "_tidb_ks1_t_9001"},
-		{"policy_keyspace_table", []string{"policy", "--table-id", "9001", "--keyspace-id", "1", "--balance-policy", "fixed"}, "_tidb_ks1_t_9001"},
-		{"range_add_keyspace_table", []string{"range", "add", "--table-id", "9001", "--keyspace-id", "1", "--force", "--range", sampleRange}, "_tidb_ks1_t_9001"},
+		{"create_unscoped_table", []string{"create", "--table-id", "9001"}, "_tidb_t_9001"},
+		{"create_unscoped_partition", []string{"create", "--table-id", "9001", "--partition-id", "9002"}, "_tidb_pt_9001_p9002"},
+		{"range_add_unscoped_table", []string{"range", "add", "--table-id", "9001", "--force", "--range", sampleRange}, "_tidb_t_9001"},
+		{"update_unscoped_table", []string{"update", "--table-id", "9001", "--leader", "1", "--voters", "1,2,3"}, "_tidb_t_9001"},
+		{"policy_unscoped_table", []string{"policy", "--table-id", "9001", "--balance-policy", "fixed"}, "_tidb_t_9001"},
+		{"policy_unscoped_group_id", []string{"policy", "--group-id", "_tidb_t_9001", "--balance-policy", "fixed"}, "_tidb_t_9001"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
@@ -299,30 +308,9 @@ func TestAffinityStructuredSelectorValidation(t *testing.T) {
 			re.Equal(tc.wantID, calledID)
 		})
 	}
-
-	// Create, update, policy, and range add require --keyspace-id in NextGen.
-	for _, tc := range []struct {
-		name   string
-		args   []string
-		wantID string
-	}{
-		{"create_unscoped_table", []string{"create", "--table-id", "9001"}, "_tidb_t_9001"},
-		{"create_unscoped_partition", []string{"create", "--table-id", "9001", "--partition-id", "9002"}, "_tidb_pt_9001_p9002"},
-		{"range_add_unscoped_table", []string{"range", "add", "--table-id", "9001", "--force", "--range", sampleRange}, "_tidb_t_9001"},
-		{"update_unscoped_table", []string{"update", "--table-id", "9001", "--leader", "1", "--voters", "1,2,3"}, "_tidb_t_9001"},
-		{"policy_unscoped_table", []string{"policy", "--table-id", "9001", "--balance-policy", "fixed"}, "_tidb_t_9001"},
-		{"policy_legacy_group_id", []string{"policy", "--group-id", "_tidb_t_9001", "--balance-policy", "fixed"}, "_tidb_t_9001"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
-			calledID, err := runCmd(tc.args...)
-			if kerneltype.IsNextGen() {
-				re.ErrorContains(err, "nextgen requires keyspace-aware TiDB affinity group IDs")
-				re.Empty(calledID)
-				return
-			}
-			re.NoError(err)
-			re.Equal(tc.wantID, calledID)
-		})
+	for _, groupID := range []string{"", "a/b", strings.Repeat("a", 65)} {
+		calledID, err := runCmd("show", "--group-id", groupID)
+		require.ErrorContains(t, err, "it must be 1 to 64 letters, digits, hyphens or underscores")
+		require.Empty(t, calledID)
 	}
 }

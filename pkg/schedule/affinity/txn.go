@@ -153,30 +153,23 @@ func (m *Manager) createGroupsWithSkipExisting(reqCtx context.Context, changes [
 	states := make(map[string]*GroupState, len(changes))
 	newRanges := make([]GroupKeyRanges, 0, len(changes))
 	for _, change := range changes {
-		if state := m.GetAffinityGroupState(change.GroupID); state != nil {
-			if !skipExisting {
-				return nil, errs.ErrAffinityGroupExist.GenWithStackByArgs(change.GroupID)
-			}
-			for _, kr := range change.KeyRanges {
-				if err := ValidateKeyRange(change.GroupID, kr.StartKey, kr.EndKey, false); err != nil {
-					return nil, err
-				}
-			}
-			if err := validateGroupKeyRanges(change); err != nil {
-				return nil, err
-			}
-			states[state.ID] = state
-			continue
+		state := m.GetAffinityGroupState(change.GroupID)
+		if state != nil && !skipExisting {
+			return nil, errs.ErrAffinityGroupExist.GenWithStackByArgs(change.GroupID)
 		}
-		if requireRanges {
+		if state != nil || requireRanges {
 			for _, kr := range change.KeyRanges {
-				if err := ValidateKeyRange(change.GroupID, kr.StartKey, kr.EndKey, false); err != nil {
+				if err := ValidateKeyRange(change.GroupID, kr.StartKey, kr.EndKey); err != nil {
 					return nil, err
 				}
 			}
 		}
 		if err := validateGroupKeyRanges(change); err != nil {
 			return nil, err
+		}
+		if state != nil {
+			states[state.ID] = state
+			continue
 		}
 		// Reject invalid rules before any chunk can commit.
 		if len(change.KeyRanges) > 0 {
@@ -383,9 +376,6 @@ func (m *Manager) restoreGroupCreations(txn kv.Txn, changes []GroupKeyRanges, cr
 func (m *Manager) stageGroupCreation(txn kv.Txn, change GroupKeyRanges, create *groupCreation, plan *labeler.Plan) error {
 	create.group = &Group{ID: change.GroupID, CreateTimestamp: uint64(time.Now().Unix())}
 	create.ranges = change
-	if err := m.AdjustGroup(create.group); err != nil {
-		return err
-	}
 	if source := change.InheritPolicyFrom; source != "" {
 		value, _, err := m.storage.LoadAffinityGroupInTxn(txn, source)
 		if err != nil {
@@ -453,7 +443,7 @@ func (m *Manager) DeleteAffinityGroupsWithContext(reqCtx context.Context, groupI
 		return errs.ErrAffinityGroupContent.FastGenByArgs("no group ids provided")
 	}
 	for _, groupID := range groupIDs {
-		if err := ValidateExistingGroupID(groupID); err != nil {
+		if err := ValidateGroupID(groupID); err != nil {
 			return err
 		}
 	}
@@ -762,7 +752,13 @@ func (m *Manager) UpdateAffinityGroupPolicy(groupID string, policy BalancePolicy
 
 // UpdateAffinityGroupPolicyWithContext updates one policy if the request is still active.
 func (m *Manager) UpdateAffinityGroupPolicyWithContext(reqCtx context.Context, groupID string, policy BalancePolicy) (*GroupState, error) {
-	states, err := m.UpdateAffinityGroupPoliciesWithContext(reqCtx, []string{groupID}, policy)
+	if err := ValidateGroupID(groupID); err != nil {
+		return nil, err
+	}
+	if err := validateRequestedBalancePolicy(policy); err != nil {
+		return nil, err
+	}
+	states, err := m.updateGroupPolicies(reqCtx, []string{groupID}, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -799,7 +795,10 @@ func (m *Manager) UpdateAffinityGroupPoliciesWithContext(reqCtx context.Context,
 	if len(ids) == 0 {
 		return nil, errs.ErrEmptyRequest.FastGenByArgs("no group ids provided")
 	}
+	return m.updateGroupPolicies(reqCtx, ids, policy)
+}
 
+func (m *Manager) updateGroupPolicies(reqCtx context.Context, ids []string, policy BalancePolicy) ([]*GroupState, error) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	if err := combineCtxErr(reqCtx, m.ctx); err != nil {
@@ -907,22 +906,13 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 
 // UpdateAffinityGroupKeyRangesWithContext modifies ranges and checks cancellation between transactions.
 func (m *Manager) UpdateAffinityGroupKeyRangesWithContext(reqCtx context.Context, addOps, removeOps []GroupKeyRanges) error {
-	// Validate IDs for the full batch, including empty operations.
-	for _, op := range addOps {
-		if err := ValidateGroupID(op.GroupID); err != nil {
-			return err
-		}
-	}
-	for _, op := range removeOps {
-		if err := ValidateExistingGroupID(op.GroupID); err != nil {
-			return err
-		}
-	}
-
-	// Each group can have at most one nonempty operation.
+	// Validate IDs for the full batch, including empty operations, and reject duplicate nonempty operations.
 	seenGroups := make(map[string]struct{}, len(addOps)+len(removeOps))
 	for _, ops := range [][]GroupKeyRanges{addOps, removeOps} {
 		for _, op := range ops {
+			if err := ValidateGroupID(op.GroupID); err != nil {
+				return err
+			}
 			if len(op.KeyRanges) == 0 {
 				continue
 			}
@@ -977,11 +967,8 @@ func (m *Manager) UpdateAffinityGroupKeyRangesWithContext(reqCtx context.Context
 	plan := m.regionLabeler.NewPlan()
 	for i := range planned {
 		item := &planned[i]
-		// Removals may leave legacy ranges in place for incremental repair.
-		if !item.isRemove {
-			if err := validateGroupKeyRanges(item.ranges); err != nil {
-				return err
-			}
+		if err := validateGroupKeyRanges(item.ranges); err != nil {
+			return err
 		}
 		if len(item.ranges.KeyRanges) > 0 {
 			item.labelRule = MakeLabelRule(item.ranges)

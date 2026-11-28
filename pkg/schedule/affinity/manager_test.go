@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -180,41 +181,6 @@ func TestBasicGroupOperations(t *testing.T) {
 	err = manager.DeleteAffinityGroups([]string{"group1"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group1"))
-}
-
-type stubGroupStateProvider map[string]*GroupState
-
-func (p stubGroupStateProvider) GetAllAffinityGroupStates() []*GroupState {
-	return slices.Collect(maps.Values(p))
-}
-
-func (p stubGroupStateProvider) GetAffinityGroupState(id string) *GroupState {
-	return p[id]
-}
-
-func TestCollectGroupStatesWithCustomProvider(t *testing.T) {
-	re := require.New(t)
-	first := &GroupState{ID: "first"}
-	second := &GroupState{ID: "second"}
-	provider := stubGroupStateProvider{"first": first, "second": second}
-	all := map[string]*GroupState{"first": first, "second": second}
-
-	re.Equal(all, CollectAllGroupStates(provider))
-
-	states, err := CollectGroupStates(provider, nil)
-	re.NoError(err)
-	re.Equal(all, states)
-
-	states, err = CollectGroupStates(provider, []string{" second ", "second", "", "missing"})
-	re.NoError(err)
-	re.Equal(map[string]*GroupState{"second": second}, states)
-
-	states, err = CollectGroupStates(provider, []string{" "})
-	re.NoError(err)
-	re.Empty(states)
-
-	_, err = CollectGroupStates(provider, []string{"bad id"})
-	re.ErrorIs(err, errs.ErrInvalidGroupID)
 }
 
 func TestCollectGroupStatesByQuery(t *testing.T) {
@@ -1526,13 +1492,22 @@ func TestUpdateAffinityGroupPolicies(t *testing.T) {
 	before := manager.GetAffinityGroupState("a")
 
 	// Duplicates are written once, and writing the same policy again keeps the stored groups.
-	for range 2 {
+	revisions := make(map[string]int64, 2)
+	for attempt := range 2 {
 		states, err := manager.UpdateAffinityGroupPolicies([]string{"a", "b", "a"}, BalancePolicyFixed)
 		re.NoError(err)
 		re.Len(states, 2)
 		for _, state := range states {
 			re.Equal(BalancePolicyFixed, state.BalancePolicy)
 			re.Equal(BalancePolicyFixed, test.stored(state.ID).BalancePolicy)
+			resp, err := client.Get(t.Context(), keypath.AffinityGroupPath(state.ID))
+			re.NoError(err)
+			re.Len(resp.Kvs, 1)
+			if attempt == 0 {
+				revisions[state.ID] = resp.Kvs[0].ModRevision
+			} else {
+				re.Equal(revisions[state.ID], resp.Kvs[0].ModRevision)
+			}
 		}
 	}
 	// The target and the runtime state are kept.

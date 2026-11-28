@@ -410,18 +410,9 @@ func ValidateGroupID(id string) error {
 	return err
 }
 
-// ValidateExistingGroupID checks the character set and length of a stored group ID.
-// It permits IDs persisted before NextGen required keyspace-aware TiDB IDs.
-func ValidateExistingGroupID(id string) error {
-	if !idRegexp.MatchString(id) {
-		return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
-	}
-	return nil
-}
-
 func parseGroupID(id string) (uint32, bool, error) {
-	if err := ValidateExistingGroupID(id); err != nil {
-		return 0, false, err
+	if !idRegexp.MatchString(id) {
+		return 0, false, errs.ErrInvalidGroupID.GenWithStackByArgs(id)
 	}
 	if !kerneltype.IsNextGen() {
 		return 0, false, nil
@@ -451,14 +442,13 @@ func parseGroupID(id string) (uint32, bool, error) {
 }
 
 // ValidateKeyRange checks the endpoints of a range in a create, add, or remove request.
-func ValidateKeyRange(groupID string, startKey, endKey []byte, remove bool) error {
+func ValidateKeyRange(groupID string, startKey, endKey []byte) error {
 	// Both empty represents the entire key space.
 	if len(startKey) == 0 && len(endKey) == 0 {
 		return nil
 	}
 	if len(startKey) == 0 || len(endKey) == 0 {
-		// Removal must match persisted ranges even if creation would reject them.
-		if remove || (!kerneltype.IsNextGen() && !strings.HasPrefix(groupID, "_tidb_")) {
+		if !kerneltype.IsNextGen() && !strings.HasPrefix(groupID, "_tidb_") {
 			return nil
 		}
 		return errs.ErrAffinityGroupContent.FastGenByArgs("key range must have both start_key and end_key, or both empty for entire key space")

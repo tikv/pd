@@ -231,14 +231,6 @@ func deleteAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	// Validate all group IDs
-	for _, id := range req.IDs {
-		if err := affinity.ValidateExistingGroupID(id); err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
 	// Semantics are enforced in manager:
 	// - force=false: missing IDs will cause an error
 	// - force=true: missing IDs are ignored while existing groups are deleted
@@ -295,11 +287,11 @@ func BatchModifyAffinityGroups(c *gin.Context) {
 
 	// Validate and convert operations in one pass
 	affectedGroups := make(map[string]bool)
-	addOps, err := convertAndValidateRangeOps(req.Add, manager, affectedGroups, false)
+	addOps, err := convertAndValidateRangeOps(req.Add, manager, affectedGroups)
 	if handleAffinityError(c, err) {
 		return
 	}
-	removeOps, err := convertAndValidateRangeOps(req.Remove, manager, affectedGroups, true)
+	removeOps, err := convertAndValidateRangeOps(req.Remove, manager, affectedGroups)
 	if handleAffinityError(c, err) {
 		return
 	}
@@ -396,10 +388,6 @@ func UpdateAffinityGroupPolicy(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	if err := affinity.ValidateGroupID(groupID); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-		return
-	}
 	state, err := manager.UpdateAffinityGroupPolicyWithContext(c.Request.Context(), groupID, req.BalancePolicy)
 	if handleAffinityError(c, err) {
 		return
@@ -409,9 +397,9 @@ func UpdateAffinityGroupPolicy(c *gin.Context) {
 }
 
 // UpdateAffinityGroupPolicies updates the balance policy of several affinity groups.
-// Every group must exist, or nothing is written. The groups are written in
-// chunks that each fit in one etcd transaction, so a failed chunk leaves the
-// chunks written before it in place; repeating the request is safe.
+// If prevalidation finds a missing group, nothing is written. Each chunk uses
+// one etcd transaction. A storage error or stale state detected during execution
+// leaves previously acknowledged chunks in place. Repeating the request is safe.
 //
 //	@Tags		affinity-groups
 //	@Summary	Update the balance policy of several affinity groups.
@@ -506,7 +494,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
-	if err := affinity.ValidateExistingGroupID(groupID); err != nil {
+	if err := affinity.ValidateGroupID(groupID); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -622,16 +610,11 @@ func handleAffinityError(c *gin.Context, err error) bool {
 // convertAndValidateRangeOps validates group operations and converts them to GroupKeyRanges format.
 // It updates affectedGroups with all groups encountered.
 // Multiple operations for the same group are automatically merged.
-func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool, remove bool) ([]affinity.GroupKeyRanges, error) {
+func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool) ([]affinity.GroupKeyRanges, error) {
 	grouped := make(map[string][]keyutil.KeyRange)
 	order := make([]string, 0, len(ops))
-	validateID := affinity.ValidateGroupID
-	if remove {
-		validateID = affinity.ValidateExistingGroupID
-	}
-
 	for _, op := range ops {
-		if err := validateID(op.ID); err != nil {
+		if err := affinity.ValidateGroupID(op.ID); err != nil {
 			return nil, err
 		}
 		if !manager.IsGroupExist(op.ID) {
@@ -647,7 +630,7 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 		}
 		// Validate and merge ranges for this group
 		for _, kr := range op.Ranges {
-			if err := affinity.ValidateKeyRange(op.ID, kr.StartKey, kr.EndKey, remove); err != nil {
+			if err := affinity.ValidateKeyRange(op.ID, kr.StartKey, kr.EndKey); err != nil {
 				return nil, err
 			}
 			grouped[op.ID] = append(grouped[op.ID], keyutil.KeyRange{

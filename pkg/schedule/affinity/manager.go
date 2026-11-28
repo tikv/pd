@@ -490,7 +490,7 @@ func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 
 // CheckAndGetAffinityGroupState returns the group state after validating the ID and presence.
 func (m *Manager) CheckAndGetAffinityGroupState(groupID string) (*GroupState, error) {
-	if err := ValidateExistingGroupID(groupID); err != nil {
+	if err := ValidateGroupID(groupID); err != nil {
 		return nil, err
 	}
 	state := m.GetAffinityGroupState(groupID)

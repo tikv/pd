@@ -35,6 +35,7 @@ import (
 const tidbGroupIDPrefix = "_tidb_"
 
 var (
+	rawGroupIDRegexp = regexp.MustCompile(`^[-A-Za-z0-9_]{1,64}$`)
 	// tidbObjectGroupIDRegexp matches the IDs of TiDB table and partition groups,
 	// with or without a keyspace.
 	tidbObjectGroupIDRegexp = regexp.MustCompile(`^_tidb_(?:ks(0|[1-9][0-9]*)_)?(?:t_([1-9][0-9]*)|pt_([1-9][0-9]*)_p([1-9][0-9]*))$`)
@@ -212,7 +213,7 @@ func affinityShowCommandFunc(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Otherwise, show the specific affinity group
-	groupID, err := getGroupID(cmd, true)
+	groupID, err := getGroupID(cmd)
 	if err != nil {
 		return err
 	}
@@ -226,14 +227,8 @@ func affinityShowCommandFunc(cmd *cobra.Command, _ []string) error {
 }
 
 func affinityCreateCommandFunc(cmd *cobra.Command, _ []string) error {
-	// Resolve the ID before enforcing keyspace scoping so legacy TiDB table
-	// group IDs can also direct users to the repair command.
-	groupID, err := getGroupID(cmd, true)
+	groupID, err := getGroupID(cmd)
 	if err != nil {
-		return err
-	}
-	isLegacyTableGroup := strings.HasPrefix(groupID, tidbGroupIDPrefix+"tg_")
-	if err := affinity.ValidateGroupID(groupID); err != nil && !isLegacyTableGroup {
 		return err
 	}
 	if tidbTableGroupIDRegexp.MatchString(groupID) {
@@ -282,7 +277,7 @@ type affinityKeyRange struct {
 }
 
 func affinityRangeShowCommandFunc(cmd *cobra.Command, _ []string) error {
-	groupID, err := getGroupID(cmd, true)
+	groupID, err := getGroupID(cmd)
 	if err != nil {
 		return err
 	}
@@ -341,7 +336,7 @@ func affinityRangeRemoveCommandFunc(cmd *cobra.Command, _ []string) error {
 }
 
 func changeAffinityGroupRanges(cmd *cobra.Command, add bool) error {
-	groupID, err := getGroupID(cmd, !add)
+	groupID, err := getGroupID(cmd)
 	if err != nil {
 		return err
 	}
@@ -371,7 +366,7 @@ func changeAffinityGroupRanges(cmd *cobra.Command, add bool) error {
 }
 
 func affinityDeleteCommandFunc(cmd *cobra.Command, _ []string) error {
-	groupID, err := getGroupID(cmd, true)
+	groupID, err := getGroupID(cmd)
 	if err != nil {
 		return err
 	}
@@ -395,7 +390,7 @@ func affinityDeleteCommandFunc(cmd *cobra.Command, _ []string) error {
 }
 
 func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) error {
-	groupID, err := getGroupID(cmd, false)
+	groupID, err := getGroupID(cmd)
 	if err != nil {
 		return err
 	}
@@ -448,7 +443,7 @@ func affinityUpdatePolicyCommandFunc(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	groupID, err := getGroupID(cmd, false)
+	groupID, err := getGroupID(cmd)
 	if err != nil {
 		return err
 	}
@@ -460,7 +455,7 @@ func affinityUpdatePolicyCommandFunc(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func getGroupID(cmd *cobra.Command, existing bool) (string, error) {
+func getGroupID(cmd *cobra.Command) (string, error) {
 	if cmd.Flags().Changed("group-id") {
 		for _, name := range []string{"table-id", "partition-id", "keyspace-id"} {
 			if cmd.Flags().Changed(name) {
@@ -468,13 +463,8 @@ func getGroupID(cmd *cobra.Command, existing bool) (string, error) {
 			}
 		}
 		groupID, _ := cmd.Flags().GetString("group-id")
-		if err := affinity.ValidateExistingGroupID(groupID); err != nil {
+		if !rawGroupIDRegexp.MatchString(groupID) {
 			return "", errors.Errorf("invalid --group-id %q: it must be 1 to 64 letters, digits, hyphens or underscores", groupID)
-		}
-		if !existing {
-			if err := affinity.ValidateGroupID(groupID); err != nil {
-				return "", err
-			}
 		}
 		return groupID, nil
 	}
@@ -494,15 +484,7 @@ func getGroupID(cmd *cobra.Command, existing bool) (string, error) {
 		}
 		keyspaceID = &id
 	}
-	groupID := formatAffinityGroupID(tableID, partitionID, keyspaceID)
-	validate := affinity.ValidateGroupID
-	if existing {
-		validate = affinity.ValidateExistingGroupID
-	}
-	if err := validate(groupID); err != nil {
-		return "", err
-	}
-	return groupID, nil
+	return formatAffinityGroupID(tableID, partitionID, keyspaceID), nil
 }
 
 // FormatGroupID builds the affinity group ID from table/partition IDs following TiDB convention.
